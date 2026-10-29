@@ -17,6 +17,13 @@
 </p>
 
 <p align="center">
+  <a href="docs/getting-started.md"><strong>Get started</strong></a> ·
+  <a href="#set-up-with-your-ai-agent">Set up with AI</a> ·
+  <a href="docs/deployment.md">Deploy a server</a> ·
+  <a href="docs/user-guide.md">User guide</a>
+</p>
+
+<p align="center">
   <img src="docs/assets/atelier-hero.webp" alt="Atelier: a canvas of generated images above the prompt composer, with the Library rail of collections and history on the left" width="900">
 </p>
 
@@ -27,6 +34,48 @@ model, write a prompt and get a batch of tiles; the server routes the request
 to the right backend, streams previews as they render and keeps every batch in
 server-side history. It sits behind your own authentication proxy and keeps
 each user's work separate, down to the encryption of every stored file.
+
+## Start here
+
+| Your goal | Follow this guide |
+|---|---|
+| Try the interface without API keys or a GPU | [Getting started](docs/getting-started.md): download, install and generate a test image |
+| Run a server with real models and authenticated users | [Deployment](docs/deployment.md): prerequisites, encryption, first launch and maintenance |
+| Learn the everyday workflow | [Using Atelier](docs/user-guide.md): models, references, collections and templates |
+
+The public repository contains the application, Docker builds, proxy examples
+and the ComfyUI worker. No private repository or operator-specific overlay is
+needed. You supply your own model service or provider keys, and production
+hosting needs an authentication proxy. Model weights and provider access are
+not included.
+
+The local walkthrough uses **Mock Fast**, which produces small coloured test
+images so you can check the installation without spending provider credits.
+It then explains how to connect real generation. For a shared or public
+installation, follow the production guide before exposing the app.
+
+## Set up with your AI agent
+
+Prefer to have Codex or Claude Code handle the installation? Copy this prompt
+into your agent with terminal access on the computer where you want to run
+Atelier. It follows the same setup guide, checks the local installation and
+helps connect your chosen provider.
+
+```text
+Set up https://github.com/SneakyShadyLurker/atelier-studio locally. Reuse a
+matching checkout or clone it. Read docs/getting-started.md and follow it with
+the pinned Bun version, preserving existing configuration and data. Keep the
+installation on loopback. Start the API, local sign-in proxy and web app;
+verify Mock Fast generation, saved history and a downloaded PNG. Then ask
+which real provider I want, configure it using secure credential entry and
+verify a real image when access is available. Ask before setting up a
+shared/public server, following docs/deployment.md. Finish with the app URL,
+start/stop commands, verification results and any remaining requirements.
+Distinguish mock checks from real-provider verification.
+```
+
+You supply provider access or model weights. The local trial needs neither.
+For a manual walkthrough, open [Getting started](docs/getting-started.md).
 
 ## Highlights
 
@@ -75,37 +124,9 @@ volume they live on.
 - **Polish**: light and dark themes, a lightbox with zoom, keyboard shortcuts,
   and layouts built for phones, tablets and desktops
 
-## Quick start
-
-Requirements: [Bun](https://bun.sh), an OpenAI-compatible upstream such as
-[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) for cloud models,
-and a trusted authentication proxy that injects `Remote-User` and the proxy key
-(for example SWAG with Authelia). ComfyUI is optional.
-
-```sh
-bun install
-cp .env.example api/.env   # the api reads .env from its own directory; point DATA_DIR at a writable path
-```
-
-Outside production the mock provider is on, so the `Mock` models generate
-without any upstream. The api answers only requests that carry `Remote-User`,
-so in development run it behind a small header-injecting proxy on :8787, the
-port Vite proxies `/api` to:
-
-```sh
-API_PORT=8786 bun run dev:api
-bun -e 'Bun.serve({ port: 8787, idleTimeout: 0, fetch(req) { const url = new URL(req.url); url.port = "8786"; const headers = new Headers(req.headers); headers.set("Remote-User", "alice"); return fetch(url, { method: req.method, headers, body: req.body, redirect: "manual" }); } })'
-bun run dev:web            # http://localhost:5173
-```
-
-`bun run typecheck`, `bun run lint` and `bun run test` run the checks.
-
-Production runs in Docker Compose behind the proxy; the deploy steps, the
-encryption setup and the release checklist are in
-[docs/deployment.md](docs/deployment.md).
-
 ## Documentation
 
+[Getting started](docs/getting-started.md) · [Using Atelier](docs/user-guide.md) ·
 [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) ·
 [Providers](docs/providers.md) · [Local models](docs/local-models.md) ·
 [Prompt Library authoring](docs/prompt-library-authoring.md) ·

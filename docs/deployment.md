@@ -1,79 +1,280 @@
 # Deployment
 
-Atelier ships as two containers (`atelier-api`, `atelier-web`) defined in `infra/docker/docker-compose.yml`. A trusted reverse proxy (the committed configuration targets SWAG with Authelia) is the only route to them. This document covers a first deploy, the environment, artifact encryption, local model manifests, the release checklist and recovery recipes. Topology and contracts are in [`architecture.md`](./architecture.md).
+Atelier runs as two containers, `atelier-api` and `atelier-web`, built from this
+repository. A trusted authentication proxy is the only route to them. The
+included configuration uses SWAG and Authelia. No private deployment repository
+or operator-specific overlay is required.
+
+Use [Getting started](getting-started.md) for a local trial. This guide is for
+an operator setting up a persistent server. After installation, [Using Atelier](user-guide.md)
+covers the app itself; [Architecture](architecture.md) describes its contracts.
 
 ## Requirements
 
-- Docker with Compose v2.
-- A reverse proxy on a shared Docker network that authenticates users, clears client-supplied `Remote-*` headers, injects `Remote-User` and the shared `X-Atelier-Proxy-Key`, and disables buffering for SSE. `infra/swag/atelier.subdomain.conf` and `infra/authelia/access-control.yml` are the reference configuration.
-- An OpenAI-compatible upstream for cloud image and text calls, such as [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), on a private network.
-- Optional: a ComfyUI host running Atelier's private worker ([`infra/comfyui/README.md`](../infra/comfyui/README.md)) for local models.
-- Optional: an OpenRouter key for the GPT input-moderation gate ([providers](providers.md#gpt-only-input-moderation)). Without it GPT requests stop before they leave Atelier; other models keep working.
+- A Docker host with [Compose v2](https://docs.docker.com/compose/install/), Git
+  and OpenSSL. The commands below use a Linux POSIX shell. Docker builds include
+  Bun and the media tools; you do not need to install them on the production host.
+- A domain with DNS pointing at your ingress, a valid TLS certificate, and a
+  working authentication proxy. Atelier does not create accounts or provide a
+  login service. Set up [SWAG](https://docs.linuxserver.io/general/swag/) and
+  [its Authelia integration](https://www.authelia.com/integration/proxies/swag/)
+  first, including at least one user who can log in. These are separate services,
+  not containers installed by Atelier's Compose file.
+- A Docker network shared with that proxy. The proxy must remove client-supplied
+  `Remote-*` headers, inject the verified `Remote-User` and shared
+  `X-Atelier-Proxy-Key`, preserve the public host and stream SSE without buffering.
+  Another proxy is possible if it meets all [authentication requirements](architecture.md#authentication).
+- An empty writable data directory, preferably on an encrypted volume, and a
+  secret manager or secure store for the storage identity and server keys.
+- At least one real generation path from the [provider setup guide](getting-started.md#connect-a-real-model):
+  Google BYOK, a compatible GPT image upstream, or your own ComfyUI worker.
+  Model weights, provider credentials and credits are not supplied.
+
+For GPT, the upstream must support Atelier's configured image model and adapter
+contract; a chat-only OpenAI-compatible endpoint will not work. GPT also needs
+`OPENROUTER_API_KEY` for its [input-moderation check](providers.md#gpt-only-input-moderation).
+Local models need the included [ComfyUI worker](../infra/comfyui/README.md), whose
+provisioning procedure targets Windows portable ComfyUI. “Private worker” means
+the privacy transport included in this public repository, not separate private
+code. Plain ComfyUI without that worker is not supported.
 
 ## First deploy
 
-1. **Data directory.** Create the host directory that becomes `DATA_DIR`, ideally on an encrypted volume. The api runs as UID/GID `1000:1000`, so on Linux:
+These steps create a **fresh installation**. For existing plaintext data, use
+[Creating the data volume](#creating-the-data-volume) with the stopped existing
+directory as the source. For an existing encrypted installation, keep its data,
+recipient and keys and follow [Releasing an update](#releasing-an-update).
 
-   ```sh
-   sudo mkdir -p /srv/atelier
-   sudo chown -R 1000:1000 /srv/atelier
-   sudo chmod 750 /srv/atelier
-   ```
+Stop at any failed command and resolve the error before continuing. Never
+initialize over an existing installation or create its volume marker by hand.
+Multi-command maintenance blocks use a subshell, `( ... )`, to stop on failure
+without changing your interactive shell options or closing your session.
 
-   On Docker Desktop (macOS, Windows) the file-sharing layer maps the host user to the container user, so no `chown` is needed. The compose bind uses `create_host_path: false`: a missing or unmounted directory fails the container start instead of creating an empty one. Use [artifact encryption](#artifact-encryption) to populate it.
+### 1. Download the project
 
-2. **Environment.** Copy the template and fill it in:
+```sh
+git clone https://github.com/SneakyShadyLurker/atelier-studio.git
+cd atelier-studio/infra/docker
+```
 
-   ```sh
-   cd infra/docker
-   cp .env.production.example .env
-   chmod 600 .env
-   openssl rand -base64 48   # TRUSTED_PROXY_KEY
-   openssl rand -hex 32      # BYOK_ENCRYPTION_KEY
-   ```
+**Run the remaining Compose commands from `infra/docker`.** Paths beginning
+with `../../` below refer to the repository root. If you downloaded a ZIP,
+extract it and enter its `infra/docker` directory instead.
 
-   Required in production: `CLIPROXY_BASE_URL`, `CLIPROXY_TOKEN`, `DATA_DIR`, `SWAG_EXTERNAL_NETWORK`, `TRUSTED_PROXY_KEY`, `BYOK_ENCRYPTION_KEY` and `STORAGE_ROOT_RECIPIENT`. `NODE_ENV=production` is set in `docker-compose.yml` and enables the production auth and CSRF checks. Keep `ENABLE_MOCK_PROVIDER=false`. The user allowlists `PROMPT_LIBRARY_USERS`, `LOCAL_MODELS_USERS` and `EPHEMERA_USERS` default to empty (nobody), so set each one you want. [`architecture.md` § Configuration](./architecture.md#configuration) lists every variable.
+### 2. Prepare the data directory
 
-   - **CLIProxyAPI auth.** Set `CLIPROXY_TOKEN` to a value already in the proxy's API-key list; a freshly generated token gets `401 Invalid API key`.
-   - **CLIProxyAPI reachability.** On Docker Desktop, `host.docker.internal` reaches a proxy only when it listens on the host loopback or all interfaces. A proxy bound to one LAN address must be addressed by that address.
-   - **Text model ids.** `CLIPROXY_TEXT_MODEL_*` default to bare ids such as `kimi-latest`. A proxy that namespaces models needs the full id (`<provider>/kimi-latest`). See [providers](providers.md#text-backends-via-cliproxyapi).
-   - **Local models.** `COMFYUI_BASE_URL`, `COMFYUI_ATELIER_TOKEN` and `COMFYUI_ATELIER_CA` come from the private worker's provisioning ([`infra/comfyui/README.md`](../infra/comfyui/README.md)). `VIDEO_MODELS_ENABLED=true` requires `COMFYUI_BASE_URL`. See [Models directory](#models-directory).
+The examples use `/srv/atelier`. On Linux, create a new empty directory owned
+by the container's UID/GID `1000:1000`:
 
-   Verify the reverse proxy's external network name with `docker network ls` rather than guessing.
+```sh
+sudo mkdir /srv/atelier
+sudo chown 1000:1000 /srv/atelier
+sudo chmod 750 /srv/atelier
+```
 
-3. **Host override.** Copy `infra/docker/docker-compose.override.example.yml` to `infra/docker/docker-compose.override.yml` (gitignored) and adjust the memory and CPU limits, the optional platform pin, any loopback-only ports and the models mount. Compose merges it automatically. The api's 4 GiB `/tmp` tmpfs counts against its memory limit.
+If that path already exists, inspect it and choose a new empty destination
+instead of overwriting its contents. On Docker Desktop, choose a shared host
+path and verify that UID 1000 can write through the mount; host ownership
+mapping differs from Linux. The bind mount does not create a missing host
+directory, so a locked or unmounted volume causes startup to fail safely.
 
-4. **Build and start.**
+### 3. Configure the environment
 
-   ```sh
-   cd infra/docker
-   ATELIER_BUILD_REVISION="$(git rev-parse HEAD)" docker compose build
-   docker compose up -d --wait
-   docker compose ps
-   ```
+Copy the template only if you have no existing `.env`:
 
-   `atelier-api` must become `healthy`. Its compose healthcheck calls `/api/ready` with the proxy key, so it only reports healthy once SQLite is reachable. In production the api starts **sealed** until it receives the storage root identity ([Artifact encryption](#artifact-encryption)).
+```sh
+cp .env.production.example .env
+chmod 600 .env
+openssl rand -base64 48   # Generate TRUSTED_PROXY_KEY
+openssl rand -hex 32     # Generate BYOK_ENCRYPTION_KEY
+docker network ls
+```
 
-5. **Reverse proxy.** Install `infra/swag/atelier.subdomain.conf` into SWAG's `nginx/proxy-confs/` and substitute the placeholder. SWAG does not envsubst proxy-confs, so the file must be valid as deployed:
+Edit `.env` and replace the placeholders. Keep the generated keys in your
+secret store, and do not paste them into an issue or commit them.
 
-   ```sh
-   TRUSTED_PROXY_KEY=$(grep '^TRUSTED_PROXY_KEY=' infra/docker/.env | cut -d= -f2-)
-   sed "s|__TRUSTED_PROXY_KEY__|$TRUSTED_PROXY_KEY|" infra/swag/atelier.subdomain.conf \
-     > /tmp/atelier.subdomain.conf
-   sudo mv /tmp/atelier.subdomain.conf /path/to/swag/nginx/proxy-confs/atelier.subdomain.conf
-   docker exec swag nginx -t
-   docker exec swag nginx -s reload
-   ```
+| Setting | What to enter |
+|---|---|
+| `DATA_DIR` | The absolute host path created in step 2 |
+| `SWAG_EXTERNAL_NETWORK` | The existing network shared with your proxy, as shown by `docker network ls` |
+| `TRUSTED_PROXY_KEY` | The generated base64 value; the same value goes into the proxy configuration |
+| `BYOK_ENCRYPTION_KEY` | The generated 64-character hex value; required in production even if you do not use Gemini |
+| `STORAGE_ROOT_RECIPIENT` | The public recipient generated in step 5; leave its placeholder only until then |
+| `CLIPROXY_BASE_URL` / `CLIPROXY_TOKEN` | Your upstream's bare origin and an accepted API token; both fields are required to boot |
+| `OPENROUTER_API_KEY` | Your OpenRouter key if using GPT; missing or unavailable input checks block GPT requests |
 
-   The default `server_name` is `atelier.*`. The conf pins its resolvers to `ipv6=off`: on a dual-stack Docker network the embedded DNS returns AAAA records while Bun binds IPv4 only. Install `infra/swag/atelier-privacy.conf` as described in [`infra/comfyui/README.md`](../infra/comfyui/README.md).
+For Gemini-only or local-only installations, `CLIPROXY_BASE_URL` must still be
+a valid bare HTTP(S) origin and `CLIPROXY_TOKEN` must be nonempty. They can point
+at an unused private endpoint if you do not use the proxy-backed features.
+Do not expect those features to work without a real upstream.
 
-6. **Authelia.** Merge `infra/authelia/access-control.yml` into your access-control rules, replacing the domain regex (or pinning the exact FQDN) for your domain, then reload Authelia and check its logs.
+Inside a container, `127.0.0.1` means that container. Use a reachable private
+address or a service name on a shared network for your upstream. Docker Desktop
+offers `host.docker.internal` for host services; check their bind address and
+firewall. A newly invented token will not work unless the upstream accepts it.
+The URL must not include `/v1`, a query or credentials.
 
-7. **Smoke test** ([below](#smoke-test)).
+Keep ComfyUI fields empty unless you have provisioned the worker. If you use
+it, set its URL, token and pinned certificate, then list exact signed-in
+usernames in `LOCAL_MODELS_USERS`. Set `PROMPT_LIBRARY_USERS` for users who
+should have the Prompt Library. These lists default to nobody. Text actions
+also need the appropriate upstream [text model IDs](providers.md#text-backends-via-cliproxyapi).
+Keep `ENABLE_MOCK_PROVIDER=false` and `VIDEO_MODELS_ENABLED=false` for the
+first deployment. [Architecture](architecture.md#configuration) describes the
+configuration reference.
+
+### 4. Build the images
+
+```sh
+ATELIER_BUILD_REVISION="$(git rev-parse HEAD)" docker compose build
+```
+
+If you downloaded a ZIP, run `docker compose build` instead. There is no Git
+revision to label, so the image revision is `unknown`. For later updates, use
+a Git clone of the intended revision and carry over your private configuration.
+The update and migration-rehearsal procedure below requires Git so it can label
+and check the candidate image. Do not run Git update commands in a ZIP directory.
+
+The default image names are `atelier-atelier-api` and `atelier-atelier-web`.
+Do not start the containers yet: encrypted storage must be initialized first.
+
+The host override is optional. If you copy
+`docker-compose.override.example.yml` to `docker-compose.override.yml`, adjust
+the resource limits for your host. **Remove its `COMFYUI_MODELS_DIR`
+environment entry and models volume block unless you are mounting a custom
+model directory.** Those blocks are active in the example and otherwise
+require a host path that does not exist on a fresh install. Built-in models
+do not need that mount. The API's 4 GiB `/tmp` tmpfs counts against its memory
+limit. Keep the API and web containers unpublished; the proxy reaches them
+over the Docker network.
+
+### 5. Initialize encrypted storage
+
+Follow [Creating the data volume](#creating-the-data-volume) now, before
+`docker compose up`: generate the root identity, save it in your secret store,
+put only its public recipient in `.env`, then initialize the empty data
+directory. Return here when initialization succeeds and writes
+`.atelier-data-volume`. The identity is essential for reading every user's
+artifacts; there is no recovery if it is lost.
+
+### 6. Connect the authentication proxy
+
+The following paths are inside SWAG's persistent `/config` mount. Install the
+repository's `../../infra/swag/atelier-privacy.conf` as
+`/config/nginx/atelier-privacy.conf`. Add this line **inside the `http` block**
+of SWAG's `nginx.conf`, not inside a `server` block:
+
+```nginx
+include /config/nginx/atelier-privacy.conf;
+```
+
+Give SWAG a tmpfs mount for `/tmp/atelier-body` in its own container
+configuration, then recreate SWAG. For example, merge this into its service:
+
+```yaml
+tmpfs:
+  - /tmp/atelier-body:mode=1777
+```
+
+This keeps request-body spill in RAM; it does not disable host paging. The
+privacy log format is required for the supplied site configuration even if
+you do not use ComfyUI.
+
+Copy `../../infra/swag/atelier.subdomain.conf` to SWAG's
+`/config/nginx/proxy-confs/atelier.subdomain.conf`. In that deployed copy:
+
+1. Set `server_name` to your actual hostname, such as `atelier.example.org`.
+2. Replace `__TRUSTED_PROXY_KEY__` with the exact value from `.env`. SWAG does
+   not expand environment variables in this file. Edit it privately and make
+   it readable only by the operator and SWAG; do not commit the substituted file.
+3. Preserve the header-clearing, Authelia includes, public `Host`, SSE settings
+   and upstream container names.
+
+In Authelia, add an access-control rule for that exact hostname under
+`access_control.rules`, before any broader rule that would take precedence:
+
+```yaml
+- domain: atelier.example.org
+  policy: one_factor
+```
+
+The [included rule fragment](../infra/authelia/access-control.yml) is another
+starting point. Restrict the audience according to your own policy. Reload
+Authelia and confirm the config is accepted. Use your actual SWAG container
+name if it differs from `swag`:
+
+```sh
+docker exec swag nginx -t
+docker exec swag nginx -s reload
+```
+
+Do not reload if the configuration test fails. Confirm SWAG and both Atelier
+services use the network named by `SWAG_EXTERNAL_NETWORK`.
+
+### 7. Start, unseal and verify
+
+```sh
+docker compose config --quiet
+docker compose up -d --wait
+docker compose ps
+```
+
+Both containers must be running and the API must be healthy. That healthcheck
+only verifies the database responds; it does **not** prove storage is unsealed
+or an upstream can generate images.
+
+For a manual unseal, paste your saved one-line root identity into this hidden
+prompt. It does not echo the identity or put it in shell history or arguments:
+
+```sh
+bash -c 'read -r -s -p "Storage root identity: " atelier_root_identity || exit 1; printf "\n" >&2; printf "%s\n" "$atelier_root_identity" | docker exec -i atelier-api bun scripts/storage.ts unseal'
+docker exec atelier-api bun scripts/storage.ts status
+docker exec atelier-api bun scripts/storage.ts verify
+```
+
+Status must report `"sealed":false`; verification must report zero user-key
+failures, failures and missing files. Every API container start needs another
+unseal. For automation, pipe the output of your own secret-store read command
+directly into `docker exec -i atelier-api bun scripts/storage.ts unseal`.
+
+Run the [smoke test](#smoke-test), then give users the site address and
+[Using Atelier](user-guide.md). Do not treat a healthy container as a completed
+first deployment without checking a real generation and download.
+
+## Day-to-day operation
+
+Run these commands from `infra/docker`:
+
+| Task | Command | Follow-up |
+|---|---|---|
+| Check status | `docker compose ps` | API health checks SQLite, not storage or provider access |
+| Read recent logs | `docker compose logs --tail 100 atelier-api` | Keep credentials and private content out of issue reports |
+| Stop the app | `docker compose stop` | Data stays in the host data directory |
+| Start it again | `docker compose up -d --wait` | Unseal the API and check a generation |
+| Restart the API | `docker compose restart atelier-api` | Unseal again; this does not reload `.env` |
+| Apply environment changes | `docker compose up -d --force-recreate atelier-api` | Unseal again, then check the affected feature |
+| Check storage | `docker exec atelier-api bun scripts/storage.ts status` | `sealed: true` needs the saved root identity |
+
+Use the [manual unseal prompt](#7-start-unseal-and-verify) after any API start,
+restart, recreation or host reboot. A production API never reads the storage
+root identity from `.env`. Keep `STORAGE_ROOT_RECIPIENT` unchanged for an
+existing database.
+
+For new users, create their account in your authentication service. Atelier
+uses the exact `Remote-User` value as the user's identity; it does not have a
+separate account-registration screen. Add usernames to the feature allowlists
+you need, recreate the API to load changes, and send users the
+[user guide](user-guide.md). Renaming an authentication username does not move
+its existing Atelier history.
 
 ## Models directory
 
-The built-in local model manifests ship in the api image under `api/src/providers/comfyui/models/`: `krea-2-gonzalomo`, `moss-image-sft`, and the MiniMax H3 pair `minimax-h3-i2v` and `minimax-h3-t2v` as **disabled templates** derived from ComfyUI's official H3 workflow and unverified on a live host. To add or replace rows, mount a directory with the same layout read-only and point `COMFYUI_MODELS_DIR` at it; the override example binds `${COMFYUI_MODELS_HOST_DIR}` at `/run/comfyui-models`. `COMFYUI_ENABLE_MODELS` registers disabled built-ins. Render through each graph against your ComfyUI before enabling a row. Validate a directory before deploying it:
+The built-in local model manifests ship in the api image under `api/src/providers/comfyui/models/`: `krea-2-gonzalomo`, `moss-image-sft`, and the MiniMax H3 pair `minimax-h3-i2v` and `minimax-h3-t2v` as **disabled templates** derived from ComfyUI's official H3 workflow and unverified on a live host. To add or replace rows, mount a directory with the same layout read-only and point `COMFYUI_MODELS_DIR` at it; the override example binds `${COMFYUI_MODELS_HOST_DIR}` at `/run/comfyui-models`. `COMFYUI_ENABLE_MODELS` registers disabled built-ins. Render through each graph against your ComfyUI before enabling a row.
+
+For optional model authoring, validate the directory on a workstation with Bun
+and project dependencies installed. Run this command from the **repository
+root**, replacing `<models dir>` with the external directory path; it is not
+part of the Docker-only first deployment:
 
 ```sh
 bun run api/scripts/validate-models.ts <models dir> --builtin api/src/providers/comfyui/models
@@ -87,7 +288,12 @@ Every artifact (images, clips, uploads, thumbnails, sequence masters) is stored 
 
 **Keys.** Each user has a post-quantum hybrid age identity (`user_storage_keys`), created on first write and stored encrypted to the deployment root recipient (`STORAGE_ROOT_RECIPIENT`, public, `age1pq1…`, in `.env`). Every file gets a fresh file key wrapped to its owner. `storage_root` binds the database to one root: a different recipient refuses boot. Deleting a user row cascades to their key, which crypto-shreds their files. Keep the root **identity** only in a secret store you control, never on the data volume; losing it loses every artifact, and there is no rotation or re-encryption tooling.
 
-**Sealed and unsealed.** The api boots **sealed**. Writes (generation, uploads, thumbnails) work, because encryption needs only public recipients; reads wait up to 20 s, then return `503 STORAGE_SEALED` with `Retry-After: 5`. Queued work is not dispatched while sealed and resumes on unseal. Unseal by piping the root identity into the container-local socket `/run/atelier/unseal.sock`; the identity is read from stdin only:
+**Sealed and unsealed.** The api boots **sealed**. Encryption needs only public
+recipients, but reading encrypted artifacts needs the root identity. Reads wait
+up to 20 seconds, then return `503 STORAGE_SEALED` with `Retry-After: 5`.
+Queued generation is not dispatched while sealed and resumes on unseal. Unseal
+by piping the root identity into the container-local socket
+`/run/atelier/unseal.sock`; the identity is read from stdin only:
 
 ```sh
 <command that prints the root identity> | docker exec -i atelier-api bun scripts/storage.ts unseal
@@ -105,26 +311,72 @@ The socket lives on a container tmpfs, so every container start needs a new unse
 
 ### Creating the data volume
 
-1. Build the api image (`docker compose build atelier-api`), then generate the root identity with the image's own age library. It prints the identity (`AGE-SECRET-KEY-PQ-…`) and then its recipient (`age1pq1…`). Move the identity into your secret store without writing it to a file, and keep only the recipient for `.env`:
+Run these commands from `infra/docker`, after building the API image. A fresh
+installation and a plaintext migration both use the same initializer.
+
+1. Generate the root identity with the image's age library. It prints the secret
+   identity (`AGE-SECRET-KEY-PQ-…`) and then its public recipient (`age1pq1…`).
+   Run this in a private terminal, save the identity in your secret store, and
+   set `STORAGE_ROOT_RECIPIENT` in `.env` to the public recipient. Keep a secure
+   backup of the identity, separate from the data volume. Do not generate a new
+   identity for an existing encrypted installation.
 
    ```sh
    docker run --rm --network none --entrypoint bun atelier-atelier-api -e \
      "import { generateHybridIdentity, identityToRecipient } from 'age-encryption'; const i = await generateHybridIdentity(); console.log(i); console.log(await identityToRecipient(i));"
    ```
 
-2. Run the migration into an **empty** destination owned by UID 1000 (it refuses anything else). The source must contain `atelier.sqlite`. For a fresh install, an empty file is enough: the migration snapshots it, creates the current schema and writes the marker. For an existing plaintext `DATA_DIR`, stop the api and use that directory as the source.
+2. For a fresh installation, prepare a temporary source with an empty database.
+   The permissions below let the container's UID 1000 read it. This source
+   contains no user data:
 
    ```sh
-   mkdir -p /srv/atelier-plaintext && touch /srv/atelier-plaintext/atelier.sqlite   # fresh install only
+   atelier_initial_source="$(mktemp -d /tmp/atelier-initial-source.XXXXXX)" &&
+   chmod 755 "$atelier_initial_source" &&
+   touch "$atelier_initial_source/atelier.sqlite" &&
+   chmod 644 "$atelier_initial_source/atelier.sqlite"
+   ```
+
+   For an existing plaintext installation, **stop the API first** and set
+   `atelier_initial_source` to the absolute path of its existing `DATA_DIR`
+   instead. Preserve the whole source, including SQLite WAL files, and take a
+   backup before migrating. The destination must be a different, empty directory
+   writable by UID 1000. Do not use the fresh-install `touch` command on existing
+   data.
+
+3. Replace `age1pq1…` with the exact public recipient you saved in `.env`.
+   Replace `/srv/atelier` if your destination differs. Run:
+
+   ```sh
    docker run --rm --network none -u 1000:1000 \
      -e STORAGE_ROOT_RECIPIENT=age1pq1… \
-     --mount type=bind,src=/srv/atelier-plaintext,dst=/src,readonly \
+     --mount "type=bind,src=$atelier_initial_source,dst=/src,readonly" \
      --mount type=bind,src=/srv/atelier,dst=/app/data \
      --entrypoint bun atelier-atelier-api scripts/encrypt-migrate.ts --source /src --dest /app/data
    ```
 
-   It snapshots the stopped DB (`VACUUM INTO`), re-syncs the prompt FTS index, migrates to the current schema, encrypts every artifact and verifies each by decrypting it and comparing SHA-256, checks every DB-referenced artifact exists, and writes the marker last. Any failure exits non-zero with no marker; empty the destination and rerun.
-3. Set `DATA_DIR` and `STORAGE_ROOT_RECIPIENT` in `.env`, start the stack, unseal, and run `storage.ts verify`; it must report zero failures and zero missing. Then delete the plaintext source and any snapshots of it.
+   The initializer snapshots the stopped DB, updates its schema and prompt
+   index, encrypts artifacts and verifies their bytes. It checks every referenced
+   artifact exists and writes `.atelier-data-volume` last. A failed run leaves
+   a partial destination, including a database snapshot, without a valid marker.
+   Preserve the source and diagnose the error. To retry, create a new empty
+   destination with the same ownership and permissions, change the destination
+   mount's `src=` in the command above, and set `DATA_DIR` in `.env` to that same
+   new path before starting the API. Keep the original recipient.
+
+   The tool's suggestion to empty the destination applies only to a known failed
+   attempt, never the source or an existing installation. Protect partial
+   destinations as user data and retire them under your storage policy after
+   the successful installation and backups have been verified. Never create the
+   marker by hand to bypass a failed initializer.
+
+4. For a first installation, return to [Connect the authentication proxy](#6-connect-the-authentication-proxy),
+   then start, unseal and verify. If your proxy is already configured for an
+   existing plaintext installation, proceed to [Start, unseal and verify](#7-start-unseal-and-verify).
+   Do not remove
+   an old plaintext source until the encrypted installation is verified and its
+   backups have been tested. Retire plaintext backups according to your storage
+   policy; ordinary deletion does not promise forensic erasure.
 
 ### Recovery with the stock age CLI
 
@@ -141,7 +393,9 @@ sqlite3 -readonly /srv/atelier/atelier.sqlite \
 
 ## BYOK keys
 
-`BYOK_ENCRYPTION_KEY` (64 hex characters) encrypts user-supplied provider keys at rest with AES-256-GCM. Changing it requires a restart.
+`BYOK_ENCRYPTION_KEY` (64 hex characters) encrypts user-supplied provider keys at
+rest with AES-256-GCM. Preserve it across updates and restores. Changing an
+existing key without re-encrypting its stored data makes those keys unreadable.
 
 ### BYOK master-key loss
 
@@ -152,13 +406,15 @@ If `BYOK_ENCRYPTION_KEY` is lost or rotated without re-encryption, every stored 
 To recover from total master-key loss (every BYOK row must be re-entered): the api exits on the wrong key and Compose keeps restarting it, so stop it first, run the two deletes from a one-off container of the same service (it mounts the same `DATA_DIR` read-write at `/app/data`), then start it again. The next boot seeds a fresh sentinel.
 
 ```sh
-cd infra/docker
 docker compose stop atelier-api
 docker compose run --rm --no-deps --entrypoint bun atelier-api -e \
   "import {Database} from 'bun:sqlite'; const db = new Database('/app/data/atelier.sqlite'); db.run('DELETE FROM keystore_proof'); db.run('DELETE FROM user_provider_keys'); db.close();"
-docker compose start atelier-api
+docker compose up -d --force-recreate atelier-api
 ```
- The 409 path is logged at WARN as `event=byok_put_under_rotation` without key material. `user_provider_keys.key_version` is reserved and always `1`; it is not a rotation mechanism.
+Unseal again after the API starts. The 409 path is logged at WARN as
+`event=byok_put_under_rotation` without key material.
+`user_provider_keys.key_version` is reserved and always `1`; it is not a rotation
+mechanism.
 
 ## Ephemera character cards (optional)
 
@@ -184,7 +440,7 @@ Atelier applies pending schema migrations at api boot (`api/src/db/migrate.ts`);
    docker tag "$(docker inspect --format '{{.Image}}' atelier-api)" atelier-atelier-api:prev
    docker tag "$(docker inspect --format '{{.Image}}' atelier-web)" atelier-atelier-web:prev
    ```
-4. **Build** with `docker compose build`.
+4. **Back up**, then **build** with `ATELIER_BUILD_REVISION="$(git rev-parse HEAD)" docker compose build`.
 5. **Rehearse migrations** when `api/src/db/migrate.ts`, `api/src/db/migrations/` or `api/src/db/schema.sql` changed since the running revision (below).
 6. **Start** with `docker compose up -d --wait`, unseal, and run the [smoke test](#smoke-test).
 7. **Roll back** on failure by re-tagging `:prev` as `:latest` and running `docker compose up -d --no-build --wait`, but only when no migration ran: a downgraded image refuses a newer schema. After a migration, fix forward.
@@ -196,7 +452,8 @@ Never run two `atelier-api` instances against the same `DATA_DIR`; some migratio
 `infra/docker/rehearse-migrations.ts` runs the candidate image's real `migrate()` against a consistent snapshot of the live database, without starting the server. It needs only `DATA_DIR`; do not pass `--env-file .env`, because `docker run` cannot parse the multiline `COMFYUI_ATELIER_CA` value that Compose accepts. Production keeps running during the rehearsal:
 
 ```bash
-cd infra/docker
+(
+set -e
 candidate_revision="$(git rev-parse HEAD)"
 ATELIER_BUILD_REVISION="$candidate_revision" docker compose build atelier-api
 live_data_dir="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}' atelier-api)"
@@ -218,6 +475,7 @@ docker run --rm --entrypoint bun \
   -v "$PWD/rehearse-migrations.ts:/rehearse.ts:ro" \
   -e DATA_DIR=/app/data \
   "$candidate_api_image" /rehearse.ts
+)
 ```
 
 The rehearsal fails, and the release must stop, when any of these assertions fails:
@@ -235,11 +493,25 @@ Table additions, drops and row-count deltas are printed as advisory output. The 
 
 From a clean browser session:
 
-1. Open the site; the auth proxy must redirect to its portal and return to the Atelier SPA after login.
-2. Generate a batch with `gpt-image-2.5-sunburst` (or a local model); tile events must arrive incrementally.
-3. Open the tile in the lightbox, download it, delete it, refresh, and confirm the deletion persisted.
-4. Spoof check: `curl --header 'Remote-User: attacker' https://<your host>/api/models` must yield the auth portal redirect, not a 200.
-5. Check SSE in Safari, Firefox and Chrome. The proxy conf disables buffering and sets a 600 s read timeout so long generations stream.
+1. Open the site; confirm that the proxy requires login and returns you to
+   Atelier after successful authentication.
+2. Generate a batch with a configured **real provider**: Gemini BYOK, GPT Image
+   or a verified local model. For Gemini, save the user's key through **API
+   keys** first. Confirm the generation finishes; Mock Fast does not establish
+   upstream access.
+3. Open the result in the lightbox and download it. Archive a test result,
+   refresh, and confirm it appears in Archive. Restore it and check it returns
+   to the active history.
+4. Without a session cookie, run
+   `curl --header 'Remote-User: attacker' https://<your-host>/api/models` with
+   your actual hostname. It must require authentication through a login
+   redirect or an unauthenticated 401/403 response. A 200 response granting
+   access as the supplied attacker is a failed trust boundary.
+5. Check updates and completion in the browsers you support. For a provider
+   that emits previews, confirm they arrive during generation rather than in
+   one buffered burst. Gemini and some other paths return only finished
+   images. The supplied proxy disables SSE buffering and uses a 600-second
+   read timeout.
 
 Inside-container liveness (auth-gated routes return 401 without the proxy headers):
 
@@ -254,7 +526,9 @@ docker exec atelier-api bun -e "console.log(await (await fetch('http://127.0.0.1
 
 1. Generate a new value with `openssl rand -base64 48`.
 2. Update `TRUSTED_PROXY_KEY` in `infra/docker/.env` and the `X-Atelier-Proxy-Key` value in the deployed proxy conf.
-3. Restart the api and reload the proxy close together (`docker compose restart atelier-api`, `nginx -t`, `nginx -s reload`).
+3. Recreate the API to load the changed `.env` and reload the proxy close together
+   (`docker compose up -d --force-recreate atelier-api`, `nginx -t`,
+   `nginx -s reload`). Unseal the recreated API.
 4. Re-run the spoof check and a generation. During a mismatch, authenticated requests fail with 401.
 
 ## Rotating `EPHEMERA_INTEGRATION_KEY`
@@ -266,10 +540,10 @@ Rotate Ephemera first: it refuses the old key the moment it restarts, while Atel
 Logs are pino JSON on stdout. Every request has `reqId`; generation paths also log `batchId` and `tileId`.
 
 ```sh
-docker compose logs -f atelier-api
-docker compose logs atelier-api 2>&1 | grep '<batchId>'
-docker compose logs atelier-api 2>&1 | grep 'brainstorm_backend_fallback'
-docker compose logs atelier-api 2>&1 | grep db_corruption_detected
+docker compose logs --tail 100 atelier-api
+docker compose logs --since 1h atelier-api 2>&1 | grep '<batchId>'
+docker compose logs --since 1h atelier-api 2>&1 | grep 'brainstorm_backend_fallback'
+docker compose logs --since 1h atelier-api 2>&1 | grep db_corruption_detected
 ```
 
 ## DB and migration inspection
@@ -284,9 +558,69 @@ docker exec atelier-api bun -e "import {Database} from 'bun:sqlite'; const db=ne
 
 ## Backups
 
-If you back up `DATA_DIR`, copy it as a unit: artifacts are encrypted to per-user identities stored only in that database's `user_storage_keys`, so artifacts without the matching database, or a database restored from before a user's first write, are unreadable. The root identity is never part of the copy.
+Back up the **whole `DATA_DIR` from one point in time**: the database and any
+SQLite sidecars, `images/`, `uploads/`, `thumbs/` and `.atelier-data-volume`.
+Artifacts require their matching per-user keys in the database. Files without
+that database, or a database from before a user's first write, are unreadable.
 
-Take the database and artifact roots from one point in time: stop the api, `.backup` the database, copy `images/`, `thumbs/` and `uploads/`, then start it again. A single filesystem snapshot covering `atelier.sqlite*` and those three roots is also valid. Do not take a live `.backup` and copy artifacts later while writers continue, and never copy raw `atelier.sqlite`, `-wal` and `-shm` files from a running api.
+Keep separate secure backups of the root identity, `BYOK_ENCRYPTION_KEY`, the
+production `.env`, proxy configuration and any custom model manifests. The
+root identity should remain in your secret store, separate from the data
+backup. SQLite contains prompts and metadata, so protect the backup with
+volume or backup encryption even though media files are already encrypted.
+
+For a simple stopped backup, choose a secure backup path **outside `DATA_DIR`**
+and adapt both paths below. Use a new archive name; do not overwrite the last
+good backup. From `infra/docker`:
+
+```sh
+(
+set -e
+docker compose stop atelier-api
+sudo tar -C /srv/atelier -cpf /secure/backup/atelier-data-YYYYMMDD.tar .
+docker compose start atelier-api
+)
+```
+
+Unseal again and confirm the app works. If the archive command fails, preserve
+the error, resolve it and start/unseal the API when safe; do not claim that a
+backup was taken. A single filesystem snapshot covering the entire data
+directory is another option. Never copy raw database and WAL files from a
+running API, or take a live database snapshot and copy artifacts later while
+writers continue.
+
+### Restore a backup
+
+1. Stop the API. Preserve the current data directory separately; do not extract
+   a backup over it or mix files from different backups.
+2. Use the application revision that created the backup, or a compatible newer
+   revision. A binary refuses a database with a newer schema. Restore your
+   saved environment and model/proxy configuration privately.
+3. Create a **new empty** destination and extract the complete stopped backup,
+   preserving ownership. For example, with paths adapted to your machine:
+
+   ```sh
+   (
+   set -e
+   sudo mkdir /srv/atelier-restored
+   sudo tar -C /srv/atelier-restored -xpf /secure/backup/atelier-data-YYYYMMDD.tar
+   sudo chown -R 1000:1000 /srv/atelier-restored
+   )
+   ```
+
+4. Set `DATA_DIR` in `.env` to that destination. Restore the matching
+   `BYOK_ENCRYPTION_KEY` and `STORAGE_ROOT_RECIPIENT`. Do not run the plaintext
+   initializer on encrypted backup data or generate replacement keys.
+5. Run `docker compose config --quiet`, then
+   `docker compose up -d --force-recreate --wait`. Unseal using the matching
+   root identity and run `storage.ts verify`; it must report zero failures and
+   missing files. Check history, a download, a real generation and BYOK access
+   if used.
+
+Test restoration before relying on a backup. To rehearse alongside production,
+use an isolated Docker host or separately adapted stack: this Compose file
+uses fixed container names, and two API instances must never share a data
+directory.
 
 ## Database corruption
 
@@ -301,15 +635,16 @@ Docker Desktop's VirtioFS bind mounts have known data-loss bugs under sustained 
 **Repair.** Identify the damaged objects with `PRAGMA integrity_check(200)`, then work on a copy, never the live file:
 
 ```sh
+(
+set -e
 # 1. Stop the api and back up db + wal + shm
-docker compose -f infra/docker/docker-compose.yml stop atelier-api
+docker compose stop atelier-api
 D=<DATA_DIR on host>
 B="$D/repair-backup-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$B" && cp -p "$D"/atelier.sqlite* "$B/"
 
 # 2. Checkpoint, then work in a FRESH scratch dir. Piping .recover output into a
 #    database that already exists continues past "table already exists" errors
 #    and still passes integrity_check, so set -e + mktemp are load-bearing.
-set -e
 W=$(mktemp -d)
 S=sqlite3   # needs SQLite >= 3.39 for .recover
 "$S" "$D/atelier.sqlite" 'PRAGMA wal_checkpoint(TRUNCATE);'
@@ -343,7 +678,8 @@ SQL
 mv "$D/atelier.sqlite" "$D/atelier.sqlite.corrupt-$(date +%Y%m%d-%H%M%S)"
 rm -f "$D/atelier.sqlite-wal" "$D/atelier.sqlite-shm"
 cp "$W/recovered.db" "$D/atelier.sqlite"
-docker compose -f infra/docker/docker-compose.yml start atelier-api
+docker compose start atelier-api
+)
 ```
 
 ### WAL grows unexpectedly
@@ -363,10 +699,24 @@ Check for a desync with `SELECT count(*) FROM batch_prompt_fts_content c JOIN ba
 
 ## Troubleshooting
 
-- `docker compose config` fails: check `SWAG_EXTERNAL_NETWORK`, `DATA_DIR` and the required api values in `infra/docker/.env`.
+- `docker compose config --quiet` fails: check `SWAG_EXTERNAL_NETWORK`, `DATA_DIR` and the required API values in `.env`.
+- API exits with a missing `.atelier-data-volume` marker: confirm the correct
+  volume is mounted and storage initialization succeeded. Do not create the
+  marker by hand or point the API at a fresh empty directory to suppress it.
+- Images return `503 STORAGE_SEALED`, or queued work never starts after a
+  restart: check `storage.ts status` and unseal with the saved root identity.
+- Key or recipient mismatch at boot: restore the matching configuration and
+  keys; do not generate replacement keys for an existing data directory.
+- Compose reports a missing models mount: remove the optional models environment
+  and volume blocks from the example override if you do not use an external catalog.
+- Local model menu is empty: check `COMFYUI_BASE_URL`, the exact signed-in name
+  in `LOCAL_MODELS_USERS` and the model's enabled state. An offline row also
+  needs worker credentials, a valid pinned certificate, weights and node classes.
 - The proxy returns 502: confirm both containers are on the proxy's external network and `atelier-api` is healthy.
 - The spoof check returns 200: confirm `more_clear_input_headers Remote-User Remote-Groups Remote-Name Remote-Email;` precedes the Authelia include, then reload.
-- Tiles arrive in one burst: confirm `/api/` has `proxy_buffering off`, `proxy_set_header X-Accel-Buffering no` and `proxy_read_timeout 600s`.
+- A preview-capable provider's updates arrive in one burst: confirm `/api/`
+  has `proxy_buffering off`, `proxy_set_header X-Accel-Buffering no` and
+  `proxy_read_timeout 600s`. Final-only providers do not emit previews.
 - Authenticated requests return 401: the proxy's `X-Atelier-Proxy-Key` must match `TRUSTED_PROXY_KEY` exactly.
 - `GET /api/img/:tileId` returns 404 for another user: expected; image reads are scoped by `Remote-User`.
 - `GET /api/img/:tileId` returns 500: a row likely points at a missing artifact. Restart the api to run startup reconciliation, then search the logs for the `tileId`.

@@ -1,10 +1,20 @@
 # Atelier documentation
 
-Index of project documentation. The repository [README](../README.md) covers
-the quick start; this directory holds the durable architectural and
-operational references.
+Start with the guide that matches what you want to do. The public repository
+includes everything specific to Atelier; you bring your own hosting, provider
+access and, if you use local models, model weights.
 
-## Documents
+## Install and use
+
+| Guide | What you will do |
+|---|---|
+| [Getting started](getting-started.md) | Download Atelier, run a local test without credentials, then connect a real model |
+| [Using Atelier](user-guide.md) | Generate and edit images, organise work, use templates and understand optional features |
+| [Deployment](deployment.md) | Set up authentication and encryption; launch, operate, back up and restore a server |
+| [ComfyUI worker](../infra/comfyui/README.md) | Provision the included worker on a Windows portable ComfyUI install |
+| [Local models](local-models.md) | Inspect model requirements, enable verified graphs and mount custom manifests |
+
+## Technical references
 
 - [`architecture.md`](./architecture.md): system topology, SSE contract,
   provider interface, storage layout, endpoint catalog. **Locked contract.**

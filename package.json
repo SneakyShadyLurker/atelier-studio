@@ -1,0 +1,35 @@
+{
+  "name": "atelier",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "workspaces": ["web", "api", "shared"],
+  "engines": {
+    "bun": "1.4.3"
+  },
+  "scripts": {
+    "typecheck": "bun run --filter '*' typecheck",
+    "lint": "eslint .",
+    "test": "bun run --filter '*' test && bun run test:infra && bun run test:comfyui",
+    "test:infra": "bun test --isolate infra/docker",
+    "test:comfyui": "python3 -B infra/comfyui/test_store.py && python3 -B infra/comfyui/test_supervisor.py && python3 -B infra/comfyui/test_provision.py",
+    "inventory:comfyui": "bun run api/scripts/comfyui-inventory.ts",
+    "dev:web": "bun run --cwd web dev",
+    "dev:api": "bun run --cwd api dev",
+    "verify:csp": "bun run --filter '@atelier/web' build && bun run web/scripts/verify-csp-hash.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
+    "@tanstack/eslint-plugin-query": "5.102.8",
+    "@types/bun": "1.4.1",
+    "eslint": "10.10.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "typescript-eslint": "8.69.0"
+  },
+  "overrides": {
+    "ws": "8.21.3"
+  }
+}

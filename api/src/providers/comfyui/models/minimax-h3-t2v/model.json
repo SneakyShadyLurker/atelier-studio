@@ -1,0 +1,48 @@
+{
+  "id": "minimax-h3-t2v",
+  "name": "MiniMax H3 T2V",
+  "family": "video",
+  "order": 110,
+  "enabled": false,
+  "residencyKey": "minimax-h3",
+  "saveImageNodeId": "15",
+  "requiredPlaceholders": [
+    "{{prompt}}",
+    "{{seed}}",
+    "{{width}}",
+    "{{height}}",
+    "{{videoFrames}}",
+    "{{steps}}"
+  ],
+  "defaultSteps": 8,
+  "ratioMap": "h3-768p",
+  "supportedRatios": [
+    "1:1",
+    "4:5",
+    "3:4",
+    "16:9",
+    "9:16"
+  ],
+  "supportedDurations": [
+    124,
+    243,
+    362
+  ],
+  "defaultDuration": 124,
+  "size": "768p · INT8",
+  "latency": "slow",
+  "batched": false,
+  "defaultCount": 1,
+  "outputKind": "video",
+  "graphs": {
+    "base": "workflow.json"
+  },
+  "requiredModelFiles": [
+    "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+    "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+    "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "minimax_h3_video_vae_int8_convrot.safetensors",
+    "minimax_h3_audio_vae_fp32.safetensors"
+  ],
+  "requiredClipType": "minimax"
+}

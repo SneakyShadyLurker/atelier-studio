@@ -1,0 +1,128 @@
+.stack {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+}
+
+.panel {
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-1);
+}
+
+.head {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.headTitle {
+  margin: 0 0 4px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.headNote {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 16px 14px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+
+.rowMain {
+  min-width: 0;
+}
+
+.rowLabel {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.rowDescription {
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.rowControl {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.stepsInput {
+  width: 64px;
+  height: 36px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-4);
+  background: var(--bg-sunk);
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  padding: 0 6px;
+  text-align: center;
+}
+
+.stepsInput[data-tuned='true'] {
+  border-color: var(--ink);
+  font-weight: 600;
+}
+
+.stepsInput:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.stepsInput:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (width < 768px) {
+  .row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .rowControl {
+    align-self: flex-start;
+    justify-content: flex-start;
+  }
+}

@@ -1,0 +1,39 @@
+/* Bottom-sheet primitive: the phone (or short-viewport) form of an overlay.
+   Owners compose `.sheet` and set only custom properties:
+     --sheet-max-h       ceiling (default 60dvh)
+     --sheet-pad         top and side padding (default 0)
+     --sheet-pad-bottom  bottom padding above the safe-area inset (default 0)
+     --sheet-border      top border colour (default --line)
+   The safe-area bottom padding (docs/web-conventions.md) and the --keyboard-inset lift live
+   here once. Owners keep their full border on the popover form only, so it
+   never overrides this top-only border. Dismissal (backdrop click, not
+   useOutsidePointer) stays with the components. */
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--keyboard-inset, 0);
+  max-height: var(--sheet-max-h, 60dvh);
+  border-top: 1px solid var(--sheet-border, var(--line));
+  border-radius: var(--radius-14) var(--radius-14) 0 0;
+  padding: var(--sheet-pad, 0px) var(--sheet-pad, 0px) calc(var(--sheet-pad-bottom, 0px) + env(safe-area-inset-bottom));
+  animation: global(atelier-sheet-in) var(--dur-sheet) var(--ease-out) both;
+}
+
+/* Designed leave (useExitTransition stamps data-closing for --dur-overlay). */
+.sheet[data-closing='true'] {
+  animation: global(atelier-sheet-out) var(--dur-overlay) var(--ease-out) both;
+  pointer-events: none;
+}
+
+/* Reduced motion: the slide becomes the spec's short opacity-only fade. */
+@media (prefers-reduced-motion: reduce) {
+  .sheet {
+    animation: global(atelier-fade-in) var(--dur-reduced) linear both;
+  }
+
+  .sheet[data-closing='true'] {
+    animation: global(atelier-fade-out) var(--dur-reduced) linear both;
+  }
+}

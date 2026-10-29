@@ -1,0 +1,77 @@
+.media {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  animation: global(atelier-img-in) var(--dur-reveal) var(--ease-out) both;
+}
+
+.playBadge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--glass-on-dark-12);
+  border-radius: 50%;
+  background: var(--scrim-panel);
+  color: var(--glass-on-dark-85);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+  transition: opacity var(--dur-overlay) var(--ease-out), transform var(--dur-overlay) var(--ease-out);
+}
+
+/* While the clip is actually playing the centre badge would just obscure the
+   motion — fade it out so the preview reads as live video, not a thumbnail. */
+.playBadge[data-playing='true'] {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.85);
+}
+
+.playBadge :global(svg) {
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+}
+
+/* Clip duration, revealed once metadata loads (on first hover / in-view play).
+   On-glass mono chip in the top-left, mirroring the tile action vocabulary. */
+.duration {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--glass-on-dark-90);
+  background: var(--scrim-control);
+  border: 1px solid var(--glass-on-dark-12);
+  border-radius: var(--radius-4);
+  padding: 3px 5px;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .duration {
+    background: var(--scrim-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media {
+    animation-duration: var(--dur-hover);
+    animation-name: global(atelier-fade-in);
+    filter: none;
+  }
+}

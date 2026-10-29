@@ -1,0 +1,136 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 92vw);
+  max-height: min(80dvh, 720px);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+  animation: global(atelier-scale-in) var(--dur-entrance) var(--ease-out) both;
+}
+
+/* [data-closing] is stamped on the DialogShell backdrop (dialog.module.css);
+   the attribute selector reaches across module scoping. */
+[data-closing='true'] .card {
+  animation: global(atelier-scale-out) var(--dur-overlay) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    animation: global(atelier-fade-in) var(--dur-reduced) linear both;
+  }
+
+  [data-closing='true'] .card {
+    animation: none;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.section { border-bottom: 1px solid var(--line-2); }
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 18px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--ink-2);
+}
+
+.sectionHead:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.sectionLabel {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.rows { padding: 0 18px 10px; display: flex; flex-direction: column; gap: 4px; }
+
+.jumpRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  transition: border-color var(--dur-hover) var(--ease-out),
+    transform var(--dur-transform) var(--ease-tactile);
+}
+
+.jumpRow:hover { border-color: var(--ink-3); }
+
+.jumpRow:active { transform: scale(0.99); }
+
+@media (prefers-reduced-motion: reduce) {
+  .jumpRow:active { transform: none; }
+}
+
+.jumpRow:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.count {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+}
+
+.low { color: var(--ink-3); font-size: var(--text-xs); }
+
+.cleanupRow { color: var(--danger); font-size: var(--text-xs); display: flex; gap: 8px; }
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+
+@media (width < 768px) {
+  .card { width: 100dvw; height: 100dvh; max-height: none; border-radius: 0; }
+}

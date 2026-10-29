@@ -1,0 +1,38 @@
+{
+  "id": "moss-test-beta",
+  "name": "MOSS Test Beta Override",
+  "family": "moss",
+  "saveImageNodeId": "9",
+  "requiredPlaceholders": [
+    "{{prompt}}",
+    "{{seed}}",
+    "{{width}}",
+    "{{height}}",
+    "{{count}}",
+    "{{steps}}"
+  ],
+  "defaultSteps": 8,
+  "ratioMap": "moss-turbo-1.5mp",
+  "supportedRatios": [
+    "1:1",
+    "4:5",
+    "3:4",
+    "16:9",
+    "9:16"
+  ],
+  "defaultRatio": "3:4",
+  "size": "test size",
+  "latency": "medium",
+  "batched": true,
+  "defaultCount": 4,
+  "graphs": {
+    "base": "workflow.json"
+  },
+  "requiredModelFiles": [
+    "test-unet.safetensors",
+    "test-encoder.safetensors",
+    "test-vae.safetensors"
+  ],
+  "requiredClipType": "moss_image",
+  "overrides": true
+}

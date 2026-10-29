@@ -1,0 +1,22 @@
+.textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  font: inherit;
+}
+
+.hint {
+  margin-right: auto;
+  align-self: center;
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+
+/* iOS Safari auto-zooms when a focused field is under 16px; the shared
+   dialog `.input` already bumps to 16px on mobile (dialog.module.css), and
+   this textarea (used by all three Describe* dialogs) must match. */
+@media (width < 768px) {
+  .textarea {
+    font-size: var(--text-base);
+  }
+}

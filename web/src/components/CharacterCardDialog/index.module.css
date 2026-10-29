@@ -1,0 +1,84 @@
+/* Card-kind picker: three native radios dressed as options inside the
+   dialog's field rhythm (dialog.module.css). The radio itself is visually
+   hidden, so the option draws the selected and focus states. */
+.kinds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+}
+
+.kind {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-hover) var(--ease-out),
+    box-shadow var(--dur-hover) var(--ease-out);
+}
+
+.kind:hover {
+  border-color: var(--line-control);
+}
+
+/* Selected-state chrome is ink, as elsewhere: --accent is reserved for AI
+   actions (docs/handoff/README.md tokens). The inset ring doubles the border
+   without shifting layout. */
+.kind:has(input:checked) {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.kind:has(input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.kindTitle {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.kind:has(input:checked) .kindTitle {
+  color: var(--ink);
+}
+
+.kindHint {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kind {
+    transition: none;
+  }
+}
+
+/* A phone sheet is too narrow for three columns without the titles breaking
+   mid-phrase, so the options stack. */
+@media (width < 768px) {
+  .kinds {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .kind {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+}

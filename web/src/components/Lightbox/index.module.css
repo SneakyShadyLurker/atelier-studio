@@ -1,0 +1,521 @@
+/* Replaces DialogShell's backdrop wholesale, so it carries the same UA <dialog>
+   resets — see the note in styles/dialog.module.css. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  color: inherit;
+  overflow: visible;
+  background: var(--scrim-strong);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  z-index: var(--z-lightbox);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: global(atelier-fade-in) var(--dur-sheet) var(--ease-out) both;
+  cursor: zoom-out;
+}
+
+.backdrop::backdrop {
+  background: transparent;
+}
+
+/* Designed leave — the viewer earned an elaborate entrance; the exit mirrors
+   it at ~2/3 duration (Material's exit-faster rule). The component holds
+   data-closing for LB_EXIT_MS before unmounting. */
+.backdrop[data-closing='true'] {
+  animation: global(atelier-fade-out) var(--dur-overlay) var(--ease-out) both;
+  pointer-events: none;
+}
+
+.backdrop[data-closing='true'] .frame {
+  animation: global(atelier-shrink-out) var(--dur-overlay) var(--ease-out) both;
+}
+
+.frame {
+  position: relative;
+  max-width: 90vw;
+  max-height: calc(100dvh - 120px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  background-color: var(--bg-sunk);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  border-radius: var(--radius);
+  animation: lb-frame-in var(--dur-entrance) var(--ease-out) both;
+}
+
+.frame[data-media='video'] {
+  max-height: calc(100dvh - 180px);
+}
+
+@keyframes lb-frame-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.frame img {
+  max-width: 90vw;
+  max-height: calc(100dvh - 120px);
+  display: block;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-photo);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* Zoom transforms the image past its frame on purpose — at 1:1 the render owns
+   the whole stage. The chrome sits a layer above and stays clear of it. */
+.zoomable {
+  cursor: zoom-in;
+}
+
+.frame .zoomed {
+  cursor: grab;
+  border-radius: 0;
+  box-shadow: none;
+  will-change: transform;
+}
+
+.frame .grabbing {
+  cursor: grabbing;
+}
+
+.video {
+  max-width: 90vw;
+  max-height: calc(100dvh - 120px);
+  display: block;
+  border: 1px solid var(--glass-on-dark-12);
+  border-radius: var(--radius);
+  background: var(--scrim-panel);
+  box-shadow: var(--shadow-photo);
+  accent-color: var(--good);
+}
+
+.image {
+  opacity: 0;
+  transition: opacity var(--dur-sheet) var(--ease-out);
+}
+
+.imageLoaded {
+  opacity: 1;
+}
+
+.settling {
+  /* Shared by the swipe snap-back and by every zoom step — both read as one
+     gesture settling, so they share a curve. Suppressed while a pointer drives
+     the transform directly (`.dragging`). */
+  transition: transform var(--dur-transform) var(--ease-out),
+    border-radius var(--dur-transform) var(--ease-out),
+    opacity var(--dur-sheet) var(--ease-out);
+}
+
+.dragging {
+  transition: none;
+}
+
+.refs {
+  position: fixed;
+  bottom: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  background: var(--scrim-panel);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-on-dark-8);
+  border-radius: var(--radius-lg);
+  z-index: calc(var(--z-lightbox) + 1);
+}
+
+.refThumb {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--glass-on-dark-12);
+  border-radius: var(--radius);
+  background: var(--glass-on-dark-6);
+  transition: background-color var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out),
+    transform var(--dur-transform) var(--ease-tactile);
+}
+
+.refThumb:active {
+  transform: scale(0.94);
+}
+
+.refThumb:hover,
+.refThumbActive {
+  border-color: var(--glass-on-dark-34);
+  background: var(--glass-on-dark-12);
+}
+
+.refThumb:focus-visible {
+  outline: 2px solid var(--glass-on-dark-100);
+  outline-offset: 2px;
+}
+
+.imageError {
+  min-width: min(320px, 80vw);
+  min-height: 180px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--glass-on-dark-85);
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.imageError .btn {
+  min-height: 44px;
+  padding-inline: 16px;
+  border: 1px solid var(--glass-on-dark-65);
+}
+
+.imageError .btn:focus-visible {
+  outline: 2px solid var(--glass-on-dark-100);
+  outline-offset: 2px;
+}
+
+@media (hover: none) {
+  .refThumb {
+    width: 44px;
+    height: 44px;
+  }
+  /* Bottom-bar Download/Edit/Archive(Delete) text buttons meet the 44px
+     touch floor on hover-less devices (they carry text labels, so only the
+     vertical hit area was short). */
+  .btn {
+    min-height: 44px;
+  }
+}
+
+.refThumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.bar {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  background: var(--scrim-panel);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-on-dark-8);
+  border-radius: var(--radius-lg);
+  z-index: calc(var(--z-lightbox) + 1);
+}
+
+.bar[data-media='video'] {
+  bottom: 12px;
+}
+
+.info {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 12px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--glass-on-dark-65);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-right: 1px solid var(--glass-on-dark-10);
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+.info span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info b {
+  color: var(--glass-on-dark-100);
+  font-weight: 500;
+}
+
+.btn {
+  height: 28px;
+  padding: 0 10px;
+  background: transparent;
+  border: none;
+  color: var(--glass-on-dark-85);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.btn:hover {
+  background: var(--glass-on-dark-10);
+  color: var(--glass-on-dark-100);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.animateAction,
+.zoomAction {
+  color: var(--glass-on-dark-85);
+}
+
+.zoomAction[aria-pressed='true'] {
+  background: var(--glass-on-dark-15);
+  color: var(--glass-on-dark-100);
+}
+
+.animateAction:hover,
+.animateAction:focus-visible,
+.zoomAction:hover,
+.zoomAction:focus-visible {
+  background: var(--glass-on-dark-10);
+  border-color: var(--glass-on-dark-12);
+  color: var(--glass-on-dark-100);
+}
+
+.animateAction[disabled] {
+  cursor: progress;
+}
+
+/* On-glass pending ring shown while the source still is fetched + uploaded.
+   Sized to the 14px film glyph so the swap is layout-stable. */
+.animateSpinner {
+  composes: ring from '../../styles/spinner.module.css';
+}
+
+.btn:focus-visible,
+.zoomAction:focus-visible,
+.close:focus-visible,
+.nav:focus-visible,
+.refThumb:focus-visible {
+  outline: 2px solid var(--glass-on-dark-70);
+  outline-offset: 2px;
+}
+
+.danger:hover {
+  background: color-mix(in oklch, var(--danger) 40%, transparent);
+}
+
+.close {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  background: var(--glass-on-dark-8);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-on-dark-10);
+  border-radius: 50%;
+  color: var(--glass-on-dark-100);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: calc(var(--z-lightbox) + 1);
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.close:hover {
+  background: var(--glass-on-dark-15);
+  transform: rotate(90deg);
+}
+
+.close:active {
+  transform: rotate(90deg) scale(0.9);
+}
+
+.nav {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  background: var(--glass-on-dark-6);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-on-dark-8);
+  border-radius: 50%;
+  color: var(--glass-on-dark-100);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: calc(var(--z-lightbox) + 1);
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.nav:hover {
+  background: var(--glass-on-dark-12);
+}
+
+/* Compose with the vertical-centering translate — a bare scale() would
+   yank the button off its axis. */
+.nav:active:not(:disabled) {
+  transform: translateY(-50%) scale(0.92);
+}
+
+.prev {
+  left: 24px;
+}
+
+.next {
+  right: 24px;
+}
+
+.nav:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
+@media (width < 768px) {
+  .frame,
+  .frame img,
+  .video {
+    max-width: 100vw;
+    max-height: calc(100dvh - 120px);
+  }
+
+  .frame[data-media='video'],
+  .frame[data-media='video'] .video {
+    max-height: calc(100dvh - 220px);
+  }
+
+  .bar[data-media='video'] {
+    bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .close {
+    top: calc(12px + env(safe-area-inset-top));
+    right: 12px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .nav {
+    width: 44px;
+    height: 44px;
+  }
+
+  .prev {
+    left: 8px;
+  }
+
+  .next {
+    right: 8px;
+  }
+
+  .bar {
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    flex-wrap: wrap;
+    max-width: calc(100vw - 24px);
+    gap: 4px;
+  }
+
+  .info {
+    border-right: none;
+    padding: 4px 10px;
+    flex: 0 0 100%;
+    border-bottom: 1px solid var(--glass-on-dark-10);
+  }
+
+  .refs {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settling {
+    transition: none;
+  }
+
+  .backdrop,
+  .frame {
+    animation-duration: var(--dur-hover);
+    animation-name: global(atelier-fade-in);
+    transform: none;
+  }
+
+  /* Hover transforms count as motion under WCAG 2.3.3 — kill the 90° rotate
+     on .close and any other hover transforms in this layer. */
+  .close:hover,
+  .close:active,
+  .btn:active:not(:disabled),
+  .refThumb:active {
+    transform: none;
+  }
+
+  .nav:active:not(:disabled) {
+    transform: translateY(-50%);
+  }
+
+  .backdrop[data-closing='true'] {
+    animation: global(atelier-fade-out) var(--dur-reduced) linear both;
+  }
+
+  .backdrop[data-closing='true'] .frame {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .backdrop,
+  .refs,
+  .bar,
+  .close,
+  .nav {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .refs,
+  .bar {
+    background: var(--scrim-strong);
+  }
+  .close,
+  .nav {
+    background: var(--glass-on-dark-15);
+  }
+}

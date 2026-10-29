@@ -1,0 +1,28 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "/app/api/src/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "scripts/dump-prompt-library.ts",
+    "scripts/dump-prompt-library.test.ts",
+    "scripts/audit-prompt-library.ts",
+    "scripts/audit-prompt-library.test.ts",
+    "scripts/storage.ts",
+    "scripts/storage.test.ts",
+    "scripts/encrypt-migrate.ts",
+    "scripts/encrypt-migrate.test.ts",
+    "scripts/comfyui-inventory.ts",
+    "scripts/comfyui-inventory.test.ts",
+    "scripts/validate-models.ts",
+    "scripts/validate-models.test.ts",
+    "scripts/media-cache-browser-fixture.ts",
+    "../infra/docker/rehearse-migrations.ts",
+    "../infra/docker/deploy-lock.test.ts",
+    "../infra/docker/bun-version.test.ts"
+  ]
+}

@@ -1,0 +1,21 @@
+/* SaveTemplateDialog-only classes. The dialog shell (backdrop, card, field
+   rows, actions, sheet, motion) lives in web/src/styles/dialog.module.css;
+   action buttons in web/src/styles/buttons.module.css. Only the
+   resolved-prompt preview is unique here. */
+
+.preview {
+  max-height: 132px;
+  margin: 0 0 14px;
+  overflow-y: auto;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

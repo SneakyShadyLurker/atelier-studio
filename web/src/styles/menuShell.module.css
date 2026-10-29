@@ -1,0 +1,94 @@
+/* Shared shell for the anchored action menus (BatchOverflowMenu,
+   MovePopover): portal root, surface, desktop popover, scrolling content,
+   phone sheet and backdrop, with their enter/leave motion. Owners compose
+   these classes and set --menu-width plus the sheet padding properties;
+   rows stay local. */
+
+.portalRoot {
+  display: contents;
+}
+
+.panel {
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow-2);
+  z-index: calc(var(--z-popover) + 1);
+}
+
+/* A top-layer popover placed by native anchor positioning
+   (styles/anchors.module.css); its z-index only matters without the Popover
+   API. */
+.popover {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: var(--menu-width);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px;
+  animation: global(atelier-popover-in) var(--dur-overlay) var(--ease-out) both;
+}
+
+/* Keep the scrolling contents separate from the anchor fallback box.
+   A pressed row's scale must not reset that box's scroll between down/up. */
+.content {
+  min-height: 0;
+  margin: -4px;
+  padding: 4px;
+  scroll-padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sheet {
+  composes: sheet from './sheet.module.css';
+  overflow-y: auto;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  z-index: var(--z-popover);
+  animation: global(atelier-fade-in) var(--dur-overlay) var(--ease-out);
+}
+
+/* Designed leave (useExitTransition stamps data-closing for --dur-overlay). */
+.popover[data-closing='true'] {
+  animation: global(atelier-popover-out) var(--dur-overlay) var(--ease-out) both;
+  pointer-events: none;
+}
+
+.backdrop[data-closing='true'] {
+  animation: global(atelier-fade-out) var(--dur-overlay) var(--ease-out) both;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popover,
+  .backdrop {
+    animation-duration: var(--dur-reduced);
+    animation-timing-function: linear;
+  }
+
+  .popover {
+    transform: none;
+  }
+
+  .popover[data-closing='true'],
+  .backdrop[data-closing='true'] {
+    animation: global(atelier-fade-out) var(--dur-reduced) linear both;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .backdrop {
+    background: var(--scrim-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

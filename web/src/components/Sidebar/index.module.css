@@ -1,0 +1,843 @@
+.sidebar {
+  border-right: 1px solid var(--line);
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* clip, not hidden: `hidden` makes this a scroll container, so focusing the
+     collapse/expand toggle while the grid column is at width 0 lets the browser
+     scroll it horizontally to reveal the off-view button — a stray scrollLeft
+     that survives restore and shifts the whole rail left under the viewport
+     edge. `clip` clips identically but is never a scroll container. The feed's
+     own vertical scroll lives on an inner element, so nothing here scrolls. */
+  overflow: clip;
+}
+
+.header {
+  min-height: var(--app-header-h);
+  padding: 0 18px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mark {
+  display: block;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: var(--radius-4);
+}
+
+.title {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-size: var(--text-md);
+}
+
+.version {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-left: auto;
+}
+
+.closeBtn {
+  display: none;
+}
+
+.collapseBtn {
+  display: none;
+}
+
+@media (width >= 768px) {
+  .collapseBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: var(--radius-4);
+    color: var(--ink-3);
+    transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+  }
+
+  .collapseBtn:hover {
+    background: var(--bg-sunk);
+    color: var(--ink);
+    border-color: var(--line);
+  }
+
+  .collapseBtn:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  .sidebar[data-collapsed='true'] {
+    border-right-color: transparent;
+  }
+}
+
+.section {
+  padding: 14px 18px 8px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.library {
+  flex-shrink: 0;
+}
+
+.libList {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 4px;
+}
+
+.libRow {
+  position: relative;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+  /* opacity-only on purpose: libRow re-mounts on rename/create commit because
+     the conditional input ↔ button swap changes element type, and a translate
+     on every commit reads as jarring "row jumped down" instead of "row
+     appeared". */
+  animation: global(atelier-fade-in) var(--dur-sheet) var(--ease-out) both;
+}
+
+.libRow:hover {
+  background: var(--bg-sunk);
+}
+
+.libRow:focus-visible,
+.libNameInput:focus-visible,
+.searchInput:focus-visible,
+.cancelText:focus-visible,
+.libDelete:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.libIcon {
+  width: 14px;
+  height: 14px;
+  color: var(--ink-3);
+  display: inline-flex;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Collection rows pair a grip + folder in the same 14x14 slot so the leading
+   glyph swaps on hover without shifting the row layout. */
+.libGrip,
+.libFolder {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity var(--dur-hover) var(--ease-out);
+}
+
+.libGrip {
+  opacity: 0;
+  color: var(--ink-3);
+}
+
+.libFolder {
+  opacity: 1;
+}
+
+.libCollectionRow:hover .libGrip,
+.libCollectionRow:focus-within .libGrip {
+  opacity: 1;
+}
+
+.libCollectionRow:hover .libFolder,
+.libCollectionRow:focus-within .libFolder {
+  opacity: 0;
+}
+
+.libCollectionRow[data-dragging='true'] .libGrip {
+  opacity: 1;
+  color: var(--ink);
+}
+
+.libCollectionRow[data-dragging='true'] .libFolder {
+  opacity: 0;
+}
+
+.libLabel {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+
+.libCount {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.libCollectionRow {
+  position: relative;
+}
+
+/* Drag affordance is desktop-only AND only when the rail is reorderable.
+   pointer:fine devices get the grab cursor + touch-action: none required for
+   pointer capture to fight the browser's native scroll. Touch devices fall
+   through to the standard tap-to-select row and keep vertical scroll on the
+   rail (rail can hold up to 50 rows). Archive view filters rows by
+   archivedCount and is not reorderable, so the cursor/grip stay hidden. */
+@media (hover: hover) and (pointer: fine) {
+  .libList[data-reorderable='true'] .libCollectionRow > .libRow {
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .libList[data-reorderable='true'] .libCollectionRow[data-dragging='true'] > .libRow {
+    cursor: grabbing;
+  }
+}
+
+.libList[data-reorderable='false'] .libGrip {
+  display: none;
+}
+
+.libList[data-reorderable='false'] .libFolder {
+  opacity: 1;
+}
+
+.libCollectionRow[data-dragging='true'] {
+  z-index: 1;
+}
+
+.libCollectionRow[data-dragging='true'] > .libRow {
+  background: var(--bg-elev);
+  border-color: var(--line);
+  box-shadow: var(--shadow-2);
+  opacity: 0.92;
+}
+
+/* Suppress hover affordances while another row is being dragged so the rail
+   reads as "static target" instead of competing with the drop indicator. */
+.libList[data-drag-active='true'] .libRow:hover {
+  background: transparent;
+}
+
+.libList[data-drag-active='true'] .libCollectionRow:not([data-dragging='true']) .libGrip {
+  opacity: 0;
+}
+
+.libList[data-drag-active='true'] .libCollectionRow:not([data-dragging='true']) .libFolder {
+  opacity: 1;
+}
+
+.libList {
+  position: relative;
+}
+
+.libDropIndicator {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 0;
+  height: 2px;
+  background: var(--ink);
+  border-radius: 1px;
+  pointer-events: none;
+  list-style: none;
+  animation: global(atelier-fade-in) var(--dur-hover) var(--ease-out) both;
+}
+
+.libDropIndicator::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+.libDelete {
+  position: absolute;
+  top: 7px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-4);
+  background: var(--bg-elev);
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+}
+
+.libCollectionRow:hover .libDelete,
+.libCollectionRow:focus-within .libDelete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.libDelete:hover {
+  background: var(--bg-sunk);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.libNewRow {
+  margin-top: 4px;
+}
+
+.libNewButton {
+  border-color: var(--line-2);
+  border-style: dashed;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.02em;
+}
+
+.libInputWrap {
+  padding: 0 8px;
+  animation: global(atelier-fade-in) var(--dur-transform) var(--ease-out) both;
+}
+
+.libNameInput {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  transition: border-color var(--dur-hover) var(--ease-out), background var(--dur-hover) var(--ease-out);
+}
+
+.searchRow {
+  padding: 0 18px 6px;
+  animation: search-in var(--dur-sheet) var(--ease-out) both;
+}
+
+@keyframes search-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.searchInput {
+  width: 100%;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+}
+
+.searchInput::placeholder {
+  color: var(--ink-3);
+}
+
+.cancelText {
+  /* Rendered only in the mobile drawer (isPhone-gated), so the 44px touch
+     floor is unconditional here — no desktop variant to preserve. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.libMicrocopy {
+  padding: 4px 18px 12px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+}
+
+/* Bottom padding is 18px, NOT the prototype's 80px: the sidebar is its own
+   flex column with a sticky footer below `.list`; the floating composer
+   clears the canvas (which keeps its 180px), not this rail. Do not "fidelity
+   fix" this back to 80px. */
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 18px;
+  min-height: 0;
+}
+
+.virtualList {
+  position: relative;
+  width: 100%;
+}
+
+.virtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+/* Feed-less views (Archive, Prompt Library) drop `.list`; this takes over its
+   flex-grow role so the Prompt Library / Archive / footer stay pinned to the
+   bottom, identical to the main feed. */
+.spacer {
+  flex: 1;
+  min-height: 0;
+}
+
+.empty {
+  padding: 18px 18px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.retry {
+  margin-top: 10px;
+  border: 1px solid var(--line-2);
+  background: var(--bg);
+  border-radius: var(--radius-7);
+  padding: 6px 10px;
+  color: var(--ink);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-out);
+}
+
+.retry:hover {
+  background: var(--bg-elev);
+}
+
+.retry:active {
+  transform: scale(0.98);
+}
+
+.retry:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.itemShell {
+  position: relative;
+}
+
+.item {
+  position: relative;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  padding-right: 34px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-areas: "thumb text";
+  gap: 10px;
+  align-items: start;
+  transition: background var(--dur-hover) var(--ease-out);
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  animation: global(atelier-drop-in) var(--dur-settle) var(--ease-out) both;
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.item:hover,
+.itemActive {
+  background: var(--bg-sunk);
+}
+
+.itemActive {
+  border-color: var(--line-2);
+}
+
+.item:active {
+  transform: scale(0.985);
+  transition: transform var(--dur-hover) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item:active {
+    transform: none;
+  }
+}
+
+.thumb {
+  grid-area: thumb;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-sunk);
+  border-radius: var(--radius-4);
+  overflow: hidden;
+  position: relative;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumbEmpty {
+  /* Same resting material as tile/QueuedTile (global --aurora-rest). */
+  background: var(--aurora-rest), var(--bg-sunk);
+}
+
+.text {
+  grid-area: text;
+  min-width: 0;
+}
+
+.prompt {
+  font-size: var(--text-xs);
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.meta {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemStar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  opacity: 0;
+}
+
+/* Touch devices have no hover — keep hover-revealed actions always visible and
+   reachable without keyboard. Capability-gated (not max-width) so iPad landscape
+   and touch laptops at >=768px are covered, where a hover-reveal is dead UI. */
+@media (hover: none) {
+  .itemStar {
+    opacity: 1;
+  }
+
+  .libDelete {
+    top: 0;
+    width: 44px;
+    height: 44px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.itemShell:hover .itemStar,
+.itemShell:focus-within .itemStar,
+.itemStar:focus-visible {
+  opacity: 1;
+}
+
+.footer {
+  border-top: 1px solid var(--line);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.footerLabel {
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.themeBtn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--radius-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  flex-shrink: 0;
+  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+}
+
+.themeBtn:hover,
+.themeBtn:focus-visible {
+  background: var(--bg-sunk);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.settingsBtn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--radius-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  flex-shrink: 0;
+  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+}
+
+.settingsBtn:hover,
+.settingsBtn:focus-visible {
+  background: var(--bg-sunk);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--good) 18%, transparent);
+}
+
+.archiveBtn {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  padding: 10px 14px;
+  background: transparent;
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-left-color var(--dur-hover) var(--ease-out);
+}
+
+.archiveBtn:hover,
+.archiveActive {
+  background: var(--bg-sunk);
+  color: var(--ink);
+}
+
+.archiveActive {
+  border-left-color: var(--ink);
+}
+
+.archiveBtn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.archiveChip {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-4);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background var(--dur-hover) var(--ease-out);
+}
+
+.archiveBtn:hover .archiveChip {
+  background: color-mix(in oklch, var(--danger) 10%, transparent);
+}
+
+.archiveLabel {
+  flex: 1;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: color var(--dur-hover) var(--ease-out);
+}
+
+.archiveBtn:hover .archiveLabel,
+.archiveActive .archiveLabel {
+  color: var(--ink);
+}
+
+.archiveCount {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-3);
+  padding: 1px 6px;
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+@media (width < 768px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 84vw;
+    max-width: 320px;
+    z-index: var(--z-drawer);
+    /* viewport-fit=cover: keep rail content clear of the landscape notch and
+       the status-bar/home-bar gutters; the surface itself still fills the edge. */
+    padding-left: env(safe-area-inset-left);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    transform: translateX(-100%);
+    transition: transform var(--dur-sheet) var(--ease-out);
+    box-shadow: var(--shadow-3);
+  }
+
+  .sidebar[data-open='true'] {
+    transform: translateX(0);
+  }
+
+  .closeBtn {
+    width: 44px;
+    height: 44px;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: var(--radius);
+    color: var(--ink-3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: -10px -10px -10px 0;
+  }
+
+  .libRow,
+  .libNameInput {
+    height: 44px;
+  }
+
+  .searchRow {
+    padding-bottom: 8px;
+  }
+
+  .searchInput {
+    height: 44px;
+    font-size: var(--text-base);
+  }
+
+  .closeBtn:hover,
+  .closeBtn:active {
+    background: var(--bg-sunk);
+    color: var(--ink);
+    border-color: var(--line);
+  }
+
+  .closeBtn:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  .libNameInput {
+    font-size: var(--text-base);
+  }
+
+  .themeBtn,
+  .settingsBtn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item,
+  .libRow,
+  .libInputWrap,
+  .searchRow {
+    animation-duration: var(--dur-hover);
+    animation-name: global(atelier-fade-in);
+    transform: none;
+  }
+}
+
+@media (width < 768px) and (prefers-reduced-motion: reduce) {
+  .sidebar {
+    opacity: 0;
+    transform: translateX(0);
+    transition: opacity var(--dur-reduced) linear;
+    pointer-events: none;
+  }
+
+  .sidebar[data-open='true'] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

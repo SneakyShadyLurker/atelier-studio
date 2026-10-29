@@ -1,0 +1,5 @@
+data: {"choices":[{"delta":{"content":"{\"ops\":["}}]}
+
+data: {"choices":[{"delta":{"content":"<<truncated>>"}}]}
+
+data: [DONE]

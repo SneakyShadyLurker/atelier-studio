@@ -1,0 +1,39 @@
+.queued {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, transparent 0 34%, var(--glass-on-dark-8) 34% 36%, transparent 36% 62%, var(--glass-on-dark-8) 62% 64%, transparent 64%),
+    var(--aurora-rest),
+    var(--bg-sunk);
+  overflow: hidden;
+}
+
+.sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 0 42%, var(--glass-on-dark-12) 50%, transparent 58% 100%);
+  opacity: 0.58;
+}
+
+.text {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--glass-on-dark-100);
+  /* Same contrast backing as LoadingTile, above both material and sheen. */
+  background:
+    linear-gradient(var(--scrim-on-image), var(--scrim-on-image)),
+    linear-gradient(var(--scrim-on-image), var(--scrim-on-image)),
+    var(--scrim-on-image);
+  padding: 4px 6px;
+  border-radius: var(--radius-4);
+  text-shadow: var(--shadow-text-on-image);
+  letter-spacing: 0;
+  z-index: 1;
+}

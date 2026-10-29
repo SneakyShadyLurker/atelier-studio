@@ -1,0 +1,315 @@
+.tile {
+  composes: shell from '../shell.module.css';
+  cursor: default;
+}
+
+.frame {
+  width: 100%;
+  background: var(--bg-sunk);
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  background-color: var(--bg-sunk);
+  overflow: hidden;
+  z-index: 1;
+  /* tweenable bg-color + opacity so the cold-load fill dissolves into the
+     translucent veil the moment the first partial preview slides in behind it. */
+  transition: background-color var(--dur-reveal) var(--ease-out), opacity var(--dur-reveal) var(--ease-out);
+}
+
+/* Veiled mode: a partial preview is showing behind. Drop the opaque fill so
+   the developing image is visible, and reduce overall presence to ~80% so
+   the placeholder reads as a translucent overlay rather than a curtain. The
+   drift/scan/bar animations on this layer continue as the developing veil. */
+.loading.veiled {
+  background-color: transparent;
+  opacity: 0.8;
+}
+
+.loading::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--aurora-active);
+  filter: blur(20px);
+  /* Promote once so the 20px-blurred gradient rasterises into a single
+     composited texture; `drift`'s scale() is then a compositor-only
+     transform of that texture (no per-frame blur re-raster). */
+  will-change: transform;
+  transform: translateZ(0);
+  animation: drift 6s ease-in-out infinite alternate;
+}
+
+@keyframes drift {
+  from {
+    transform: scale(1) translate(0, 0);
+  }
+
+  to {
+    transform: scale(1.15) translate(-4%, 4%);
+  }
+}
+
+.loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 0%, transparent 45%, var(--scrim-scan) 50%, transparent 55%, transparent 100%);
+  animation: global(atelier-scan) 2.4s linear infinite;
+}
+
+.noise {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.4'/></svg>");
+  opacity: 0.25;
+  mix-blend-mode: multiply;
+  animation: shift 0.6s steps(4) infinite;
+}
+
+.preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  /* Slight overscan hides the soft halo a heavy blur leaves at the frame edges. */
+  transform: scale(1.06);
+  --pass-blur: 16px;
+  filter: blur(var(--pass-blur));
+  /* Smooth filter tween so each new partial reads as "sharpening into focus"
+     rather than a hard repaint. These two timings are loader-internal preview
+     choreography (paced against the drift/scan loops below), not part of the
+     --dur-* interaction scale — intentionally off-scale, do not tokenize. */
+  transition: filter 600ms var(--ease-out);
+  animation: global(atelier-fade-in) 320ms var(--ease-out) both;
+}
+
+.preview[data-pass="1"] { --pass-blur: 12px; }
+.preview[data-pass="2"] { --pass-blur: 8px; }
+.preview[data-pass="3"] { --pass-blur: 4px; }
+.preview[data-pass="4"] { --pass-blur: 2px; }
+.preview[data-pass="5"] { --pass-blur: 2px; }
+
+/* The I2V source still is a static backdrop, not a developing partial — show it
+   at a gentle, fixed blur so the frame stays recognisable behind the progress
+   veil + scan without competing with the status line. */
+.preview[data-source="true"] { --pass-blur: 4px; }
+
+@keyframes shift {
+  0% {
+    transform: translate(0,0);
+  }
+
+  25% {
+    transform: translate(-3px,2px);
+  }
+
+  50% {
+    transform: translate(2px,-3px);
+  }
+
+  75% {
+    transform: translate(-2px,-2px);
+  }
+
+  100% {
+    transform: translate(0,0);
+  }
+}
+
+.text {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--glass-on-dark-100);
+  /* Three 32% scrims cap even a white preview at 31.45% sRGB, keeping
+     white text above 8:1 in both themes, outside the veil's opacity. */
+  background:
+    linear-gradient(var(--scrim-on-image), var(--scrim-on-image)),
+    linear-gradient(var(--scrim-on-image), var(--scrim-on-image)),
+    var(--scrim-on-image);
+  padding: 4px 6px;
+  border-radius: var(--radius-4);
+  text-shadow: var(--shadow-text-on-image);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
+}
+
+.loading.veiled ~ .text .bar {
+  background: var(--glass-on-dark-35);
+}
+
+/* Over a partial preview the accent fill would sit at ~1.2–1.8:1 against the
+   translucent track; white keeps the progressbar ≥3:1 whatever the preview. */
+.loading.veiled ~ .text .bar::after {
+  background: var(--glass-on-dark-100);
+}
+
+.bar {
+  width: 60px;
+  height: 1px;
+  background: var(--line-2);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Video renders are long and determinate — give the bar more presence so the
+   progress reads as the primary signal during the multi-minute wait. */
+.bar[data-video='true'] {
+  width: 88px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  /* Intentional non-token easing — the progress sweep is rhythmic, not
+     directional. Material's linear-out-slow-in (cubic-bezier(.4,0,.2,1))
+     reads as a heartbeat where var(--ease-out) reads as "arriving". */
+  animation: progress 1.8s cubic-bezier(.4,0,.2,1) infinite;
+  transform-origin: left;
+}
+
+.bar[data-progress="true"]::after {
+  animation: none;
+  background: var(--accent);
+  transform: scaleX(var(--tile-progress));
+  transform-origin: left;
+}
+
+@keyframes progress {
+  0% {
+    transform: scaleX(0) translateX(0);
+    transform-origin: left;
+  }
+
+  50% {
+    transform: scaleX(0.8) translateX(0);
+    transform-origin: left;
+  }
+
+  51% {
+    transform-origin: right;
+  }
+
+  100% {
+    transform: scaleX(0) translateX(0);
+    transform-origin: right;
+  }
+}
+
+/* Reduced motion: kill the drift/scan/shift/progress loops entirely — they
+   are atmospheric polish, not state-bearing. Keep tile-in as a brief opacity
+   fade (no translate/scale), and pin the partial-preview blur curve so it
+   reads as a single still pass instead of a sharpen sequence. */
+@media (prefers-reduced-motion: reduce) {
+  .loading::before,
+  .loading::after,
+  .noise,
+  .bar::after {
+    animation: none;
+  }
+
+  .preview {
+    filter: none;
+    transition: none;
+    animation: none;
+  }
+
+  .tile {
+    animation-name: global(atelier-fade-in);
+    animation-duration: var(--dur-hover);
+  }
+}
+
+.cancelBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim-on-image);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid var(--glass-on-dark-8);
+  border-radius: 50%;
+  color: var(--glass-on-dark-100);
+  /* Resting opacity is discoverable without hover (touch/stylus have none) —
+     this aborts an in-flight paid generation, so it must not be hover-gated. */
+  opacity: 0.7;
+  transition: opacity var(--dur-transform) var(--ease-out);
+  cursor: pointer;
+  z-index: 3;
+  padding: 0;
+  -webkit-appearance: none;
+}
+
+.cancelBtn :global(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+.tile:hover .cancelBtn { opacity: 0.85; }
+.cancelBtn:hover { opacity: 1; }
+.cancelBtn:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (width < 768px) {
+  .cancelBtn {
+    /* Hit area >= 44x44 on mobile while keeping visible chrome at 24x24.
+       background-clip: content-box paints the tint only in the inner
+       content area (visible 24x24 circle); 10px padding grows the
+       touchable surface to 24+10+10 = 44. */
+    opacity: 0.75;
+    width: 44px;
+    height: 44px;
+    padding: 10px;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cancelBtn { transition: none; }
+}
+
+.tile[data-canceling="true"] {
+  animation: cancel-out var(--dur-sheet) var(--ease-out) forwards;
+}
+
+@keyframes cancel-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Opacity only, at the reduced duration TilePlaceholder waits on. */
+  .tile[data-canceling="true"] {
+    animation: global(atelier-fade-out) var(--dur-reduced) linear forwards;
+  }
+}

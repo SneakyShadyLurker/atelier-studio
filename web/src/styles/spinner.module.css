@@ -1,0 +1,19 @@
+/* Shared ring spinner. Call sites compose `.ring` and set only the custom
+   properties (size, translucent track, solid head); under reduced motion the
+   rotation becomes an opacity pulse and the head flattens to the track. */
+
+.ring {
+  width: var(--spinner-size, 14px);
+  height: var(--spinner-size, 14px);
+  border-radius: 50%;
+  border: 2px solid var(--spinner-track, var(--glass-on-dark-34));
+  border-top-color: var(--spinner-head, var(--glass-on-dark-100));
+  animation: global(atelier-spin) 0.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring {
+    animation: global(atelier-pulse) 1.4s ease-in-out infinite;
+    border-top-color: var(--spinner-track, var(--glass-on-dark-34));
+  }
+}

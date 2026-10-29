@@ -1,0 +1,23 @@
+{
+  "name": "@atelier/api",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "dependencies": {
+    "@atelier/shared": "workspace:*",
+    "age-encryption": "0.3.1",
+    "cockatiel": "4.0.0",
+    "hono": "4.13.7",
+    "pino": "10.3.1",
+    "sharp": "0.35.5",
+    "ulid": "3.0.2",
+    "zod": "4.5.4"
+  },
+  "trustedDependencies": ["sharp"],
+  "scripts": {
+    "dev": "bun run --hot src/server.ts",
+    "typecheck": "bun check",
+    "test": "bun test --isolate"
+  }
+}

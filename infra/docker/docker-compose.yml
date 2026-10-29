@@ -1,0 +1,95 @@
+# Explicit project name. Without it, compose defaults to the parent
+# directory name (`docker`), which collides when this stack is dropped
+# alongside other compose stacks (e.g. `~/docker/docker-compose.yml`).
+# A name collision causes orphan-detection warnings and risks
+# `docker compose down --remove-orphans` tearing down unrelated services.
+name: atelier
+
+# Cap container log growth (json-file driver is unbounded by default).
+# ~50 MB/service ceiling; shared by both services via the anchor below.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  atelier-api:
+    build:
+      context: ${ATELIER_BUILD_CONTEXT:-../..}
+      dockerfile: infra/docker/api.Dockerfile
+      args:
+        VCS_REF: ${ATELIER_BUILD_REVISION:-unknown}
+    container_name: atelier-api
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      NODE_ENV: production
+      ENABLE_MOCK_PROVIDER: "false"
+      UV_THREADPOOL_SIZE: "16"
+      ENHANCE_OPEN_TIMEOUT_MS: "60000"
+    volumes:
+      # `:?` makes compose hard-fail at substitution time when DATA_DIR is
+      # unset or empty. Without it, an empty interpolation silently mounts
+      # an anonymous volume at /app/data — the next `docker compose down`
+      # would destroy every persisted image and the SQLite DB. Hard-fail
+      # is the right behaviour: deploy refuses to start until the operator
+      # provides DATA_DIR.
+      #
+      # Long syntax with create_host_path: false: DATA_DIR lives on an
+      # external encrypted volume (docs/deployment.md § Artifact encryption). If
+      # it is locked or not yet mounted the container must fail to start
+      # ("bind source path does not exist"), never get a fresh empty
+      # directory; the api's .atelier-data-volume check is the second guard.
+      - type: bind
+        source: ${DATA_DIR:?DATA_DIR must point at a host path owned 1000:1000 (see infra/docker/.env.production.example)}
+        target: /app/data
+        bind:
+          create_host_path: false
+    tmpfs:
+      # Decrypted artifacts live only here, never in a file on disk: ffmpeg
+      # inputs (1.5 GiB budget, storage/decryptedTemp.ts), seekable playback
+      # copies (1 GiB, storage/decryptedVideoCache.ts), and HEIC decode
+      # scratch (the remainder). tmpfs pages count against the container
+      # memory limit, set in the host override
+      # (docker-compose.override.example.yml).
+      - /tmp:size=4g,mode=1777
+      # Container-local unseal/verify control socket (storage/encryptionBoot.ts).
+      - /run/atelier:size=1m,mode=0700,uid=1000,gid=1000
+    networks:
+      - swag
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      # Use bun's HTTP client; the base image (debian:trixie under the
+      # bun binary) has no wget/curl/busybox. Same fetch the Dockerfile
+      # HEALTHCHECK uses; compose's healthcheck overrides Dockerfile's
+      # when both are defined, so they MUST match.
+      test:
+        - CMD-SHELL
+        - bun -e "fetch('http://127.0.0.1:8787/api/ready',{headers:{'Remote-User':'healthcheck','X-Atelier-Proxy-Key':process.env.TRUSTED_PROXY_KEY||''}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  atelier-web:
+    build:
+      context: ${ATELIER_BUILD_CONTEXT:-../..}
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        VCS_REF: ${ATELIER_BUILD_REVISION:-unknown}
+    container_name: atelier-web
+    networks:
+      - swag
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      atelier-api:
+        condition: service_healthy
+
+networks:
+  swag:
+    # DECISION: verify the concrete external network name on the deploy host before deploy.
+    name: ${SWAG_EXTERNAL_NETWORK:-<verify-on-deploy-host>}
+    external: true

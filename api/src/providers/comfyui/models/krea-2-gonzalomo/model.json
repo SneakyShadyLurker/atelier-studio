@@ -1,0 +1,42 @@
+{
+  "id": "krea-2-gonzalomo",
+  "name": "Krea 2 GonzaLomo",
+  "family": "krea",
+  "order": 10,
+  "saveImageNodeId": "9",
+  "requiredPlaceholders": [
+    "{{prompt}}",
+    "{{seed}}",
+    "{{width}}",
+    "{{height}}",
+    "{{count}}",
+    "{{steps}}"
+  ],
+  "defaultSteps": 8,
+  "ratioMap": "krea-2048",
+  "supportedRatios": [
+    "1:1",
+    "4:5",
+    "3:4",
+    "16:9",
+    "9:16"
+  ],
+  "defaultRatio": "3:4",
+  "size": "≤2048px · INT8 ConvRot",
+  "latency": "medium",
+  "batched": true,
+  "defaultCount": 4,
+  "graphs": {
+    "base": "workflow.json",
+    "reference": "reference.json"
+  },
+  "requiredModelFiles": [
+    "gonzalomo_krea2_v4_int8_convrot.safetensors",
+    "qwen3vl_4b_bf16.safetensors",
+    "qwen_image_vae.safetensors"
+  ],
+  "referenceRequiredModelFiles": [
+    "krea2_reid_rank32.safetensors"
+  ],
+  "requiredClipType": "krea2"
+}

@@ -1,0 +1,310 @@
+/* Shared dialog shell — ByokDialog and SaveTemplateDialog were ~98%
+   byte-identical; this is the single source of truth for their backdrop,
+   card, field rows, link/inline-error/actions, sheet (mobile) and motion.
+   Action buttons come from buttons.module.css (.primary/.secondary/.danger).
+   Per-dialog uniques (SaveTemplateDialog .preview) stay local.
+   Dialogs are flat (no cross-class descendant selectors), so this extract
+   carries no source-order cascade risk. */
+
+/* The backdrop IS the <dialog> element (DialogShell opens it with showModal),
+   so it has to shed the UA dialog box first: default border/padding/background,
+   the auto margins and the fit-content max sizes would otherwise shrink it to a
+   centred card instead of a full-bleed scrim. `display` stays flex — the UA
+   `dialog:not([open])` display:none rule never applies because DialogShell
+   unmounts a closed dialog rather than leaving it in the DOM. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-confirm);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  color: inherit;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  animation: global(atelier-fade-in) var(--dur-overlay) var(--ease-out) both;
+}
+
+/* We paint the scrim on the dialog itself (it is full-bleed), so the UA's own
+   ::backdrop layer must not darken it a second time. */
+.backdrop::backdrop {
+  background: transparent;
+}
+
+.dialog {
+  position: relative;
+  width: calc(100% - 48px);
+  max-width: 420px;
+  max-height: calc(100dvh - 48px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px 24px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-14);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-3);
+  animation: global(atelier-scale-in) var(--dur-entrance) var(--ease-out) both;
+}
+
+/* Designed leave — DialogShell stamps data-closing (useExitTransition) for
+   --dur-overlay before the unmount; the card recedes the way it arrived. */
+.backdrop[data-closing='true'] {
+  animation: global(atelier-fade-out) var(--dur-overlay) var(--ease-out) both;
+  pointer-events: none;
+}
+
+.backdrop[data-closing='true'] .dialog {
+  animation: global(atelier-scale-out) var(--dur-overlay) var(--ease-out) both;
+}
+
+.handle {
+  display: none;
+}
+
+.label {
+  margin-bottom: 10px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.1em;
+}
+
+/* Editorial display moment — dialog titles speak in the serif voice
+   (matches StateView's empty-state heading). */
+.title {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: var(--text-xl);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: 0.005em;
+  text-wrap: balance;
+}
+
+.body {
+  max-width: 360px;
+  margin: 0 0 14px;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+.docLink {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.docLink:hover {
+  text-decoration: underline;
+}
+
+.inputRow,
+.maskedRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.inputRow:focus-within,
+.maskedRow:focus-within {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 1px var(--focus-ring);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+}
+
+.input::placeholder {
+  color: var(--ink-3);
+}
+
+.masked {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+}
+
+.linkBtn {
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.linkBtn:hover {
+  color: var(--ink);
+}
+
+.linkBtn:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.linkBtn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.inlineError {
+  margin: -8px 0 14px;
+  color: var(--danger);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.actionsRight {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.progressBar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--ink-2) 50%, transparent 100%);
+  animation: global(atelier-sweep) 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop {
+    animation: global(atelier-fade-in) var(--dur-reduced) linear both;
+  }
+
+  .dialog {
+    animation: global(atelier-fade-in) var(--dur-reduced) linear both;
+  }
+
+  .backdrop[data-closing='true'] {
+    animation: global(atelier-fade-out) var(--dur-reduced) linear both;
+  }
+
+  .backdrop[data-closing='true'] .dialog {
+    animation: none;
+  }
+
+  .progressBar {
+    animation: none;
+    background: var(--ink-2);
+    opacity: 0.6;
+  }
+}
+
+@media (width < 768px) {
+  .backdrop {
+    align-items: flex-end;
+  }
+
+  .dialog {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - 12px - env(safe-area-inset-top));
+    /* Flush to the bottom edge as a sheet, so the action row lands in the
+       home-indicator strip without the inset. */
+    padding: 18px 18px calc(24px + env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-14) var(--radius-14) 0 0;
+    animation: global(atelier-sheet-in) var(--dur-sheet) var(--ease-out) both;
+  }
+
+  /* Sheets leave the way they arrived — downward, faster than the enter. */
+  .backdrop[data-closing='true'] .dialog {
+    animation: global(atelier-sheet-out) var(--dur-overlay) var(--ease-out) both;
+  }
+
+  .handle {
+    display: block;
+    width: 36px;
+    height: 3px;
+    margin: 0 auto 14px;
+    border-radius: var(--radius-3);
+    background: var(--line-2);
+  }
+
+  .actions,
+  .actionsRight {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actionsRight {
+    margin-left: 0;
+    order: -1;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+
+  .input {
+    font-size: var(--text-base);
+  }
+}
+
+@media (width < 768px) and (prefers-reduced-motion: reduce) {
+  .dialog {
+    animation: global(atelier-fade-in) var(--dur-reduced) linear both;
+  }
+
+  .backdrop[data-closing='true'] .dialog {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .backdrop {
+    background: var(--scrim-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

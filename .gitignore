@@ -1,0 +1,195 @@
+# ─── Dependencies ───────────────────────────────────────────────────────
+node_modules/
+.bun/
+.npm/
+.pnp.*
+
+# Bun text-format lockfile is COMMITTED (`bun.lock`) for reproducible
+# installs across CI + Dockerfiles + dev machines. Only the legacy binary
+# lockfile is excluded.
+bun.lockb
+
+# Foreign package manager lockfiles — this project is Bun-only. Their
+# presence in a workspace would mean an accidental `npm/yarn/pnpm install`
+# created a divergent dep tree. Keep them out so it stays obvious.
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.pnpm-store/
+
+# ─── Build output ───────────────────────────────────────────────────────
+web/dist/
+api/dist/
+shared/dist/
+dist-ssr/
+*.tsbuildinfo
+.tsbuildinfo
+.cache/
+.turbo/
+.parcel-cache/
+
+# ─── Vite / React ───────────────────────────────────────────────────────
+.vite/
+**/.vite-temp/
+*.local
+
+# ─── Test / coverage ────────────────────────────────────────────────────
+coverage/
+*.lcov
+lcov.info
+.nyc_output/
+junit.xml
+.vitest-cache/
+
+# Future Playwright / E2E (Phase 7+ smoke tests).
+playwright-report/
+test-results/
+playwright/.cache/
+# Ad-hoc playwright-cli artifacts from local browser-driven verification.
+.playwright-cli/
+
+# ─── Env / secrets ──────────────────────────────────────────────────────
+# Block every concrete .env file but keep the committed templates.
+.env
+.env.*
+!.env.example
+!infra/docker/.env.production.example
+
+# Direnv — anything project-local should be a personal layer.
+.envrc
+
+# Production-only resource and security limits. Each host owns its values;
+# the deploy helper requires this machine-local override to stay untracked.
+infra/docker/docker-compose.override.yml
+
+# Deploy lock
+infra/docker/.deploy.lock/
+infra/docker/.deploy.lock.*/
+infra/docker/.deploy-reclaim.flock
+
+# TLS / SSH keys, certs, and signed tokens — accidental commits of these
+# are catastrophic, so ignore aggressively.
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+
+# ─── atelier persistent state ───────────────────────────────────────────
+# In production these live under ${DATA_DIR} (bind mount). In dev they
+# may land at the repo root via ad-hoc DATA_DIR=. settings.
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Generated image artifacts (atelier-api writes <tileId>.<ext>).
+*.png.tmp
+images/
+
+# ─── Logs ───────────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── Editor / IDE ───────────────────────────────────────────────────────
+.idea/
+.vscode/
+!.vscode/extensions.json
+.fleet/
+.zed/
+.cursor/
+.history/
+*.swp
+*.swo
+*.swn
+*~
+*.orig
+*.bak
+
+# ─── OS junk ────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
+._*
+# Note: the typical macOS-template `Icon?` pattern (matching the bare-CR
+# Icon resource file) is omitted on purpose. Under git's case-insensitive
+# match on macOS, `Icon?` ALSO matches `icons` (the `?` glob = `s`), which
+# silently swallows any `web/src/components/icons/` directory and ships
+# broken imports. Don't reintroduce it.
+#
+# The user's global ~/.gitignore_global also has `Icon?` for the same
+# legacy macOS reason; we force-include the icons dir below so the global
+# rule doesn't reach into this project.
+!web/src/components/icons/
+!web/src/components/icons/**
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+# ─── Local working files (not source of truth) ──────────────────────────
+# Specs, plans and audit output are local working files, gitignored
+# intentionally; the architecture doc is the committed source of truth.
+docs/specs/
+docs/plans/
+docs/audit/
+
+# Spike scratch, local notes only. Verified findings land in
+# docs/providers.md or docs/architecture.md (committed).
+docs/spikes/
+
+# ─── Tooling caches that pollute repos ──────────────────────────────────
+.eslintcache
+.stylelintcache
+.prettiercache
+__pycache__/
+*.py[cod]
+
+# ─── Local worktrees and tool scratch files ─────────────────────────────
+.worktrees/
+.codex-*
+
+# Local AI coding tools: instructions and settings stay with each developer
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+.claude/
+.codex/
+.agents/
+.cursor/
+.cursorrules
+.windsurfrules
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+.github/agents/
+.github/hooks/
+.mcp.json
+.gemini/
+.windsurf/
+.devin/
+.aider*
+.opencode/
+opencode.json
+opencode.jsonc
+t3.json
+
+api/.tmp/
+
+# Playwright browser lane (web/e2e) — reports and failure artifacts
+web/test-results/
+web/playwright-report/
+web/blob-report/
+web/.playwright-cli/

@@ -1,0 +1,1395 @@
+/* The single Composer instance is the anchor for the desktop Prompt Picker
+   (PromptPicker/index.module.css) and the global toast stack
+   (Toast/index.module.css), both placed above this box by native anchor
+   positioning. One stable, unscoped name, because only one Composer is ever
+   mounted. Centred by auto margins between its insets: plain layout, the same
+   centre a translate gave, with no transform left to coordinate with the
+   overlays that hang off it. */
+.wrap {
+  position: absolute;
+  bottom: 24px;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: calc(100% - 72px);
+  max-width: 920px;
+  z-index: var(--z-composer);
+  anchor-name: --atelier-composer;
+}
+
+.composer {
+  position: relative;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-14);
+  box-shadow: var(--shadow-3);
+  padding: 14px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color var(--dur-overlay) var(--ease-out), box-shadow var(--dur-overlay) var(--ease-out);
+}
+
+.composer:focus-within {
+  border-color: var(--focus-ring);
+}
+
+.collapseHandle {
+  display: none;
+}
+
+.minimize {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* Collapsed bar (CollapsedBar.tsx renders only while collapsed). Shared at
+   every width; the desktop and phone blocks add only the bar chrome, the
+   label size and the queue badge's truncation. */
+.collapsedBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+}
+
+.collapsedBar[data-tone='danger'] {
+  border-color: var(--danger);
+}
+
+.collapsedExpand {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  font-family: var(--sans);
+  font-size: var(--text-md);
+  text-align: left;
+  color: var(--ink);
+}
+
+.collapsedExpand:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.collapsedPrompt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collapsedPrompt[data-empty='true'] {
+  color: var(--ink-3);
+}
+
+.collapsedRefBadge,
+.collapsedQueueBadge {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-3);
+  padding: 2px 6px;
+  color: var(--ink-2);
+}
+
+@media (width >= 768px) {
+  .composer .refRow,
+  .composer .textarea {
+    padding-right: 32px;
+  }
+
+  .collapsedBar {
+    min-height: 56px;
+    box-sizing: border-box;
+    padding: 5px 8px;
+    border-radius: var(--radius-14);
+    box-shadow: var(--shadow-3);
+  }
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .composer,
+  .collapsedBar {
+    background: var(--glass-surface);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .composer,
+  .collapsedBar {
+    background: var(--bg-elev);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+.dragActive {
+  border-color: var(--ink);
+  border-style: dashed;
+}
+
+.refRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.attach {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-hover) var(--ease-out);
+}
+
+.attach:hover:not(:disabled) {
+  background: var(--bg-sunk);
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.attach:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.attach:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.fileInput {
+  display: none;
+}
+
+.refChip {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  position: relative;
+  overflow: hidden;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.refChip:hover {
+  background: var(--bg-sunk);
+  border-color: var(--line-2);
+}
+
+.refChip:active {
+  transform: scale(0.96);
+}
+
+.refChip img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.refChipUploading {
+  opacity: 0.6;
+}
+
+.refChipError {
+  border-color: var(--danger);
+}
+
+.refChipError img {
+  opacity: 0.72;
+}
+
+.refRemove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-4);
+  background: var(--bg-elev);
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.refRemove svg {
+  width: 12px;
+  height: 12px;
+}
+
+.refRemove:hover:not(:disabled) {
+  background: var(--bg-sunk);
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.refRemove:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.refRemove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.videoPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sunk);
+  animation: global(atelier-rise-in) var(--dur-sheet) var(--ease-out) both;
+}
+
+.sourceRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Quiet exit affordance: reuses the composer `.chip` vocabulary verbatim (same
+   as the Model/Ratio/Count chips) and sits in the panel's top-right corner —
+   the conventional dismiss position — so leaving animate mode is discoverable
+   without introducing new chrome. */
+.exitVideo {
+  margin-left: auto;
+  align-self: flex-start;
+  flex: 0 0 auto;
+}
+
+/* The source still is shown as the actual frame, not an opaque id — the thumb
+   is the replace affordance (click) with a corner clear; an overlay spinner
+   covers it while a replacement uploads. */
+.sourceThumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-2);
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: var(--shadow-1);
+}
+
+.sourceThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: opacity var(--dur-hover) var(--ease-out);
+}
+
+.sourceThumb[data-uploading='true'] img {
+  opacity: 0.45;
+}
+
+/* Composing (motion-prompt enhancement window). Echoes the video loading
+   tile's scan band (.loading::after) on the source still so the augmentation
+   phase reads as the first beat of the render — the same scan continues when
+   the loading tile takes over. Keyed off the resolving counter in video mode. */
+.sourceThumb[data-composing='true'] img {
+  filter: blur(3px);
+  opacity: 0.7;
+  transition: filter var(--dur-overlay) var(--ease-out), opacity var(--dur-overlay) var(--ease-out);
+}
+
+.sourceThumb[data-composing='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 0%, transparent 45%, var(--scrim-scan) 50%, transparent 55%, transparent 100%);
+  animation: global(atelier-scan) 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sourceThumb[data-composing='true']::after {
+    animation: none;
+  }
+
+  .sourceThumb[data-composing='true'] img {
+    animation: source-veil-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes source-veil-pulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 0.82; }
+  }
+}
+
+.sourceReplace {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: transparent;
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+}
+
+.sourceThumb:hover .sourceReplace,
+.sourceReplace:focus-visible {
+  background: var(--scrim-control);
+  color: var(--glass-on-dark-100);
+}
+
+.sourceReplace:focus-visible {
+  outline: 2px solid var(--glass-on-dark-70);
+  outline-offset: -2px;
+}
+
+.sourceReplace:disabled {
+  cursor: progress;
+}
+
+.sourceClear {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: var(--radius-4);
+  border: 1px solid var(--glass-on-dark-12);
+  background: var(--scrim-control);
+  color: var(--glass-on-dark-90);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+}
+
+.sourceClear svg { width: 11px; height: 11px; }
+
+.sourceClear:hover,
+.sourceClear:focus-visible {
+  background: var(--scrim-strong);
+  color: var(--glass-on-dark-100);
+}
+
+.sourceClear:focus-visible {
+  outline: 2px solid var(--glass-on-dark-70);
+  outline-offset: 1px;
+}
+
+.sourceClear:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sourceAdd {
+  flex: 0 0 auto;
+  width: 64px;
+  /* Icon + three-line 11px label stack past 64px; let the box grow so the
+     dashed frame never clips the label (the sibling thumb stays 64px). */
+  min-height: 64px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+}
+
+.sourceAdd:hover:not(:disabled),
+.sourceAdd:focus-visible {
+  border-color: var(--ink);
+  color: var(--ink);
+  background: var(--bg-sunk);
+}
+
+.sourceAdd:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.sourceAdd:disabled {
+  cursor: progress;
+}
+
+.sourceThumbSpinner {
+  composes: ring from '../../styles/spinner.module.css';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  --spinner-size: 18px;
+  --spinner-track: var(--glass-on-dark-35);
+}
+
+.sourceAdd .sourceThumbSpinner {
+  position: static;
+  margin: 0;
+  --spinner-size: 16px;
+  --spinner-track: var(--line-2);
+  --spinner-head: var(--ink);
+}
+
+.sourceMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sourceTitle {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.sourceHint {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Active "COMPOSING MOTION…" status during the enhancement window — mono
+   micro-type echoing the loading tile's statusline and .sourceTitle, in active
+   --ink so it reads as live work (vs the muted --ink-3 helper hint). */
+.composing {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--text-2xs);
+  color: var(--ink);
+}
+
+.motionField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.motionLabel {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.motionTextarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  resize: vertical;
+  min-height: 54px;
+  max-height: 140px;
+  padding: 8px 10px;
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.motionTextarea::placeholder {
+  color: var(--ink-3);
+}
+
+.motionTextarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .videoPanel { animation: none; }
+}
+
+.textarea {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  font-size: var(--text-md);
+  line-height: 1.5;
+  min-height: 48px;
+  max-height: 180px;
+  font-family: var(--sans);
+  letter-spacing: -0.005em;
+}
+
+.textarea::placeholder {
+  color: var(--ink-3);
+}
+
+/* The composer surface owns the focus signal via :focus-within; a second ring
+   on the textarea boxes the text in a redundant rectangle. Suppress so the
+   global :focus-visible fallback doesn't paint over the composer's intent. */
+.textarea:focus-visible {
+  outline: none;
+}
+
+@supports (field-sizing: content) {
+  .textarea {
+    field-sizing: content;
+    max-height: 180px;
+  }
+}
+
+.footer {
+  display: flex;
+  /* Stretch the divider when controls wrap; dock actions align with the last row. */
+  align-items: stretch;
+  gap: 14px;
+  /* When the controls need more room, the dock drops below them. */
+  flex-wrap: wrap;
+}
+
+.controls {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dock {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+}
+
+.statusRail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Reserve the badge's full line, padding and border even while idle. */
+  min-height: max(22px, calc(var(--text-2xs) + 10px));
+  min-width: 0;
+}
+
+.statusline {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 16px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-left: 2px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusline[data-tone='danger'] {
+  color: var(--danger);
+}
+
+.activitySlot {
+  flex: 0 1 auto;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 220px;
+}
+
+.banner {
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: var(--text-xs);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bannerAction {
+  border: 1px solid currentColor;
+  background: transparent;
+  border-radius: var(--radius-4);
+  color: inherit;
+  padding: 4px 8px;
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+}
+
+.bannerAction:hover {
+  background: var(--danger);
+  color: var(--bg);
+}
+
+.bannerAction:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+@media (width < 768px) {
+  .attach {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (any-pointer: coarse) {
+  /* WCAG 2.5.5: the 16px remove button lives in a 32px chip that clips its
+     children (overflow:hidden rounds the thumbnail), so a negative-margin
+     hit-area expansion gets clipped to the chip. Lift the clip on coarse
+     pointers — re-rounding the image directly — and extend the hit target to
+     44px via an invisible pseudo-element, keeping the button visually 16px.
+     Covers touch phones, iPad (incl. landscape, which reports hover:hover at
+     1024px), and touch laptops, which hover:none / width < 768px both miss. */
+  .refChip {
+    overflow: visible;
+  }
+  .refChip img {
+    border-radius: var(--radius);
+  }
+  .refRemove::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+}
+
+@media (any-pointer: coarse) {
+  /* Touch capability — not viewport width — gates the 44px floor for the footer
+     controls. iPad keeps the desktop composer layout above 767px but is still
+     touch, so the width < 768px block alone leaves these below the target.
+     Same rationale as .refChip above and the picker/MovePopover coarse blocks;
+     layout/copy changes (font bumps, hiding .clear) stay width-gated below. */
+  .attach {
+    width: 44px;
+    height: 44px;
+  }
+
+  .chip,
+  .queueChip,
+  .go,
+  .clear {
+    min-height: 44px;
+  }
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  cursor: pointer;
+  position: relative;
+  /* ChipSelect declares its own per-instance name inline (--named-anchor);
+     every other chip has none. */
+  anchor-name: var(--named-anchor, none);
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--bg-sunk);
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.chip:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--focus-ring);
+}
+
+.chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chip[aria-expanded='true'] {
+  background: var(--bg-sunk);
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.chipVal {
+  color: var(--ink);
+}
+
+.chip svg {
+  color: var(--ink-3);
+}
+
+/* Locked-value indicator: the value display gets a small lock glyph next to
+ * the number so the disabled state communicates "fixed at 1" rather than
+ * "broken / temporarily unavailable". The lock inherits the chip's color
+ * (which is dimmed by the parent `.chip:disabled` opacity rule). Glyph is
+ * 10px to sit smaller than the value digit without crowding it. */
+.countLocked {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.countLockGlyph {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+}
+
+.chipCaret {
+  margin-left: 2px;
+  opacity: 0.7;
+  transition: transform var(--dur-overlay) var(--ease-out);
+}
+
+.chip[aria-expanded='true'] .chipCaret {
+  transform: rotate(-180deg);
+}
+
+/* Phone bottom-sheet backdrop: full-screen tap-catcher rendered above the
+   composer + its scrim (so an outside tap closes only the sheet) but below the
+   sheet itself. Transparent — the composer scrim already supplies the dim.
+   +9/+10 offsets (vs the popover convention's +1) so the chip menu clears
+   PromptPicker's internal stacked layers when the chip renders inside the
+   open picker. */
+.menuBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-popover) + 9);
+  background: transparent;
+  border: 0;
+}
+
+/* Desktop placement is native anchor positioning against the chip's
+   --named-anchor (styles/anchors.module.css), in this z-index layer: below
+   the toast stack, above PromptPicker. The phone block below makes it a
+   sheet. */
+.menu {
+  position: fixed;
+  z-index: calc(var(--z-popover) + 10);
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* The listbox container holds focus (tabIndex=-1) but the visible focus
+     indicator lives on the active-descendant option (.menuOptionActive ring),
+     per the ARIA listbox pattern — so suppress the container's own ring. */
+  outline: none;
+  animation: chipmenu-in var(--dur-overlay) var(--ease-out) both;
+  font-family: var(--sans);
+}
+
+@keyframes chipmenu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Designed leave (ChipSelect stamps data-closing for --dur-overlay). */
+.menu[data-closing='true'] {
+  animation: chipmenu-out var(--dur-overlay) var(--ease-out) both;
+  pointer-events: none;
+}
+
+@keyframes chipmenu-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(2px) scale(0.99);
+  }
+}
+
+.menuGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.menuGroup + .menuGroup {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.menuGroupHeader {
+  padding: 6px 10px 4px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.menuOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+}
+
+.menuOptionActive {
+  background: var(--bg-sunk);
+  /* Keyboard active-descendant ring. --bg-sunk over --bg-elev is ~1.1:1 — far
+     below the 3:1 non-text minimum — so the background alone is not a usable
+     focus signal for sighted keyboard users. Inset so it stays within padding. */
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.menuOptionSelected {
+  background: var(--bg-sunk);
+  color: var(--ink);
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+
+.menuOptionSelected.menuOptionActive {
+  background: var(--bg-sunk);
+}
+
+.menuOptionDisabled {
+  color: var(--ink-3);
+}
+
+.menuOptionDisabled .menuOptionLabel {
+  color: var(--ink-3);
+}
+
+.menuOptionDisabled .menuOptionHint {
+  color: var(--ink-3);
+}
+
+.menuOptionLabel {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menuOptionHint {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.menuOptionCheck {
+  color: var(--ink);
+  flex-shrink: 0;
+}
+
+/* Model-chip value for local models: variant token + health dot, aligned
+   like the countLocked cluster. */
+.localToken {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Live health of the serving host, on the Model chip (local models only).
+   --good is calibrated for dot use; the hover title carries the words. */
+.hostDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--good);
+}
+
+.hostDot[data-state='offline'] {
+  background: var(--danger);
+}
+
+.clear {
+  background: transparent;
+  color: var(--ink-3);
+  border: 0;
+  border-radius: var(--radius-7);
+  padding: 7px 8px;
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  letter-spacing: -0.005em;
+  transition: color var(--dur-hover) var(--ease-out);
+}
+
+.clear:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.clear:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.clear:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* The status rail bounds the badge; its aria-label carries the full text. */
+.inFlight {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 2px solid var(--accent-soft);
+  border-radius: 999px;
+  padding: 3px 6px;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  transform-origin: top right;
+  animation: global(atelier-check-in) var(--dur-sheet) var(--ease-out) both;
+  transition: color var(--dur-transform) var(--ease-out), border-color var(--dur-transform) var(--ease-out), background-color var(--dur-transform) var(--ease-out);
+  z-index: 1;
+}
+
+/* The alarm state must read against the soft busy pill, not only pass AA on
+   its own: a filled danger pill measures >5:1 against the accent-soft fill,
+   where danger-on-danger-soft would sit at 1.0:1 (hue-only difference). */
+.inFlightAtCap {
+  color: var(--bg);
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.inFlightPreparing {
+  font-variant-numeric: tabular-nums;
+}
+
+.inFlightQueue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+}
+
+.go {
+  box-sizing: border-box;
+  width: 11.75em;
+  background: var(--ink);
+  color: var(--bg);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-7);
+  padding: 8px 14px 8px 16px;
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  letter-spacing: -0.005em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.go:active:not(:disabled):not([aria-disabled='true']) {
+  transform: scale(0.98);
+}
+
+/* Keep a two-digit count inside the fixed primary-action width. */
+.goCount {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.go:hover:not(:disabled):not([aria-disabled='true']) {
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+}
+
+/* Stop variant: while the queue is draining the primary button becomes a
+   neutral, hollow Stop so it doesn't read as the accent "go" action. Hollow →
+   filled on hover (ink/bg only — no new tokens). */
+.go[data-stop] {
+  background: transparent;
+  color: var(--ink);
+}
+
+.go[data-stop]:hover {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.go:disabled,
+.go[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Inline-fill button: the ink-on-ink default outline would be invisible.
+   --focus-ring sits on the page background with 3px offset to clear the radius. */
+.go:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.go svg {
+  transition: transform var(--dur-transform) var(--ease-out);
+}
+
+.go:hover:not(:disabled):not([aria-disabled='true']) svg {
+  transform: translateX(2px);
+}
+
+/* Working state: the trailing arrow is swapped for this ring spinner while a
+   submission resolves (ai-fill round-trip + batch POST). currentColor = --bg,
+   the on-ink foreground, so the ring reads against the filled button. Sized to
+   match the 14px icon so the swap causes no layout shift. */
+.spinner {
+  composes: ring from '../../styles/spinner.module.css';
+  --spinner-track: color-mix(in srgb, currentColor 28%, transparent);
+  --spinner-head: currentColor;
+}
+
+@media (width < 768px) {
+  .wrap {
+    position: fixed;
+    inset: auto 0 var(--keyboard-inset, 0) 0;
+    transform: none;
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    z-index: var(--z-composer);
+  }
+
+  .composer {
+    border-radius: var(--radius-14) var(--radius-14) 0 0;
+    border-bottom: 0;
+    padding: 12px 12px calc(10px + env(safe-area-inset-bottom));
+    box-shadow: var(--shadow-2-up);
+  }
+
+  .collapsedBar {
+    /* Restated: this block follows the @supports glass rule above, so the
+       phone bar stays opaque. */
+    background: var(--bg-elev);
+    border-bottom: 0;
+    border-radius: var(--radius-14) var(--radius-14) 0 0;
+    box-shadow: var(--shadow-2-up);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    animation: global(atelier-sheet-in) var(--dur-overlay) var(--ease-out) both;
+  }
+
+  .collapsedExpand {
+    font-size: var(--text-base);
+    letter-spacing: -0.005em;
+  }
+
+  .collapsedQueueBadge {
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .collapseHandle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 24px;
+    margin: -4px 0 -2px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--ink-3);
+  }
+
+  .collapseHandle:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+
+  .textarea {
+    min-height: 40px;
+    max-height: 120px;
+    font-size: var(--text-base);
+  }
+
+  .clear {
+    display: none;
+  }
+
+  /* Phone: the desktop two-zone bar (chips beside a rigid dock) breaks once the
+     chips need two rows — the dock stretches to span both and its centred
+     Generate floats over the second chip row. Stack instead: chip rows first,
+     then the dock as its own full-width row, so Generate is always the last
+     thing above the statusline and sits in the thumb zone. */
+  .footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .dock {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+    justify-content: flex-end;
+  }
+
+  .activitySlot {
+    max-width: 42%;
+  }
+
+  .chip {
+    padding: 10px 12px;
+    min-height: 44px;
+  }
+
+  .go {
+    flex: 1;
+    width: 100%;
+    justify-content: center;
+    padding: 10px 14px;
+    font-size: var(--text-md);
+    min-height: 44px;
+  }
+
+  .menu {
+    position: fixed;
+    inset: auto 0 var(--keyboard-inset, 0) 0;
+    transform: translateY(0);
+    border-radius: var(--radius-14) var(--radius-14) 0 0;
+    padding: 4px 8px calc(12px + env(safe-area-inset-bottom));
+    max-height: 60dvh;
+    overflow-y: auto;
+    animation: global(atelier-sheet-in) var(--dur-sheet) var(--ease-out) both;
+  }
+
+  .menu::before {
+    content: '';
+    display: block;
+    width: 32px;
+    height: 3px;
+    background: var(--line-2);
+    border-radius: var(--radius-3);
+    margin: 8px auto 6px;
+  }
+
+  .menuOption {
+    padding: 12px;
+    font-size: var(--text-md);
+  }
+
+  .menu[data-closing='true'] {
+    animation: global(atelier-sheet-out) var(--dur-overlay) var(--ease-out) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu {
+    animation: none;
+  }
+
+  .menu[data-closing='true'] {
+    animation: global(atelier-fade-out) var(--dur-reduced) linear both;
+  }
+
+  .chip:active:not(:disabled),
+  .refChip:active,
+  .go:active:not(:disabled):not([aria-disabled='true']) {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collapsedBar { animation: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inFlight {
+    animation-duration: var(--dur-reduced);
+    animation-name: global(atelier-fade-in);
+    transform: none;
+  }
+}
+
+/* ── Roll-queue chip ──────────────────────────────────────── */
+
+.queueChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.queueChip:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queueChip:active {
+    transform: none;
+  }
+}
+
+.queueChip:hover,
+.queueChip:focus-visible {
+  background: var(--bg-sunk);
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.queueChip[aria-expanded='true'] {
+  border-color: var(--ink);
+  background: var(--bg-sunk);
+  color: var(--ink);
+}
+
+.queueChip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Compact queue indicator: a layers glyph + tabular count badge. The full
+   "Roll-queue · N" wording lives in aria-label + the tooltip. The reserved
+   two-digit slot keeps the chip width constant as the count grows, so the
+   toolbar never reflows on a digit change. */
+.queueCount {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keep the three generation selects (Model · Ratio · Count) on one line as an
+   aligned unit. They wrap together as a block only when the toolbar genuinely
+   runs out of room (narrow tablet / phone), never orphaning the batch-size
+   chip onto its own row. */
+.selectGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (width < 768px) {
+  .queueChip { min-height: 44px; }
+}

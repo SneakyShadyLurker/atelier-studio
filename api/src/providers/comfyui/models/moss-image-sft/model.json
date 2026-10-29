@@ -1,0 +1,38 @@
+{
+  "id": "moss-image-sft",
+  "name": "MOSS Image",
+  "family": "moss",
+  "order": 70,
+  "saveImageNodeId": "9",
+  "requiredPlaceholders": [
+    "{{prompt}}",
+    "{{seed}}",
+    "{{width}}",
+    "{{height}}",
+    "{{count}}",
+    "{{steps}}"
+  ],
+  "defaultSteps": 50,
+  "ratioMap": "moss-2mp",
+  "supportedRatios": [
+    "1:1",
+    "4:5",
+    "3:4",
+    "16:9",
+    "9:16"
+  ],
+  "defaultRatio": "3:4",
+  "size": "≈2MP · INT8 ConvRot · uncensored",
+  "latency": "medium",
+  "batched": true,
+  "defaultCount": 4,
+  "graphs": {
+    "base": "workflow.json"
+  },
+  "requiredModelFiles": [
+    "moss_image_sft_int8_convrot.safetensors",
+    "qwen3.5_9b_int8_convrot.safetensors",
+    "flux2-vae.safetensors"
+  ],
+  "requiredClipType": "moss_image"
+}

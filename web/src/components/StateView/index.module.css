@@ -1,0 +1,95 @@
+.state {
+  /* min-height (not height:100%) so the state centers correctly whether it
+     owns the whole scroll viewport (Canvas) or sits below an in-flow
+     ManagedViewHeader (Archive / PromptManager) — height:100% overflowed
+     the header-offset containers. Matches Archive's prior min-height. */
+  min-height: min(360px, max(0px, calc(100dvh - 160px)));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+/* Staggered reveal — glyph, heading, body, action rise in a quiet cascade
+   instead of one block fade. Delays are additive on top of --dur-rise. */
+.state > * {
+  animation: global(atelier-rise-in) var(--dur-rise) var(--ease-out) both;
+}
+
+.state > :nth-child(2) {
+  animation-delay: 60ms;
+}
+
+.state > :nth-child(3) {
+  animation-delay: 120ms;
+}
+
+.state > :nth-child(4) {
+  animation-delay: 180ms;
+}
+
+.glyph {
+  width: 64px;
+  height: 64px;
+  border: 1px dashed var(--line-2);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  position: relative;
+}
+
+.glyph::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border: 1px dashed var(--line);
+  border-radius: 50%;
+}
+
+/* Editorial display moment — the serif carries the "atelier" voice at the
+   few places the app speaks in a full sentence. */
+.state h2 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: var(--text-display);
+  letter-spacing: 0.005em;
+  line-height: 1.15;
+  text-wrap: balance;
+  color: var(--ink);
+  margin: 0;
+  max-width: 520px;
+}
+
+.state p {
+  max-width: 420px;
+  line-height: 1.55;
+  margin: 0;
+  font-size: var(--text-sm);
+  text-wrap: pretty;
+}
+
+.state kbd {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-4);
+  padding: 2px 6px;
+  color: var(--ink-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* :nth-child(n) matches every child at (0,2,0) specificity — the plain
+     `.state > *` form loses to the non-RM :nth-child stagger delays. */
+  .state > :nth-child(n) {
+    animation: global(atelier-fade-in) var(--dur-hover) linear both;
+    animation-delay: 0ms;
+  }
+}

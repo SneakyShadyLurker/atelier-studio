@@ -1,0 +1,194 @@
+/* JetBrains Mono ships subset (pyftsubset, layout features kept) to Latin,
+   Latin Extended-A, punctuation, currency, arrows, maths, technical, box and
+   geometric symbols; the unicode-range mirrors that set, so anything else
+   (Cyrillic, Greek, ...) falls back to ui-monospace. Re-subset from the
+   upstream release with the same range when the font is updated. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+  font-style: normal;
+  unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+    U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-500.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+  font-style: normal;
+  unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+    U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+}
+
+/* Editorial display face — used sparingly (empty-state heading, managed-view
+   titles). Single weight + italic keeps the payload tiny (~21 KB each). */
+@font-face {
+  font-family: 'Instrument Serif';
+  src: url('/fonts/InstrumentSerif-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Instrument Serif';
+  src: url('/fonts/InstrumentSerif-400-Italic.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+  font-style: italic;
+}
+
+  :root {
+    --bg: #f6f4ef;
+    --bg-elev: #fbfaf6;
+    --bg-sunk: #efece5;
+    --ink: #14130f;
+    --ink-2: #4a4942;
+    --ink-3: #6c6a62;
+    --line: #e3dfd5;
+    --line-2: #d0ccc0;
+    /* Resting boundary for INTERACTIVE controls only (buttons, icon
+       buttons). --line/--line-2 are decorative dividers and exempt from
+       WCAG 1.4.11; a control boundary is not, and --line-2 measures
+       1.54:1 on --bg-elev. Lightest warm grey clearing 3:1 against every
+       surface a control boundary touches: --bg, --bg-elev, and --bg-sunk
+       (which is .icon's own fill, i.e. the border's INNER neighbour). */
+    --line-control: #8d877a;
+    --accent: oklch(53% 0.12 38);
+    --accent-soft: oklch(94% 0.02 38);
+    --glass-surface: color-mix(in srgb, var(--bg-elev) 82%, transparent);
+    --glass-blur: blur(20px) saturate(1.4);
+    --danger: oklch(50% 0.14 25);
+    --danger-soft: oklch(94% 0.02 25);
+    /* --good: calibrated for graphical/dot use on light surfaces; not for inline text without a contrast check (use --good-on-ink for text on the --ink toast surface) */
+    --good: oklch(58% 0.10 145);
+    --good-on-ink: oklch(78% 0.14 145);
+    --radius-3: 3px;
+    --radius-4: 4px;
+    --radius: 6px;
+    --radius-7: 7px;
+    --radius-lg: 10px;
+    --radius-14: 14px;
+    --shadow-1: 0 1px 0 rgba(20,19,15,0.04), 0 1px 2px rgba(20,19,15,0.04);
+    --shadow-2: 0 8px 28px -10px rgba(20,19,15,0.18), 0 2px 6px rgba(20,19,15,0.06);
+    --shadow-3: 0 30px 80px -20px rgba(20,19,15,0.35), 0 8px 20px rgba(20,19,15,0.10);
+    --shadow-2-up: 0 -8px 28px -10px rgba(20,19,15,0.18), 0 -2px 6px rgba(20,19,15,0.06);
+    --scrim: rgba(20,19,15,0.4);
+    --scrim-soft: rgba(20,19,15,0.32);
+    --scrim-tile: rgba(20,19,15,0.55);
+    --scrim-control: rgba(20,19,15,0.6);
+    --scrim-panel: rgba(20,19,15,0.7);
+    --scrim-strong: rgba(20,19,15,0.85);
+    --scrim-scan: rgba(20,19,15,0.06);
+    --scrim-on-image: rgba(0,0,0,0.32);
+    --shadow-text-on-image: 0 1px 2px rgba(0,0,0,0.55);
+    --glass-on-dark-6: rgba(255,255,255,0.06);
+    --glass-on-dark-8: rgba(255,255,255,0.08);
+    --glass-on-dark-10: rgba(255,255,255,0.10);
+    --glass-on-dark-12: rgba(255,255,255,0.12);
+    --glass-on-dark-15: rgba(255,255,255,0.15);
+    --glass-on-dark-34: rgba(255,255,255,0.34);
+    --glass-on-dark-35: rgba(255,255,255,0.35);
+    --glass-on-dark-65: rgba(255,255,255,0.65);
+    --glass-on-dark-70: rgba(255,255,255,0.7);
+    --glass-on-dark-75: rgba(255,255,255,0.75);
+    --glass-on-dark-85: rgba(255,255,255,0.85);
+    --glass-on-dark-90: rgba(255,255,255,0.9);
+    --glass-on-dark-100: rgba(255,255,255,1);
+    --shadow-photo: 0 40px 100px -20px rgba(0,0,0,0.5);
+    /* Focus ring color. Light mode = --ink (deep ink on cream — handoff spec).
+       Dark theme overrides to --ink-2 so focus stays clearly active without
+       flashing near-white against the warm-dark surface. */
+    --focus-ring: var(--ink);
+    --z-popover: 50;
+    --z-lightbox: 100;
+    --z-toast: 200;
+    --z-confirm: 250;
+    --z-composer: 5;
+    --z-drawer: 10;
+    --z-overlay-max: 1000;
+    --sidebar-width: 240px;
+    --app-header-h: 56px;
+    --tile-min: clamp(220px, 18vw, 320px);
+    --tile-cap: 72dvh;
+    --grid-gap: 14px;
+    --ease-out: cubic-bezier(.2,.8,.2,1);
+    --ease-tactile: cubic-bezier(.34,1.56,.64,1);
+    --dur-hover: 120ms;
+    --dur-overlay: 160ms;
+    --dur-transform: 200ms;
+    --dur-entrance: 380ms;
+    --dur-sheet: 240ms;
+    --dur-settle: 280ms;
+    --dur-rise: 420ms;
+    --dur-reveal: 500ms;
+    --dur-reduced: 80ms;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+    --text-2xs: 0.6875rem;
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-md: 0.9375rem;
+    --text-base: 1rem;
+    --text-lg: 1.0625rem;
+    --text-xl: 1.25rem;
+    --text-display: 1.75rem;
+    --bp-phone: 767px;
+  }
+
+/* Accent pairs verified in converted sRGB relative luminance: light accent on
+   accent-soft 4.64:1 and accent against bg 5.07:1; dark accent on accent-soft
+   6.69:1. Both themes therefore clear WCAG AA for text in either direction.
+   Dark theme — warm-on-warm palette mirroring the cream baseline. The neutral
+   mid-tone (--ink-3) is shared across both themes; everything else inverts on
+   the same warm L axis. Accent hues stay constant (oklch chroma is theme-
+   neutral); lightness flips for contrast — accent moves from L≈53% in light
+   while danger/good remain near L≈55%, and all three move to L≈72% in dark.
+   This keeps the same warm-red/orange/green
+   reading while clearing WCAG AA against the dark surface AND the dark
+   `*-soft` background variants. Shadows switch from
+   warm-ink-tinted to pure black for visibility against the dark surface.
+   Activated by an inline bootstrap script in index.html that resolves
+   localStorage('atelier.theme') ?? prefers-color-scheme before React mounts
+   (prevents FOUC). */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #14130f;
+  --bg-elev: #1c1a16;
+  --bg-sunk: #0e0d0a;
+  --ink: #f6f4ef;
+  --ink-2: #c4c0b6;
+  --ink-3: #8a877e;
+  --line: #2a2722;
+  --line-2: #3a352e;
+  --line-control: #736c60;
+  --accent: oklch(72% 0.13 38);
+  --accent-soft: oklch(22% 0.03 38);
+  --danger: oklch(72% 0.14 25);
+  --danger-soft: oklch(22% 0.04 25);
+  --good: oklch(72% 0.11 145);
+  --good-on-ink: oklch(55% 0.14 145);
+  --focus-ring: var(--ink-2);
+  --shadow-1: 0 1px 0 rgba(0,0,0,0.30), 0 1px 2px rgba(0,0,0,0.22);
+  --shadow-2: 0 8px 28px -10px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.30);
+  --shadow-3: 0 30px 80px -20px rgba(0,0,0,0.75), 0 8px 20px rgba(0,0,0,0.40);
+  --shadow-2-up: 0 -8px 28px -10px rgba(0,0,0,0.55), 0 -2px 6px rgba(0,0,0,0.30);
+  /* Warm-ink scan sweep reads as dark-on-dark against the dark frame; flip to
+     a faint white sweep at the same alpha so the motion stays a signal. */
+  --scrim-scan: var(--glass-on-dark-6);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+@media (width < 768px) {
+  :root {
+    --tile-cap: 70dvh;
+    --grid-gap: 10px;
+  }
+}

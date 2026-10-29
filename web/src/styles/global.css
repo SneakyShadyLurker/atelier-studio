@@ -1,0 +1,472 @@
+@import './tokens.css';
+@import './motion.css';
+
+/* Aurora placeholder material (LoadingTile while rendering; QueuedTile and the
+   Sidebar thumbnail at rest, at lower alpha). One owner per theme; kept out of
+   tokens.css, which mirrors the locked handoff token block. */
+:root {
+  --aurora-rest:
+    radial-gradient(ellipse at 20% 30%, oklch(78% 0.12 38 / 0.3), transparent 50%),
+    radial-gradient(ellipse at 80% 70%, oklch(74% 0.10 220 / 0.3), transparent 55%),
+    radial-gradient(ellipse at 50% 50%, oklch(80% 0.09 320 / 0.3), transparent 60%);
+  --aurora-active:
+    radial-gradient(ellipse at 20% 30%, oklch(78% 0.12 38 / 0.6), transparent 50%),
+    radial-gradient(ellipse at 80% 70%, oklch(74% 0.10 220 / 0.5), transparent 55%),
+    radial-gradient(ellipse at 50% 50%, oklch(80% 0.09 320 / 0.45), transparent 60%);
+}
+
+:root[data-theme='dark'] {
+  --aurora-rest:
+    radial-gradient(ellipse at 20% 30%, oklch(45% 0.12 38 / 0.35), transparent 50%),
+    radial-gradient(ellipse at 80% 70%, oklch(38% 0.10 220 / 0.35), transparent 55%),
+    radial-gradient(ellipse at 50% 50%, oklch(42% 0.10 320 / 0.35), transparent 60%);
+  --aurora-active:
+    radial-gradient(ellipse at 20% 30%, oklch(45% 0.12 38 / 0.6), transparent 50%),
+    radial-gradient(ellipse at 80% 70%, oklch(38% 0.10 220 / 0.6), transparent 55%),
+    radial-gradient(ellipse at 50% 50%, oklch(42% 0.10 320 / 0.6), transparent 60%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--text-md);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* Global :focus-visible fallback. Component-level rules below override this
+   with hue-appropriate tints (Lightbox uses white-on-dark, Composer routes
+   through --focus-ring). Any interactive that forgets to declare its own
+   focus state still receives a visible ring — WCAG 2.4.7. Uses --focus-ring
+   so the color is theme-aware (light --ink, dark --ink-2); a stark cream
+   against the dark surface flashes the eye on every keystroke. Modern
+   browsers (Chrome 94+, Firefox 88+, Safari 16.4+) already render outline
+   following the element's own border-radius, so we don't touch it here —
+   overriding it would mutate the element's corners on focus, not the
+   outline shape. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Press feedback baseline for clickable role-button divs that aren't <button>.
+   Real <button>s pick up their own :active rules from component styles; the
+   role-button pattern (ImageTile/Archive frames, Sidebar history-items) gets
+   a default 120ms (--dur-hover) scale press so every clickable acknowledges touch. */
+@media (hover: hover) {
+  [role='button']:not(button):active {
+    transform: scale(0.985);
+    transition: transform var(--dur-hover) var(--ease-out);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [role='button']:not(button):active {
+    transform: none;
+  }
+}
+
+/* Rail active-bar primitive — the 2px ink accent marking the active row in
+   the Sidebar Library rail and the PromptManager resource list. Single
+   source of truth; apply the literal class `railActiveBar` alongside the
+   component's own active class. No layout shift (absolute ::before). */
+.railActiveBar {
+  position: relative;
+}
+
+.railActiveBar::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 2px;
+  background: var(--ink);
+  border-radius: 1px;
+}
+
+/* 14px top/bottom fade on scrolling lists (PromptPicker, PromptManager). */
+:root {
+  --scroll-fade-mask: linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%);
+}
+
+/* Content-column inset for body-portaled overlays (PromptPicker popover, toast
+   stack): the desktop sidebar's effective width, so they centre over the
+   column the Composer lives in rather than the raw viewport. Derived from the
+   --sidebar-width token and App's collapsed flag; unset (consumers fall back
+   to 0px) on phones, while collapsed, or when no app sidebar is mounted. */
+@media (width >= 768px) {
+  :root:has(#atelier-sidebar):not(:has([data-sidebar-collapsed='true'])) {
+    --content-inset-left: var(--sidebar-width);
+  }
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+#root {
+  height: 100%;
+}
+
+/* Toast stack hosted INSIDE a modal panel (lib/toastHost 'contained'): the
+   panel is the containing block, so the default Composer-anchored placement
+   would misplace it. Sit at the panel's bottom centre (the stack's own fixed
+   width and auto margins centre it between these insets), clear of the
+   sheet's home-indicator strip. `div` outranks the module's single-class
+   `.stack`, and the module's anchored rule skips this host. */
+div[data-toast-host='contained'] {
+  position: absolute;
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  max-width: calc(100% - 24px);
+}
+
+.bootstrapState {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+}
+
+.bootstrapState h1 {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+
+.bootstrapState button {
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.bootstrapMark {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  border-top-color: var(--ink);
+  animation: atelier-spin 900ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bootstrapMark { animation: none; }
+}
+
+/* Firefox / standards scrollbar styling — the -webkit- rules below cover
+   Chromium/Safari; this gives Firefox the matching thin warm scrollbar. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: var(--radius-4);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+}
+
+/* Tooltip primitive: author [data-tip="LABEL"] (and optionally a
+   [data-tip-place] from lib/tooltip.ts) on any element to show a designed
+   mono label on hover or keyboard focus. aria-label remains the
+   screen-reader contract; the label is visual only (aria-hidden).
+
+   One label node serves the whole document. useTooltipDismiss owns its
+   lifecycle: which host it describes, the DOM owner it lives in (the host's
+   open <dialog> or popover, so a native modal never inerts it), Escape,
+   re-arming, quiet expanded hosts, and swallowing presses on the label. It
+   is a manual popover shown with the host as its implicit anchor, so the top
+   layer lifts it out of every clipping, masking or transformed ancestor
+   (glass tile actions, the picker's masked scroll body, the contain:strict
+   feed) and CSS below owns every coordinate: side, edge flips and clamping.
+   No script reads its size or the host's.
+
+   Hoverable and persistent (WCAG 1.4.13): a shown label takes the pointer,
+   and transparent block borders bridge the 6px gap on either side. Presses
+   on that bridge hit the label too. A short leave grace preserves diagonal
+   travel. Hidden labels stay
+   `visibility: hidden` through the 360ms reveal, so an unseen label never
+   intercepts a click.
+
+   position: relative on hosts is kept from the pseudo-element primitive so
+   no host's own absolutely positioned content moves. Zero specificity; scoped
+   to non-empty values. */
+@media (hover: hover) {
+  :where([data-tip]:not([data-tip=''])) {
+    position: relative;
+  }
+}
+
+[data-tip-label] {
+  --tip-gap: 6px;
+  --tip-enter-shift: 2px;
+  --tip-reveal-duration: var(--dur-hover);
+
+  /* Also the nonanchored fallback (no CSS anchor positioning, or a popover
+     without showPopover({ source })): top-centre of the window, still
+     readable, still dismissed the same way. */
+  position: fixed;
+  inset: calc(6px + env(safe-area-inset-top)) 0 auto;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  margin: 0 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 0;
+  border-block: var(--tip-gap) solid transparent;
+  border-radius: var(--radius-3) / calc(var(--radius-3) + var(--tip-gap));
+  padding: 4px 7px;
+  background: var(--ink);
+  background-clip: padding-box;
+  color: var(--bg);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  line-height: normal;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  /* One line unless it would cross the window: then it wraps. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity var(--dur-hover) var(--ease-out), transform var(--dur-hover) var(--ease-out), visibility 0s linear var(--dur-hover);
+  z-index: var(--z-overlay-max);
+}
+
+/* Below placements rest on the host side too. */
+[data-tip-label]:is([data-tip-place='below'], [data-tip-place='below-end'], [data-tip-place='below-start']) {
+  --tip-enter-shift: -2px;
+  transform: translateY(-2px);
+}
+
+[data-tip-label][data-open] {
+  visibility: visible;
+  pointer-events: auto;
+  opacity: 1;
+  transform: none;
+  transition: none;
+  animation: tip-reveal var(--tip-reveal-duration) var(--ease-out) 360ms both;
+}
+
+/* Backwards fill holds the hidden state through the reveal delay, including
+   the first popover show. The lifecycle restarts this native animation when
+   the same node is reused for a different host. */
+@keyframes tip-reveal {
+  from {
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(var(--tip-enter-shift));
+  }
+
+  to {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Native anchor positioning (docs/native-anchors.md). The preferred side and
+   alignment come from data-tip-place; an option that would cross the window
+   gives way to the same side's other alignments, then capped placements on
+   either side that scroll and stay inside the window. Transparent borders keep the
+   painted label 6px from the host on whichever side is chosen, and shield
+   presses throughout that bridge. A host scrolled out of its clip
+   takes its label with it (position-visibility). */
+@supports (anchor-name: --a) and (position-area: top) and (position-try-fallbacks: flip-block) and (justify-self: anchor-center) {
+  [data-tip-label][data-anchored] {
+    position-anchor: auto;
+    inset: auto;
+    margin: 0;
+    position-area: top span-all;
+    justify-self: anchor-center;
+    position-try-fallbacks: --tip-above-start, --tip-above-end, --tip-clamp-below, --tip-clamp-above;
+    position-visibility: anchors-visible;
+  }
+
+  [data-tip-label][data-anchored][data-tip-place='below'] {
+    position-area: bottom span-all;
+    position-try-fallbacks: --tip-below-start, --tip-below-end, --tip-clamp-above, --tip-clamp-below;
+  }
+
+  /* End and start variants align the label with that edge of the host. */
+  [data-tip-label][data-anchored][data-tip-place='above-end'] {
+    position-area: top span-left;
+    justify-self: end;
+    position-try-fallbacks: --tip-above-start, --tip-below-end, --tip-clamp-below, --tip-clamp-above;
+  }
+
+  [data-tip-label][data-anchored][data-tip-place='above-start'] {
+    position-area: top span-right;
+    justify-self: start;
+    position-try-fallbacks: --tip-above-end, --tip-below-start, --tip-clamp-below, --tip-clamp-above;
+  }
+
+  [data-tip-label][data-anchored][data-tip-place='below-end'] {
+    position-area: bottom span-left;
+    justify-self: end;
+    position-try-fallbacks: --tip-below-start, --tip-above-end, --tip-clamp-above, --tip-clamp-below;
+  }
+
+  [data-tip-label][data-anchored][data-tip-place='below-start'] {
+    position-area: bottom span-right;
+    justify-self: start;
+    position-try-fallbacks: --tip-below-end, --tip-above-start, --tip-clamp-above, --tip-clamp-below;
+  }
+}
+
+@position-try --tip-above-start {
+  position-area: top span-right;
+  justify-self: start;
+}
+
+@position-try --tip-above-end {
+  position-area: top span-left;
+  justify-self: end;
+}
+
+@position-try --tip-below-start {
+  position-area: bottom span-right;
+  justify-self: start;
+}
+
+@position-try --tip-below-end {
+  position-area: bottom span-left;
+  justify-self: end;
+}
+
+/* Four candidates plus the base, within the guaranteed option budget.
+   Native anchor-center alignment shifts horizontally within these margins.
+   Percentages cap height against the chosen side, including the bridge. */
+@position-try --tip-clamp-above {
+  position-area: top span-all;
+  justify-self: anchor-center;
+  margin-inline: 8px;
+  max-height: calc(100% - 12px);
+}
+
+@position-try --tip-clamp-below {
+  position-area: bottom span-all;
+  justify-self: anchor-center;
+  margin-inline: 8px;
+  max-height: calc(100% - 12px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Opacity only. visibility keeps its own hold so a fading label never
+     vanishes early and a pending one never takes the pointer while still
+     transparent; the 360ms reveal delay is unchanged. */
+  [data-tip-label] {
+    --tip-enter-shift: 0px;
+    --tip-reveal-duration: var(--dur-reduced);
+    transition: opacity var(--dur-reduced) linear, visibility 0s linear var(--dur-reduced);
+    transform: none;
+  }
+
+  [data-tip-label]:is([data-tip-place='below'], [data-tip-place='below-end'], [data-tip-place='below-start']) {
+    --tip-enter-shift: 0px;
+    transform: none;
+  }
+}
+
+/* Windows High Contrast / forced-colors: the UI leans on token colors, glass
+   and scrims that the OS strips and replaces with system colors. Re-anchor the
+   load-bearing signals to system color keywords so focus, the selected-row bar
+   and the tooltip stay perceivable. Icon-button borders live in
+   buttons.module.css (the single source for those classes). */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: Highlight;
+  }
+
+  .railActiveBar::before {
+    background-color: Highlight;
+  }
+
+  /* The label's inverted token colours are stripped here; restate them as
+     system colours with a frame so it still reads as a separate surface. */
+  [data-tip-label] {
+    forced-color-adjust: none;
+    background-color: Canvas;
+    color: CanvasText;
+    box-shadow: inset 0 0 0 1px CanvasText;
+  }
+}
+
+/* Increased-contrast preference: thicken the focus ring and the selected-row
+   accent so they read against a higher-contrast surface. */
+@media (prefers-contrast: more) {
+  :focus-visible {
+    outline-width: 3px;
+  }
+
+  .railActiveBar::before {
+    width: 3px;
+  }
+}

@@ -1,0 +1,114 @@
+/* AI output arriving after an async round-trip — a quiet rise signals
+   "just computed" instead of popping in fully formed. */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  transition: opacity var(--dur-transform) var(--ease-out);
+  animation: global(atelier-rise-in) var(--dur-settle) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    animation: global(atelier-fade-in) var(--dur-reduced) linear both;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-7);
+  background: var(--bg-sunk);
+  font-size: var(--text-sm);
+}
+
+.name {
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.reason {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: var(--radius-7);
+  background: var(--bg-sunk);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+
+.pair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.detailTemplate {
+  color: var(--ink);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.detailList {
+  color: var(--ink-2);
+}
+
+.sep {
+  color: var(--ink-3);
+}
+
+.dimension {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+@media (width < 768px) {
+  .card { padding: 12px; }
+  .pair { flex-wrap: wrap; }
+}

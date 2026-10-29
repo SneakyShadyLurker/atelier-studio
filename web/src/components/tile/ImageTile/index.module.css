@@ -1,0 +1,218 @@
+.tile {
+  composes: shell from '../shell.module.css';
+  cursor: zoom-in;
+}
+
+.tile:hover {
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-2px);
+}
+
+.tile[data-seen='true'] .frame img,
+.tile[data-seen='true'] .frame video {
+  animation: none;
+}
+
+/* Keyboard focus echoes hover so the keyboard user gets the same affordance:
+   border darkens + shadow lifts. Plus an explicit outline for unambiguous
+   focus indication — the overlay-gradient by itself doesn't satisfy 2.4.7
+   because the icon-buttons inside the overlay then steal focus on the next
+   tab and the surrounding frame loses signal. The ring is drawn on the tile,
+   not the frame: the tile clips its contents (overflow: hidden), so a ring
+   offset outside the frame would be cut away. */
+.frame:focus-visible {
+  outline: none;
+}
+
+.tile:has(.frame:focus-visible) {
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-2);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.frame {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: var(--bg-sunk);
+  color: inherit;
+  cursor: zoom-in;
+  display: block;
+  position: relative;
+  overflow: hidden;
+  text-align: inherit;
+}
+
+.frame:disabled {
+  cursor: default;
+}
+
+.frame[data-media-failed='true'] {
+  cursor: pointer;
+}
+
+/* Thumbnail and full image both failed: a quiet, retryable state instead of
+   the browser's broken-image glyph. Clicking the frame retries. */
+.mediaFailed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.frame[data-media-failed='true']:hover .mediaFailed {
+  color: var(--ink-2);
+}
+
+.frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  animation: global(atelier-img-in) var(--dur-reveal) var(--ease-out) both;
+}
+
+/* Mirrors the LoadingTile veil's cream fill at 0.8 and fades to 0 on mount,
+   matching the loading→veiled transition's easing. The drift/scan motion
+   intentionally does NOT carry through — once the image is final, the
+   developing vocabulary stops; stillness is the payoff. */
+.reveal {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-color: var(--bg-sunk);
+  animation: reveal-out var(--dur-reveal) var(--ease-out) both;
+}
+
+@keyframes reveal-out {
+  from { opacity: 0.8; }
+  to { opacity: 0; }
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-overlay) var(--ease-out);
+  background: linear-gradient(180deg, transparent 60%, var(--scrim-tile) 100%);
+}
+
+.tile:hover .overlay,
+.tile:focus-within .overlay {
+  opacity: 1;
+}
+
+.actions {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--glass-on-dark-85);
+  text-shadow: var(--shadow-text-on-image);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  /* Optional edit, animate, and character actions can expand the cluster; let
+     the index label shrink rather than push buttons off the narrowest tiles. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.numGlyph {
+  width: 11px;
+  height: 11px;
+  margin-left: 4px;
+  vertical-align: -1px;
+}
+
+.buttons {
+  display: flex;
+  flex: 1 1 160px;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+/* On-glass pending ring while an edit/animate source is fetched + uploaded.
+   Sized to the 14px glyph so the icon→spinner swap is layout-stable. */
+.actionSpinner {
+  composes: ring from '../../../styles/spinner.module.css';
+}
+
+@media (hover: none) {
+  .overlay {
+    opacity: 0.7;
+  }
+
+  .actions {
+    opacity: 1;
+  }
+
+  /* 44px touch targets: sharing the row with the index label leaves a
+     ~250px tile room for three buttons, so seven need three rows and a 16:9
+     tile clips the top one. Owning the full row fits four per row from the
+     grid's narrowest column (~220px), keeping the cluster to two rows. */
+  .buttons {
+    flex-basis: 100%;
+  }
+
+  .tile:active {
+    transform: scale(0.99);
+    transition: transform var(--dur-hover) var(--ease-out);
+  }
+}
+
+@media (hover: none) and (prefers-reduced-motion: reduce) {
+  .tile:active {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile {
+    animation-duration: var(--dur-hover);
+    animation-name: global(atelier-fade-in);
+    transition: none;
+  }
+
+  .frame img {
+    animation-duration: var(--dur-hover);
+    animation-name: global(atelier-fade-in);
+    filter: none;
+  }
+
+  .reveal {
+    animation: none;
+    display: none;
+  }
+
+  .tile:hover {
+    transform: none;
+  }
+}

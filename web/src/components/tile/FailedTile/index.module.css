@@ -1,0 +1,117 @@
+.tile {
+  composes: shell from '../shell.module.css';
+  cursor: default;
+}
+
+.tile:hover {
+  transform: none;
+  box-shadow: var(--shadow-1);
+}
+
+.frame {
+  width: 100%;
+  background: var(--bg-sunk);
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+
+.tile[data-moderation='true'] .frame { min-height: 220px; }
+.tile[data-moderation='true'] .mini { min-height: 44px; }
+
+.body {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  background: var(--bg-elev);
+  background-image: repeating-linear-gradient(45deg, transparent, transparent 8px, var(--bg-sunk) 8px, var(--bg-sunk) 9px);
+  /* No delay: an empty sunk frame during the delay reads as a still-loading
+     tile, lying about the underlying state. The body fades alongside .tile. */
+  animation: global(atelier-fade-in) var(--dur-rise) var(--ease-out) both;
+}
+
+.icon {
+  color: var(--danger);
+  margin-bottom: 8px;
+}
+
+.title {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--danger);
+  margin-bottom: 6px;
+}
+
+.message {
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mini {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 5px 9px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-elev);
+  color: var(--ink-2);
+  border-radius: var(--radius-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-hover) var(--ease-out);
+}
+
+.mini:hover {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.mini:active {
+  transform: scale(0.97);
+  transition: transform var(--dur-hover) var(--ease-out);
+}
+
+.mini:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (hover: none) {
+  .mini {
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile {
+    animation-duration: var(--dur-hover);
+    animation-name: global(atelier-fade-in);
+  }
+
+  .body {
+    animation-duration: var(--dur-hover);
+  }
+
+  .mini:active {
+    transform: none;
+  }
+}

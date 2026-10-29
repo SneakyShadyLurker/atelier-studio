@@ -1,0 +1,80 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 12px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.hairline {
+  width: 60px;
+  height: 1px;
+  background: var(--line-2);
+  position: relative;
+  overflow: hidden;
+}
+
+.hairline[data-state="loading"]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, var(--ink-3) 50%, transparent 100%);
+  animation: global(atelier-sweep) 1.2s linear infinite;
+}
+
+.sentinel {
+  width: 1px;
+  height: 1px;
+}
+
+.fallbackButton {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  margin: -1px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.fallbackButton:focus-visible,
+.root[data-error="true"] .fallbackButton {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  margin: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.fallbackButton:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hairline[data-state="loading"]::after {
+    animation: none;
+    opacity: 0.5;
+  }
+}

@@ -1,0 +1,164 @@
+/* The app-root stack (and the 'viewport' host inside a native dialog) hangs
+   16px above the Composer, centred over it, through native anchor
+   positioning on the Composer's single name, --atelier-composer
+   (Composer/index.module.css). The 'contained' host is placed inside its
+   panel instead (styles/global.css, PromptPicker). Fixed width and auto
+   margins centre the stack between its insets: on the content column
+   (--content-inset-left = sidebar width, 0 on phone/collapsed; derived in
+   styles/global.css) without an anchor, on the Composer with one.
+   The stack itself never takes the pointer; actionable toasts do. */
+.stack {
+  position: fixed;
+  /* Without anchor positioning: top-centre of the content column, clear of a
+     Composer whose height nothing here measures. */
+  top: calc(16px + env(safe-area-inset-top));
+  left: var(--content-inset-left, 0px);
+  right: 0;
+  width: fit-content;
+  max-width: calc(100% - var(--content-inset-left, 0px) - 24px);
+  margin-inline: auto;
+  z-index: var(--z-toast);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* anchor() takes its fallback when no Composer is mounted: the stack then
+   rests 24px off the bottom of the content column. */
+@supports (anchor-name: --a) and (position-anchor: --a) {
+  .stack:not([data-toast-host='contained']) {
+    position-anchor: --atelier-composer;
+    top: auto;
+    bottom: calc(anchor(top, 8px) + 16px);
+    left: anchor(left, var(--content-inset-left, 0px));
+    right: anchor(right, 0px);
+    max-width: none;
+  }
+}
+
+.toast {
+  background: var(--ink);
+  color: var(--bg);
+  padding: 9px 16px;
+  border-radius: var(--radius-7);
+  font-size: var(--text-xs);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 1;
+  pointer-events: none;
+  /* Tactile spring — the confirmation "lands" with a slight overshoot and
+     settle instead of a plain ease. */
+  animation: toast-in var(--dur-sheet) var(--ease-tactile) both;
+}
+
+.toastActionable {
+  pointer-events: auto;
+}
+
+.action {
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.action:active {
+  transform: scale(0.96);
+}
+
+.action:hover,
+.action:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.action:focus-visible {
+  /* The inherited text color stays visible on success, soft, and error fills. */
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+@media (hover: none) {
+  .action {
+    min-height: 44px;
+  }
+}
+
+/* Store flips `leaving` then unmounts after the same CSS duration. */
+.toast.leaving {
+  animation: toast-out var(--dur-overlay) var(--ease-out) both;
+}
+
+/* Brighter green than --good so the check still pops on the dark toast
+   background. --good is tuned for status-dot legibility against light bg;
+   the toast inverts so we need extra lightness. */
+.toast svg {
+  color: var(--good-on-ink);
+}
+
+.toastError {
+  background: var(--danger);
+  color: var(--bg);
+}
+
+.toastError svg {
+  color: var(--bg);
+}
+
+.toastSoft {
+  background: var(--bg-elev);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.toastSoft svg {
+  color: var(--ink-2);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    transform: none;
+    animation: global(atelier-fade-in) var(--dur-reduced) linear both;
+  }
+
+  .toast.leaving {
+    animation: global(atelier-fade-out) var(--dur-reduced) linear both;
+  }
+
+  .action:active {
+    transform: none;
+  }
+}

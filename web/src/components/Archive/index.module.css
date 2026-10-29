@@ -1,0 +1,249 @@
+.archive {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+  padding: 0 36px;
+}
+
+.contents {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 24px;
+}
+
+.emptyButton {
+  border-radius: var(--radius-3);
+  padding: 5px 10px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), opacity var(--dur-hover) var(--ease-out);
+}
+
+/* Touch capability (not viewport width) mandates the 44px floor — covers iPad
+   landscape and touch laptops at >=768px. Visual size stays compact on pointer
+   devices; only the hit area grows. */
+@media (hover: none) {
+  .emptyButton {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
+
+.virtualGrid {
+  position: relative;
+}
+
+.virtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: grid;
+  gap: var(--grid-gap);
+}
+
+.tile {
+  position: relative;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: zoom-in;
+  transition: transform var(--dur-transform) var(--ease-out), box-shadow var(--dur-transform) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+  animation: global(atelier-tile-in) var(--dur-entrance) var(--ease-out) both;
+}
+
+.media {
+  position: relative;
+}
+
+.tile:hover {
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-2px);
+}
+
+.frame:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+
+.tile:has(.frame:focus-visible) {
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-2);
+}
+
+.tileLeaving {
+  pointer-events: none;
+  animation: global(atelier-shrink-out) var(--dur-sheet) var(--ease-out) both;
+}
+
+.frame {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: var(--bg-sunk);
+  color: inherit;
+  cursor: zoom-in;
+  display: block;
+  position: relative;
+  overflow: hidden;
+  text-align: inherit;
+}
+
+.frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+}
+
+.frame img.imageLoaded {
+  opacity: 1;
+  animation: global(atelier-img-in) var(--dur-reveal) var(--ease-out) both;
+}
+
+.skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, var(--bg-sunk) 25%, var(--bg-elev) 45%, var(--bg-sunk) 65%);
+  transition: opacity var(--dur-hover) var(--ease-out);
+}
+
+.skeletonHidden {
+  opacity: 0;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-overlay) var(--ease-out);
+  background: linear-gradient(180deg, transparent 60%, var(--scrim-tile) 100%);
+}
+
+.tile:hover .overlay,
+.tile:focus-within .overlay {
+  opacity: 1;
+}
+
+.actions {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.identity {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px 11px;
+  cursor: default;
+}
+
+.identity .prompt {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity .prompt > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.meta span,
+.meta time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta time {
+  flex-shrink: 0;
+}
+
+@media (width < 768px) {
+  .archive {
+    padding: 0 14px;
+  }
+
+  .contents {
+    padding-bottom: 20px;
+  }
+
+  .virtualRow {
+    gap: 10px;
+  }
+}
+
+@media (hover: none) {
+  .overlay {
+    opacity: 0.7;
+  }
+
+  .actions {
+    opacity: 1;
+  }
+
+  .tile:active {
+    transform: scale(0.99);
+    transition: transform var(--dur-hover) var(--ease-out);
+  }
+}
+
+@media (hover: none) and (prefers-reduced-motion: reduce) {
+  .tile:active {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile {
+    animation-duration: var(--dur-hover);
+    animation-name: global(atelier-fade-in);
+  }
+
+  .tileLeaving {
+    animation-duration: var(--dur-hover);
+    animation-name: global(atelier-fade-out);
+  }
+
+  .frame img.imageLoaded {
+    animation-duration: var(--dur-hover);
+    animation-name: global(atelier-fade-in);
+    filter: none;
+  }
+
+  .tile:hover {
+    transform: none;
+  }
+}

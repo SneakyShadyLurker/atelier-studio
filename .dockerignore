@@ -1,0 +1,24 @@
+.git
+**/node_modules
+web/dist
+docs
+.tmp
+.worktrees
+.claude
+
+# Secret-bearing files are ignored by Git but still enter a normal Docker
+# build context unless excluded independently. The deploy helper builds from a
+# clean git archive; these patterns also protect direct operator/CI builds.
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.local
+**/*.pem
+**/*.key
+**/*.crt
+**/*.cer
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore

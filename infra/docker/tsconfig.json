@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "/app/api/src/*": ["../../api/src/*"]
+    }
+  },
+  "include": ["rehearse-migrations.ts", "deploy-lock.test.ts", "bun-version.test.ts", "compose.test.ts"]
+}

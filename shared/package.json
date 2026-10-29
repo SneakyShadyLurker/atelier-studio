@@ -1,0 +1,26 @@
+{
+  "name": "@atelier/shared",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sse": "./src/sse.ts",
+    "./prompt-resolver": "./src/promptResolver.types.ts",
+    "./template-tokens": "./src/templateTokens.ts",
+    "./tag-coherence": "./src/tagCoherence.ts",
+    "./ai-fill": "./src/aiFill.ts",
+    "./character-source-text": "./src/characterSourceText.ts",
+    "./brainstorm-prompt": "./src/brainstormPrompt.ts",
+    "./prompt-limits": "./src/promptLimits.ts"
+  },
+  "scripts": {
+    "typecheck": "bun check",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "zod": "4.5.4"
+  }
+}

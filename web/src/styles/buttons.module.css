@@ -1,0 +1,356 @@
+/* Canonical button system. One vocabulary for primary / secondary / danger
+   actions across Composer, dialogs, PromptPicker, PromptManager. Apply via
+   className concatenation. Components add their own additive local class for
+   bespoke bits (e.g. Composer's arrow micro-interaction) at higher
+   specificity, never relying on source order. */
+
+.primary,
+.secondary,
+.danger,
+.ai {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  border-radius: var(--radius-7);
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out),
+    color var(--dur-hover) var(--ease-out),
+    filter var(--dur-hover) var(--ease-out),
+    transform var(--dur-transform) var(--ease-tactile);
+}
+
+.primary {
+  background: var(--ink);
+  color: var(--bg);
+  border: 1px solid var(--ink);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+}
+
+.secondary {
+  background: transparent;
+  color: var(--ink);
+  /* The button's own boundary is what tells a sighted user where the target
+     is; WCAG 1.4.11 wants 3:1 for that, which --line-2 (1.54:1) misses. */
+  border: 1px solid var(--line-control);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--bg-sunk);
+  /* One step past the resting --line-control so the hover border is an actual
+     signal, not a no-op repaint. */
+  border-color: var(--ink-3);
+}
+
+.danger {
+  background: var(--danger);
+  color: var(--bg);
+  border: 1px solid var(--danger);
+}
+
+.danger:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+/* AI-action vocabulary. --accent is reserved for AI actions per project
+   convention; never use it for other interactive states. */
+.ai {
+  background: var(--accent);
+  color: var(--bg);
+  border: 1px solid var(--accent);
+}
+
+.ai:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.primary:active:not(:disabled),
+.secondary:active:not(:disabled),
+.danger:active:not(:disabled),
+.ai:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.primary:focus-visible,
+.secondary:focus-visible,
+.danger:focus-visible,
+.ai:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.primary:focus-visible,
+.ai:focus-visible {
+  outline-offset: 3px;
+}
+
+.primary:disabled,
+.secondary:disabled,
+.danger:disabled,
+.ai:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Square 36×36 icon button — same vocabulary, no text padding. */
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  /* Interactive boundary, not a divider — 3:1 minimum (WCAG 1.4.11). */
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-7);
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out),
+    color var(--dur-hover) var(--ease-out),
+    transform var(--dur-transform) var(--ease-tactile);
+}
+
+.icon:hover:not(:disabled) {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+
+.icon:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.icon:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.iconAction,
+.starBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-4);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out),
+    color var(--dur-hover) var(--ease-out),
+    opacity var(--dur-hover) var(--ease-out),
+    transform var(--dur-transform) var(--ease-tactile);
+}
+
+.iconAction[data-size='22'],
+.starBtn[data-size='22'] {
+  width: 22px;
+  height: 22px;
+}
+
+.iconAction[data-size='26'],
+.starBtn[data-size='26'] {
+  width: 26px;
+  height: 26px;
+}
+
+.iconAction[data-size='28'],
+.starBtn[data-size='28'] {
+  width: 28px;
+  height: 28px;
+}
+
+.iconAction:hover,
+.iconAction:focus-visible,
+.starBtn:hover,
+.starBtn:focus-visible {
+  background: var(--bg-sunk);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.iconAction:focus-visible,
+.starBtn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.iconAction:active,
+.starBtn:active {
+  transform: scale(0.94);
+}
+
+.iconAction svg,
+.starBtn svg {
+  fill: none;
+}
+
+.iconAction[data-in-collection='true'] svg,
+.starBtn[data-pinned='true'] svg {
+  fill: currentColor;
+}
+
+.starBtn[data-pinned='true'] {
+  opacity: 1;
+  color: var(--ink);
+}
+
+.tileAction {
+  width: 26px;
+  height: 26px;
+  background: var(--scrim-control);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-on-dark-12);
+  border-radius: var(--radius-4);
+  color: var(--glass-on-dark-90);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out),
+    color var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out),
+    transform var(--dur-transform) var(--ease-tactile);
+}
+
+.tileAction:hover,
+.tileAction:focus-visible {
+  background: var(--scrim-strong);
+  color: var(--glass-on-dark-100);
+}
+
+.tileAction:focus-visible {
+  outline: 2px solid var(--glass-on-dark-100);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--scrim-strong);
+}
+
+.tileAction:active {
+  transform: scale(0.96);
+}
+
+@media (width < 768px) {
+  .primary,
+  .secondary,
+  .danger,
+  .ai {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary,
+  .secondary,
+  .danger,
+  .ai,
+  .icon,
+  .iconAction,
+  .starBtn,
+  .tileAction {
+    transition: background-color var(--dur-reduced) linear,
+      border-color var(--dur-reduced) linear, color var(--dur-reduced) linear;
+  }
+
+  .primary:active:not(:disabled),
+  .secondary:active:not(:disabled),
+  .danger:active:not(:disabled),
+  .ai:active:not(:disabled),
+  .icon:active:not(:disabled),
+  .iconAction:active,
+  .starBtn:active,
+  .tileAction:active {
+    transform: none;
+  }
+}
+
+@media (hover: none) {
+  /* Touch capability, not viewport width, is what mandates the 44px floor —
+     the width < 768px block above misses iPad landscape and touch laptops. */
+  .primary,
+  .secondary,
+  .danger,
+  .ai {
+    min-height: 44px;
+  }
+
+  /* Match [data-size] specificity so the WCAG 2.5.5 touch floor wins over
+     the .iconAction[data-size='22'/'26'/'28'] variant blocks above. */
+  .iconAction,
+  .iconAction[data-size],
+  .starBtn,
+  .starBtn[data-size] {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* .icon is visually 36×36 on pointer devices; raise to the 44px WCAG
+     2.5.5 floor on touch (it shares the icon-button role with .iconAction). */
+  .icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .tileAction {
+    width: 44px;
+    height: 44px;
+    padding: 10px;
+    background: var(--scrim-tile);
+  }
+
+  .tileAction:active {
+    background: var(--scrim-strong);
+    transform: scale(0.96);
+    transition: transform var(--dur-hover) var(--ease-out);
+  }
+}
+
+@media (hover: none) and (prefers-reduced-motion: reduce) {
+  .tileAction:active {
+    transform: none;
+  }
+}
+
+/* Forced-colors (Windows High Contrast): icon-only buttons signal affordance
+   only through a token background/scrim that the OS strips — give them a
+   system-color border so they remain delineated and hittable. */
+@media (forced-colors: active) {
+  .icon,
+  .iconAction,
+  .starBtn,
+  .tileAction {
+    border: 1px solid ButtonText;
+  }
+
+  .icon:focus-visible,
+  .iconAction:focus-visible,
+  .starBtn:focus-visible,
+  .tileAction:focus-visible {
+    outline-color: Highlight;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .tileAction {
+    background: var(--scrim-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

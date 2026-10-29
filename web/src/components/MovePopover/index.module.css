@@ -1,0 +1,150 @@
+/* Shell (portal root, surface, popover, sheet, backdrop and their motion)
+   lives in styles/menuShell.module.css; only sizes and rows are local. */
+.portalRoot {
+  composes: portalRoot from '../../styles/menuShell.module.css';
+}
+
+.panel {
+  composes: panel from '../../styles/menuShell.module.css';
+}
+
+.popover {
+  composes: popover from '../../styles/menuShell.module.css';
+  --menu-width: 220px;
+}
+
+.content {
+  composes: content from '../../styles/menuShell.module.css';
+}
+
+.sheet {
+  composes: sheet from '../../styles/menuShell.module.css';
+  --sheet-pad: 10px;
+  --sheet-pad-bottom: 18px;
+}
+
+.backdrop {
+  composes: backdrop from '../../styles/menuShell.module.css';
+}
+
+.header {
+  padding: 8px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 0 8px;
+  background: transparent;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.row:active {
+  transform: scale(0.98);
+}
+
+.row:hover,
+.row:focus-visible,
+.row[data-current='true'] {
+  background: var(--bg-sunk);
+}
+
+.row:focus-visible,
+.input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink);
+  animation: global(atelier-check-in) var(--dur-sheet) var(--ease-out) both;
+}
+
+.name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+
+.divider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--line);
+}
+
+.newButton {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.02em;
+}
+
+.input {
+  width: 100%;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0 8px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font-size: var(--text-xs);
+}
+
+@media (hover: none) {
+  /* Touch capability, not viewport width, is what mandates the 44px floor —
+     the width < 768px block below misses iPad landscape and touch laptops. */
+  .row {
+    min-height: 44px;
+  }
+
+  .input {
+    font-size: var(--text-base);
+  }
+}
+
+@media (width < 768px) {
+  .row {
+    min-height: 44px;
+  }
+
+  .input {
+    font-size: var(--text-base);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row:active {
+    transform: none;
+  }
+
+  .check {
+    animation-duration: var(--dur-reduced);
+    transform: none;
+  }
+}

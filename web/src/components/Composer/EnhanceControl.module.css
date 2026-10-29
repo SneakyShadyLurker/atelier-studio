@@ -1,0 +1,130 @@
+.seg {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+  transition: border-color var(--dur-hover) var(--ease-out);
+}
+
+.segActive {
+  border-color: var(--line-2);
+}
+
+.seg .enhance,
+.seg .revert {
+  gap: 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.seg .enhance:active:not(:disabled),
+.seg .revert:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* Flat segment rendering of the btn.ai vocabulary: accent ink + sparkle
+   instead of the filled accent pill, so the segmented control keeps its
+   chrome while the "accent = AI call" cue still reads. */
+.seg .enhance {
+  min-width: 104px;
+  justify-content: flex-start;
+  color: var(--accent);
+}
+
+.enhance svg,
+.revert svg {
+  color: var(--ink-3);
+  flex: 0 0 auto;
+}
+
+.seg .enhance svg {
+  color: var(--accent);
+}
+
+.seg .enhance:hover:not(:disabled) {
+  background: var(--accent-soft);
+  filter: none;
+}
+
+.revert:hover:not(:disabled) svg {
+  color: var(--ink);
+}
+
+.enhance:focus-visible,
+.revert:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.sep {
+  width: 1px;
+  background: var(--line);
+  align-self: stretch;
+  flex: 0 0 auto;
+}
+
+.revert {
+  padding: 6px 9px;
+  color: var(--ink-3);
+}
+
+.revert:not(:disabled) {
+  color: var(--ink);
+}
+
+.revert:not(:disabled) svg {
+  color: var(--ink);
+}
+
+@media (width < 768px) {
+  .seg .enhance,
+  .seg .revert {
+    min-height: 44px;
+  }
+
+  .seg .enhance {
+    min-width: 0;
+    padding: 0 14px;
+  }
+
+  .seg .revert {
+    padding: 0 14px;
+  }
+
+  .enhanceLabel {
+    display: none;
+  }
+}
+
+@media (any-pointer: coarse) {
+  /* Touch floor for iPad, which keeps the desktop label above 767px but is
+     still touch. Height only — the label stays visible (width-gated below). */
+  .seg .enhance,
+  .seg .revert {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seg,
+  .enhance,
+  .revert {
+    transition-duration: var(--dur-reduced);
+  }
+
+  .seg .enhance:active:not(:disabled),
+  .seg .revert:active:not(:disabled) {
+    transform: none;
+  }
+}

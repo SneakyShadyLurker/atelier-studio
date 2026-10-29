@@ -1,0 +1,184 @@
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  height: 100%;
+  background: var(--bg);
+}
+
+/* Skip-link — only visible when keyboard-focused. Lets users jump past the
+   sidebar's flat list of history items (which can be 50+ tab stops) directly
+   to the composer. Standard WCAG 2.4.1 pattern. */
+.skipLink {
+  position: absolute;
+  top: 8px;
+  left: -1000px;
+  width: auto;
+  height: auto;
+  padding: 8px 14px;
+  background: var(--ink);
+  color: var(--bg);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  z-index: calc(var(--z-toast) + 1);
+}
+
+.skipLink:focus-visible {
+  left: 8px;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.main {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 0;
+  position: relative;
+}
+
+.viewSwap {
+  min-height: 0;
+  overflow: hidden;
+  transition: opacity var(--dur-hover) var(--ease-out);
+  /* backwards, not both: a forwards fill would pin opacity at 1 and mask the
+     pending/stale dim below. */
+  animation: global(atelier-rise-in) var(--dur-overlay) var(--ease-out) backwards;
+}
+
+.app[data-view-pending='true'] .viewSwap,
+.viewSwap[data-stale='true'] {
+  opacity: 0.82;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewSwap {
+    transition: none;
+    animation: none;
+  }
+}
+
+.backdrop {
+  display: none;
+}
+
+.hamburger {
+  display: none;
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  left: calc(8px + env(safe-area-inset-left));
+  width: 44px;
+  height: 44px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  align-items: center;
+  justify-content: center;
+  /* Just below the composer plane so the dock overlays the hamburger. */
+  z-index: calc(var(--z-composer) - 1);
+}
+
+.hamburger:hover,
+.hamburger:active {
+  background: var(--bg-sunk);
+}
+
+.hamburger:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (width < 768px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .viewSwap {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .hamburger {
+    display: inline-flex;
+  }
+
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: var(--scrim-tile);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    border: 0;
+    padding: 0;
+    z-index: calc(var(--z-drawer) - 1);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-sheet) var(--ease-out);
+  }
+
+  .backdrop[data-open='true'] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (width >= 768px) {
+  .app > aside {
+    width: var(--sidebar-width);
+    transition: transform var(--dur-overlay) var(--ease-out);
+  }
+
+  .app[data-sidebar-collapsed='true'] {
+    --sidebar-width: 0px;
+    grid-template-columns: 0 1fr;
+  }
+
+  .app[data-sidebar-collapsed='true'] > aside {
+    transform: translateX(-100%);
+  }
+
+  .app[data-sidebar-collapsed='true'] .hamburger {
+    display: inline-flex;
+  }
+}
+
+@media (width >= 768px) and (prefers-reduced-motion: reduce) {
+  .app > aside {
+    transition: none;
+  }
+}
+
+@media (width < 768px) and (prefers-reduced-motion: reduce) {
+  .backdrop {
+    transition: opacity var(--dur-reduced) linear;
+  }
+}
+
+.composerScrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim-soft);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  border: 0;
+  padding: 0;
+  z-index: calc(var(--z-composer) - 1);
+  animation: global(atelier-fade-in) var(--dur-overlay) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composerScrim { animation-duration: var(--dur-reduced); }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .backdrop {
+    background: var(--scrim-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

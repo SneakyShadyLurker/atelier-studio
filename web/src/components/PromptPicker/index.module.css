@@ -1,0 +1,1308 @@
+.panel {
+  /* min-height BEATS max-height in CSS, so this floor silently overrode the
+     sheet's ceiling on a landscape phone and took 96% of the screen. Floor and
+     ceiling are now expressed against the same "leave a strip of backdrop"
+     rule (see the short-viewport block), so they can no longer disagree. */
+  min-height: min(380px, calc(100dvh - 32px));
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-popover);
+}
+
+/* Feedback is a row inside the trapped picker, so Undo never covers its
+   commit buttons. The scroll body yields space at the panel's height limit.
+   Empty live regions are positioned out of flow and reserve no space. */
+.panel > div[data-toast-host='contained'] {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.panel > div[data-toast-host='contained']:has(> :not([aria-live])) {
+  margin: 0 12px 12px;
+}
+
+.popover {
+  position: fixed;
+  /* Centre over the content column, not the raw viewport: --content-inset-left
+     is the sidebar's effective width (0 when collapsed/phone), published to
+     :root by styles/global.css. Auto margins between that inset and the right
+     edge put the centre at calc(50% + var(--content-inset-left, 0px) / 2):
+     plain layout, which also centres inside the anchored area below. Width is
+     bounded by the same column so the panel never overhangs the sidebar on a
+     narrow content area (iPad portrait). */
+  left: var(--content-inset-left, 0px);
+  right: 0;
+  margin-inline: auto;
+  /* Without anchor positioning: centred in the window with 24px clearance and
+     scrolling inside. Nothing here reads the Composer's measured height. */
+  top: 0;
+  bottom: 0;
+  margin-block: auto;
+  height: fit-content;
+  width: min(720px, calc(100vw - var(--content-inset-left, 0px) - 48px));
+  max-height: min(680px, calc(100dvh - 48px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  animation: picker-in var(--dur-overlay) var(--ease-out) both;
+}
+
+/* Native anchor positioning: the picker's bottom sits 10px above the
+   Composer (`--atelier-composer`, Composer/index.module.css) and its height
+   budget is the space above it less 24px of top clearance, both resolved by
+   the browser as the Composer grows, wraps or moves. Horizontal centring stays
+   on the content column above. Without a mounted Composer the area does not
+   apply and the panel rests 10px off the viewport bottom. */
+@supports (anchor-name: --a) and (position-area: top) {
+  .popover {
+    position-anchor: --atelier-composer;
+    position-area: top span-all;
+    top: auto;
+    margin-block: 0 10px;
+    height: auto;
+    max-height: min(680px, calc(100% - 34px));
+  }
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .popover {
+    background: var(--glass-surface);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .popover {
+    background: var(--bg-elev);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+.sheet {
+  composes: sheet from '../../styles/sheet.module.css';
+  --sheet-max-h: 72dvh;
+  --sheet-border: var(--line-2);
+  display: flex;
+  flex-direction: column;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  z-index: var(--z-popover);
+  animation: global(atelier-fade-in) var(--dur-overlay) var(--ease-out) both;
+}
+
+.header {
+  flex: 0 0 auto;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Editorial display moment — matches StateView / dialog titles. */
+.header h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: var(--text-xl);
+  font-weight: 400;
+  letter-spacing: 0.005em;
+  line-height: 1.2;
+}
+
+.header p {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.backLink:hover {
+  color: var(--ink);
+}
+
+.backLink:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pill,
+.templateButton {
+  font: inherit;
+}
+
+.templatePhase,
+.refinePhase {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.brainstormPhase {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.brainstormForm {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brainstormForm label {
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+
+.brainstormBrief {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.brainstormBrief:focus-visible,
+.brainstormControls input[type='number']:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.brainstormControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.brainstormControls input[type='number'] {
+  width: 68px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 0 8px;
+  font: inherit;
+}
+
+.optional {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.templateEntry {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.brainstormPin {
+  padding: 10px 14px 0;
+}
+
+.brainstormPin > button {
+  width: 100%;
+  justify-content: center;
+}
+
+.searchRow {
+  flex: 0 0 auto;
+  padding: 12px 14px;
+}
+
+.scrollBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  mask-image: var(--scroll-fade-mask);
+}
+
+.scrollBody > *:first-child {
+  margin-top: 0;
+}
+
+.refineFoot {
+  flex: 0 0 auto;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+}
+
+.skeletonList {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeletonRow {
+  height: 44px;
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, var(--bg) 25%, var(--bg-sunk) 37%, var(--bg) 63%);
+  background-size: 400% 100%;
+  animation: brainstorm-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes brainstorm-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonRow {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+.searchInput {
+  width: 100%;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0 10px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+
+.searchInput:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.templateList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.templateVirtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding-bottom: 6px;
+}
+
+.templateButton {
+  width: 100%;
+  min-height: 54px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  background: var(--bg);
+  color: var(--ink);
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.templateButton:hover,
+.templateButton:focus-visible {
+  background: var(--bg-sunk);
+  border-color: var(--line-2);
+}
+
+.templateButton:active {
+  transform: scale(0.99);
+}
+
+.templateButton:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.templateButton span {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.templateButton code {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.hint svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.axes {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.axisItem {
+  display: block;
+}
+
+.subjectDivider {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  padding: 0;
+  margin: 0;
+  user-select: none;
+}
+
+.axis {
+  display: grid;
+  gap: 8px;
+}
+
+.sweepToggle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  cursor: pointer;
+  margin-left: auto;
+}
+.sweepToggle:hover,
+.sweepToggle:focus-visible { color: var(--ink); }
+.sweepToggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.sweepToggle[aria-pressed='true'] { color: var(--ink); }
+
+.axisSweepActive {
+  border-left: 2px solid var(--ink);
+  padding-left: 10px;
+}
+
+.sweepHint {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+  margin: 4px 0 0;
+}
+
+.axisHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.axisHead h3 {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.axisHead span {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pillRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0 12px;
+  background: var(--bg);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.pill:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.pill:hover:not(:disabled),
+.pill:focus-visible {
+  background: var(--bg-sunk);
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.pill:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pillActive {
+  border-color: var(--ink);
+  background: var(--bg-sunk);
+  color: var(--ink);
+}
+
+.pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.warnings {
+  margin-top: 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+.warnings p {
+  margin: 0;
+}
+
+.warnings p + p {
+  margin-top: 4px;
+}
+
+.previewBlock {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sunk);
+  overflow: hidden;
+}
+
+/* Positioning context for the copy button — scoped to the text region (below
+   the meta bar) so the button anchors top-right of the prompt, not the block. */
+.previewBody {
+  position: relative;
+}
+
+/* Simulate progress: a bright accent beam sweeps top-to-bottom across the whole
+   preview while the fill resolves (~3-13s) — a clear "AI is composing the prompt"
+   cue layered over the per-chip shimmer. Decorative (aria-hidden); the meta note
+   carries the textual status. transform/opacity only (no layout thrash). */
+.scanOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.scanBeam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 36%;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in oklch, var(--accent) 6%, transparent) 55%,
+    color-mix(in oklch, var(--accent) 20%, transparent) 90%,
+    color-mix(in oklch, var(--accent) 64%, transparent) 100%
+  );
+  border-bottom: 1px solid color-mix(in oklch, var(--accent) 72%, transparent);
+  box-shadow: 0 1px 12px 0 color-mix(in oklch, var(--accent) 42%, transparent);
+  will-change: transform, opacity;
+  animation: previewScan 1.9s ease-in-out infinite;
+}
+
+@keyframes previewScan {
+  0% { transform: translateY(-100%); opacity: 0; }
+  14% { opacity: 1; }
+  86% { opacity: 1; }
+  100% { transform: translateY(270%); opacity: 0; }
+}
+
+/* Floats over the top-right of the resolved prompt, just under the meta bar, so
+   it stays visible without scrolling on long prompts. Resting fill + border keep
+   it legible above prompt text; only rendered in the 'resolved' state. */
+.copyButton {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 1;
+  background: var(--bg-elev);
+  border-color: var(--line);
+  box-shadow: var(--shadow-1);
+  animation: global(atelier-fade-in) var(--dur-reveal) var(--ease-out);
+}
+
+.previewMeta {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.meterDanger {
+  color: var(--danger);
+}
+
+.preview {
+  margin: 0;
+  min-height: 96px;
+  padding: 12px;
+  white-space: pre-wrap;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+/* The preview is click-focusable (tabIndex -1) so Cmd/Ctrl+A can scope its
+   selection; suppress the outline on pointer focus, keep it for keyboard. */
+.preview:focus {
+  outline: none;
+}
+
+.preview:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.aiFillChip {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 0 4px;
+  border-radius: var(--radius-4);
+  background: var(--accent-soft);
+  color: var(--accent);
+  white-space: nowrap;
+  isolation: isolate;
+}
+
+/* Resolving state: only the AI-fill chips are actually being computed, so the
+   life lives here. A soft accent light "scan" sweeps across the chip while its
+   text blur-breathes and the sparkle twinkles — an inline "thinking" cue. */
+.aiFillChip[data-resolving]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    transparent 28%,
+    color-mix(in oklch, var(--accent) 26%, transparent) 50%,
+    transparent 72%
+  );
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  animation: aiFillSweep 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.aiFillChip[data-resolving] .aiFillChipText {
+  animation: aiFillBreathe 1.8s ease-in-out infinite;
+}
+
+.aiFillChip[data-resolving] .aiFillSparkle {
+  animation: aiFillTwinkle 2.2s ease-in-out infinite;
+}
+
+@keyframes aiFillSweep {
+  0% { background-position: 180% 0; }
+  100% { background-position: -60% 0; }
+}
+
+@keyframes aiFillBreathe {
+  0%, 100% { filter: blur(0.4px); opacity: 0.6; }
+  50% { filter: blur(0); opacity: 1; }
+}
+
+@keyframes aiFillTwinkle {
+  0%, 100% { transform: rotate(0deg) scale(1); opacity: 0.65; }
+  50% { transform: rotate(90deg) scale(1.18); opacity: 1; }
+}
+
+/* The payoff: when the resolved prompt lands, it de-blurs into focus. */
+.preview[data-state='resolved'] {
+  animation: aiFillReveal var(--dur-reveal) var(--ease-out);
+}
+
+@keyframes aiFillReveal {
+  from { filter: blur(3px); opacity: 0.45; }
+  to { filter: blur(0); opacity: 1; }
+}
+
+.aiFillNote {
+  color: var(--accent);
+}
+
+.aiFillNotePulse {
+  animation: aiFillNotePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes aiFillNotePulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aiFillChip[data-resolving]::after { animation: none; opacity: 0; }
+  .aiFillChip[data-resolving] .aiFillChipText { animation: none; filter: none; opacity: 0.6; }
+  .aiFillChip[data-resolving] .aiFillSparkle { animation: none; opacity: 0.7; }
+  .preview[data-state='resolved'] { animation: none; }
+  .aiFillNotePulse { animation: none; }
+  /* Static accent rule at the top instead of a sweeping beam. */
+  .scanBeam { animation: none; top: 0; height: 2px; opacity: 0.8; }
+  .copyButton { animation: none; }
+}
+
+/* Instrument strip — a readout and its two controls, never wrapping. The
+   readout takes the slack and ellipsizes; the icons hold fixed positions so the
+   re-roll target never moves. */
+.instrument {
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-height: 36px;
+}
+
+.instrumentActions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The second selector is not redundant: the canonical `.icon:hover` is
+   (0,0,3,0) and would otherwise repaint a PRESSED lock back to the unpressed
+   border, erasing the only state the control carries now that it has no text
+   label. */
+.instrumentButton[aria-pressed='true'],
+.instrumentButton[aria-pressed='true']:hover:not(:disabled) {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* A solid shackle body is the state carrier hover cannot repaint — the
+   .starBtn[data-pinned] precedent. Scoped to the rect so the shackle's open
+   arc stays an outline instead of filling into a blob. */
+.instrumentButton[aria-pressed='true'] svg rect {
+  fill: currentColor;
+}
+
+/* Commit bar — the actions that dispose of the sheet. Stash sits left, apart
+   from the two that close it. */
+.footer {
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stashControl {
+  margin-right: auto;
+}
+
+.seed {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* The dice tumbles once per press and RETURNS. It used to be a transition to a
+   resting `rotate(18deg) scale(1.08)` gated on a monotone counter that never
+   reset, so the glyph tipped over on the first roll and stayed tipped for the
+   rest of the session. A one-shot animation ends where it started; the React
+   key on the glyph is what replays it. */
+/* Scoped to the dice BUTTON, not every instrument glyph — `.instrumentButton
+   svg` also matched the lock, tumbling it on every mount. `data-rolled` is
+   absent until the first roll, so nothing animates on open either. */
+.instrumentButton[data-rolled='true'] svg {
+  animation: dice-roll var(--dur-transform) var(--ease-out);
+}
+
+@keyframes dice-roll {
+  from { transform: rotate(-14deg) scale(1.06); }
+  to { transform: rotate(0) scale(1); }
+}
+
+.axisTrigger {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0 10px 0 12px;
+  background: var(--bg);
+  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.axisTrigger:active {
+  transform: scale(0.98);
+}
+
+.axisTrigger:hover,
+.axisTrigger:focus-visible {
+  background: var(--bg-sunk);
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.axisTrigger:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.axisTrigger[data-selected='true'] {
+  border-color: var(--ink);
+  background: var(--bg-sunk);
+  color: var(--ink);
+}
+
+.axisTrigger svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.axisTriggerValue {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.axisTriggerValue[data-placeholder='true'] {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.menuPanel {
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+}
+
+/* A top-layer popover placed by native anchor positioning
+   (styles/anchors.module.css). */
+.menuPopover {
+  --anchor-height-limit: min(340px, 60dvh);
+  width: 240px;
+  max-height: var(--anchor-height-limit);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px;
+  animation: global(atelier-popover-in) var(--dur-overlay) var(--ease-out) both;
+}
+
+.menuSheet {
+  composes: sheet from '../../styles/sheet.module.css';
+  --sheet-max-h: 64dvh;
+  --sheet-pad: 10px;
+  --sheet-pad-bottom: 18px;
+}
+
+.menuBackdrop {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  z-index: var(--z-popover);
+  animation: global(atelier-fade-in) var(--dur-overlay) var(--ease-out) both;
+}
+
+.menuHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 4px 6px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.menuClose {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.menuClose:hover,
+.menuClose:focus-visible {
+  background: var(--bg-sunk);
+  color: var(--ink);
+}
+
+.menuClose:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.menuFilter {
+  width: 100%;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0 9px;
+  margin-bottom: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+
+.menuFilter:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.menuList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+}
+
+.menuRow {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.menuRow:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.menuRow svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.menuRow:hover:not(:disabled),
+.menuRow:focus-visible {
+  background: var(--bg-sunk);
+  color: var(--ink);
+}
+
+.menuRow:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+.menuRowActive {
+  border-color: var(--ink);
+  background: var(--bg-sunk);
+  color: var(--ink);
+}
+
+.menuRowActive svg {
+  color: var(--ink);
+}
+
+.menuRow:disabled {
+  cursor: not-allowed;
+  color: var(--ink-3);
+}
+
+.menuName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.menuCheck {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink);
+  animation: global(atelier-check-in) var(--dur-transform) var(--ease-out) both;
+}
+
+.menuReason {
+  flex: none;
+  max-width: 45%;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-3);
+  padding: 3px 6px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuEmpty {
+  padding: 14px 8px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+@keyframes picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Designed leave (useExitTransition stamps data-closing for --dur-overlay).
+   The popover is centred by its margins, so its transform is motion only. */
+.popover[data-closing='true'] {
+  animation: picker-out var(--dur-overlay) var(--ease-out) both;
+  pointer-events: none;
+}
+
+.backdrop[data-closing='true'] {
+  animation: global(atelier-fade-out) var(--dur-overlay) var(--ease-out) both;
+  pointer-events: none;
+}
+
+@keyframes picker-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+}
+
+@media (width < 768px), (max-height: 620px) {
+  .searchRow,
+  .refineFoot {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .scrollBody {
+    padding: 12px 10px 18px;
+    mask-image: none;
+  }
+
+  .searchInput {
+    height: 44px;
+    font-size: var(--text-base);
+  }
+
+  .menuClose {
+    width: 44px;
+    height: 44px;
+  }
+
+  .advancedToggle {
+    min-height: 44px;
+    padding: 0 4px;
+  }
+
+  .popover,
+  .sheet {
+    width: auto;
+  }
+
+  /* The instrument icons take the 44px touch floor from buttons.module.css, so
+     the strip is 44px here rather than 36px. */
+  .instrument {
+    min-height: 44px;
+  }
+
+  /* A landscape phone is ~375pt tall: 72dvh of that is 270px, and once the
+     header and commit bar are paid for there is nothing left to read through.
+     A short viewport gets a taller sheet — still short of the top edge, so a
+     strip of backdrop keeps it reading as a sheet rather than a takeover. */
+  @media (max-height: 620px) {
+    .sheet {
+      --sheet-max-h: calc(100dvh - 32px);
+    }
+  }
+
+  /* The primary absorbs the row's slack, so it is always the widest target in
+     the footer — at speed, size is the tap heuristic, and Stash & roll used to
+     out-measure it. */
+  .footer .primaryControl {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .axisTrigger {
+    min-height: 48px;
+  }
+
+  .menuFilter {
+    height: 44px;
+    font-size: var(--text-base);
+  }
+
+  .menuRow {
+    min-height: 44px;
+  }
+}
+
+@media (any-pointer: coarse) {
+  /* Touch capability, not viewport width, gates these: iPad (>767px) keeps the
+     desktop popover but is still touch, so the phone block above misses it. 16px
+     font stops iOS Safari zooming on focus; 44px height meets the touch floor.
+     `any-pointer: coarse` (not `hover: none`) so iPad LANDSCAPE — which reports
+     hover:hover at 1024px with a keyboard — is still covered, mirroring the
+     composer .refChip rationale. */
+  .brainstormBrief {
+    font-size: var(--text-base);
+  }
+
+  .brainstormControls input[type='number'] {
+    height: 44px;
+    font-size: var(--text-base);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popover,
+  .backdrop,
+  .menuPopover,
+  .menuBackdrop {
+    animation-duration: var(--dur-reduced);
+    animation-timing-function: linear;
+    /* Swap the slide/scale entrances for an opacity-only fade. Each element then
+       rests at its base transform (none: the popover is centred by its
+       margins), so we get the spec's "80ms opacity fade only". The sheets get
+       the same fade from styles/sheet.module.css. */
+    animation-name: global(atelier-fade-in);
+  }
+
+  /* Full shorthand — the non-RM exit rules share this specificity, so the
+     longhand duration/timing from the group rule above would lose to them. */
+  .popover[data-closing='true'],
+  .backdrop[data-closing='true'] {
+    animation: global(atelier-fade-out) var(--dur-reduced) linear both;
+  }
+
+  .templateButton:active,
+  .pill:active:not(:disabled),
+  .axisTrigger:active,
+  .menuRow:active:not(:disabled) {
+    transform: none;
+  }
+
+  .instrumentButton[data-rolled='true'] svg {
+    animation: none;
+  }
+
+  .menuCheck {
+    animation-duration: var(--dur-reduced);
+    transform: none;
+  }
+}
+
+.advanced {
+  margin-top: 12px;
+}
+
+.advancedToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.advancedToggle:hover,
+.advancedToggle:focus-visible {
+  color: var(--ink);
+}
+
+.advancedToggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.advancedCaret {
+  transition: transform var(--dur-overlay) var(--ease-out);
+}
+
+.advancedToggle[aria-expanded='true'] .advancedCaret {
+  transform: rotate(-180deg);
+}
+
+.advancedPanel {
+  margin-top: 10px;
+  animation: global(atelier-drop-in) var(--dur-overlay) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .advancedPanel {
+    animation-duration: var(--dur-reduced);
+    animation-timing-function: linear;
+    animation-name: global(atelier-fade-in);
+  }
+}

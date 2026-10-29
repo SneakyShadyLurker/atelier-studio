@@ -1,0 +1,83 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.feedHeader {
+  flex: 0 0 auto;
+  min-height: var(--app-header-h);
+  padding: 0 36px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.feedHeaderLabel {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.canvas {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 36px calc(var(--composer-top, 156px) + 24px);
+  container-type: inline-size;
+  container-name: feed;
+  /* TanStack Virtual's canonical Dynamic example sets both — without
+     `overflow-anchor: none` the browser auto-adjusts scrollTop when content
+     prepends above the viewport, which yanks the spring animation, and
+     TanStack's own measureElement size-correction does the same. With
+     `contain: strict` the browser isolates this scroller's layout/paint so
+     virtualized rows can't bleed into the parent reflow. */
+  overflow-anchor: none;
+  contain: strict;
+}
+
+.virtualFeed {
+  position: relative;
+}
+
+/* The fixed 44px sidebar-expand button sits over the feed's top-left corner
+   when the sidebar is collapsed. Reserve its band on the shell, outside the
+   scroller, so scrolled content never passes under it. */
+@media (width >= 768px) {
+  :global([data-sidebar-collapsed='true']) .shell {
+    padding-top: 60px;
+  }
+}
+
+.virtualBatch {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+@media (width < 768px) {
+  .feedHeader {
+    padding: 0 14px 0 60px;
+  }
+
+  .canvas {
+    padding: 14px 14px calc(var(--composer-top, 140px) + 20px);
+  }
+}
+
+/* The feed reads oldest → newest, and `anchorTo: 'end'` + `scrollToEnd` keep the
+   newest batch against the composer as soon as it overflows. A feed too short to
+   scroll starts at the TOP of the canvas: floating a lone batch in the middle of
+   an empty column reads as a layout fault, and it would jump back up the moment a
+   second batch made the column overflow. */
+.feedColumn {
+  display: flex;
+  flex-direction: column;
+}

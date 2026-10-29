@@ -1,0 +1,18 @@
+/* The card every feed tile sits in (loading, failed, finished), so the three
+   states share one footprint, entrance and border. Composed by each tile's
+   `.tile`; state-specific cursor and hover stay with the tile. */
+.shell {
+  position: relative;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: transform var(--dur-transform) var(--ease-out), box-shadow var(--dur-transform) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+  animation: global(atelier-tile-in) var(--dur-entrance) var(--ease-out) both;
+  width: min(100%, calc(var(--tile-cap) * var(--tile-ratio-num, 1)));
+  margin-inline: auto;
+}
+
+.shell[data-seen='true'] {
+  animation: none;
+}

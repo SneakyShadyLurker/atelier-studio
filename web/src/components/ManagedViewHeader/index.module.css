@@ -1,0 +1,113 @@
+.header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  min-height: var(--app-header-h);
+  margin: 0 0 14px;
+  padding: 8px 0;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--line);
+}
+
+.label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.backButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-left: -4px;
+  padding: 4px 8px 4px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  transition: color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.backButton:hover {
+  color: var(--ink);
+}
+
+.backButton:active {
+  transform: scale(0.97);
+}
+
+.backButton:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-4);
+}
+
+.backIcon {
+  display: inline-flex;
+  transform: scaleX(-1);
+  transition: transform var(--dur-transform) var(--ease-out);
+}
+
+.backButton:hover .backIcon {
+  transform: scaleX(-1) translateX(2px);
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  gap: 10px;
+}
+
+@media (width >= 768px) {
+  :global([data-sidebar-collapsed='true']) .header {
+    padding-left: 52px;
+  }
+}
+
+@media (width < 768px) {
+  .backButton {
+    min-height: 44px;
+  }
+
+  .header {
+    flex-wrap: wrap;
+    padding-left: 46px;
+  }
+
+  .actions {
+    flex-basis: 100%;
+    margin-top: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backIcon {
+    transition: none;
+  }
+
+  .backButton:hover .backIcon {
+    transform: scaleX(-1);
+  }
+
+  .backButton:active {
+    transform: none;
+  }
+}

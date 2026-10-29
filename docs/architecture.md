@@ -555,15 +555,32 @@ No metrics or tracing in v1. `docker compose logs atelier-api` is the troublesho
 
 ## Configuration
 
-`api/src/config.ts` — single Zod schema for all env vars, parsed once at boot, frozen.
+`api/src/config.ts` is the Zod schema for API environment variables, parsed once
+at boot and frozen. Compose also uses host-side settings such as `DATA_DIR` and
+`SWAG_EXTERNAL_NETWORK`; see [Deployment](deployment.md#3-configure-the-environment).
 
 Required (boot fails with the missing-var name on `process.exit(1)`):
 - `CLIPROXY_BASE_URL`, `CLIPROXY_TOKEN`
 - `DATA_DIR`
-- Production only: `TRUSTED_PROXY_KEY` (at least 32 chars, non-placeholder), `BYOK_ENCRYPTION_KEY` (64 hex chars / 32 bytes)
+- Production only: `TRUSTED_PROXY_KEY` (at least 32 chars, non-placeholder),
+  `BYOK_ENCRYPTION_KEY` (64 hex chars / 32 bytes), and `STORAGE_ROOT_RECIPIENT`
+  (the public age recipient bound to the initialized data volume). Production
+  also requires the `.atelier-data-volume` marker before the database is opened;
+  [initialize storage](deployment.md#creating-the-data-volume) before first boot.
 
 Optional (with defaults):
-- `COMFYUI_BASE_URL` (default unset) - registers every local model on the direct ComfyUI host, the only local host; unset means no local rows. Boot rejects `VIDEO_MODELS_ENABLED=true` without this URL.
+- `OPENROUTER_API_KEY` (default unset) - required for GPT requests to pass the
+  input-moderation check, not for boot or local/Gemini image generation.
+- `COMFYUI_BASE_URL` (default unset) - registers enabled local model rows on the
+  configured worker; unset means no local rows. Boot rejects
+  `VIDEO_MODELS_ENABLED=true` without this URL.
+- `COMFYUI_ATELIER_TOKEN`, `COMFYUI_ATELIER_CA` (default unset) - authenticated
+  TLS worker credentials and pinned public certificate. Local readiness fails
+  without them when a worker URL is set. See [worker setup](../infra/comfyui/README.md).
+- `STORAGE_ROOT_RECIPIENT` - required in production; when unset outside
+  production, creates a persistent local development identity and auto-unseals.
+- `STORAGE_UNSEAL_SOCKET` - optional socket path override; production defaults to
+  `/run/atelier/unseal.sock`. No socket starts by default in development.
 - `COMFYUI_MODELS_DIR` (default unset) - directory of local model manifests; boot rejects a value that is not a readable directory.
 - `COMFYUI_ENABLE_MODELS` (default empty) - comma-separated local model ids to register despite `"enabled": false` (the bundled MiniMax H3 templates ship disabled; [local-models.md](local-models.md)).
 - `PROMPT_LIBRARY_USERS` (default empty) - comma-separated `Remote-User` allowlist for the Prompt Library; empty disables it for everyone.

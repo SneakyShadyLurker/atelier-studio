@@ -602,14 +602,13 @@ const migration56Sql = loadMigration('0056_user_model_steps.sql');
 // Wraps migration 19 with a conditional `tile_ref_images` rebuild and the
 // SQLite-recommended foreign-key dance for ALTER-table-style rebuilds.
 //
-// **Critical landmine — adversarial 2026-05-26**: with `foreign_keys=ON`
+// **Critical landmine**: with `foreign_keys=ON`
 // (set by applyPragmas), the SQL inside `0019_tiles_error_check.sql` ran
 // `DROP TABLE tiles_old`, which fires `ON DELETE CASCADE` on every
 // `tile_ref_images.tile_id` row (still referencing `tiles_old` after the
 // rename). All ref-image provenance silently vanished BEFORE the
 // conditional `tile_ref_images` rebuild below could re-point the FK at the
-// new `tiles` table. Reproduced empirically on an in-memory bun:sqlite by
-// both adversarial reviewers.
+// new `tiles` table. Reproduced empirically on an in-memory bun:sqlite.
 //
 // Per SQLite docs §4.6 ("Making Other Kinds Of Table Schema Changes"), the
 // canonical recipe for a table rebuild that preserves FK-referenced data

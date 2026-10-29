@@ -3,7 +3,7 @@
 -- code path leaking a raw provider string would silently land in the DB and
 -- replay through the SSE wire — the storage layer is the last fence.
 --
--- 'client disconnected' is intentionally retained: per CLAUDE.md it is a legacy
+-- 'client disconnected' is intentionally retained: it is a legacy
 -- TileErrorCategory still carried by pre-v3 rows that the FailedTile component
 -- renders with a distinct "connection dropped" copy. Dropping it from the CHECK
 -- would refuse to load (and refuse new INSERTs that re-quote it) for those

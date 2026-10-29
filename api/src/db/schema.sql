@@ -260,7 +260,7 @@ CREATE UNIQUE INDEX idx_users_cache_scope
 -- below. batches has a TEXT primary key, so its hidden rowid is mutable: a
 -- VACUUM renumbers it and silently desyncs this index (search/delete then hit
 -- the wrong batch). A plain FTS5 'rebuild' does NOT re-key it. After any VACUUM,
--- re-sync per docs/runbook.md (DELETE + INSERT…SELECT rowid FROM batches).
+-- re-sync per docs/deployment.md § WAL grows unexpectedly (DELETE + INSERT…SELECT rowid FROM batches).
 CREATE VIRTUAL TABLE batch_prompt_fts USING fts5(
   user_id UNINDEXED,
   batch_id UNINDEXED,

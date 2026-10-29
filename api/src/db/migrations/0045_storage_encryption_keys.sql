@@ -1,4 +1,4 @@
--- Per-user at-rest artifact encryption (docs/runbook.md § Artifact encryption).
+-- Per-user at-rest artifact encryption (docs/deployment.md § Artifact encryption).
 -- storage_root binds this database to one root recipient; user_storage_keys
 -- holds each user's age recipient and their identity encrypted to that root.
 CREATE TABLE IF NOT EXISTS storage_root (

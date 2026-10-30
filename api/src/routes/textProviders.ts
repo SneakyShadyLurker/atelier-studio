@@ -215,7 +215,7 @@ export const textProvidersRoutes = new Hono<AppEnv>()
   .post('/text-providers/test', async (c) => {
     const parsed = await parseBody(c, TextProviderDraftTestBody);
     if (!parsed.ok) return parsed.response;
-    const { protocol, baseUrl, apiKey, listModels, probeModelId } = parsed.value;
+    const { protocol, baseUrl, apiKey, tokenField, listModels, probeModelId } = parsed.value;
     const now = Date.now();
     const draft: ResolvedProvider = {
       id: 'draft',
@@ -224,7 +224,7 @@ export const textProvidersRoutes = new Hono<AppEnv>()
       baseUrl,
       preset: null,
       auth: apiKey === undefined ? 'none' : 'stored',
-      tokenField: 'max_completion_tokens',
+      tokenField: tokenField ?? 'max_completion_tokens',
       listModels: listModels ?? true,
       enabled: true,
       createdAt: now,
@@ -266,6 +266,18 @@ export const textProvidersRoutes = new Hono<AppEnv>()
     if (provider instanceof Response) return provider;
     const { probeModelId } = parsed.value;
     return admitted(c, provider.credential, (signal) => connectionTest(c, provider, probeModelId, signal));
+  })
+  .post('/text-providers/:id/refresh', async (c) => {
+    // "Check again": one availability poll for this provider, awaited (the
+    // poller's own timeout bounds it). Not a config write, so no revision bump.
+    const params = parseParams(c, TextProviderParam);
+    if (!params.ok) return params.response;
+    const { text, config } = c.var;
+    if (!text.store.getProvider(params.value.id)) return c.json({ error: 'not found' }, 404);
+    await text.availability.refresh(params.value.id).catch(() => undefined);
+    const provider = text.store.getProvider(params.value.id);
+    if (!provider) return c.json({ error: 'not found' }, 404);
+    return c.json(adminProvider(text, config, provider));
   })
   .get('/text-providers/:id/models/available', async (c) => {
     const params = parseParams(c, TextProviderParam);

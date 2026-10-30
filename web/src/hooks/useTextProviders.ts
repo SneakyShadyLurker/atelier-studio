@@ -10,6 +10,7 @@ import {
   patchProvider,
   putRoutingDefault,
   putRoutingWriter,
+  refreshProvider,
   textAdminKeys,
   textProvidersOpts,
   textRoutingOpts,
@@ -87,11 +88,11 @@ export function useUpdateProvider() {
 }
 
 /**
- * "Check again": an empty PATCH makes the server re-poll the provider's
- * model list. There is no dedicated refresh route (spec § 10.2).
+ * "Check again": the server polls the provider's model list once and answers
+ * the fresh row. Not a config write, so routing caches stay warm.
  */
 export function useRefreshProvider() {
-  return useTextAdminMutation((id: string) => patchProvider(id, {}));
+  return useTextAdminMutation((id: string) => refreshProvider(id));
 }
 
 export function useUpdateModel() {

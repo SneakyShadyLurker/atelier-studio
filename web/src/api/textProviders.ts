@@ -98,6 +98,10 @@ export const patchProvider = (id: string, body: ProviderPatchBody) =>
 export const deleteProvider = (id: string) =>
   requestJson<{ ok: true }>(apiPath('/text-providers/:id', { id }), jsonInit('DELETE'));
 
+/** "Check again": one availability poll for the provider, then its fresh row. */
+export const refreshProvider = (id: string) =>
+  requestJson<AdminProvider>(apiPath('/text-providers/:id/refresh', { id }), jsonInit('POST'));
+
 export const testDraftConnection = (body: TextProviderConnectionTestRequest) =>
   requestJson<ConnectionReport>('/text-providers/test', jsonInit('POST', body));
 

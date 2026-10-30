@@ -188,10 +188,9 @@ describe('Text models view', () => {
     const glm = await screen.findByRole('listitem', { name: 'GLM 5.3' });
     fireEvent.click(within(glm).getByRole('button', { name: 'Check again' }));
     await waitFor(() => {
-      expect(calls.some((call) => call.method === 'PATCH' && call.url.endsWith('/api/text-providers/p-cli'))).toBe(true);
+      expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/api/text-providers/p-cli/refresh'))).toBe(true);
     });
-    const patch = calls.find((call) => call.method === 'PATCH');
-    expect(patch?.body).toEqual({});
+    expect(calls.some((call) => call.method === 'PATCH')).toBe(false);
   });
 
   test('a provider with every model offline says so', async () => {

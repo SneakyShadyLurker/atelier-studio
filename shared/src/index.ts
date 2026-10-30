@@ -1353,6 +1353,8 @@ export interface TextProviderConnectionTestRequest {
   readonly protocol: TextProtocol;
   readonly baseUrl: string;
   readonly apiKey?: string;
+  /** Output-limit field the provider will use; defaults to max_completion_tokens. */
+  readonly tokenField?: TextTokenField;
   readonly listModels?: boolean;
   /** Model to send the probe to; required when `listModels` is false. */
   readonly probeModelId?: string;

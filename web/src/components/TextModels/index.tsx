@@ -14,14 +14,15 @@ import dialogStyles from '../../styles/dialog.module.css';
 import { removeModelCopy, type ModelAction } from './ModelRow';
 import ProviderSection from './ProviderSection';
 import RoutingPanel from './RoutingPanel';
+import AddProviderDialog from './AddProviderDialog';
+import EditProviderDialog from './EditProviderDialog';
 import styles from './index.module.css';
 
 const GUIDE_URL = 'https://github.com/SneakyShadyLurker/atelier-studio/blob/main/docs/connect-a-text-model.md';
 
 /**
- * Dialogs this view opens. Task 15 renders 'add-provider' / 'edit-provider',
- * Task 16 'add-models' / 'edit-model' / 'test-model'; until then each opens
- * the placeholder below.
+ * Dialogs this view opens. 'add-provider' / 'edit-provider' are built;
+ * Task 16 replaces the placeholder for 'add-models' / 'edit-model' / 'test-model'.
  */
 export type TextModelsDialog =
   | { readonly kind: 'add-provider' }
@@ -30,23 +31,23 @@ export type TextModelsDialog =
   | { readonly kind: 'edit-model'; readonly provider: AdminProvider; readonly model: AdminModel }
   | { readonly kind: 'test-model'; readonly provider: AdminProvider; readonly model: AdminModel };
 
-const DIALOG_TITLE: Record<TextModelsDialog['kind'], string> = {
-  'add-provider': 'Add a provider',
-  'edit-provider': 'Edit provider',
+type PendingKind = Exclude<TextModelsDialog['kind'], 'add-provider' | 'edit-provider'>;
+
+const DIALOG_TITLE: Record<PendingKind, string> = {
   'add-models': 'Add models',
   'edit-model': 'Edit model',
   'test-model': 'Test model',
 };
 
-// Placeholder until Tasks 15-16 replace each kind with its real dialog.
-function PendingDialog({ dialog, onClose }: { dialog: TextModelsDialog; onClose: () => void }) {
+// Placeholder until Task 16 replaces each kind with its real dialog.
+function PendingDialog({ kind, onClose }: { kind: PendingKind; onClose: () => void }) {
   const titleId = useId();
   const { closing, requestClose } = useExitTransition(onClose, true);
   return (
     <DialogShell open onCancel={requestClose} closing={closing} labelledBy={titleId}>
       <div className={dialogStyles.dialog}>
         <div className={dialogStyles.handle} aria-hidden="true" />
-        <h2 id={titleId} className={dialogStyles.title}>{DIALOG_TITLE[dialog.kind]}</h2>
+        <h2 id={titleId} className={dialogStyles.title}>{DIALOG_TITLE[kind]}</h2>
         <p className={dialogStyles.body}>This form is not built yet.</p>
         <div className={dialogStyles.actions}>
           <div className={dialogStyles.actionsRight}>
@@ -74,6 +75,9 @@ export default function TextModels({ onBack }: TextModelsProps) {
   const imageLabel = (id: string) => routing.data?.imageModels.find((image) => image.id === id)?.label ?? id;
   const addProvider = () => { setDialog({ kind: 'add-provider' }); };
   const providers = admin.data?.providers;
+  // Every non-env provider carries this warning when the master key is unset.
+  const byokMissing = providers?.some((provider) => provider.warnings.includes('byok-not-configured')) ?? false;
+  const closeDialog = () => { setDialog(null); };
 
   const onModelAction = (provider: AdminProvider) => (model: AdminModel, action: ModelAction) => {
     if (action === 'edit') setDialog({ kind: 'edit-model', provider, model });
@@ -137,7 +141,13 @@ export default function TextModels({ onBack }: TextModelsProps) {
         </ManagedViewHeader>
       </div>
       {content}
-      {dialog !== null && <PendingDialog dialog={dialog} onClose={() => { setDialog(null); }} />}
+      {dialog?.kind === 'add-provider' && <AddProviderDialog byokMissing={byokMissing} onClose={closeDialog} />}
+      {dialog?.kind === 'edit-provider' && (
+        <EditProviderDialog provider={dialog.provider} imageLabel={imageLabel} onClose={closeDialog} />
+      )}
+      {dialog !== null && dialog.kind !== 'add-provider' && dialog.kind !== 'edit-provider' && (
+        <PendingDialog kind={dialog.kind} onClose={closeDialog} />
+      )}
       {removing !== null && (
         <ConfirmDialog
           open

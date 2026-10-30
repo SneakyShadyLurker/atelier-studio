@@ -18,18 +18,24 @@ import styles from './index.module.css';
 export type ModelAction = 'edit' | 'test' | 'remove';
 
 /** "A", "A and B", "A, B, and C". */
-function joinWords(parts: readonly string[]): string {
+export function joinWords(parts: readonly string[]): string {
   if (parts.length <= 2) return parts.join(' and ');
   return `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1) ?? ''}`;
 }
 
-/** Body of the remove confirmation, from the usage the server reported. */
-export function removeModelCopy(usage: TextModelUsage, imageLabel: (id: string) => string): string {
+/** What depends on a model (or on several, merged), as phrases for the confirmations. */
+export function usagePhrases(usage: TextModelUsage, imageLabel: (id: string) => string): string[] {
   const parts: string[] = [];
   if (usage.isDefault) parts.push('the default model');
   if (usage.tasks.length > 0) parts.push(`assigned to ${joinWords(usage.tasks.map((task) => TEXT_TASK_LABELS[task]))}`);
   if (usage.writers.length > 0) parts.push(`the prompt writer for ${joinWords(usage.writers.map(imageLabel))}`);
   if (usage.userPicks > 0) parts.push(`picked by ${usage.userPicks} ${usage.userPicks === 1 ? 'person' : 'people'}`);
+  return parts;
+}
+
+/** Body of the remove confirmation, from the usage the server reported. */
+export function removeModelCopy(usage: TextModelUsage, imageLabel: (id: string) => string): string {
+  const parts = usagePhrases(usage, imageLabel);
   if (parts.length === 0) return 'Nothing uses it right now.';
   return `It is ${joinWords(parts)}. Those will fall back to the next model in line.`;
 }

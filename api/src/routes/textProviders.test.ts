@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import type { AdminModel, AdminProvider, ConnectionReport, ListedModel, TestReport } from '@atelier/shared';
+import type { TextAvailabilityHandle } from '../lifecycle/text-availability';
+import { UNKNOWN_TEXT_AVAILABILITY } from '../routing/textServices';
 import { testRuntime } from '../test/helpers';
 import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 import { resetTextProbeAdmissionForTests } from './textProviders';
@@ -127,6 +129,7 @@ describe('admin gate and CSRF', () => {
     ['PATCH', '/text-providers/p1'],
     ['DELETE', '/text-providers/p1'],
     ['POST', '/text-providers/p1/test'],
+    ['POST', '/text-providers/p1/refresh'],
     ['GET', '/text-providers/p1/models/available'],
     ['POST', '/text-providers/p1/models'],
     ['PATCH', '/text-providers/p1/models/m1'],
@@ -383,6 +386,22 @@ describe('connection test and model list', () => {
     expect(report).toMatchObject({ ok: true, checks: [{ id: 'completion', status: 'pass' }] });
   });
 
+  test('a draft test sends the token field the provider will use', async () => {
+    const rt = admin();
+    const bodies: Record<string, unknown>[] = [];
+    chat = async (req) => {
+      bodies.push(await req.json() as Record<string, unknown>);
+      return okChat(req);
+    };
+    const probe = { listModels: false, probeModelId: 'm-1' };
+    expect(await json<ConnectionReport>(await draftTest(rt, { ...probe, tokenField: 'max_tokens' }), 200)).toMatchObject({ ok: true });
+    expect(await json<ConnectionReport>(await draftTest(rt, probe), 200)).toMatchObject({ ok: true });
+    expect(bodies[0]).toHaveProperty('max_tokens');
+    expect(bodies[0]).not.toHaveProperty('max_completion_tokens');
+    expect(bodies[1]).toHaveProperty('max_completion_tokens');
+    expect((await draftTest(rt, { tokenField: 'bogus' })).status).toBe(400);
+  });
+
   test('a saved provider is tested with its stored key', async () => {
     const rt = admin();
     const provider = await createProvider(rt, { apiKey: KEY });
@@ -544,5 +563,65 @@ describe('POST /api/text-providers/:id/models/:mid/test', () => {
     expect(rt.logs.length).toBeGreaterThan(0);
     expect(rt.logs.join('\n')).not.toContain(KEY);
     expect(rt.logs.join('\n')).toContain('[redacted]');
+  });
+});
+
+describe('POST /api/text-providers/:id/refresh', () => {
+  /** Availability whose poll for a provider waits for `open()`, then lists `m-1`. */
+  function scriptedAvailability() {
+    const listed = new Map<string, ReadonlySet<string>>();
+    const polled: string[] = [];
+    let open = (): void => undefined;
+    let gate: Promise<void> = Promise.resolve();
+    const handle: TextAvailabilityHandle = {
+      ...UNKNOWN_TEXT_AVAILABILITY,
+      snapshot: (providerId) => listed.get(providerId) ?? null,
+      statusOf: (model) => {
+        const set = listed.get(model.providerId);
+        if (set === undefined) return 'unknown';
+        return set.has(model.modelId) ? 'available' : 'offline';
+      },
+      refresh: async (providerId) => {
+        polled.push(providerId);
+        await gate;
+        listed.set(providerId, new Set(['m-1']));
+      },
+    };
+    return {
+      handle,
+      polled,
+      hold: () => { gate = new Promise<void>((resolve) => { open = resolve; }); },
+      open: () => { open(); },
+    };
+  }
+
+  test('awaits one poll and answers the fresh provider without bumping the revision', async () => {
+    const availability = scriptedAvailability();
+    const rt = admin({ textAvailability: availability.handle });
+    const provider = await createProvider(rt);
+    await createModels(rt, provider.id, [{ modelId: 'm-1' }, { modelId: 'm-2' }]);
+    availability.polled.length = 0;
+    const before = rt.text.store.revision();
+
+    availability.hold();
+    let settled = false;
+    const pending = call(rt, 'POST', `/text-providers/${provider.id}/refresh`).then((res) => {
+      settled = true;
+      return res;
+    });
+    await Bun.sleep(20);
+    expect(settled).toBe(false);
+    availability.open();
+
+    const fresh = await json<AdminProvider>(await pending, 200);
+    expect(availability.polled).toEqual([provider.id]);
+    expect(fresh).toMatchObject({ id: provider.id, listedCount: 1 });
+    expect(fresh.models.map((model) => [model.modelId, model.status])).toEqual([['m-1', 'available'], ['m-2', 'offline']]);
+    expect(rt.text.store.revision()).toBe(before);
+  });
+
+  test('an unknown provider is 404', async () => {
+    const rt = admin();
+    expect((await call(rt, 'POST', '/text-providers/missing/refresh')).status).toBe(404);
   });
 });

@@ -64,6 +64,8 @@ export const TextProviderDraftTestBody = z.object({
   protocol: z.enum(TEXT_PROTOCOLS),
   baseUrl,
   apiKey: apiKey.exactOptional(),
+  /** The field the provider will send output limits in; defaults to max_completion_tokens. */
+  tokenField: z.enum(TEXT_TOKEN_FIELDS).exactOptional(),
   listModels: z.boolean().exactOptional(),
   probeModelId: upstreamModelId.exactOptional(),
 });

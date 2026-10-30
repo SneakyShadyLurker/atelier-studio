@@ -273,11 +273,12 @@ CREATE TABLE text_models (
   probe_json          TEXT,
   sort_order          INTEGER NOT NULL DEFAULT 0,
   created_at          INTEGER NOT NULL,
-  updated_at          INTEGER NOT NULL,
-  UNIQUE (provider_id, model_id)
+  updated_at          INTEGER NOT NULL
 );
 
-CREATE INDEX idx_text_models_provider ON text_models(provider_id);
+-- Not unique: each row is a settings profile, so two rows on one provider may
+-- name the same upstream model (legacy slots aliased to one id, or two profiles).
+CREATE INDEX idx_text_models_provider ON text_models(provider_id, model_id);
 
 CREATE TABLE text_defaults (
   scope         TEXT PRIMARY KEY CHECK (scope IN (

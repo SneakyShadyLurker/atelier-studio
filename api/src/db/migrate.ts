@@ -1484,36 +1484,22 @@ function migration58Run(db: Database, ctx: MigrationContext): void {
     const seeded = db
       .query<{ id: string }, [string]>('SELECT id FROM text_providers WHERE preset = ?')
       .get(LEGACY_SEED.provider.preset) !== null;
-    const seededRows = seed !== undefined && !seeded ? seedLegacyTextProvider(db, seed, ctx.log) : undefined;
+    if (seed !== undefined && !seeded) seedLegacyTextProvider(db, seed);
     if (!hasLegacyPins) return;
-    // Legacy key -> model row. A fresh seed knows the keys it collapsed onto a
-    // shared row; otherwise only the rows' own legacy_key is known.
-    const keyRows = seededRows ?? new Map(
-      db.query<{ legacy_key: string; id: string }, []>('SELECT legacy_key, id FROM text_models WHERE legacy_key IS NOT NULL')
-        .all()
-        .map((row) => [row.legacy_key, row.id] as const),
-    );
-    const keyMap = [...keyRows];
-    let carried = 0;
-    if (keyMap.length > 0) {
-      const taskList = TEXT_TASKS.map(() => '?').join(', ');
-      const carriedPins = `
-        FROM user_text_backends u
-        JOIN key_map k ON k.backend = u.backend
-       WHERE u.workload IN (${taskList})
-         AND u.backend <> 'gpt'`;
-      const withKeyMap = `WITH key_map(backend, text_model_id) AS (VALUES ${keyMap.map(() => '(?, ?)').join(', ')})`;
-      const params = [...keyMap.flat(), ...TEXT_TASKS];
-      carried = db
-        .query<{ count: number }, string[]>(`${withKeyMap} SELECT COUNT(*) AS count ${carriedPins}`)
-        .get(...params)?.count ?? 0;
-      db.query<unknown, string[]>(`
-        INSERT INTO user_text_models (user_id, task, text_model_id, effort, updated_at)
-        ${withKeyMap}
-        SELECT u.user_id, u.workload, k.text_model_id, u.effort, u.updated_at ${carriedPins}
-      `).run(...params);
-    }
+    const taskList = TEXT_TASKS.map(() => '?').join(', ');
+    const carriedPins = `
+      FROM user_text_backends u
+      JOIN text_models m ON m.legacy_key = u.backend
+     WHERE u.workload IN (${taskList})
+       AND u.backend <> 'gpt'`;
     const total = db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM user_text_backends').get()?.count ?? 0;
+    const carried = db
+      .query<{ count: number }, string[]>(`SELECT COUNT(*) AS count ${carriedPins}`)
+      .get(...TEXT_TASKS)?.count ?? 0;
+    db.query<unknown, string[]>(`
+      INSERT INTO user_text_models (user_id, task, text_model_id, effort, updated_at)
+      SELECT u.user_id, u.workload, m.id, u.effort, u.updated_at ${carriedPins}
+    `).run(...TEXT_TASKS);
     db.run('DROP TABLE user_text_backends');
     const dropped = total - carried;
     if (dropped > 0) {
@@ -1530,18 +1516,8 @@ function migration58Run(db: Database, ctx: MigrationContext): void {
   })();
 }
 
-/**
- * Seeds the legacy CLIProxyAPI provider (spec § 11.1); exported for test fixtures.
- * Slots whose upstream ids coincide share one row (`UNIQUE (provider_id,
- * model_id)`): the first slot in `LEGACY_SEED` order keeps its settings and
- * legacy_key, the later slots map onto it. Returns legacy key -> row id for
- * every slot.
- */
-export function seedLegacyTextProvider(
-  db: Database,
-  seed: TextSeed,
-  log?: Pick<AppLogger, 'info' | 'warn'>,
-): Map<string, string> {
+/** Seeds the legacy CLIProxyAPI provider (spec § 11.1); exported for test fixtures. */
+export function seedLegacyTextProvider(db: Database, seed: TextSeed): void {
   const now = Date.now();
   const { provider } = LEGACY_SEED;
   const providerId = randomUUID();
@@ -1572,24 +1548,14 @@ export function seedLegacyTextProvider(
       created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  const rowByUpstreamId = new Map<string, { id: string; legacyKey: string }>();
-  const collapsed: Record<string, string> = {};
   LEGACY_SEED.models.forEach((model, index) => {
-    const upstreamId = seed.modelIds[model.legacyKey];
-    const shared = rowByUpstreamId.get(upstreamId);
-    if (shared !== undefined) {
-      modelRowIds.set(model.legacyKey, shared.id);
-      collapsed[model.legacyKey] = shared.legacyKey;
-      return;
-    }
     const id = randomUUID();
     const caps = model.capabilities;
     modelRowIds.set(model.legacyKey, id);
-    rowByUpstreamId.set(upstreamId, { id, legacyKey: model.legacyKey });
     insertModel.run(
       id,
       providerId,
-      upstreamId,
+      seed.modelIds[model.legacyKey],
       model.displayName,
       model.legacyKey,
       caps.vision ? 1 : 0,
@@ -1622,14 +1588,6 @@ export function seedLegacyTextProvider(
   // Sunburst first: an id in both lists keeps the stricter lock.
   for (const imageModelId of seed.sunburstImageModelIds) insertWriter.run(imageModelId, writer, 'lock', now);
   for (const imageModelId of seed.gptImageModelIds) insertWriter.run(imageModelId, writer, 'prefer', now);
-  const collapsedKeys = Object.keys(collapsed);
-  if (collapsedKeys.length > 0) {
-    log?.warn(
-      { event: 'migration_text_models_collapsed', version: 58, collapsed },
-      `migration v58: ${collapsedKeys.map((key) => `'${key}' -> '${collapsed[key]}'`).join(', ')} name the same upstream model and share one text model`,
-    );
-  }
-  return modelRowIds;
 }
 
 // Partial index behind every "is this upload still referenced" probe. No-op

@@ -565,8 +565,20 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
         return { ...merged, id: randomUUID() };
       });
       const now = Date.now();
+      const duplicate = 'This provider already has a model with that id.';
       try {
         write(() => {
+          // The schema lets rows share an upstream id (migrated legacy slots);
+          // an import still refuses ids the provider or the batch already has.
+          const taken = new Set(
+            db.query<{ model_id: string }, [string]>('SELECT model_id FROM text_models WHERE provider_id = ?')
+              .all(providerId)
+              .map((row) => row.model_id),
+          );
+          for (const model of prepared) {
+            if (taken.has(model.modelId)) throw new TextConfigConflictError(duplicate);
+            taken.add(model.modelId);
+          }
           let next = (db
             .query<{ next: number }, [string]>(
               'SELECT COALESCE(MAX(sort_order) + 1, 0) AS next FROM text_models WHERE provider_id = ?',
@@ -607,7 +619,7 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
           }
         });
       } catch (error) {
-        rethrowUnique(error, 'This provider already has a model with that id.');
+        rethrowUnique(error, duplicate);
       }
       return prepared.map((model) => modelFromRow(mustRead(readModel(model.id))));
     },

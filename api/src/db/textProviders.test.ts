@@ -277,7 +277,11 @@ describe('text provider store: models', () => {
     const p = await provider(store);
     store.createModels(p.id, [{ modelId: 'a' }]);
     expect(() => store.createModels(p.id, [{ modelId: 'z' }, { modelId: 'a' }])).toThrow(TextConfigConflictError);
+    expect(() => store.createModels(p.id, [{ modelId: 'y' }, { modelId: 'y' }])).toThrow(TextConfigConflictError);
     expect(store.listModels(p.id).map((m) => m.modelId)).toEqual(['a']);
+    // Another provider may reuse the id.
+    const other = await provider(store, 'Other');
+    expect(store.createModels(other.id, [{ modelId: 'a' }]).map((m) => m.modelId)).toEqual(['a']);
   });
 
   test('createModels on an unknown provider is a validation error', () => {

@@ -968,6 +968,8 @@ export interface AiFillBatchRequest {
   readonly modelId: string;
 }
 
+// Not tagged `@deprecated`: the no-deprecated lint rule would fail every
+// current consumer until the legacy route is removed.
 /**
  * Text-backend wire keys. Keys name the VENDOR + TIER, never a version, so a
  * future swap within a tier does not require another rename. Every key is
@@ -980,6 +982,7 @@ export interface AiFillBatchRequest {
  * other backend is user-selectable only.
  * Purely advisory leading frame naming which backend holds the fill: a client
  * that ignores it gets the same terminal outcome.
+ * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
  */
 export const AI_FILL_BACKEND_VALUES = [
   'kimi',
@@ -990,6 +993,7 @@ export const AI_FILL_BACKEND_VALUES = [
   'glm-abliterated',
   'gpt',
 ] as const;
+/** Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route. */
 export type AiFillBackend = (typeof AI_FILL_BACKEND_VALUES)[number];
 
 /**
@@ -1007,6 +1011,7 @@ export type AiFillBackend = (typeof AI_FILL_BACKEND_VALUES)[number];
  * 'deepseek-abliterated' is documented with text plus up to 4 images, but its
  * vision path is unverified, so it stays out until a live check passes; when
  * it is added, cap its images at 4.
+ * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
  */
 export function isVisionTextBackend(
   backend: string,
@@ -1024,6 +1029,7 @@ export function isVisionTextBackend(
  * vision — whether the call carries an image is `isVisionTextBackend` — and it
  * selects wording only: no backend receives instructions to disregard its own
  * safety judgement.
+ * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
  */
 export function usesGenericPromptVariant(
   backend: string,
@@ -1031,7 +1037,10 @@ export function usesGenericPromptVariant(
   return backend !== 'kimi' && (AI_FILL_BACKEND_VALUES as readonly string[]).includes(backend);
 }
 
-/** Canonical display labels for the text-backend union. Single source of truth for web copy. */
+/**
+ * Canonical display labels for the text-backend union. Single source of truth for web copy.
+ * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
+ */
 export const TEXT_BACKEND_LABELS = {
   kimi: 'Kimi K3',
   mimo: 'MiMo V2.6 Pro',
@@ -1042,7 +1051,10 @@ export const TEXT_BACKEND_LABELS = {
   gpt: 'GPT-6.1 Sol',
 } as const satisfies Record<AiFillBackend, string>;
 
-/** Workloads a user may pin to a fixed text backend. Absent override = automatic routing. */
+/**
+ * Workloads a user may pin to a fixed text backend. Absent override = automatic routing.
+ * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
+ */
 export const TEXT_BACKEND_WORKLOADS = [
   'ai-fill',
   'brainstorm',
@@ -1050,9 +1062,13 @@ export const TEXT_BACKEND_WORKLOADS = [
   'condense',
   'storytelling',
 ] as const;
+/** Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route. */
 export type TextBackendWorkload = (typeof TEXT_BACKEND_WORKLOADS)[number];
 
-/** Absent key = automatic routing (the shipped default). */
+/**
+ * Absent key = automatic routing (the shipped default).
+ * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
+ */
 export type TextBackendOverrides = Partial<Record<TextBackendWorkload, AiFillBackend>>;
 
 /** Wire values of the OpenAI-compatible `reasoning_effort` ladder, lowest first. */
@@ -1089,6 +1105,7 @@ const TEXT_BACKEND_REASONING_EFFORTS = {
  * Efforts a user may pin on each backend's settings row: the levels each
  * model lists in its catalog and the upstream forwards. Single source for the route validator, the stored-value
  * reader and the Settings options.
+ * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
  */
 export function textBackendReasoningEfforts(backend: AiFillBackend): readonly TextReasoningEffort[] {
   return TEXT_BACKEND_REASONING_EFFORTS[backend];
@@ -1097,9 +1114,11 @@ export function textBackendReasoningEfforts(backend: AiFillBackend): readonly Te
 /**
  * Pinned reasoning effort per workload. Absent key = the backend's own default.
  * An effort belongs to its workload's pinned backend and is only present with one.
+ * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
  */
 export type TextBackendEfforts = Partial<Record<TextBackendWorkload, TextReasoningEffort>>;
 
+/** Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route. */
 export interface TextBackendSettingsResponse {
   readonly overrides: TextBackendOverrides;
   readonly efforts: TextBackendEfforts;
@@ -1108,6 +1127,235 @@ export interface TextBackendSettingsResponse {
    * a stored pin to one routes as Auto. Empty when the proxy inventory is unknown.
    */
   readonly unavailable: readonly AiFillBackend[];
+}
+
+// ─── Admin-managed text providers and models ────────────────────────────
+// Replaces the fixed text-backend keys above. Wire contract: spec
+// docs/specs/byo-text-providers.md § 10. Credentials never appear here: the
+// browser sees only the auth mode, a fingerprint and an env var name.
+
+export { TEXT_PRESETS } from './textPresets';
+export type { TextPreset, TextPresetId } from './textPresets';
+export { validateTextProviderBaseUrl } from './textProviderUrl';
+export type { TextProviderBaseUrlResult } from './textProviderUrl';
+
+/**
+ * Features that call a text model. Single source for the routing DB CHECK, the
+ * per-task user picks and the admin task assignments.
+ */
+export const TEXT_TASKS = [
+  'enhance',
+  'motion',
+  'ai-fill',
+  'brainstorm',
+  'condense',
+  'storytelling',
+  'story-segments',
+  'infer',
+  'rescue',
+  'list-draft',
+  'template-draft',
+] as const;
+export type TextTask = (typeof TEXT_TASKS)[number];
+
+export const TEXT_TASK_LABELS = {
+  enhance: 'Enhance',
+  motion: 'Motion writer',
+  'ai-fill': 'AI fill',
+  brainstorm: 'Brainstorm',
+  condense: 'Krea condense',
+  storytelling: 'Story planner',
+  'story-segments': 'Story segments',
+  infer: 'Dimension inference',
+  rescue: 'Dimension rescue',
+  'list-draft': 'List drafts',
+  'template-draft': 'Template drafts',
+} as const satisfies Record<TextTask, string>;
+
+/** How Atelier talks to a provider. */
+export const TEXT_PROTOCOLS = ['openai-compatible', 'anthropic'] as const;
+export type TextProtocol = (typeof TEXT_PROTOCOLS)[number];
+
+/** Request field carrying the output budget; OpenAI-compatible providers only. */
+export const TEXT_TOKEN_FIELDS = ['max_completion_tokens', 'max_tokens'] as const;
+export type TextTokenField = (typeof TEXT_TOKEN_FIELDS)[number];
+
+/** Where a provider's credential comes from. 'env' is set only by the migration/seed. */
+export const TEXT_PROVIDER_AUTH_MODES = ['none', 'stored', 'env'] as const;
+export type TextProviderAuthMode = (typeof TEXT_PROVIDER_AUTH_MODES)[number];
+
+/** JSON output mode a model supports, strongest first. */
+export const TEXT_STRUCTURED_OUTPUT_MODES = ['json_schema', 'json_object', 'none'] as const;
+export type TextStructuredOutputMode = (typeof TEXT_STRUCTURED_OUTPUT_MODES)[number];
+
+/** 'slow' applies the long timeout and response-size floors. */
+export const TEXT_LATENCY_PROFILES = ['standard', 'slow'] as const;
+export type TextLatencyProfile = (typeof TEXT_LATENCY_PROFILES)[number];
+
+/** Which ai-fill prompt body a model receives. Wording only. */
+export const TEXT_PROMPT_VARIANTS = ['generic', 'kimi'] as const;
+export type TextPromptVariant = (typeof TEXT_PROMPT_VARIANTS)[number];
+
+/** Whether the provider currently lists the model. 'unknown' passes routing. */
+export type TextModelStatus = 'available' | 'offline' | 'unknown';
+
+/** Admin-editable capability settings of one model. */
+export interface TextModelCapabilities {
+  readonly vision: boolean;
+  /** Cap on image parts per call; null = no cap. Only meaningful with vision. */
+  readonly maxImages: number | null;
+  readonly structuredOutput: TextStructuredOutputMode;
+  /** Levels users may pick. Empty = users cannot pick one. */
+  readonly reasoningLevels: readonly TextReasoningEffort[];
+  /** Sent when the user picked nothing; null = no effort field. */
+  readonly reasoningDefault: TextReasoningEffort | null;
+  readonly temperature: number | null;
+  readonly topP: number | null;
+  /** Replaces every per-task output budget when set. */
+  readonly fixedOutputTokens: number | null;
+  readonly latencyProfile: TextLatencyProfile;
+  readonly promptVariant: TextPromptVariant;
+}
+
+/** A model as every signed-in user sees it. */
+export interface PublicTextModel {
+  readonly id: string;
+  readonly displayName: string;
+  readonly providerName: string;
+  readonly vision: boolean;
+  readonly reasoningLevels: readonly TextReasoningEffort[];
+  readonly status: TextModelStatus;
+}
+
+/** One task row of the user's text-model settings. */
+export interface TaskRow {
+  readonly task: TextTask;
+  /** The user's own pick (model id). */
+  readonly pick?: string;
+  readonly effort?: TextReasoningEffort;
+  /** Model the task would use right now, after every fallback. */
+  readonly effectiveModelId?: string;
+  /** 'offline' = the pick is skipped and the task falls back. */
+  readonly pickState?: 'active' | 'offline';
+}
+
+/** `GET /api/text-models` and `PUT /api/text-models/tasks/:task`. */
+export interface TextModelsResponse {
+  readonly models: readonly PublicTextModel[];
+  readonly tasks: readonly TaskRow[];
+  readonly defaults: {
+    readonly default?: string;
+    readonly byTask: Partial<Record<TextTask, string>>;
+  };
+  /** Image model id → prompt-writer model id. */
+  readonly writers: Readonly<Record<string, string>>;
+}
+
+/** Where a model is referenced; shown before a delete is confirmed. */
+export interface TextModelUsage {
+  readonly isDefault: boolean;
+  readonly tasks: readonly TextTask[];
+  /** Image model ids whose prompts this model writes. */
+  readonly writers: readonly string[];
+  /** Number of users who picked this model for at least one task. */
+  readonly userPicks: number;
+}
+
+export interface AdminModel extends TextModelCapabilities {
+  readonly id: string;
+  readonly providerId: string;
+  /** Upstream model id. */
+  readonly modelId: string;
+  readonly displayName: string;
+  readonly enabled: boolean;
+  /** Run the content pre-check before every request to this model. */
+  readonly screenRequests: boolean;
+  readonly sortOrder: number;
+  readonly status: TextModelStatus;
+  /** Epoch ms of the last passing "Test model"; null = untested. */
+  readonly verifiedAt: number | null;
+  readonly lastTest: TestReport | null;
+  readonly usage: TextModelUsage;
+}
+
+export type TextProviderWarning =
+  /** A model screens requests but OPENROUTER_API_KEY is unset. */
+  | 'screen-requests-without-key'
+  /** Stored keys cannot be read or written without BYOK_ENCRYPTION_KEY. */
+  | 'byok-not-configured';
+
+export interface AdminProvider {
+  readonly id: string;
+  readonly name: string;
+  readonly protocol: TextProtocol;
+  readonly baseUrl: string;
+  /** Preset used at creation; informational. */
+  readonly preset: string | null;
+  readonly auth: TextProviderAuthMode;
+  /** Present when auth is 'stored'. */
+  readonly fingerprint?: string;
+  /** Present when auth is 'env'. */
+  readonly envVar?: string;
+  readonly tokenField: TextTokenField;
+  readonly listModels: boolean;
+  readonly enabled: boolean;
+  /** Models the last list call returned; null = unknown (not listed, failed or empty). */
+  readonly listedCount: number | null;
+  readonly warnings: readonly TextProviderWarning[];
+  readonly models: readonly AdminModel[];
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+/** Capability hints a provider's model list reported. Unverified. */
+export interface TextModelHints {
+  readonly vision?: boolean;
+  readonly structuredOutput?: TextStructuredOutputMode;
+  readonly reasoningLevels?: readonly TextReasoningEffort[];
+  readonly contextLength?: number;
+  readonly maxOutputTokens?: number;
+}
+
+/** One entry of `GET /api/text-providers/:id/models/available`. */
+export interface ListedModel {
+  readonly id: string;
+  readonly hints?: TextModelHints;
+  readonly source: 'provider';
+}
+
+export interface TextProbeCheck {
+  readonly id: string;
+  readonly status: 'pass' | 'fail' | 'skip';
+  /** Plain-English result, already redacted. */
+  readonly message: string;
+}
+
+/** `POST /api/text-providers/test`. */
+export interface TextProviderConnectionTestRequest {
+  readonly protocol: TextProtocol;
+  readonly baseUrl: string;
+  readonly apiKey?: string;
+  readonly listModels?: boolean;
+  /** Model to send the probe to; required when `listModels` is false. */
+  readonly probeModelId?: string;
+}
+
+/** Verdict of a provider connection test. */
+export interface ConnectionReport {
+  readonly ok: boolean;
+  readonly checks: readonly TextProbeCheck[];
+  readonly listedCount?: number;
+  readonly listUnsupported?: boolean;
+}
+
+/** Result of "Test model". */
+export interface TestReport {
+  readonly checks: readonly TextProbeCheck[];
+  /** Values the probe confirmed. */
+  readonly proposed: Partial<TextModelCapabilities>;
+  /** Values the provider's list reported that the probe did not exercise. */
+  readonly advertised: Partial<TextModelCapabilities>;
+  readonly wireNotes: readonly string[];
 }
 
 /** Inclusive bounds for a per-model base-sampler step override (API, DB CHECK, UI). */

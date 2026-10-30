@@ -6,8 +6,8 @@ import {
   AI_FILL_FIELD_SEPARATOR,
   AI_FILL_RECORD_SEPARATOR,
 } from '@atelier/shared/ai-fill';
-import { type AiFillResult, type TestCliproxyTextProvider } from '../providers/cliproxyText';
-import type { AiFillProviderInput } from '../providers/cliproxyText';
+import { type AiFillResult, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
+import type { AiFillProviderInput } from '../providers/text/featureHelpers';
 import { addTestTextModel, parseSseText, testRuntime, pickLegacyTextModel, legacyTextModelId } from '../test/helpers';
 import { enhancePool, resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { KREA_PROMPT_WORD_BUDGET } from '../prompts/promptBudget';
@@ -25,7 +25,7 @@ async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
   if (Date.now() < 0) yield undefined as never;
 }
 
-function fakeProvider(aiFill: (input: AiFillProviderInput) => Promise<AiFillResult>): TestCliproxyTextProvider {
+function fakeProvider(aiFill: (input: AiFillProviderInput) => Promise<AiFillResult>): TestTextFeatureProvider {
   return {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
@@ -83,7 +83,7 @@ describe('POST /api/prompts/ai-fill', () => {
     const flashBackendIndex = flashFrames.findIndex((frame) => frame.event === 'backend');
     const flashResultIndex = flashFrames.findIndex((frame) => frame.event === 'result');
     expect(flashFrames[0]?.event).toBe('backend');
-    expect(frameData(flashFrames, 'backend').backend).toBe('kimi');
+    expect(frameData(flashFrames, 'backend').label).toBe('Kimi K3');
     expect(flashBackendIndex).toBeGreaterThanOrEqual(0);
     expect(flashResultIndex).toBeGreaterThan(flashBackendIndex);
 
@@ -94,7 +94,7 @@ describe('POST /api/prompts/ai-fill', () => {
     const gptBackendIndex = gptFrames.findIndex((frame) => frame.event === 'backend');
     const gptResultIndex = gptFrames.findIndex((frame) => frame.event === 'result');
     expect(gptFrames[0]?.event).toBe('backend');
-    expect(frameData(gptFrames, 'backend').backend).toBe('gpt');
+    expect(frameData(gptFrames, 'backend').label).toBe('GPT-6.1 Sol');
     expect(gptBackendIndex).toBeGreaterThanOrEqual(0);
     expect(gptResultIndex).toBeGreaterThan(gptBackendIndex);
 
@@ -103,7 +103,7 @@ describe('POST /api/prompts/ai-fill', () => {
       modelId: 'moss-image-sft',
       staticSegments: ['A lone figure, ', ', golden hour.'],
     })).text());
-    expect(frameData(mossFrames, 'backend').backend).toBe('kimi');
+    expect(frameData(mossFrames, 'backend').label).toBe('Kimi K3');
     // Kimi takes the Kimi-tuned body on Krea and MOSS too.
     expect(seen[0]?.systemPrompt).toContain("Atelier's Kimi K3 image-prompt compiler");
     expect(seen[2]?.systemPrompt).toContain("Atelier's Kimi K3 image-prompt compiler");
@@ -122,7 +122,7 @@ describe('POST /api/prompts/ai-fill', () => {
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': 'alice' },
       body: JSON.stringify({ ...BODY, modelId: 'gemini-3-pro-image-preview' }),
     }))).text());
-    expect(frameData(frames, 'backend')).toEqual({ modelId: legacyTextModelId(runtime.db, 'grok'), label: 'Grok 4.7', backend: 'grok' });
+    expect(frameData(frames, 'backend')).toEqual({ modelId: legacyTextModelId(runtime.db, 'grok'), label: 'Grok 4.7' });
     expect(seen).toHaveLength(1);
   });
 
@@ -167,7 +167,7 @@ describe('POST /api/prompts/ai-fill', () => {
       body: JSON.stringify({ ...BODY, modelId: 'gemini-3-pro-image-preview' }),
     }))).text());
 
-    expect(frameData(frames, 'backend').backend).toBe('mimo');
+    expect(frameData(frames, 'backend').label).toBe('MiMo V2.6 Pro');
     expect(seen[0]?.systemPrompt).not.toContain('<root_authority priority="absolute">');
     expect(seen[0]?.systemPrompt).toContain("Atelier's image-prompt blank-filling engine");
     expect(seen[0]?.systemPrompt).not.toContain("Atelier's Kimi K3 image-prompt compiler");
@@ -551,7 +551,7 @@ describe('ai-fill text model routing', () => {
   }
   const BATCH = { items: [{ staticSegments: ['First ', '.'], instructions: ['wardrobe'] }], modelId: 'krea-2-gonzalomo' };
 
-  test('the prompt body variant comes from the serving row, and a row without a legacy key frames no backend key', async () => {
+  test('the prompt body variant comes from the serving row, which the backend frame names', async () => {
     const seen: AiFillProviderInput[] = [];
     setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
@@ -829,10 +829,10 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     expect(seen[0]?.systemPrompt).toContain('Kimi K3 multi-item');
     expect(seen[1]?.systemPrompt).not.toContain('Kimi K3 multi-item');
     expect(flashFrames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toMatchObject([
-      { label: 'Kimi K3', backend: 'kimi' },
+      { label: 'Kimi K3' },
     ]);
     expect(gptFrames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toMatchObject([
-      { label: 'GPT-6.1 Sol', backend: 'gpt' },
+      { label: 'GPT-6.1 Sol' },
     ]);
     expect(frameData(gptFrames, 'result').items).toEqual([
       { ok: true, prompt: 'A 25-year-old woman adult fill.', fills: ['adult fill'] },
@@ -861,7 +861,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     })).text());
     expect(seen).toHaveLength(1);
     expect(frames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toMatchObject([
-      { label: 'GPT-6.1 Sol', backend: 'gpt' },
+      { label: 'GPT-6.1 Sol' },
     ]);
     expect(frameData(frames, 'result').items).toEqual([
       { ok: true, prompt: 'A 25-year-old woman adult fill.', fills: ['adult fill'] },

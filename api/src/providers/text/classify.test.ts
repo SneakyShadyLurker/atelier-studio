@@ -28,7 +28,7 @@ function classify(status: number, body: unknown, headers: Record<string, string>
   return classifyApiError(apiError(status, body, headers), QUOTA_MS);
 }
 
-// Ported from cliproxyText.classify.test.ts (classifyUpstreamFailureForTests).
+// Ported from the legacy CLIProxy text provider's classification tests.
 describe('classifyApiError quota detection', () => {
   test('429 + long Retry-After → QuotaExhaustedError with raw seconds', () => {
     const e = classify(429, { error: { message: 'slow down' } }, { 'retry-after': '900' });

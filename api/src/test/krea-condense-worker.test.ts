@@ -6,8 +6,8 @@ import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { resetUpstreamGateForTests } from '../orchestrator/upstreamGate';
 import {
   type EnhanceChunk,
-  type TestCliproxyTextProvider,
-} from '../providers/cliproxyText';
+  type TestTextFeatureProvider,
+} from '../providers/text/featureHelpers';
 import { KREA_PROMPT_CONDENSE_TRIGGER_WORDS } from '../prompts/promptBudget';
 import { localTilesInFlight } from '../orchestrator/concurrency';
 import { stopQueuedPromptPreparation } from '../orchestrator/queuedPromptPreparation';
@@ -27,8 +27,8 @@ function wordPrompt(count: number, prefix = 'word'): string {
 }
 
 function fakeCondenseProvider(
-  enhance: TestCliproxyTextProvider['enhance'],
-): TestCliproxyTextProvider {
+  enhance: TestTextFeatureProvider['enhance'],
+): TestTextFeatureProvider {
   return {
     enhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),

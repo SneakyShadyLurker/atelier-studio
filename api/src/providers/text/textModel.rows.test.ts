@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { setJevSystemOneProviderForTests } from '../jevSystemOne';
 import { restoreFetch } from '../../test/helpers';
 import { genericTextModel, seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
-import type { EnhanceChunk } from '../cliproxyText';
-import { GLM_ABLITERATED_MAX_COMPLETION_TOKENS } from '../cliproxyText.config';
+import type { EnhanceChunk } from './featureHelpers';
+import { GLM_ABLITERATED_MAX_COMPLETION_TOKENS } from './textBudgets';
 
 // Row-driven behaviour the legacy provider keyed on backend names: the JEV
 // pre-screen (`screenRequests`), `fixedOutputTokens`, `maxImages`/`vision`,

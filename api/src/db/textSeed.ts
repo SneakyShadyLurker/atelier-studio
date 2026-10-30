@@ -1,4 +1,4 @@
-import type { AiFillBackend, TextModelCapabilities } from '@atelier/shared';
+import type { TextModelCapabilities } from '@atelier/shared';
 import type { Config } from '../config';
 import { classifyImageModelTarget } from '../prompts/gptImagePhrasing';
 import { isSunburstModel } from '../prompts/gptSystemPrompt';
@@ -7,11 +7,18 @@ import { isSunburstModel } from '../prompts/gptSystemPrompt';
 // schema 57. Migration 58 seeds them as admin-managed models on upgraded
 // installs, and the wire-compat tests compare the new adapter against them.
 // The values are literals on purpose: the legacy constants they were read from
-// (`cliproxyText.config.ts`, `buildChatBody`, `TEXT_BACKEND_*` in shared) go
-// away with the legacy surface, and this record must outlive them.
+// (the legacy text config, `buildChatBody`, `TEXT_BACKEND_*` in shared) are
+// gone, and this record must outlive them.
 
 /** One of the seven fixed backend keys a migrated model row remembers. */
-export type LegacyTextKey = AiFillBackend;
+export type LegacyTextKey =
+  | 'kimi'
+  | 'mimo'
+  | 'grok'
+  | 'gemini-argon'
+  | 'deepseek-abliterated'
+  | 'glm-abliterated'
+  | 'gpt';
 
 export interface LegacySeedModel {
   readonly legacyKey: LegacyTextKey;

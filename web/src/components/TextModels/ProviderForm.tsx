@@ -3,6 +3,7 @@ import type { ConnectionReport, TextProtocol, TextTokenField } from '@atelier/sh
 import { TEXT_TOKEN_FIELDS, validateTextProviderBaseUrl } from '@atelier/shared';
 import { ApiError } from '../../api/client';
 import { describeError } from '../../lib/errorCopy';
+import { isRecord } from '../../lib/guards';
 import styles from './AddProviderDialog.module.css';
 
 // The provider form shared by "Add a provider" and "Edit provider": name,
@@ -60,6 +61,13 @@ export type ConnectionState =
 
 export function connectionFailure(error: unknown, signature: string): ConnectionState {
   if (error instanceof ApiError && error.status === 429) return { kind: 'error', message: BUSY_COPY, signature };
+  // A 502 means the server could not run the test; its message says why (credentials redacted server-side).
+  if (error instanceof ApiError && error.status === 502) {
+    const serverMessage = isRecord(error.body) ? error.body.error : undefined;
+    if (typeof serverMessage === 'string' && serverMessage.trim().length > 0) {
+      return { kind: 'error', message: serverMessage, signature };
+    }
+  }
   return { kind: 'error', message: describeError(error, 'The test could not run. Try again.'), signature };
 }
 

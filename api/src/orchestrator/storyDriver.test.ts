@@ -3,7 +3,7 @@ import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { Database } from 'bun:sqlite';
 import { abortReason } from '../lifecycle/abort';
 import sharp from 'sharp';
-import type { EnhanceChunk, TestCliproxyTextProvider } from '../providers/cliproxyText';
+import type { EnhanceChunk, TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import { generateHybridIdentity, identityToRecipient } from 'age-encryption';
 import { DbUserKeyStore, StorageKeyring, configureStorageKeyring } from '../storage/crypto';
 import { deleteArtifact, readArtifactBytes, writeAtomic } from '../storage/files';
@@ -44,8 +44,8 @@ const PNG = new Uint8Array(await sharp({
 const MP4 = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]);
 
 function providerWith(
-  enhance: TestCliproxyTextProvider['enhance'],
-): TestCliproxyTextProvider {
+  enhance: TestTextFeatureProvider['enhance'],
+): TestTextFeatureProvider {
   return {
     enhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'unused' }),
@@ -56,7 +56,7 @@ function providerWith(
   };
 }
 
-function successfulProvider(text = 'enhanced motion'): TestCliproxyTextProvider {
+function successfulProvider(text = 'enhanced motion'): TestTextFeatureProvider {
   return providerWith(async function* () {
     await Promise.resolve();
     yield { type: 'delta', text: text.slice(0, 8) } satisfies EnhanceChunk;

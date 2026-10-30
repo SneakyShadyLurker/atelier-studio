@@ -5,7 +5,7 @@ import { MAX_PROMPT_CHARS } from '@atelier/shared';
 import { addTestTextModel, legacyTextModelId, parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds, pickLegacyTextModel } from '../test/helpers';
 import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { writeAtomic } from '../storage/files';
-import { type TestCliproxyTextProvider, type EnhanceChunk } from '../providers/cliproxyText';
+import { type TestTextFeatureProvider, type EnhanceChunk } from '../providers/text/featureHelpers';
 import {
   ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
@@ -398,7 +398,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
     resetLlmAdmissionForTests();
   });
 
-  function fakeEnhanceProvider(chunks: AsyncGenerator<EnhanceChunk>): TestCliproxyTextProvider {
+  function fakeEnhanceProvider(chunks: AsyncGenerator<EnhanceChunk>): TestTextFeatureProvider {
     return {
       async *enhance() {
         for await (const c of chunks) yield c;

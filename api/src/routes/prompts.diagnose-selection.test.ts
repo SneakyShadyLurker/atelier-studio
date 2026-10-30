@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
-import { type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import { parseInferDone, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 
@@ -12,7 +12,7 @@ async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
   if (Date.now() < 0) yield undefined as never;
 }
 
-function fake(ops: RawInferOp[]): TestCliproxyTextProvider {
+function fake(ops: RawInferOp[]): TestTextFeatureProvider {
   return {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),

@@ -9,7 +9,7 @@ import {
   KREA_PROMPT_CONDENSE_TRIGGER_WORDS,
   promptWordBudgetForModel,
 } from '../prompts/promptBudget';
-import { kreaCondenseTimeoutMs } from '../providers/cliproxyText.config';
+import { kreaCondenseTimeoutMs } from '../providers/text/textBudgets';
 import { imageModelRouting, textProviderForResolved } from '../providers/textRouting';
 import type { ResolvedTextModel } from '../routing/textModelResolver';
 import type { TextServices } from '../routing/textServices';

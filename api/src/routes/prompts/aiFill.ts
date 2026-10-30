@@ -21,7 +21,7 @@ import {
   aiFillBatchRouteTimeoutMs,
   aiFillPerAttemptTimeoutMs,
   aiFillRouteTimeoutMs,
-} from '../../providers/cliproxyText.config';
+} from '../../providers/text/textBudgets';
 import { parseBody } from '../_http';
 import { AiFillBatchRequestSchema, AiFillRequestSchema } from './aiFill.schema';
 import {
@@ -36,7 +36,6 @@ import { isLikelyModelRefusal } from '../../prompts/modelOutput';
 import { failedToSseError } from '../../lifecycle/llm-error';
 import { promptCharBudgetForModel, promptMinPerSlotWordsForModel } from '../../prompts/promptBudget';
 import type { TextModelRecord } from '../../db/textProviders';
-import { LEGACY_SEED } from '../../db/textSeed';
 
 const SAFE_ERROR_MESSAGE = "Couldn't fill the prompt. Please try again.";
 const REFUSAL_ERROR_MESSAGE = 'The writer refused this prompt. Nothing was sent to the image model.';
@@ -117,10 +116,9 @@ function resolveAiFillModel(c: Context<AppEnv>, modelId: string): ResolvedTextMo
   return c.var.text.resolve({ userId: c.var.userId, task: 'ai-fill', ...imageModelRouting(c.var.config, modelId) });
 }
 
-/** The advisory `backend` frame: the serving row, with its legacy key while the web reads it. */
+/** The advisory `backend` frame naming the serving row. */
 function backendFrame(model: TextModelRecord): AiFillBackendFrame {
-  const backend = LEGACY_SEED.models.find((seed) => seed.legacyKey === model.legacyKey)?.legacyKey;
-  return { modelId: model.id, label: model.displayName, ...(backend === undefined ? {} : { backend }) };
+  return { modelId: model.id, label: model.displayName };
 }
 
 // Words each slot may use: the model's prompt budget left after the static

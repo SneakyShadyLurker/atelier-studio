@@ -11,7 +11,6 @@ import {
   aiFillBatchPerAttemptTimeoutMs,
   aiFillPerAttemptTimeoutMs,
   kreaCondenseTimeoutMs,
-  legacyLatencyProfile,
   AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS,
   AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
   aiFillBatchRouteTimeoutMs,
@@ -22,14 +21,9 @@ import {
   PINNED_EFFORT_MAX_RESPONSE_BYTES,
   pinnedEffortMaxResponseBytes,
   brainstormRouteTimeoutMs,
-  GROK_SAMPLING,
   INFER_DIMENSIONS_DEFAULTS,
   KIMI_LOW_REASONING_OVERHEAD_TOKENS,
-  TEXT_BACKEND_DEFAULT_REASONING_EFFORT,
-  textBackendModels,
-} from '../cliproxyText.config';
-import { AI_FILL_BACKEND_VALUES, textBackendReasoningEfforts } from '@atelier/shared';
-import { testConfig } from '../../test/helpers';
+} from './textBudgets';
 import { LEGACY_SEED } from '../../db/textSeed';
 
 describe('Shared ai-fill defaults', () => {
@@ -38,46 +32,6 @@ describe('Shared ai-fill defaults', () => {
   test('keeps the shared Kimi-facing low default', () => {
     expect(AI_FILL_DEFAULTS.reasoning_effort).toBe('low');
     expect(AI_FILL_DEFAULTS.max_completion_tokens).toBe(36_000);
-  });
-});
-
-describe('text backend registry', () => {
-  test('maps every backend to its configured CLIProxy model id', () => {
-    expect(textBackendModels(testConfig())).toEqual({
-      kimi: 'kimi-latest',
-      mimo: 'mimo-v2.6-pro',
-      grok: 'grok-latest',
-      'gemini-argon': 'gemini-4-argon',
-      'deepseek-abliterated': 'abliterated-model-large-flash',
-      'glm-abliterated': 'glm-5.3',
-      gpt: 'gpt-6.1-sol',
-    });
-    expect(textBackendModels(testConfig({ CLIPROXY_TEXT_MODEL_GLM_ABLITERATED: 'proxy/glm' }))['glm-abliterated'])
-      .toBe('proxy/glm');
-  });
-
-  test('every fixed default effort is one the backend lists, so the proxy never remaps it', () => {
-    expect(TEXT_BACKEND_DEFAULT_REASONING_EFFORT).toEqual({
-      kimi: null,
-      mimo: 'none',
-      grok: 'low',
-      'gemini-argon': 'low',
-      'deepseek-abliterated': 'none',
-      'glm-abliterated': 'low',
-      gpt: 'medium',
-    });
-    for (const backend of AI_FILL_BACKEND_VALUES) {
-      const effort = TEXT_BACKEND_DEFAULT_REASONING_EFFORT[backend];
-      // GPT is never user-pinned, so it lists nothing; Kimi takes the per-path default.
-      if (effort === null || backend === 'gpt') continue;
-      expect(textBackendReasoningEfforts(backend)).toContain(effort);
-    }
-    // Kimi's per-path default must itself be a level Kimi lists.
-    expect(textBackendReasoningEfforts('kimi')).toContain(AI_FILL_DEFAULTS.reasoning_effort);
-  });
-
-  test("Grok sampling follows xAI's recommendation", () => {
-    expect(GROK_SAMPLING).toEqual({ temperature: 0.7, top_p: 0.95 });
   });
 });
 
@@ -141,10 +95,8 @@ describe('budgets by latency profile (spec § 11.2 item 2)', () => {
 
   test('the seeded GLM row is the only slow one, matching the legacy backend mapping', () => {
     for (const seed of LEGACY_SEED.models) {
-      expect(seed.capabilities.latencyProfile).toBe(legacyLatencyProfile(seed.legacyKey));
+      expect(seed.capabilities.latencyProfile).toBe(seed.legacyKey === 'glm-abliterated' ? 'slow' : 'standard');
     }
-    expect(legacyLatencyProfile('glm-abliterated')).toBe('slow');
-    expect(legacyLatencyProfile(null)).toBe('standard');
   });
 
   test('the ai-fill batch route deadline budgets each profile\'s attempt length', () => {

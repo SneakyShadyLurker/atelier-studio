@@ -11,8 +11,8 @@ import { TextResponseTooLargeError } from './fetch';
 import { incompleteTextStream } from './finish';
 
 // Maps what the AI SDK raises onto Atelier's retry taxonomy. The SDK's
-// `isRetryable` has no quota notion, so the HTTP table is today's
-// (cliproxyText.ts `classifyHttpFailure` / `classifyInStreamFrame`).
+// `isRetryable` has no quota notion, so the HTTP table is the one the legacy
+// CLIProxy text provider used.
 
 // Explicit long-budget wording, distinct from transient overload. Kept narrow:
 // matches upstream quota phrasing, not generic "rate limit"/"slow down".

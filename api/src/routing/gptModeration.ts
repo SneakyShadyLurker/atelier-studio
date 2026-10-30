@@ -8,11 +8,25 @@ export class GptModerationError extends Error {
   readonly status: number;
 
   constructor(readonly kind: GptModerationFailureKind, readonly moderation: GptModerationNotice) {
-    super(kind === 'moderation-blocked'
-      ? 'Atelier blocked this request under its GPT content policy.'
-      : 'Atelier could not check this request. Nothing was sent to GPT. Please try again.');
+    super(moderationMessage(kind, moderation));
     this.status = kind === 'moderation-blocked' ? 422 : 503;
   }
+}
+
+/**
+ * GPT Image targets keep the GPT wording; a text target names the screened
+ * model (its display name, or "the text model" on a notice without one).
+ */
+function moderationMessage(kind: GptModerationFailureKind, moderation: GptModerationNotice): string {
+  if (moderation.target === 'image') {
+    return kind === 'moderation-blocked'
+      ? 'Atelier blocked this request under its GPT content policy.'
+      : 'Atelier could not check this request. Nothing was sent to GPT. Please try again.';
+  }
+  const model = moderation.modelLabel ?? 'the text model';
+  return kind === 'moderation-blocked'
+    ? `Atelier blocked this request under its content policy. Nothing was sent to ${model}.`
+    : `Atelier could not check this request. Nothing was sent to ${model}. Please try again.`;
 }
 
 // Initial operating threshold, not a calibrated accuracy guarantee. Valid

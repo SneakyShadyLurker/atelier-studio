@@ -4,8 +4,8 @@ import { parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds } from '../t
 import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 import {
   type EnhanceChunk,
-  type TestCliproxyTextProvider,
-} from '../providers/cliproxyText';
+  type TestTextFeatureProvider,
+} from '../providers/text/featureHelpers';
 import {
   ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
@@ -55,7 +55,7 @@ function systemPromptOf(request: CapturedRequest): unknown {
   return request.messages?.find((message) => message.role === 'system')?.content;
 }
 
-function provider(): TestCliproxyTextProvider {
+function provider(): TestTextFeatureProvider {
   return {
     async *enhance() {
       await Promise.resolve();

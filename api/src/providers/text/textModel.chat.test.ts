@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { brainstormDefaults, textBackendModels } from '../cliproxyText.config';
-import type { ChatResponseFormat } from '../cliproxyText';
+import { brainstormDefaults } from './textBudgets';
+import type { ChatResponseFormat } from './featureHelpers';
 // These suites use modelId 'gpt-image-2.5-sunburst' → the GPT (anatomy-safe) constraints variant.
 import {
   BRAINSTORM_FIELD_SEPARATOR,
   BRAINSTORM_RECORD_SEPARATOR,
   BRAINSTORM_CONSTRAINTS_GPT,
 } from '../../prompts/brainstormCharactersSystemPrompt';
-import { restoreFetch, testConfig } from '../../test/helpers';
+import { legacyTextUpstreamIds, restoreFetch } from '../../test/helpers';
 import { redactSecrets } from '../../observability/redact';
 import { seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
 
-const TEXT_MODELS = textBackendModels(testConfig());
+const TEXT_MODELS = legacyTextUpstreamIds();
 
 const servers: Bun.Server<unknown>[] = [];
 beforeEach(() => {

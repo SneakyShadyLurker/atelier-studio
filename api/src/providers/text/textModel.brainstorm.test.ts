@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { type BrainstormChunk } from '../cliproxyText';
+import { type BrainstormChunk } from './featureHelpers';
 import {
   BRAINSTORM_RECORD_SEPARATOR,
   BRAINSTORM_FIELD_SEPARATOR,
   BRAINSTORM_CONSTRAINTS_GPT,
 } from '../../prompts/brainstormCharactersSystemPrompt';
-import { brainstormDefaults } from '../cliproxyText.config';
+import { brainstormDefaults } from './textBudgets';
 import { restoreFetch } from '../../test/helpers';
 import { seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
 import { hostPortProbeResponse, isHostPortProbe } from '../../test/hostProbe';

@@ -1,5 +1,5 @@
 // Product-owned system prompt for the dimension-rescue LLM (consumed verbatim
-// by providers/cliproxyText.ts rescueDimension). Unlike the inferer's
+// by providers/text/textModel.ts rescueDimension). Unlike the inferer's
 // taxonomy-wide reasoning, this is a single targeted op: invent ONE new option
 // for a named list that bridges a conflict the user's already-accepted bundles
 // have introduced. Output MUST be strict JSON in the same envelope as the

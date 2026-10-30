@@ -113,8 +113,7 @@ export function tryParseJson(text: unknown): unknown {
 }
 
 // Coerce an unknown upstream error into a loggable string. Shared by the
-// CLIProxyAPI-family adapters (cliproxy, cliproxyText), which each had a
-// byte-identical private copy.
+// CLIProxyAPI image adapter and the text feature provider.
 export function errorToRawString(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value instanceof Error) return value.message;

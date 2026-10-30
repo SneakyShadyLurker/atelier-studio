@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { Database } from 'bun:sqlite';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import { allowJevForProviderTests, resetJevForProviderTests } from '../test/jev-fixture';
-import { type BrainstormCharactersInput, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type BrainstormCharactersInput, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds, pickLegacyTextModel, legacyTextModelId } from '../test/helpers';
 import { BRAINSTORM_FIELD_SEPARATOR, BRAINSTORM_RECORD_SEPARATOR } from '../prompts/brainstormCharactersSystemPrompt';
@@ -75,7 +76,7 @@ async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
   if (Date.now() < 0) yield undefined as never;
 }
 
-function fakeProvider(inputs: BrainstormCharactersInput[] = []): TestCliproxyTextProvider {
+function fakeProvider(inputs: BrainstormCharactersInput[] = []): TestTextFeatureProvider {
   return {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -138,31 +139,11 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     ]);
   });
 
-  test('rejects retired wire keys before calling a provider', async () => {
-    const inputs: BrainstormCharactersInput[] = [];
-    setTextModelProviderForTests(fakeProvider(inputs));
-    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    for (const textBackend of ['deepseek-pro', 'deepseek-flash', 'qwen', 'glm-flash']) {
-      const res = await post(app, 'alice', {
-        count: 1, modelId: 'gemini-3-pro-image-preview', textBackend,
-      });
-      expect(res.status).toBe(400);
-    }
-    expect(inputs).toEqual([]);
-  });
-
-  test('rejects an explicit GPT pin on a local image target', async () => {
-    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOCAL_MODELS_USERS: 'alice' });
-    const res = await post(app, 'alice', { count: 1, modelId: 'krea-2-gonzalomo', textBackend: 'gpt' });
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain('cloud image models only');
-  });
-
-  test('an explicit textBackend overrides the image-model routing', async () => {
+  test('an explicit textModelId pin overrides the image-model routing', async () => {
     setTextModelProviderForTests(null);
     const requests: Record<string, unknown>[] = [];
     const upstream = serveCapture(requests);
-    const { app } = testRuntime({
+    const { app, db } = testRuntime({
       seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       LOCAL_MODELS_USERS: 'alice',
@@ -170,9 +151,9 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       CLIPROXY_TOKEN: 'sk-test',
     });
     const body = { brief: 'A solitary adult cartographer.', count: 2 };
-    await parseSse(await post(app, 'alice', { ...body, modelId: 'krea-2-gonzalomo', textBackend: 'kimi' }));
-    await parseSse(await post(app, 'alice', { ...body, modelId: 'gemini-3-pro-image-preview', textBackend: 'mimo' }));
-    await parseSse(await post(app, 'alice', { ...body, modelId: 'gemini-3-pro-image-preview', textBackend: 'grok' }));
+    await parseSse(await post(app, 'alice', { ...body, modelId: 'krea-2-gonzalomo', textModelId: legacyTextModelId(db, 'kimi') }));
+    await parseSse(await post(app, 'alice', { ...body, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(db, 'mimo') }));
+    await parseSse(await post(app, 'alice', { ...body, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(db, 'grok') }));
 
     expect(requests.map((request) => request.model)).toEqual([
       TEXT_MODELS.kimi,
@@ -185,7 +166,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     setTextModelProviderForTests(null);
     const requests: Record<string, unknown>[] = [];
     const upstream = serveCapture(requests);
-    const { app } = testRuntime({
+    const { app, db } = testRuntime({
       seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       LOCAL_MODELS_USERS: 'alice',
@@ -193,13 +174,13 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       CLIPROXY_TOKEN: 'sk-test',
     });
     await parseSse(await post(app, 'alice', {
-      brief: 'A solitary adult cartographer.', count: 1, modelId: 'gemini-3-pro-image-preview', textBackend: 'deepseek-abliterated',
+      brief: 'A solitary adult cartographer.', count: 1, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(db, 'deepseek-abliterated'),
     }));
     expect(requests.map((request) => request.model)).toEqual([TEXT_MODELS['deepseek-abliterated']]);
   });
 
   // Sunburst remains on its fixed backend, including requests from other clients.
-  test('Sunburst fixes GPT despite stored and explicit text-backend preferences', async () => {
+  test('Sunburst fixes GPT despite stored and explicit text-model pins', async () => {
     setTextModelProviderForTests(null);
     const requests: Record<string, unknown>[] = [];
     const upstream = serveCapture(requests);
@@ -215,7 +196,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     // Sunburst fixes the backend without mutating stored preferences.
     await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.5-sunburst' }));
     // A request pin cannot move the Sunburst workflow to another backend.
-    await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.5-sunburst', textBackend: 'kimi' }));
+    await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.5-sunburst', textModelId: legacyTextModelId(db, 'kimi') }));
 
     expect(requests.map((request) => request.model)).toEqual([
       TEXT_MODELS.gpt,
@@ -227,7 +208,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     setTextModelProviderForTests(null);
     const requests: Record<string, unknown>[] = [];
     const upstream = serveByModel(requests, { [TEXT_MODELS.mimo]: 503, [TEXT_MODELS.kimi]: 'record' });
-    const { app } = testRuntime({
+    const { app, db } = testRuntime({
       seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       LOCAL_MODELS_USERS: 'alice',
@@ -235,7 +216,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       CLIPROXY_TOKEN: 'sk-test',
       RESILIENT_MAX_ATTEMPTS: '1',
     });
-    const events = await parseSse(await post(app, 'alice', { count: 1, modelId: 'krea-2-gonzalomo', textBackend: 'mimo' }));
+    const events = await parseSse(await post(app, 'alice', { count: 1, modelId: 'krea-2-gonzalomo', textModelId: legacyTextModelId(db, 'mimo') }));
     expect(requests.map((request) => request.model)).toEqual([TEXT_MODELS.mimo, TEXT_MODELS.kimi]);
     expect(events.map((e) => e.event)).toEqual(['prompt', 'done']);
   });
@@ -253,14 +234,14 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       RESILIENT_MAX_ATTEMPTS: '1',
     });
     pickLegacyTextModel(db, 'alice', 'brainstorm', 'kimi', 'max');
-    await parseSse(await post(app, 'alice', { count: 1, modelId: 'krea-2-gonzalomo', textBackend: 'mimo' }));
+    await parseSse(await post(app, 'alice', { count: 1, modelId: 'krea-2-gonzalomo', textModelId: legacyTextModelId(db, 'mimo') }));
     expect(requests.map((request) => [request.model, request.reasoning_effort])).toEqual([
       [TEXT_MODELS.mimo, 'none'],
       [TEXT_MODELS.kimi, 'low'],
     ]);
 
     requests.length = 0;
-    await parseSse(await post(app, 'alice', { count: 1, modelId: 'krea-2-gonzalomo', textBackend: 'kimi' }));
+    await parseSse(await post(app, 'alice', { count: 1, modelId: 'krea-2-gonzalomo', textModelId: legacyTextModelId(db, 'kimi') }));
     expect(requests.map((request) => [request.model, request.reasoning_effort])).toEqual([[TEXT_MODELS.kimi, 'max']]);
   });
 
@@ -268,7 +249,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     setTextModelProviderForTests(null);
     const requests: Record<string, unknown>[] = [];
     const upstream = serveByModel(requests, { [TEXT_MODELS.mimo]: 'insufficient_system_resource', [TEXT_MODELS.kimi]: 'record' });
-    const { app } = testRuntime({
+    const { app, db } = testRuntime({
       seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       LOCAL_MODELS_USERS: 'alice',
@@ -277,9 +258,9 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       RESILIENT_MAX_ATTEMPTS: '1',
       RESILIENT_BREAKER_THRESHOLD: '3',
     });
-    const body = { count: 1, modelId: 'krea-2-gonzalomo', textBackend: 'mimo' };
+    const body = (runtimeDb: Database) => ({ count: 1, modelId: 'krea-2-gonzalomo', textModelId: legacyTextModelId(runtimeDb, 'mimo') });
     for (let call = 0; call < 3; call += 1) {
-      const events = await parseSse(await post(app, 'alice', body));
+      const events = await parseSse(await post(app, 'alice', body(db)));
       expect(events.map((e) => e.event)).toEqual(['prompt', 'done']);
     }
     // insufficient_system_resource on the drain path is a transient failure, so
@@ -290,7 +271,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     // An in-stream `{ error }` frame with timeout wording is transient too.
     const inStream: Record<string, unknown>[] = [];
     const inStreamUpstream = serveByModel(inStream, { [TEXT_MODELS.mimo]: 'in_stream_timeout', [TEXT_MODELS.kimi]: 'record' });
-    const { app: appInStream } = testRuntime({
+    const { app: appInStream, db: dbInStream } = testRuntime({
       seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       LOCAL_MODELS_USERS: 'alice',
@@ -298,7 +279,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       CLIPROXY_TOKEN: 'sk-test',
       RESILIENT_MAX_ATTEMPTS: '1',
     });
-    const inStreamEvents = await parseSse(await post(appInStream, 'alice', body));
+    const inStreamEvents = await parseSse(await post(appInStream, 'alice', body(dbInStream)));
     expect(inStreamEvents.map((e) => e.event)).toEqual(['prompt', 'done']);
     expect(inStream.map((request) => request.model)).toEqual([TEXT_MODELS.mimo, TEXT_MODELS.kimi]);
 
@@ -307,7 +288,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     // MiMo breaker opens, then the next call must skip MiMo entirely.
     const down: Record<string, unknown>[] = [];
     const downstream = serveByModel(down, { [TEXT_MODELS.mimo]: 503, [TEXT_MODELS.kimi]: 'record' });
-    const { app: appDown } = testRuntime({
+    const { app: appDown, db: dbDown } = testRuntime({
       seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       LOCAL_MODELS_USERS: 'alice',
@@ -317,7 +298,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       RESILIENT_BREAKER_THRESHOLD: '3',
     });
     for (let call = 0; call < 4; call += 1) {
-      const events = await parseSse(await post(appDown, 'alice', body));
+      const events = await parseSse(await post(appDown, 'alice', body(dbDown)));
       expect(events.map((e) => e.event)).toEqual(['prompt', 'done']);
     }
     expect(down.filter((request) => request.model === TEXT_MODELS.mimo).length).toBe(3);
@@ -328,7 +309,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     setTextModelProviderForTests(null);
     const requests: Record<string, unknown>[] = [];
     const upstream = serveByModel(requests, { [TEXT_MODELS.mimo]: 'content_filter', [TEXT_MODELS.kimi]: 503 });
-    const { app } = testRuntime({
+    const { app, db } = testRuntime({
       seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       LOCAL_MODELS_USERS: 'alice',
@@ -336,14 +317,14 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       CLIPROXY_TOKEN: 'sk-test',
       RESILIENT_MAX_ATTEMPTS: '1',
     });
-    const refused = await parseSse(await post(app, 'alice', { count: 1, modelId: 'gemini-3-pro-image-preview', textBackend: 'mimo' }));
+    const refused = await parseSse(await post(app, 'alice', { count: 1, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(db, 'mimo') }));
     expect(requests.map((request) => request.model)).toEqual([TEXT_MODELS.mimo]);
     expect(refused.map((e) => e.event)).toEqual(['error']);
     expect((refused[0]?.data as { code?: string }).code).toBe('content-filter');
 
     const bothDown: Record<string, unknown>[] = [];
     const downstream = serveByModel(bothDown, { [TEXT_MODELS.mimo]: 503, [TEXT_MODELS.kimi]: 503 });
-    const { app: appDown } = testRuntime({
+    const { app: appDown, db: dbDown } = testRuntime({
       seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       LOCAL_MODELS_USERS: 'alice',
@@ -351,14 +332,14 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       CLIPROXY_TOKEN: 'sk-test',
       RESILIENT_MAX_ATTEMPTS: '1',
     });
-    const doubleFail = await parseSse(await post(appDown, 'alice', { count: 1, modelId: 'gemini-3-pro-image-preview', textBackend: 'mimo' }));
+    const doubleFail = await parseSse(await post(appDown, 'alice', { count: 1, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(dbDown, 'mimo') }));
     expect(bothDown.map((request) => request.model)).toEqual([TEXT_MODELS.mimo, TEXT_MODELS.kimi]);
     expect(doubleFail.map((e) => e.event)).toEqual(['error']);
     expect((doubleFail[0]?.data as { code?: string }).code).toBe('provider-error');
 
     // Kimi has no failover partner: a transient Kimi failure is terminal.
     bothDown.length = 0;
-    const kimiDown = await parseSse(await post(appDown, 'alice', { count: 1, modelId: 'gemini-3-pro-image-preview', textBackend: 'kimi' }));
+    const kimiDown = await parseSse(await post(appDown, 'alice', { count: 1, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(dbDown, 'kimi') }));
     expect(bothDown.map((request) => request.model)).toEqual([TEXT_MODELS.kimi]);
     expect(kimiDown.map((e) => e.event)).toEqual(['error']);
     expect((kimiDown[0]?.data as { code?: string }).code).toBe('provider-error');
@@ -498,9 +479,6 @@ describe('brainstorm text model pin and failover', () => {
     runtime.text.store.updateModel(grok, { enabled: false });
     const disabled = await post(runtime.app, 'alice', { ...body, textModelId: grok });
     expect(disabled.status).toBe(400);
-    // The legacy key maps to the same (now turned-off) row.
-    const legacy = await post(runtime.app, 'alice', { ...body, textBackend: 'grok' });
-    expect(legacy.status).toBe(400);
     expect(requests).toEqual([]);
   });
 
@@ -530,7 +508,7 @@ describe('brainstorm text model pin and failover', () => {
     const requests: Record<string, unknown>[] = [];
     const runtime = upstreamRuntime(serveByModel(requests, { [TEXT_MODELS.mimo]: 503, [TEXT_MODELS.kimi]: 'record' }));
     runtime.text.store.updateModel(legacyTextModelId(runtime.db, 'kimi'), { enabled: false });
-    const events = await parseSse(await post(runtime.app, 'alice', { count: 1, modelId: 'gemini-3-pro-image-preview', textBackend: 'mimo' }));
+    const events = await parseSse(await post(runtime.app, 'alice', { count: 1, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(runtime.db, 'mimo') }));
     expect(requests.map((request) => request.model)).toEqual([TEXT_MODELS.mimo]);
     expect(events.map((e) => e.event)).toEqual(['error']);
   });

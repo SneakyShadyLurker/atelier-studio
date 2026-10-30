@@ -4,7 +4,7 @@ import type { VariableOption } from '@atelier/shared';
 import type { AppEnv } from '../../server-env';
 import { ensureUser } from '../../db/users';
 import { reorderOwned } from '../../db/reorder';
-import type { DraftResult } from '../../providers/cliproxyText';
+import type { DraftResult } from '../../providers/text/featureHelpers';
 import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
 import { failedToSseError } from '../../lifecycle/llm-error';
 import { draftPool } from '../../orchestrator/llmAdmission';

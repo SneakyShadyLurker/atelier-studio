@@ -46,8 +46,8 @@ import {
   type BrainstormCharactersInput,
   type BrainstormChunk,
   type ChatResponseFormat,
-  type CliproxyTextPolicies,
-  type CliproxyTextProvider,
+  type TextCallPolicies,
+  type TextFeatureProvider,
   type DraftListProviderInput,
   type DraftResult,
   type DraftTemplateProviderInput,
@@ -58,7 +58,7 @@ import {
   type InferCallOptions,
   type InferResult,
   type RescueDimensionArgs,
-} from '../cliproxyText';
+} from './featureHelpers';
 import {
   AI_FILL_BATCH_MAX_COMPLETION_TOKENS,
   AI_FILL_DEFAULTS,
@@ -68,7 +68,7 @@ import {
   DRAFT_TEMPLATE_DEFAULTS,
   INFER_DIMENSIONS_DEFAULTS,
   pinnedEffortMaxResponseBytes,
-} from '../cliproxyText.config';
+} from './textBudgets';
 import { NOOP_PROVIDER_LOGGER, type ProviderLogger } from '../types';
 import { classifyApiError, classifyStreamError } from './classify';
 import { boundedFetch, TextResponseTooLargeError } from './fetch';
@@ -77,9 +77,8 @@ import { OPENAI_COMPATIBLE_OPTIONS_KEY } from './openaiCompatible';
 import type { ResolvedProvider, TextProtocolAdapter } from './protocol';
 
 // The text feature interface (enhance, brainstorm, drafts, ai-fill, infer,
-// rescue) over one admin-managed provider + model row. Replaces
-// `createCliproxyTextProvider`: the AI SDK provider packages shape the wire,
-// this module keeps what the SDK cannot own (spec § 5.3):
+// rescue) over one admin-managed provider + model row. The AI SDK provider
+// packages shape the wire; this module keeps what the SDK cannot own (spec § 5.3):
 //
 // - The cockatiel policy wraps the open (`doStream`) so a failed open is
 //   retried; streams whose deltas reach the client (enhance, brainstorm) drain
@@ -376,9 +375,9 @@ function endError(end: Extract<WireEvent, { type: 'end' }>): Error | null {
 // ---------------------------------------------------------------------------
 // The provider.
 
-export type TextModelProvider = CliproxyTextProvider;
+export type TextModelProvider = TextFeatureProvider;
 
-export interface TextModelProviderInit extends CliproxyTextPolicies {
+export interface TextModelProviderInit extends TextCallPolicies {
   readonly adapter: TextProtocolAdapter;
   readonly provider: TextProviderRecord;
   /** Plaintext credential (null = none); resolved on first use and kept for this instance. */

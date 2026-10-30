@@ -7,7 +7,6 @@ import {
   BRAINSTORM_MEDIA,
   BRAINSTORM_MIN_COUNT,
   BRAINSTORM_MAX_COUNT_CEILING,
-  BRAINSTORM_TEXT_BACKENDS,
   BRAINSTORM_VARIATION_SEED_MAX,
 } from '@atelier/shared';
 import { CHARACTER_SOURCE_TEXT_MAX_CHARS } from '@atelier/shared/character-source-text';
@@ -19,7 +18,6 @@ export const BrainstormCharactersRequestSchema = z.object({
   medium: z.enum(BRAINSTORM_MEDIA).optional(),
   modelId: z.string().trim().min(1).check(maxUtf16Length(200)),
   textModelId: z.string().trim().min(1).check(maxUtf16Length(200)).optional(),
-  textBackend: z.enum(BRAINSTORM_TEXT_BACKENDS).optional(),
   variationSeed: z.number().int().nonnegative().max(BRAINSTORM_VARIATION_SEED_MAX).optional(),
 });
 

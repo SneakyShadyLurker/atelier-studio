@@ -34,7 +34,7 @@ function isAiFillBatchResult(value: unknown): value is AiFillBatchResolved {
 export type AiFillModel = Pick<AiFillBackendFrame, 'modelId' | 'label'>;
 
 // Advisory frame: a malformed one is dropped, never thrown. Any model id is
-// accepted; the legacy `backend` key is ignored.
+// accepted.
 function backendFrameModel(data: unknown): AiFillModel | null {
   if (!isRecord(data) || typeof data.modelId !== 'string' || data.modelId === '' || typeof data.label !== 'string') {
     return null;

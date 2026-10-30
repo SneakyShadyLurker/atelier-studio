@@ -1,32 +1,14 @@
-import type { AiFillBackend, TextLatencyProfile, TextReasoningEffort } from '@atelier/shared';
-import type { Config } from '../config';
+import type { TextLatencyProfile, TextReasoningEffort } from '@atelier/shared';
 
-export const CLIPROXY_CHAT_PATH = '/v1/chat/completions';
-// Text backends reached through an OpenAI-compatible proxy such as CLIProxyAPI.
-// Each backend's upstream model id is configuration (`CLIPROXY_TEXT_MODEL_*`,
-// see `textBackendModels`); the wire shape follows the backend key. Kimi, MiMo,
-// Grok and Gemini answered streaming strict `json_schema` with a base64 PNG
-// image part and non-streaming `json_object` with HTTP 200 through the proxy.
-// DeepSeek V4.1 Flash Abliterated's vision path is unverified; it is selectable
-// regardless.
+// Token budgets, deadlines and byte caps of the text feature calls, keyed by a
+// model row's latency profile where slow models need longer ones.
+
 export const KIMI_LOW_REASONING_OVERHEAD_TOKENS = 4000;
-// xAI's recommended sampling for Grok (docs.x.ai best practices).
-// Every other backend sends no sampling fields: Kimi, MiMo, Gemini and GPT fix
-// or ignore sampling under reasoning, and MiMo produced token salad at
-// temperature 1.5.
-export const GROK_SAMPLING = { temperature: 0.7, top_p: 0.95 } as const;
-// GPT-6.1 Sol: vision, strict schema, medium effort and both stream modes
-// verified through CLIProxyAPI.
-export const GPT_REASONING_EFFORT = 'medium';
-
-// GLM 5.3 (a text-only model, backend key 'glm-abliterated'). User-selectable only — never an automatic-routing target.
-// The upstream publishes low/high/max efforts; the wire branch pins 'low' unless
-// the user pins another. Its catalog `max_output_tokens` is 131,072, but
-// reasoning spends from the completion budget and the stream drain below is
-// sized to emit the whole budget at the measured throughput, so every call
-// asks for 32,768: a count-12 brainstorm used 21,067 tokens on the earlier
-// GLM Flash route.
-export const GLM_ABLITERATED_REASONING_EFFORT = 'low';
+// GLM 5.3's catalog `max_output_tokens` is 131,072, but reasoning spends from
+// the completion budget and the stream drain below is sized to emit the whole
+// budget at the measured throughput, so its migrated row asks for 32,768 on
+// every call: a count-12 brainstorm used 21,067 tokens on the earlier GLM
+// Flash route.
 export const GLM_ABLITERATED_MAX_COMPLETION_TOKENS = 32_768;
 
 // GLM's longer deadlines were sized on a GLM 5.3 Flash route at 'high'
@@ -42,14 +24,6 @@ export const GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS = 360_000;
 export const GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS = 420_000;
 export const GLM_ABLITERATED_STREAM_DRAIN_MS = 2_700_000;
 export const GLM_ABLITERATED_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
-
-/**
- * Legacy: the latency profile of a fixed backend key, for callers not yet on
- * the model resolver. Only GLM was slow (spec § 6.2).
- */
-export function legacyLatencyProfile(backend: AiFillBackend | null): TextLatencyProfile {
-  return backend === 'glm-abliterated' ? 'slow' : 'standard';
-}
 
 /** Per-attempt ai-fill timeout; the provider's policy and the route envelope both read it. */
 export function aiFillPerAttemptTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
@@ -146,53 +120,6 @@ export const DRAFT_TEMPLATE_DEFAULTS = {
   verbosity: 'low',
   max_completion_tokens: 1500 + KIMI_LOW_REASONING_OVERHEAD_TOKENS,
 } as const;
-
-/** The config slice holding each backend's CLIProxy model id. */
-export type TextBackendModelConfig = Pick<
-  Config,
-  | 'CLIPROXY_TEXT_MODEL_KIMI'
-  | 'CLIPROXY_TEXT_MODEL_MIMO'
-  | 'CLIPROXY_TEXT_MODEL_GROK'
-  | 'CLIPROXY_TEXT_MODEL_GEMINI_ARGON'
-  | 'CLIPROXY_TEXT_MODEL_DEEPSEEK_ABLITERATED'
-  | 'CLIPROXY_TEXT_MODEL_GLM_ABLITERATED'
-  | 'CLIPROXY_TEXT_MODEL_GPT'
->;
-
-/**
- * Legacy backend → CLIProxy model id mapping (the `CLIPROXY_TEXT_MODEL_*` ids),
- * read only by the legacy `cliproxyTextForBackend` (Task 17 removes both).
- * Production routes resolve text models from the database instead.
- */
-export function textBackendModels(config: TextBackendModelConfig): Readonly<Record<AiFillBackend, string>> {
-  return {
-    kimi: config.CLIPROXY_TEXT_MODEL_KIMI,
-    mimo: config.CLIPROXY_TEXT_MODEL_MIMO,
-    grok: config.CLIPROXY_TEXT_MODEL_GROK,
-    'gemini-argon': config.CLIPROXY_TEXT_MODEL_GEMINI_ARGON,
-    'deepseek-abliterated': config.CLIPROXY_TEXT_MODEL_DEEPSEEK_ABLITERATED,
-    'glm-abliterated': config.CLIPROXY_TEXT_MODEL_GLM_ABLITERATED,
-    gpt: config.CLIPROXY_TEXT_MODEL_GPT,
-  };
-}
-
-/**
- * Reasoning effort each backend sends when the user has not pinned one.
- * `null` = the per-path default (`AI_FILL_DEFAULTS.reasoning_effort` and
- * friends, all 'low'), which only Kimi takes. Every other entry is one of the
- * backend's own listed levels: CLIProxyAPI silently remaps an unlisted level
- * (MiMo 'low' -> 'high'), so a per-path default must never reach
- * them. GPT keeps its fixed pin even under a user effort.
- */
-export const TEXT_BACKEND_DEFAULT_REASONING_EFFORT = {
-  kimi: null,
-  mimo: 'none',
-  grok: 'low',
-  'gemini-argon': 'low',
-  'deepseek-abliterated': 'none',
-  'glm-abliterated': GLM_ABLITERATED_REASONING_EFFORT,
-  gpt: GPT_REASONING_EFFORT,
-} as const satisfies Record<AiFillBackend, TextReasoningEffort | null>;
 
 // ai-fill writes at most AI_FILL_MAX_SLOTS short blanks, so it must not inherit
 // the 32k infer ceiling. Kimi uses low reasoning for this bounded compilation.

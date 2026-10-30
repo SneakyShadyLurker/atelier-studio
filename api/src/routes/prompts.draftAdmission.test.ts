@@ -8,8 +8,8 @@ import {
   type DraftResult,
   type DraftTemplateResult,
   type EnhanceChunk,
-  type TestCliproxyTextProvider,
-} from '../providers/cliproxyText';
+  type TestTextFeatureProvider,
+} from '../providers/text/featureHelpers';
 import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { parseSseText, testRuntime } from '../test/helpers';
 
@@ -26,20 +26,20 @@ async function* emptyEnhance(): AsyncGenerator<EnhanceChunk, void, unknown> {
 function pendingProvider(
   method: 'draftList',
   result: DraftResult,
-): { provider: TestCliproxyTextProvider; resolve(): void };
+): { provider: TestTextFeatureProvider; resolve(): void };
 function pendingProvider(
   method: 'draftTemplate',
   result: DraftTemplateResult,
-): { provider: TestCliproxyTextProvider; resolve(): void };
+): { provider: TestTextFeatureProvider; resolve(): void };
 function pendingProvider(
   method: 'draftList' | 'draftTemplate',
   result: DraftResult | DraftTemplateResult,
-): { provider: TestCliproxyTextProvider; resolve(): void } {
+): { provider: TestTextFeatureProvider; resolve(): void } {
   let release: (() => void) | null = null;
   const wait = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const base: TestCliproxyTextProvider = {
+  const base: TestTextFeatureProvider = {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
     draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),

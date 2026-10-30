@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { TEXT_BACKEND_LABELS } from '@atelier/shared';
 import type { AppEnv } from '../server-env';
 import { draftPool } from '../orchestrator/llmAdmission';
 import { withLlmSlot } from '../lifecycle/withLlmSlot';
@@ -10,7 +9,7 @@ import { BrainstormCharactersRequestSchema } from './characters.schema';
 import { failedToSseError } from '../lifecycle/llm-error';
 import type { ResolveTextModelInput } from '../routing/textModelResolver';
 import type { TextModelRecord } from '../db/textProviders';
-import { brainstormRouteTimeoutMs, textStreamDrainMs } from '../providers/cliproxyText.config';
+import { brainstormRouteTimeoutMs, textStreamDrainMs } from '../providers/text/textBudgets';
 
 const SAFE_ERROR_MESSAGE = "Couldn't brainstorm characters. Please try again.";
 
@@ -22,31 +21,16 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
   const userId = c.var.userId;
   const text = c.var.text;
   const entry = findModel(parsed.value.modelId, c.var.config);
-  const { textModelId, textBackend } = parsed.value;
-  // Legacy shim rule (removed with `textBackend`): the GPT key never wrote for local or unknown targets.
-  if (textBackend === 'gpt' && (entry === null || entry.model.pool === 'local')) {
-    return c.json({ error: `${TEXT_BACKEND_LABELS.gpt} supports cloud image models only; local or unknown targets cannot pin gpt` }, 400);
-  }
-  // The request pin must name an enabled model; the legacy key maps to its migrated row.
-  const enabledModels = text.snapshot.current().models;
-  let requestPin: string | undefined;
-  if (textModelId !== undefined) {
-    if (!enabledModels.has(textModelId)) {
-      return c.json({ error: 'This text model is not available', issues: [{ path: ['textModelId'], message: 'unknown or turned off' }] }, 400);
-    }
-    requestPin = textModelId;
-  } else if (textBackend !== undefined) {
-    const legacy = [...enabledModels.values()].find((model) => model.legacyKey === textBackend);
-    if (!legacy) {
-      return c.json({ error: 'This text backend is not available', issues: [{ path: ['textBackend'], message: 'unknown or turned off' }] }, 400);
-    }
-    requestPin = legacy.id;
+  const { textModelId } = parsed.value;
+  // The request pin must name an enabled model.
+  if (textModelId !== undefined && !text.snapshot.current().models.has(textModelId)) {
+    return c.json({ error: 'This text model is not available', issues: [{ path: ['textModelId'], message: 'unknown or turned off' }] }, 400);
   }
   const route: ResolveTextModelInput = {
     userId,
     task: 'brainstorm',
     ...(entry ? { imageModelId: entry.model.id } : {}),
-    ...(requestPin === undefined ? {} : { requestPin }),
+    ...(textModelId === undefined ? {} : { requestPin: textModelId }),
   };
   const resolved = text.resolve(route);
   if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);

@@ -3,14 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  AI_FILL_BACKEND_VALUES,
-  isVisionTextBackend,
-  TEXT_BACKEND_LABELS,
-  TEXT_TASKS,
-  textBackendReasoningEfforts,
-  usesGenericPromptVariant,
-} from '@atelier/shared';
+import { TEXT_TASKS } from '@atelier/shared';
 import { BINARY_SCHEMA_VERSION, migrate } from './migrate';
 import { LEGACY_SEED, legacyTextModelEnvVars, legacyTextSeed, staleLegacyTextModelEnvVars, type TextSeed } from './textSeed';
 import {
@@ -18,7 +11,7 @@ import {
   GLM_ABLITERATED_MAX_COMPLETION_TOKENS,
   GROK_SAMPLING,
   TEXT_BACKEND_DEFAULT_REASONING_EFFORT,
-} from '../providers/cliproxyText.config';
+} from '../test/legacyChatBody';
 import { registryForConfig } from '../providers/registry';
 import { testConfig } from '../test/helpers';
 import type { AppLogger } from '../observability/logger';
@@ -397,16 +390,14 @@ describe('migration 58 - text providers', () => {
 });
 
 describe('legacy text seed', () => {
-  test('LEGACY_SEED reproduces the legacy backend constants', () => {
-    expect(LEGACY_SEED.models.map((m) => m.legacyKey)).toEqual([...AI_FILL_BACKEND_VALUES]);
+  test('LEGACY_SEED reproduces the frozen legacy wire constants', () => {
+    expect(LEGACY_SEED.models.map((m): string => m.legacyKey)).toEqual(Object.keys(TEXT_BACKEND_DEFAULT_REASONING_EFFORT));
     const defaults = testConfig();
     for (const model of LEGACY_SEED.models) {
       const key = model.legacyKey;
       const caps = model.capabilities;
-      expect(model.displayName).toBe(TEXT_BACKEND_LABELS[key]);
-      expect(caps.vision).toBe(isVisionTextBackend(key));
-      expect(caps.promptVariant).toBe(usesGenericPromptVariant(key) ? 'generic' : 'kimi');
-      expect(caps.reasoningLevels).toEqual([...textBackendReasoningEfforts(key)]);
+      // A listed default, so the proxy never remaps it (GPT lists none: its effort is fixed).
+      if (caps.reasoningLevels.length > 0 && caps.reasoningDefault !== null) expect(caps.reasoningLevels).toContain(caps.reasoningDefault);
       expect(caps.reasoningDefault).toBe(TEXT_BACKEND_DEFAULT_REASONING_EFFORT[key] ?? AI_FILL_DEFAULTS.reasoning_effort);
       expect(model.screenRequests).toBe(key === 'gpt');
       expect(caps.temperature).toBe(key === 'grok' ? GROK_SAMPLING.temperature : null);

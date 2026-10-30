@@ -1,6 +1,6 @@
 import { LEGACY_SEED, type LegacyTextKey } from '../db/textSeed';
 import type { TextModelRecord, TextProviderRecord } from '../db/textProviders';
-import type { CliproxyTextPolicies } from '../providers/cliproxyText';
+import type { TextCallPolicies } from '../providers/text/featureHelpers';
 import { textAdapterFor } from '../providers/text/registry';
 import { createTextModelProvider, type TextModelProvider, type TextModelProviderInit } from '../providers/text/textModel';
 import type { ProviderLogger } from '../providers/types';
@@ -76,7 +76,7 @@ export function testTextProviderRow(origin: string, overrides: Partial<TextProvi
   };
 }
 
-export interface TestTextModelProviderOptions extends Partial<CliproxyTextPolicies> {
+export interface TestTextModelProviderOptions extends Partial<TextCallPolicies> {
   /** Bare origin of the upstream, e.g. a Bun.serve URL or 'http://x' with a faked fetch. */
   readonly origin: string;
   readonly token?: string | null;

@@ -1,7 +1,7 @@
 import type { LibraryDiagnosisResponse } from '@atelier/shared';
 
 // Product-owned system prompt for the dimension inferer (consumed verbatim by
-// providers/cliproxyText.ts). Edit text here to retune behaviour. Keep the
+// providers/text/textModel.ts). Edit text here to retune behaviour. Keep the
 // example library grounded in the kinds of values the real library actually
 // holds (poses, outfits, locations, races, franchises, jobs, eras, cameras,
 // figures, …) so the model can pattern-match against its own input.
@@ -168,6 +168,6 @@ function formatPriorDiagnosis(diag: LibraryDiagnosisResponse): string {
   return lines.join('\n');
 }
 
-// Backward-compat: existing callers (cliproxyText.ts, tests) import a string constant.
+// Backward-compat: existing callers (textModel.ts, tests) import a string constant.
 // Keep that surface working by re-exporting the no-args build.
 export const INFER_DIMENSIONS_SYSTEM_PROMPT = buildInferDimensionsSystemPrompt();

@@ -3,8 +3,8 @@ import type { TextStructuredOutputMode } from '@atelier/shared';
 import { RESCUE_RESPONSE_FORMAT } from '../../prompts/inferParse';
 import { STORY_PLAN_RESPONSE_FORMAT } from '../../prompts/storyPlannerSystemPrompt';
 import { genericTextModel, testTextModelProvider } from '../../test/textModelProvider';
-import type { EnhanceChunk } from '../cliproxyText';
-import { STORY_PLANNER_DEFAULTS } from '../cliproxyText.config';
+import type { EnhanceChunk } from './featureHelpers';
+import { STORY_PLANNER_DEFAULTS } from './textBudgets';
 
 // Anthropic structured output end to end through the feature provider: the
 // rescue call (strict schema, accumulated inside the policy) and the story

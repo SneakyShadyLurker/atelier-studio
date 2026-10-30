@@ -1,7 +1,7 @@
 import { SKIN_MARKING_BAN_ENHANCE, SKIN_MARKING_BAN_MOSS, WET_LOOK_BAN } from './skinRenderRules';
 
 // System prompts for the prompt enhancer (consumed verbatim by
-// providers/cliproxyText.ts as the `system` message). Product-owned content —
+// providers/text/textModel.ts as the `system` message). Product-owned content —
 // edit the text directly here to retune behaviour.
 // ENHANCE_SYSTEM_PROMPT is the provider default (Gemini and any model
 // without a dedicated variant). Dedicated target variants change only their

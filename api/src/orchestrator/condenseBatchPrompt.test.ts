@@ -8,8 +8,8 @@ import {
 } from './llmAdmission';
 import {
   type EnhanceChunk,
-  type TestCliproxyTextProvider,
-} from '../providers/cliproxyText';
+  type TestTextFeatureProvider,
+} from '../providers/text/featureHelpers';
 import {
   KREA_PROMPT_CONDENSE_TRIGGER_WORDS,
   KREA_PROMPT_WORD_BUDGET,
@@ -35,8 +35,8 @@ afterEach(() => {
 });
 
 function fakeCondenseProvider(
-  enhance: TestCliproxyTextProvider['enhance'],
-): TestCliproxyTextProvider {
+  enhance: TestTextFeatureProvider['enhance'],
+): TestTextFeatureProvider {
   return {
     enhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),

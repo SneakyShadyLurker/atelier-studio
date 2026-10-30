@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import type { AiFillBackend } from '@atelier/shared';
 import { buildResilientPolicy } from '../../lifecycle/resilient-call';
 import {
   AI_FILL_BATCH_MAX_COMPLETION_TOKENS,
@@ -9,8 +8,8 @@ import {
   aiFillBatchRouteTimeoutMs,
   aiFillPolicyEnvelopeMs,
   aiFillRouteTimeoutMs,
-  legacyLatencyProfile,
-} from '../cliproxyText.config';
+} from './textBudgets';
+import type { LegacyTextKey } from '../../db/textSeed';
 import { genericTextModel, seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
 
 // Fast per-attempt policy for tests — small backoff so the transient-retry
@@ -29,7 +28,7 @@ function makeProvider(
   aiFillBatchPolicy = fastPolicy,
   // null = an admin-added row with no legacy key. (The legacy suite passed
   // `undefined` here, which the default turned back into 'kimi'.)
-  backend: AiFillBackend | null = 'kimi',
+  backend: LegacyTextKey | null = 'kimi',
 ) {
   return testTextModelProvider({
     origin: 'http://fake-upstream',
@@ -159,14 +158,14 @@ describe('aiFill retry policy', () => {
 
     // The initial call plus one format-recovery call.
     const policyCallCount = 2;
-    const timeoutMs = aiFillBatchRouteTimeoutMs(legacyLatencyProfile('kimi'), 8_000);
+    const timeoutMs = aiFillBatchRouteTimeoutMs('standard', 8_000);
     expect(timeoutMs).toBe(
       policyEnvelopeMs * policyCallCount + AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
     );
     expect(timeoutMs).toBeGreaterThan(300_000);
 
     // A GLM batch budgets its own longer per-attempt timeout for both calls.
-    expect(aiFillBatchRouteTimeoutMs(legacyLatencyProfile('glm-abliterated'), 8_000)).toBe(
+    expect(aiFillBatchRouteTimeoutMs('slow', 8_000)).toBe(
       2 * aiFillPolicyEnvelopeMs(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS, 8_000) + AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
     );
 

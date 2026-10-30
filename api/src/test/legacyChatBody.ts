@@ -5,7 +5,7 @@ import type { TextReasoningEffort } from '@atelier/shared';
 // `cliproxyText.config.ts` at schema 57). The wire-compat tests compare the
 // AI SDK adapter against it, so it must outlive the legacy code and must not
 // be "fixed": it records what production sent. Only the backend type is local
-// (the shared `AiFillBackend` goes away with the legacy surface).
+// (the shared `AiFillBackend` went away with the legacy surface).
 
 export type LegacyBackend =
   | 'kimi'

@@ -974,109 +974,6 @@ export interface AiFillBatchRequest {
   readonly modelId: string;
 }
 
-// Not tagged `@deprecated`: the no-deprecated lint rule would fail every
-// current consumer until the legacy route is removed.
-/**
- * Text-backend wire keys. Keys name the VENDOR + TIER, never a version, so a
- * future swap within a tier does not require another rename. Every key is
- * served through the configured OpenAI-compatible upstream, each with a
- * configurable model id: 'kimi' = Kimi K3, 'mimo' = MiMo V2.6 Pro,
- * 'grok' = Grok 4.7, 'gemini-argon' = Gemini 4 Argon, 'deepseek-abliterated'
- * = DeepSeek V4.1 Flash Abliterated and 'glm-abliterated' = GLM 5.3, a
- * text-only model (the key predates its move off an abliterated build); 'gpt' = GPT-6.1 Sol for cloud image
- * targets. Only 'kimi' and 'gpt' are automatic targets; every
- * other backend is user-selectable only.
- * Purely advisory leading frame naming which backend holds the fill: a client
- * that ignores it gets the same terminal outcome.
- * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
- */
-export const AI_FILL_BACKEND_VALUES = [
-  'kimi',
-  'mimo',
-  'grok',
-  'gemini-argon',
-  'deepseek-abliterated',
-  'glm-abliterated',
-  'gpt',
-] as const;
-/** Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route. */
-export type AiFillBackend = (typeof AI_FILL_BACKEND_VALUES)[number];
-
-/**
- * Backends Atelier will hand an image to. Per the model-capability policy every
- * natively multimodal backend belongs here, and each was verified end to end
- * through the upstream before being added — a backend listed without that check
- * would silently drop the image rather than fail. Kimi K3, MiMo V2.6 Pro,
- * Grok 4.7 and Gemini 4 Argon each read a base64 PNG image part under strict
- * `json_schema` (streaming) and `json_object` (non-streaming). GPT-6.1 Sol
- * read image parts with strict schema, medium reasoning and both streaming and
- * non-streaming responses.
- * GLM 5.3 ('glm-abliterated') is text-only: the upstream publishes
- * no image input for it and answers an image part with HTTP 400
- * `image_input_not_supported`.
- * 'deepseek-abliterated' is documented with text plus up to 4 images, but its
- * vision path is unverified, so it stays out until a live check passes; when
- * it is added, cap its images at 4.
- * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
- */
-export function isVisionTextBackend(
-  backend: string,
-): backend is Extract<AiFillBackend, 'kimi' | 'mimo' | 'grok' | 'gemini-argon' | 'gpt'> {
-  return backend === 'kimi'
-    || backend === 'mimo'
-    || backend === 'grok'
-    || backend === 'gemini-argon'
-    || backend === 'gpt';
-}
-
-/**
- * Does this backend take the generic ai-fill prompt body rather than the
- * Kimi-tuned one? True for every non-Kimi backend. This is INDEPENDENT of
- * vision — whether the call carries an image is `isVisionTextBackend` — and it
- * selects wording only: no backend receives instructions to disregard its own
- * safety judgement.
- * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
- */
-export function usesGenericPromptVariant(
-  backend: string,
-): backend is Exclude<AiFillBackend, 'kimi'> {
-  return backend !== 'kimi' && (AI_FILL_BACKEND_VALUES as readonly string[]).includes(backend);
-}
-
-/**
- * Canonical display labels for the text-backend union. Single source of truth for web copy.
- * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
- */
-export const TEXT_BACKEND_LABELS = {
-  kimi: 'Kimi K3',
-  mimo: 'MiMo V2.6 Pro',
-  grok: 'Grok 4.7',
-  'gemini-argon': 'Gemini 4 Argon',
-  'deepseek-abliterated': 'DeepSeek V4.1 Flash Abliterated',
-  'glm-abliterated': 'GLM 5.3',
-  gpt: 'GPT-6.1 Sol',
-} as const satisfies Record<AiFillBackend, string>;
-
-/**
- * Workloads a user may pin to a fixed text backend. Absent override = automatic routing.
- * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
- */
-export const TEXT_BACKEND_WORKLOADS = [
-  'ai-fill',
-  'brainstorm',
-  'enhance',
-  'condense',
-  'storytelling',
-] as const;
-/** Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route. */
-export type TextBackendWorkload = (typeof TEXT_BACKEND_WORKLOADS)[number];
-
-/**
- * Absent key = automatic routing (the shipped default).
- * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
- */
-export type TextBackendOverrides = Partial<Record<TextBackendWorkload, AiFillBackend>>;
-
 /** Wire values of the OpenAI-compatible `reasoning_effort` ladder, lowest first. */
 export const TEXT_REASONING_EFFORT_VALUES = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type TextReasoningEffort = (typeof TEXT_REASONING_EFFORT_VALUES)[number];
@@ -1091,52 +988,8 @@ export const TEXT_REASONING_EFFORT_LABELS = {
   max: 'Max',
 } as const satisfies Record<TextReasoningEffort, string>;
 
-const TEXT_BACKEND_REASONING_EFFORTS = {
-  // Catalog `reasoning_efforts` the upstream forwards.
-  // The proxy silently remaps an unlisted level (MiMo 'low' -> 'high'), so only
-  // listed levels are offered.
-  kimi: ['low', 'high', 'max'],
-  mimo: ['none', 'high'],
-  grok: ['low', 'medium', 'high', 'xhigh'],
-  'gemini-argon': ['low', 'medium', 'high'],
-  'deepseek-abliterated': TEXT_REASONING_EFFORT_VALUES,
-  // GLM 5.3 always thinks and publishes exactly low/high/max; 'none' still
-  // reasons, so it is not offered.
-  'glm-abliterated': ['low', 'high', 'max'],
-  // GPT's effort stays pinned for its fixed cloud-image text work.
-  gpt: [],
-} as const satisfies Record<AiFillBackend, readonly TextReasoningEffort[]>;
-
-/**
- * Efforts a user may pin on each backend's settings row: the levels each
- * model lists in its catalog and the upstream forwards. Single source for the route validator, the stored-value
- * reader and the Settings options.
- * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
- */
-export function textBackendReasoningEfforts(backend: AiFillBackend): readonly TextReasoningEffort[] {
-  return TEXT_BACKEND_REASONING_EFFORTS[backend];
-}
-
-/**
- * Pinned reasoning effort per workload. Absent key = the backend's own default.
- * An effort belongs to its workload's pinned backend and is only present with one.
- * Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route.
- */
-export type TextBackendEfforts = Partial<Record<TextBackendWorkload, TextReasoningEffort>>;
-
-/** Legacy: replaced by admin-managed text providers and models (`TEXT_TASKS`, `PublicTextModel`); removed with the legacy settings route. */
-export interface TextBackendSettingsResponse {
-  readonly overrides: TextBackendOverrides;
-  readonly efforts: TextBackendEfforts;
-  /**
-   * Backends whose model CLIProxyAPI's live inventory does not currently serve;
-   * a stored pin to one routes as Auto. Empty when the proxy inventory is unknown.
-   */
-  readonly unavailable: readonly AiFillBackend[];
-}
-
 // ─── Admin-managed text providers and models ────────────────────────────
-// Replaces the fixed text-backend keys above. Wire contract: spec
+// Wire contract: spec
 // docs/specs/byo-text-providers.md § 10. Credentials never appear here: the
 // browser sees only the auth mode, a fingerprint and an env var name.
 
@@ -1402,15 +1255,10 @@ export interface ModelStepsPutRequest {
   readonly steps: number | null;
 }
 
-/**
- * Advisory leading ai-fill frame naming the text model serving the fill.
- * `backend` is the migrated row's legacy key, present only for the seven
- * migrated models while the web still reads it.
- */
+/** Advisory leading ai-fill frame naming the text model serving the fill. */
 export interface AiFillBackendFrame {
   readonly modelId: string;
   readonly label: string;
-  readonly backend?: AiFillBackend;
 }
 
 export type AiFillSseEvent =
@@ -1447,10 +1295,6 @@ export type BrainstormLayout = (typeof BRAINSTORM_LAYOUTS)[number];
 export const BRAINSTORM_MEDIA = ['photograph'] as const;
 export type BrainstormMedium = (typeof BRAINSTORM_MEDIA)[number];
 
-/** Text backends a brainstorm caller may pin. Omitted = routed by image-model family. */
-export const BRAINSTORM_TEXT_BACKENDS = AI_FILL_BACKEND_VALUES satisfies readonly AiFillBackend[];
-export type BrainstormTextBackend = (typeof BRAINSTORM_TEXT_BACKENDS)[number];
-
 export interface BrainstormCharactersRequest {
   /** Optional steering brief (theme / era / setting). Empty = max variety. */
   readonly brief?: string;
@@ -1467,8 +1311,6 @@ export interface BrainstormCharactersRequest {
    * prompt writer for the image model still wins. Omitted = routed.
    */
   readonly textModelId?: string;
-  /** Legacy pin by migrated backend key; maps to the row with that legacy key. Prefer `textModelId`. */
-  readonly textBackend?: BrainstormTextBackend;
   /** Optional 32-bit entropy source for a meaningfully different take of the same brief. */
   readonly variationSeed?: number;
 }
@@ -1686,7 +1528,6 @@ type _NoUserIdOnAiFillSseEvent = _Assert<_NoUserIdOn<AiFillSseEvent>>;
 type _NoUserIdOnAiFillBatchItem = _Assert<_NoUserIdOn<AiFillBatchItem>>;
 type _NoUserIdOnAiFillBatchRequest = _Assert<_NoUserIdOn<AiFillBatchRequest>>;
 type _NoUserIdOnAiFillBatchSseEvent = _Assert<_NoUserIdOn<AiFillBatchSseEvent>>;
-type _NoUserIdOnTextBackendSettings = _Assert<_NoUserIdOn<TextBackendSettingsResponse>>;
 type _NoUserIdOnTextRouting = _Assert<_NoUserIdOn<TextRoutingResponse>>;
 type _NoUserIdOnModelStepsSettings = _Assert<_NoUserIdOn<ModelStepsSettingsResponse>>;
 type _NoUserIdOnModelStepsSetting = _Assert<_NoUserIdOn<ModelStepsSetting>>;

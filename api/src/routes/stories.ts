@@ -28,8 +28,8 @@ import {
   storyPlannerUserContent,
   type StorySourceMode,
 } from '../prompts/storyPlannerSystemPrompt';
-import { STORY_PLANNER_DEFAULTS, textStreamDrainMs } from '../providers/cliproxyText.config';
-import type { EnhanceImageInput } from '../providers/cliproxyText';
+import { STORY_PLANNER_DEFAULTS, textStreamDrainMs } from '../providers/text/textBudgets';
+import type { EnhanceImageInput } from '../providers/text/featureHelpers';
 import {
   findModel,
   isLocalModelGated,

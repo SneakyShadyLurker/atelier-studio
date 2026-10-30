@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import { testRuntime } from '../test/helpers';
 import { findModel } from '../providers/registry';
-import { type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import { configureQueuedPromptPreparation, prepareQueuedPrompts, stopQueuedPromptPreparation } from './queuedPromptPreparation';
 import * as queue from './queue';
 import { getBatchForUser, resetRegistryForTests, snapshotBatchControllers, snapshotBatchDonePromises } from './registry';
@@ -16,7 +16,7 @@ const gates: (() => void)[] = [];
 const signals: AbortSignal[] = [];
 let calls = 0;
 
-function heldProvider(): TestCliproxyTextProvider {
+function heldProvider(): TestTextFeatureProvider {
   return {
     async *enhance(_prompt, _images, signal) {
       calls += 1;

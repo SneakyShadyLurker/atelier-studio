@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { type EnhanceCallOptions } from '../cliproxyText';
+import { type EnhanceCallOptions } from './featureHelpers';
 import { restoreFetch } from '../../test/helpers';
 import { genericTextModel, seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
 import { hostPortProbeResponse, isHostPortProbe } from '../../test/hostProbe';

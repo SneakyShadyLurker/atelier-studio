@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { DraftTemplateResponse, VariableList } from '@atelier/shared';
-import { type CliproxyTextProvider, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type TextFeatureProvider, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import type { LibraryOverview } from '../prompts/libraryOverview';
 import { parseSseText, pickLegacyTextModel, restoreFetch, testRuntime } from '../test/helpers';
 import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
@@ -43,8 +43,8 @@ async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
 }
 
 function fakeProvider(
-  draftTemplate: CliproxyTextProvider['draftTemplate'],
-): TestCliproxyTextProvider {
+  draftTemplate: TextFeatureProvider['draftTemplate'],
+): TestTextFeatureProvider {
   return {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),

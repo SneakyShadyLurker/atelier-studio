@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../../server-env';
 import { ensureUser } from '../../db/users';
 import { reorderOwned } from '../../db/reorder';
-import type { DraftTemplateResult } from '../../providers/cliproxyText';
+import type { DraftTemplateResult } from '../../providers/text/featureHelpers';
 import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
 import { failedToSseError } from '../../lifecycle/llm-error';
 import { libraryOverviewForUser } from './libraryOverviewDb';

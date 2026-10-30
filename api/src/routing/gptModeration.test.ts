@@ -1,13 +1,20 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { createCliproxyProvider } from '../providers/cliproxy';
-import { createCliproxyTextProvider } from '../providers/cliproxyText';
 import { setJevSystemOneProviderForTests } from '../providers/jevSystemOne';
 import { moderateGptInput } from './gptModeration';
-import { rejectionOf, legacyTextUpstreamIds } from '../test/helpers';
-import { testTextPolicies } from '../test/textPolicies';
-import { genericTextModel, testTextModelProvider } from '../test/textModelProvider';
+import type { LegacyTextKey } from '../db/textSeed';
+import { rejectionOf } from '../test/helpers';
+import { genericTextModel, seededTextModel, testTextModelProvider } from '../test/textModelProvider';
 
-const TEXT_MODELS = legacyTextUpstreamIds();
+/** The feature provider over a seeded legacy-keyed row (only 'gpt' is screened). */
+function seededText(key: LegacyTextKey, origin = 'https://gpt.test') {
+  return testTextModelProvider({ origin, model: seededTextModel(key), moderation: { openrouterApiKey: 'or-key' } });
+}
+
+const okStream = () => new Response(
+  'data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+  { headers: { 'content-type': 'text/event-stream' } },
+);
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -104,9 +111,9 @@ describe('GPT moderation gate', () => {
     });
     globalThis.fetch = mock(() => {
       calls.push('gpt');
-      return Promise.resolve(new Response('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'));
+      return Promise.resolve(okStream());
     }) as unknown as typeof fetch;
-    const provider = createCliproxyTextProvider({ ...testTextPolicies(), baseUrl: 'https://gpt.test', token: 'test', model: TEXT_MODELS.gpt, backend: 'gpt', maxResponseBytes: 10_000 });
+    const provider = seededText('gpt');
     await collect(provider.enhance('original input', [{ bytes: new Uint8Array([1, 2]), mime: 'image/png' }], signal(), 'exact instructions'));
     expect(calls).toEqual(['jev', 'gpt']);
     expect(state).toEqual({ task: 'text-generation', instructions: 'exact instructions', input: ['original input'] });
@@ -116,7 +123,7 @@ describe('GPT moderation gate', () => {
     setJevSystemOneProviderForTests(() => Promise.resolve(decision(0.95)));
     const network = mock(() => { throw new Error('GPT must not receive blocked input'); });
     globalThis.fetch = network as unknown as typeof fetch;
-    const provider = createCliproxyTextProvider({ ...testTextPolicies(), baseUrl: 'https://gpt.test', token: 'test', model: TEXT_MODELS.gpt, backend: 'gpt', maxResponseBytes: 10_000 });
+    const provider = seededText('gpt');
     const results = [
       ...(await collect(provider.enhance('input', [], signal()))),
       ...(await collect(provider.brainstormCharacters({ modelId: 'gpt-image-2.5-sunburst', count: 1, brief: 'input' }, signal()))),
@@ -150,7 +157,7 @@ describe('GPT moderation gate', () => {
     const image = createCliproxyProvider({ baseUrl: 'https://gpt.test', token: 'test', maxResponseBytes: 10_000 });
     expect(await collect(image.generate({ prompt, modelId: image.id, ratio: '1:1', tileIndex: 0, seed: 1 }, signal())))
       .toMatchObject([{ status: 'failed', error: { moderation: { reason: 'sexual-age', categories: ['nudity'], target: 'image' } } }]);
-    const text = createCliproxyTextProvider({ ...testTextPolicies(), baseUrl: 'https://gpt.test', token: 'test', model: TEXT_MODELS.gpt, backend: 'gpt', maxResponseBytes: 10_000 });
+    const text = seededText('gpt');
     expect(await collect(text.enhance(prompt, [], signal())))
       .toMatchObject([{ type: 'failed', kind: 'moderation-blocked', moderation: { reason: 'sexual-age', categories: ['nudity'], target: 'text' } }]);
     expect(inputs).toMatchObject([{ task: 'image-generation', input: prompt }, { task: 'text-generation', input: prompt }]);
@@ -172,9 +179,9 @@ describe('GPT moderation gate', () => {
   test('non-GPT text never calls JEV', async () => {
     const jev = mock(() => Promise.resolve(decision(1, 1)));
     setJevSystemOneProviderForTests(jev);
-    globalThis.fetch = mock(() => Promise.resolve(new Response('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'))) as unknown as typeof fetch;
-    for (const model of Object.values(TEXT_MODELS).filter((model) => model !== TEXT_MODELS.gpt)) {
-      const provider = createCliproxyTextProvider({ ...testTextPolicies(), baseUrl: 'https://text.test', token: 'test', model, maxResponseBytes: 10_000 });
+    globalThis.fetch = mock(() => Promise.resolve(okStream())) as unknown as typeof fetch;
+    for (const key of ['kimi', 'mimo', 'grok', 'gemini-argon', 'deepseek-abliterated', 'glm-abliterated'] as const) {
+      const provider = seededText(key, 'https://text.test');
       expect(await collect(provider.enhance('input', [], signal()))).toMatchObject([{ type: 'delta' }, { type: 'done' }]);
     }
     expect(jev).not.toHaveBeenCalled();
@@ -209,13 +216,27 @@ describe('per-model screening (screenRequests)', () => {
     expect((image as { moderation: object }).moderation).not.toHaveProperty('modelLabel');
   });
 
+  test('text messages name the screened model, never GPT; image messages keep the GPT wording', async () => {
+    const messageOf = async (task: 'text' | 'image', blocked: boolean, options: { modelLabel?: string } = {}) => {
+      setJevSystemOneProviderForTests(() => Promise.resolve(blocked ? decision(0.95) : new Response('', { status: 500 })));
+      return ((await rejectionOf(moderateGptInput(undefined, task === 'text' ? textEvidence : evidence, signal(), options))) as Error).message;
+    };
+    expect(await messageOf('text', true, { modelLabel: 'Kimi K3' }))
+      .toBe('Atelier blocked this request under its content policy. Nothing was sent to Kimi K3.');
+    expect(await messageOf('text', false, { modelLabel: 'Kimi K3' }))
+      .toBe('Atelier could not check this request. Nothing was sent to Kimi K3. Please try again.');
+    expect(await messageOf('text', true)).toBe('Atelier blocked this request under its content policy. Nothing was sent to the text model.');
+    expect(await messageOf('image', true, { modelLabel: 'Kimi K3' })).toBe('Atelier blocked this request under its GPT content policy.');
+    expect(await messageOf('image', false)).toBe('Atelier could not check this request. Nothing was sent to GPT. Please try again.');
+  });
+
   test('the screened model is checked and blocked, naming itself', async () => {
     const upstream = okUpstream();
     setJevSystemOneProviderForTests(() => Promise.resolve(decision(0.95)));
     const provider = testTextModelProvider({ origin: 'http://x', model: screened, moderation: { openrouterApiKey: 'or-key' } });
     expect(await collect(provider.enhance('input', [], signal()))).toEqual([{
       type: 'failed', kind: 'moderation-blocked', status: 422,
-      detail: 'Atelier blocked this request under its GPT content policy.',
+      detail: 'Atelier blocked this request under its content policy. Nothing was sent to House GPT.',
       moderation: { reason: 'sexual-age', categories: ['sexual-age'], target: 'text', modelLabel: 'House GPT' },
     }]);
     expect(upstream).not.toHaveBeenCalled();

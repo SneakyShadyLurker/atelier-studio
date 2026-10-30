@@ -2,8 +2,8 @@ import type { TextLatencyProfile, TextProtocol } from '@atelier/shared';
 import type { Config } from '../../config';
 import { currentTextConfigRevision, type TextProviderStore } from '../../db/textProviders';
 import { loggerForConfig } from '../../observability/logger';
-import { cliproxyTextPolicies, type TestCliproxyTextProvider } from '../cliproxyText';
-import { textMaxResponseBytes } from '../cliproxyText.config';
+import { textCallPolicies, type TestTextFeatureProvider } from './featureHelpers';
+import { textMaxResponseBytes } from './textBudgets';
 import { anthropicAdapter } from './anthropic';
 import { openaiCompatibleAdapter } from './openaiCompatible';
 import type { TextProtocolAdapter } from './protocol';
@@ -45,10 +45,10 @@ let testProvider: TextModelProvider | null = null;
 
 /**
  * Test fakes may omit `inferTaxonomy`, `brainstormCharacters` and `aiFill`;
- * the setter back-fills them exactly as `setCliproxyTextProviderForTests` does.
- * The override wins over every model row; null clears it.
+ * the setter back-fills them, so `inferTaxonomy` stays required on the
+ * interface. The override wins over every model row; null clears it.
  */
-export function setTextModelProviderForTests(p: TestCliproxyTextProvider | null): void {
+export function setTextModelProviderForTests(p: TestTextFeatureProvider | null): void {
   testProvider = p === null
     ? null
     : {
@@ -80,7 +80,7 @@ function build(config: Config, store: TextProviderStore, modelRowId: string): Te
     brainstormOpenTimeoutMs: config.BRAINSTORM_OPEN_TIMEOUT_MS,
     moderation: { openrouterApiKey: config.OPENROUTER_API_KEY },
     logger: loggerForConfig(config),
-    ...cliproxyTextPolicies(config, profile),
+    ...textCallPolicies(config, profile),
   });
 }
 

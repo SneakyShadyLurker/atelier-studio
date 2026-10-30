@@ -257,6 +257,14 @@ describe('Add provider: connection test and save', () => {
     expect(alert.textContent).toBe('Another test is running. Try again in a moment.');
   });
 
+  test('a test that could not run (502) shows the server message', async () => {
+    setup({ test: () => Response.json({ error: 'The test could not run: connect ECONNREFUSED 10.0.0.5:8000' }, { status: 502 }) });
+    fireEvent.click(preset('Ollama'));
+    fireEvent.click(button('Test connection'));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('The test could not run: connect ECONNREFUSED 10.0.0.5:8000');
+  });
+
   test('a 503 byok-not-configured on save explains that keys cannot be stored', async () => {
     const { onClose } = setup({ create: () => Response.json({ error: 'byok-not-configured' }, { status: 503 }) });
     fireEvent.click(preset('OpenAI'));

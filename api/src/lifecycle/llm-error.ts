@@ -15,7 +15,9 @@ export function failedToSseError(failure: FailedLike): SseTerminalError {
     return {
       message: failure.moderation.reason === 'unavailable'
         ? 'Atelier could not complete the content check. Please try again.'
-        : 'Atelier blocked this request under its GPT content policy.',
+        : failure.moderation.target === 'image'
+          ? 'Atelier blocked this request under its GPT content policy.'
+          : 'Atelier blocked this request under its content policy.',
       code: failure.moderation.reason === 'unavailable' ? 'moderation-unavailable' : 'moderation-blocked',
       moderation: failure.moderation,
     };

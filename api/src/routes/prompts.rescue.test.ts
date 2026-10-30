@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
-import { type RescueDimensionArgs, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type RescueDimensionArgs, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import { parseInferDone, parseSse, pickLegacyTextModel, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 import { putProposal, takeProposalForUser } from '../prompts/proposalStore';
@@ -28,7 +28,7 @@ interface RescueProviderShape {
   readonly rescueCallCount?: { n: number };
 }
 
-function fakeProvider(shape: RescueProviderShape): TestCliproxyTextProvider {
+function fakeProvider(shape: RescueProviderShape): TestTextFeatureProvider {
   return {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),

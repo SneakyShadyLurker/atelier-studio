@@ -5,8 +5,8 @@ import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import {
   type EnhanceChunk,
   type EnhanceImageInput,
-  type TestCliproxyTextProvider,
-} from '../providers/cliproxyText';
+  type TestTextFeatureProvider,
+} from '../providers/text/featureHelpers';
 import { writeAtomic } from '../storage/files';
 import { parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds } from '../test/helpers';
 import { EnhancePromptRequestSchema } from './enhance.schema';
@@ -28,7 +28,7 @@ interface Capture {
   systemPrompt?: string | undefined;
 }
 
-function stub(capture: Capture): TestCliproxyTextProvider {
+function stub(capture: Capture): TestTextFeatureProvider {
   return {
     async *enhance(_prompt, images, _signal, systemPrompt) {
       capture.images = images;

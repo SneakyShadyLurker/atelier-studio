@@ -1,11 +1,10 @@
 import { expect, test } from 'bun:test';
 import { PermanentUpstreamError, QuotaExhaustedError } from '../../lifecycle/resilient-call';
-import { inferResultFromError } from '../cliproxyText';
+import { inferResultFromError } from './featureHelpers';
 
-// The HTTP and in-stream classification cases of the legacy
-// cliproxyText.classify.test.ts are ported against `classifyApiError` /
-// `classifyStreamError` in classify.test.ts (Task 4). These are the
-// error-to-result mappers the feature provider shares with the legacy one.
+// HTTP and in-stream classification is covered against `classifyApiError` /
+// `classifyStreamError` in classify.test.ts. These are the feature provider's
+// error-to-result mappers.
 
 test('quota error maps to failed result with retryAfterSeconds + quota kind', () => {
   const r = inferResultFromError(new QuotaExhaustedError(900, { status: 429 }));

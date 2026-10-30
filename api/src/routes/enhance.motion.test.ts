@@ -3,7 +3,7 @@ import { setTextModelProviderForTests } from '../providers/text/registry';
 import { MAX_PROMPT_CHARS } from '@atelier/shared';
 import { parseSse, pickLegacyTextModel, restoreFetch, testRuntime, legacyTextUpstreamIds } from '../test/helpers';
 import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
-import { type EnhanceChunk, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type EnhanceChunk, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
 
 const TEXT_MODELS = legacyTextUpstreamIds();
 
@@ -16,7 +16,7 @@ const VIDEO_ON = {
   LOCAL_MODELS_USERS: 'test',
 };
 
-function stub(capture: { systemPrompt?: string | undefined }): TestCliproxyTextProvider {
+function stub(capture: { systemPrompt?: string | undefined }): TestTextFeatureProvider {
   return {
     async *enhance(_prompt, _images, _signal, systemPrompt) {
       capture.systemPrompt = systemPrompt;

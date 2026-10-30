@@ -11,7 +11,7 @@ import {
   enhancePool,
   resetLlmAdmissionForTests,
 } from '../orchestrator/llmAdmission';
-import type { EnhanceChunk, TestCliproxyTextProvider } from '../providers/cliproxyText';
+import type { EnhanceChunk, TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import { writeAtomic } from '../storage/files';
 import { grayCardPng } from '../test/image-fixtures';
 import { parseSse, testRuntime, pickLegacyTextModel } from '../test/helpers';
@@ -32,7 +32,7 @@ const availability = new Map<string, ModelAvailability>([
   ['minimax-h3-t2v', { ok: true, checkedAt: 1 }],
 ]);
 
-function fakeProvider(plan: unknown): TestCliproxyTextProvider {
+function fakeProvider(plan: unknown): TestTextFeatureProvider {
   return {
     async *enhance(_prompt, _images, _signal, systemPrompt) {
       await Promise.resolve();

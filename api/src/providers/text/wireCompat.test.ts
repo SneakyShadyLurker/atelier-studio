@@ -110,7 +110,7 @@ interface ImageInput {
   readonly mime: string;
 }
 
-/** One feature call as the feature methods in cliproxyText.ts made it. */
+/** One feature call as the legacy CLIProxy text provider's feature methods made it. */
 interface CallShape {
   readonly name: string;
   readonly defaults: ChatDefaults;

@@ -31,7 +31,7 @@ import type { RawInferOp } from '../../prompts/inferTypes';
 import { inferPool } from '../../orchestrator/llmAdmission';
 import { withLlmSlot } from '../../lifecycle/withLlmSlot';
 import { promptLibrary } from './_shared';
-import type { InferResult } from '../../providers/cliproxyText';
+import type { InferResult } from '../../providers/text/featureHelpers';
 import { failedToSseError } from '../../lifecycle/llm-error';
 import { isAbortError } from '../../lifecycle/abort';
 

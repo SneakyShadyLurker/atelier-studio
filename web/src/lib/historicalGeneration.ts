@@ -24,6 +24,7 @@ export function buildHistoricalRequest(batch: Batch, replay: HistoricalReplay): 
       : { count: Math.min(MAX_TILE_COUNT, Math.max(1, batch.tiles.length)), seed: nextSeed() }),
     ...(refImageIds ? { refImageIds } : {}),
     ...(batch.i2vSourceUploadId ? { i2vSourceUploadId: batch.i2vSourceUploadId } : {}),
+    ...(batch.motionPrompt !== undefined ? { motionPrompt: batch.motionPrompt } : {}),
     ...(batch.durationFrames !== undefined ? { durationFrames: batch.durationFrames } : {}),
     ...(batch.provenance && batch.provenance.templateId !== null ? {
       provenance: {

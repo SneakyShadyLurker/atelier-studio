@@ -2,6 +2,7 @@ import { MAX_PROMPT_CHARS } from '@atelier/shared';
 import { delay, IDLE_BACKPRESSURE_BUDGET_MS, jitterRetryDelayMs, nextBackpressureDelayMs } from '../../api/queueFullRetry';
 import { holdSubmissionUploads, useAtelierStore } from '../../store/atelier';
 import { isAbortError } from '../abort';
+import { UNCERTAIN_SUBMISSION_NOTICE } from '../errorCopy';
 import { markDrainOwned } from '../drainOwnership';
 import { mapWithConcurrency } from '../mapWithConcurrency';
 import { buildPreparationUnits, filledItem, prepareBatch, prepareItem } from './prepare';
@@ -21,7 +22,7 @@ import {
   takeRecords,
   type RollRecords,
 } from './records';
-import { batchAlreadyStarted, generateBackpressure } from './request';
+import { classifySubmissionFailure, uncertainSubmissionItem } from './request';
 import type { DrainPumpContext, FillOutcome, FireItem, PassItem, PrepareContext, RollRecord } from './types';
 
 // Max concurrent ai-fill units when a burst of queued rolls is submitted at
@@ -39,6 +40,7 @@ const REFORMAT_FILL_CONCURRENCY = 4;
 type Answer =
   | { readonly kind: 'started' }
   | { readonly kind: 'aborted' }
+  | { readonly kind: 'uncertain' }
   | { readonly kind: 'backpressure'; readonly retryAfterMs: number }
   | { readonly kind: 'failed' };
 
@@ -348,18 +350,60 @@ export async function runDrainPump(ctx: DrainPumpContext): Promise<void> {
         }, (error: unknown) => {
           record.stream = null;
           if (submission.answer !== null) return;
-          if (batchAlreadyStarted(error)) {
+          const failure = classifySubmissionFailure(error);
+          if (failure.kind === 'started') {
             markAccepted(record, null);
             answer({ kind: 'started' });
             return;
           }
-          if (isAbortError(error)) {
+          if (failure.kind === 'aborted') {
             markDropped(record, { kind: 'aborted' });
             answer({ kind: 'aborted' });
             return;
           }
-          const retryAfterMs = generateBackpressure(error);
-          if (retryAfterMs !== null) {
+          if (failure.kind === 'uncertain') {
+            record.item = uncertainSubmissionItem(item, request);
+            // Stop may already have restored this row while its POST waited.
+            // Update that copy in place, preserving its original queue order.
+            if (record.phase === 'restored' && store().queueEpoch === pumpEpoch) {
+              store().setDraft({ rollQueue: store().draft.rollQueue.map((roll) => roll.id === item.key
+                ? { ...roll, text: item.text, ...(record.item.submission ? { submission: record.item.submission } : {}) }
+                : roll) });
+            }
+            if (record.source === null) {
+              if (store().queueEpoch === pumpEpoch) {
+                const roll = {
+                  id: item.key, text: item.text, seed: request.seed ?? 1, source: 'composer',
+                  ...(item.provenance ? { provenance: item.provenance } : {}),
+                  ...(record.item.submission ? { submission: record.item.submission } : {}),
+                } as const;
+                record.recoveryRoll = roll;
+                if (aborted()) {
+                  // The pass already restored its other rows at Stop. Insert
+                  // this late recovery beside them without resurrecting removals.
+                  const queue = store().draft.rollQueue;
+                  const index = passRecords.indexOf(record);
+                  const after = new Set(passRecords.slice(index + 1).map((entry) => entry.key));
+                  const before = new Set(passRecords.slice(0, index).map((entry) => entry.key));
+                  const next = queue.findIndex((entry) => after.has(entry.id));
+                  const previous = queue.findLastIndex((entry) => before.has(entry.id));
+                  const at = next >= 0 ? next : previous + 1;
+                  store().setDraft({ rollQueue: [...queue.slice(0, at), roll, ...queue.slice(at)] });
+                }
+              }
+            }
+            markRefused(record, { kind: 'failed' });
+            if (store().queueEpoch === pumpEpoch) {
+              addToast(UNCERTAIN_SUBMISSION_NOTICE.text, 'error', 30_000, {
+                label: UNCERTAIN_SUBMISSION_NOTICE.actionLabel, onClick: ctx.submitQueueOnly,
+              });
+            }
+            m.submissionsBlocked = true;
+            answer({ kind: 'uncertain' });
+            return;
+          }
+          if (failure.kind === 'backpressure') {
+            const { retryAfterMs } = failure;
             m.submissionsBlocked = true;
             markRefused(record, { kind: 'backpressure', retryAfterMs });
             answer({ kind: 'backpressure', retryAfterMs });
@@ -472,6 +516,9 @@ export async function runDrainPump(ctx: DrainPumpContext): Promise<void> {
             m.progressThisPass += 1;
           } else if (answer.kind === 'aborted') {
             m.progressThisPass += 1;
+          } else if (answer.kind === 'uncertain') {
+            // Its separate timeout notice does not claim that no batch exists.
+            m.progressThisPass += 1;
           } else if (answer.kind === 'backpressure') {
             m.sawBackpressure = true;
             m.backoffMs = Math.max(m.backoffMs, answer.retryAfterMs);
@@ -529,6 +576,7 @@ export async function runDrainPump(ctx: DrainPumpContext): Promise<void> {
         }));
         break;
       }
+      if (submissions.some((submission) => submission.answer?.kind === 'uncertain')) break;
       if (m.quotaStop) break;            // 5h budget — rolls restored, stop retrying
       if (!m.sawBackpressure) continue;
 

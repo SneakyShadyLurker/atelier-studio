@@ -148,6 +148,8 @@ export interface RollRecord {
   readonly key: string;
   /** The consumed queued roll; null for the active composer head. */
   readonly source: QueuedRoll | null;
+  /** A composer head saved only once its POST has an uncertain outcome. */
+  recoveryRoll?: QueuedRoll;
   /** Latest text: a paid fill is carried forward here and into persistence. */
   item: FireItem;
   phase: RollPhase;

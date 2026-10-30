@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { ExtensionCheck } from '../orchestrator/extendValidation';
 import type { AppEnv } from '../server-env';
 
@@ -28,10 +28,10 @@ export type ParseResult<T> =
 // true, use `result.value`.
 function applySafeParse<T>(
   c: Context<AppEnv>,
-  schema: z.ZodType<T>,
+  schema: z.core.$ZodType<T>,
   input: unknown,
 ): ParseResult<T> {
-  const parsed = schema.safeParse(input);
+  const parsed = z.safeParse(schema, input);
   if (!parsed.success) {
     // Single funnel = single place to emit the structured validation
     // diagnostic. Restores (and uniformly extends to every route) the
@@ -69,11 +69,11 @@ export function extensionErrorResponse(
   return c.json({ error: 'provenance-mismatch' }, 400);
 }
 
-export function parseParams<T>(c: Context<AppEnv>, schema: z.ZodType<T>): ParseResult<T> {
+export function parseParams<T>(c: Context<AppEnv>, schema: z.core.$ZodType<T>): ParseResult<T> {
   return applySafeParse(c, schema, c.req.param());
 }
 
-export function parseQuery<T>(c: Context<AppEnv>, schema: z.ZodType<T>): ParseResult<T> {
+export function parseQuery<T>(c: Context<AppEnv>, schema: z.core.$ZodType<T>): ParseResult<T> {
   return applySafeParse(c, schema, c.req.query());
 }
 
@@ -85,7 +85,7 @@ export function parseQuery<T>(c: Context<AppEnv>, schema: z.ZodType<T>): ParseRe
 // `ok` is false return `result.response`; when true use `result.value`.
 // Same funnel for a body the route already read as text (e.g. to allow an
 // empty body before validating).
-export function parseJsonText<T>(c: Context<AppEnv>, schema: z.ZodType<T>, text: string): ParseResult<T> {
+export function parseJsonText<T>(c: Context<AppEnv>, schema: z.core.$ZodType<T>, text: string): ParseResult<T> {
   let value: unknown;
   try {
     value = JSON.parse(text) as unknown;
@@ -95,7 +95,7 @@ export function parseJsonText<T>(c: Context<AppEnv>, schema: z.ZodType<T>, text:
   return applySafeParse(c, schema, value);
 }
 
-export async function parseBody<T>(c: Context<AppEnv>, schema: z.ZodType<T>): Promise<ParseResult<T>> {
+export async function parseBody<T>(c: Context<AppEnv>, schema: z.core.$ZodType<T>): Promise<ParseResult<T>> {
   const body = await parseJsonBody(c);
   if (!body.ok) return { ok: false, response: body.response };
   return applySafeParse(c, schema, body.value);

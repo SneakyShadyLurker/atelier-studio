@@ -400,7 +400,7 @@ describe('PromptPicker', () => {
     const { generateBodies } = renderAppWithGenerateCapture();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Templates' }));
-    fireEvent.click(screen.getByRole('button', { name: /Constraint portrait/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Constraint portrait/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Use prompt' }));
     // The picker exit (useExitTransition) keeps body siblings inert/aria-hidden
     // for ~160ms; the composer's Generate is queryable once it unmounts.

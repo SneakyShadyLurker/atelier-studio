@@ -4,6 +4,11 @@ import { ApiError } from '../api/client';
 import { isRecord } from './guards';
 import { ModerationError } from './moderationNotice';
 
+export const UNCERTAIN_SUBMISSION_NOTICE = {
+  text: 'Submission timed out. Your prompt is saved in the queue. Resuming also submits other queued prompts.',
+  actionLabel: 'Resume queue',
+} as const;
+
 export class EnhanceFailedError extends Error {
   constructor(message: string) {
     super(message);

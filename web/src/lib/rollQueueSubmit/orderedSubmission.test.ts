@@ -76,6 +76,7 @@ describe('postUntilAnswered', () => {
     expect(await answerFor(Object.assign(new Error('lost'), { name: 'StreamTruncatedError', batchId: 'b1' })))
       .toEqual({ kind: 'started' });
     expect(await answerFor(new DOMException('cancelled', 'AbortError'))).toEqual({ kind: 'started' });
+    expect(await answerFor(new DOMException('stalled', 'TimeoutError'))).toEqual({ kind: 'uncertain' });
     expect(await answerFor(queueFull429())).toEqual({ kind: 'backpressure', retryAfterMs: 2000 });
     expect(await answerFor(new ApiError(500, 'down', undefined, undefined))).toEqual({ kind: 'failed' });
   });
@@ -138,6 +139,16 @@ describe('admitPrepared', () => {
     const { ctx, enqueued } = context({ generate: () => Promise.reject(new ApiError(500, 'down', undefined, undefined)) });
     expect(await admitPrepared(ctx, press)).toBe('failed');
     expect(enqueued).toEqual([]);
+  });
+
+  test('an unacknowledged timeout saves exact prepared settings for an explicit same-key retry', async () => {
+    const { ctx, enqueued } = context({
+      generate: () => Promise.reject(new DOMException('stalled', 'TimeoutError')),
+      makeRequest: (item) => ({ ...request(item.text), seed: 77, idempotencyKey: item.key, motionPrompt: 'camera orbit' }),
+    });
+    expect(await admitPrepared(ctx, press)).toBe('saved');
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]?.[0]).toMatchObject({ key: 'press-1', text: 'filled', submission: { prepared: true, lockedSeed: 77, request: { motionPrompt: 'camera orbit' } } });
   });
 
   test('a queue that refuses the item reports refused', async () => {

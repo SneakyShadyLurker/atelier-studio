@@ -1071,13 +1071,16 @@ describe('visual scaffold components', () => {
       fireEvent.click(archiveButton);
       await Promise.resolve();
     });
-    const emptyArchiveButton = await screen.findByRole('button', { name: 'Empty Archive' });
+    const emptyArchiveButton = await screen.findByRole<HTMLButtonElement>('button', { name: 'Empty Archive' });
+    // The lazy view can commit its header before the scoped archive GET
+    // resolves. Wait until its destructive action is actually available.
+    await waitFor(() => { expect(emptyArchiveButton.disabled).toBe(false); });
     await act(async () => {
       fireEvent.click(emptyArchiveButton);
       await Promise.resolve();
     });
 
-    expect(screen.getByText('This permanently deletes 100 images from disk. This cannot be undone.')).toBeTruthy();
+    expect(await screen.findByText('This permanently deletes 100 images from disk. This cannot be undone.')).toBeTruthy();
   });
 
   test('Drawer hamburger toggles the phone drawer', async () => {

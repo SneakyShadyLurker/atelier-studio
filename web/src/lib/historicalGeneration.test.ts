@@ -56,6 +56,13 @@ describe('buildHistoricalRequest', () => {
     }
   });
 
+  test('story I2V replay keeps effective motion instructions distinct from the display beat', () => {
+    const story = batch({ prompt: 'The subject turns', motionPrompt: 'Slow orbit around the subject, then hold the final framing.', i2vSourceUploadId: 'source' });
+    for (const action of [{ kind: 'reroll' } as const, { kind: 'retry', tile: failedTile, seed: 7 } as const]) {
+      expect(buildHistoricalRequest(story, action)).toMatchObject({ prompt: story.prompt, motionPrompt: story.motionPrompt });
+    }
+  });
+
   test('sequence segments rerun standalone without extension linkage', () => {
     const segment = batch({
       i2vSourceUploadId: 'handoff-upload',

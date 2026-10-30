@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Batch, HistoryPage } from '@atelier/shared';
-import { historyOpts } from './history';
+import { historyRefreshInterval } from './history';
 
 function sequenceBatch(masterStatus: 'idle' | 'stitching' | 'ready' | 'failed'): Batch {
   return {
@@ -35,7 +35,7 @@ function sequenceBatch(masterStatus: 'idle' | 'stitching' | 'ready' | 'failed'):
 }
 
 function cadence(pages: HistoryPage<Batch>[]): number | false {
-  const refetchInterval = historyOpts().refetchInterval;
+  const refetchInterval = historyRefreshInterval;
   if (typeof refetchInterval !== 'function') throw new Error('Expected adaptive polling');
   return refetchInterval({
     state: {
@@ -44,7 +44,7 @@ function cadence(pages: HistoryPage<Batch>[]): number | false {
       errorUpdateCount: 0,
       fetchFailureCount: 0,
     },
-  } as Parameters<typeof refetchInterval>[0]) ?? false;
+  } as Parameters<typeof refetchInterval>[0]);
 }
 
 describe('sequence master history polling', () => {

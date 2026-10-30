@@ -2,6 +2,7 @@ import { useId } from 'react';
 import type { ComponentPropsWithoutRef, Ref } from 'react';
 import { I } from '../icons/I';
 import styles from './index.module.css';
+import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
 
 // Shared name/title field chrome for the three PromptManager editors
 // (DimensionEditor, ListEditor, TemplateEditor). Name-save contract: the name
@@ -43,6 +44,7 @@ function InlineFieldChrome({
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
+          maxLength={PROMPT_LIBRARY_NAME_MAX_CHARS}
           {...inputProps}
         />
         <span className={styles.inlineTitlePencil} aria-hidden="true"><I.pencil /></span>

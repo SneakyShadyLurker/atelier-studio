@@ -69,7 +69,7 @@ async function flushAsync(): Promise<void> {
 
 function expectStalledAbort(reason: unknown): void {
   expect(reason).toBeInstanceOf(DOMException);
-  expect((reason as DOMException).name).toBe('AbortError');
+  expect((reason as DOMException).name).toBe('TimeoutError');
   expect((reason as DOMException).message).toBe('stalled');
 }
 

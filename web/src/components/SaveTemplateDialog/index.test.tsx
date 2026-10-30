@@ -115,6 +115,18 @@ describe('SaveTemplateDialog', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    test(`candidate-confirmation Enter does not save (${JSON.stringify(composition)})`, async () => {
+      const spy = mock(() => Response.json({}));
+      globalThis.fetch = spy as unknown as typeof fetch;
+      renderOpen();
+      fireEvent.keyDown(screen.getByLabelText('Template name'), { key: 'Enter', ...composition });
+      await Promise.resolve();
+      expect(spy).not.toHaveBeenCalled();
+      expect(useAtelierStore.getState().saveTemplatePrompt).not.toBeNull();
+    });
+  }
+
   test('Escape then Enter during the exit fade does not save', async () => {
     const spy = mock(() => Response.json({ id: 't1', name: 'koi', body: 'x', sortOrder: 0, createdAt: 1, updatedAt: 1 }, { status: 201 }));
     globalThis.fetch = spy as unknown as typeof fetch;

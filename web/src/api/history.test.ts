@@ -9,6 +9,7 @@ import {
   deleteTile,
   hasActiveStory,
   historyOpts,
+  historyRefreshInterval,
   pendingStoryPollDecision,
 } from './history';
 import { ApiError } from './client';
@@ -77,8 +78,7 @@ function callRefetchInterval(
   errorUpdateCount = 0,
   dataUpdatedAt: number = Date.now(),
 ): number | false {
-  const opts = historyOpts();
-  const fn = opts.refetchInterval as
+  const fn = historyRefreshInterval as
     | ((query: RefetchQuery) => number | false)
     | undefined;
   if (typeof fn !== 'function') {
@@ -91,7 +91,7 @@ function callRefetchInterval(
   return fn(query);
 }
 
-describe('historyOpts refetchInterval', () => {
+describe('active history refresh cadence', () => {
   test('returns 3000 when at least one tile has status loading', () => {
     const pages: HistoryPage<Batch>[] = [
       { items: [makeBatch([loadingTile, doneTile])], nextCursor: null },
@@ -308,8 +308,7 @@ describe('historyOpts refetchInterval', () => {
     // (every 3–30 s) — that's the slow path, not the hot path. The contract
     // walks in refetchInterval; the
     // perf invariant only protects `select`.
-    const opts = historyOpts();
-    const fn = opts.refetchInterval as
+    const fn = historyRefreshInterval as
       | ((query: RefetchQuery) => number | false)
       | undefined;
     if (typeof fn !== 'function') {
@@ -380,8 +379,7 @@ describe('historyOpts refetchInterval', () => {
     const pages: (HistoryPage<Batch> & { loadingTileCount?: number; hasLoadingTiles?: boolean })[] = [
       { items: [makeBatch([doneTile])], nextCursor: null, loadingTileCount: 0, hasLoadingTiles: false },
     ];
-    const opts = historyOpts();
-    const fn = opts.refetchInterval as
+    const fn = historyRefreshInterval as
       | ((query: RefetchQuery) => number | false)
       | undefined;
     if (typeof fn !== 'function') {
@@ -394,6 +392,7 @@ describe('historyOpts refetchInterval', () => {
   test('refetchIntervalInBackground is unset so background tabs do not poll (SSE-on-focus convergence)', () => {
     const opts = historyOpts();
     expect(opts.refetchIntervalInBackground).toBeUndefined();
+    expect(opts.refetchInterval).toBeUndefined();
   });
 
   test('threads TanStack cancellation signal into the history fetch', async () => {

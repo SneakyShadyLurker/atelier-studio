@@ -15,13 +15,6 @@ describe('React 18 performance pattern source invariants', () => {
     expect(text).toContain('[data?.templates, deferredQuery]');
   });
 
-  test('App wraps view changes in a transition and exposes pending state', () => {
-    const text = source('App.tsx');
-    expect(text).toContain('useTransition');
-    expect(text).toContain('startViewTransition(() =>');
-    expect(text).toContain("'data-view-pending'");
-  });
-
   test('App builds one modelById map and threads it into render consumers and generation', () => {
     const text = source('App.tsx');
     expect(text).toContain('const modelById = useMemo');

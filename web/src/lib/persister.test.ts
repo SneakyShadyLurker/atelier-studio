@@ -96,7 +96,7 @@ afterEach(() => { resetSessionScopeForTests(); });
 
 describe('createIDBPersister', () => {
   test('uses a new buster after sequence fields joined persisted history', () => {
-    expect(PERSIST_CACHE_VERSION).toBe('16');
+    expect(PERSIST_CACHE_VERSION).toBe('17');
   });
 
   test('debounces persistClient', async () => {
@@ -489,6 +489,7 @@ describe('boundPersistedHistory (via persistClient)', () => {
       modelId: 'minimax-h3-i2v',
       durationFrames: 243,
       i2vSourceUploadId: 'upload-src',
+      motionPrompt: 'Slow camera orbit, preserving the subject.',
       transientFlag: true,
     });
 
@@ -497,6 +498,7 @@ describe('boundPersistedHistory (via persistClient)', () => {
       modelId: 'minimax-h3-i2v',
       durationFrames: 243,
       i2vSourceUploadId: 'upload-src',
+      motionPrompt: 'Slow camera orbit, preserving the subject.',
     });
   });
 

@@ -13,6 +13,7 @@
 export * from './sse-error';
 import type { SseTerminalError } from './sse-error';
 import type { GptModerationNotice } from './moderation';
+import type { BatchWire, DimensionTagWire, PromptLibraryResponseWire, PromptTemplateWire, StorySummaryWire, TagDimensionWire, TileWire, VariableListWire, VariableOptionWire, VideoSequenceSummaryWire } from './wireSchemas';
 export { GPT_MODERATION_REASONS, GptModerationNoticeSchema, GptModerationCategoriesSchema } from './moderation';
 export type { GptModerationNotice, GptModerationReason, GptModerationCategory } from './moderation';
 
@@ -106,12 +107,14 @@ export type LatencyClass = (typeof LATENCY_VALUES)[number];
 export const POOL_VALUES = ['shared', 'byok', 'local'] as const;
 export type Pool = (typeof POOL_VALUES)[number];
 
-export type BatchStatus = 'queued' | 'running' | 'done';
+export type BatchStatus = Batch['status'];
 
 // Max length of the history/archive search query the api accepts. Wire-contract
 // bound: the client must not send more than the server's Zod `.max()` allows.
 // Source of truth — referenced by the api schema and the web store.
 export const MAX_HISTORY_Q_LEN = 200;
+/** Maximum tracked batches/stories in one read-only history refresh. */
+export const HISTORY_REFRESH_MAX_IDS = 100;
 
 // Default per-variable-list option cap. Seeds the api config default
 // (`MAX_OPTIONS_PER_LIST`, still env-overridable) and is the web "AI Draft
@@ -467,38 +470,9 @@ export interface ModelAvailability {
 
 // ─── Tile (public) ──────────────────────────────────────────────────────
 
-export type TileStatus = 'loading' | 'done' | 'failed';
+export type TileStatus = Tile['status'];
 
-interface TileBase {
-  id: string;
-  seed: number;
-  status: TileStatus;
-  refImageIds?: readonly string[];
-}
-
-interface TileLoading extends TileBase {
-  status: 'loading';
-}
-
-interface TileDone extends TileBase {
-  status: 'done';
-  /** Relative path; the frontend prefixes with the API base. */
-  url: string;
-  /** Relative path; optional for rolling api/web deploys. */
-  thumbUrl?: string;
-  ext: MediaExt;
-  mime: MediaMime;
-  completedAt: number;
-}
-
-interface TileFailed extends TileBase {
-  status: 'failed';
-  error: TileErrorCategory;
-  moderation?: GptModerationNotice;
-  completedAt: number;
-}
-
-export type Tile = TileLoading | TileDone | TileFailed;
+export type Tile = TileWire;
 /** A finished tile: the only kind that can be opened, downloaded or handed off. */
 export type DoneTile = Extract<Tile, { status: 'done' }>;
 
@@ -509,49 +483,9 @@ export type DoneTile = Extract<Tile, { status: 'done' }>;
  * DB-internal scope key (api/src/db/types.ts). Re-exporting it through this
  * package would leak server auth state to the frontend.
  */
-export interface Batch {
-  id: string;
-  prompt: string;
-  ratio: Ratio;
-  /** Clip length in frames. Present only on batches from a video model. */
-  durationFrames?: VideoDurationFrames;
-  sequenceId?: string;
-  sequenceIndex?: number;
-  sequence?: VideoSequenceSummary;
-  modelId: string;
-  modelLabel: string;
-  createdAt: number;
-  /** When the batch left the queue and started rendering. Absent while queued. */
-  startedAt?: number;
-  collectionId: string | null;
-  pinned: boolean;
-  status: BatchStatus;
-  /**
-   * Capture of the prompt-library roll that produced this batch, when it came
-   * from the picker. `templateName` is joined from prompt_templates.name at
-   * read; `templateId` is null once the source template is deleted (ON DELETE
-   * SET NULL). `pins` keys are opaque occurrence keys — do not parse them.
-   */
-  provenance?: {
-    readonly templateId: string | null;
-    readonly templateName: string | null;
-    readonly rollSeed: number;
-    readonly pins: Readonly<Record<string, string>>;
-  };
-  /** Projected dispatch position (0 = next). Not monotonic: on the local pool it can rise when later same-model work is scheduled ahead. */
-  queueLengthAhead?: number;
-  /**
-   * Source still for an image→video batch — the frame being animated. Present
-   * only for I2V batches; the loading tile veils it behind the progress UI so
-   * the user sees what is being animated during the multi-minute render.
-   */
-  i2vSourceUploadId?: string;
-  /** Present when this batch is a segment of an AI Storytelling run. */
-  story?: StorySummary;
-  tiles: readonly Tile[];
-}
+export type Batch = BatchWire;
 
-export type VideoSequenceMasterStatus = 'idle' | 'stitching' | 'ready' | 'failed';
+export type VideoSequenceMasterStatus = VideoSequenceSummary['masterStatus'];
 
 // ─── AI Storytelling (public) ───────────────────────────────────────────
 
@@ -560,7 +494,7 @@ export type VideoSequenceMasterStatus = 'idle' | 'stitching' | 'ready' | 'failed
  * the plan happens inside POST /api/stories, and a failed plan leaves no row.
  * Stitching progress is the sequence's masterStatus, not story state.
  */
-export type StoryStatus = 'rendering' | 'done' | 'failed' | 'canceled';
+export type StoryStatus = StorySummary['status'];
 
 /** Plan-time shape of one story segment (also the POST /api/stories `plan` frame). */
 export interface StorySegmentPlan {
@@ -569,16 +503,7 @@ export interface StorySegmentPlan {
 }
 
 /** Per-batch story decoration riding history payloads (mirrors `sequence`). */
-export interface StorySummary {
-  readonly id: string;
-  readonly status: StoryStatus;
-  /** 0-based index of THIS batch's segment within the story. */
-  readonly segmentIndex: number;
-  readonly segmentCount: number;
-  readonly logline: string;
-  /** Total render estimate computed at plan time. */
-  readonly etaMs: number;
-}
+export type StorySummary = StorySummaryWire;
 
 export type StoryPlanSseEvent =
   | { event: 'status'; data: { phase: 'planning' } }
@@ -650,13 +575,7 @@ export const STORY_MAX_SEGMENTS = 6;
 export const STORY_MIN_SEGMENTS = 2;
 export const STORY_OUTLINE_MAX_CHARS = 4000;
 
-export interface VideoSequenceSummary {
-  id: string;
-  segmentCount: number;
-  totalDurationFrames: number;
-  masterStatus: VideoSequenceMasterStatus;
-  masterUpdatedAt?: number;
-}
+export type VideoSequenceSummary = VideoSequenceSummaryWire;
 
 // ─── Collections (public) ──────────────────────────────────────────────
 
@@ -699,55 +618,12 @@ export interface CollectionsResponse {
 
 // ─── Prompt library (public) ────────────────────────────────────────────
 
-export interface VariableOption {
-  readonly id: string;
-  readonly listId: string;
-  readonly value: string;
-  readonly tagIds: readonly string[];
-  readonly excludeTagIds?: readonly string[];
-  readonly sortOrder: number;
-  readonly weight: number;
-}
-
-export interface VariableList {
-  readonly id: string;
-  readonly name: string;
-  readonly options: readonly VariableOption[];
-  readonly sortOrder: number;
-  readonly createdAt: number;
-  readonly updatedAt: number;
-}
-
-export interface DimensionTag {
-  readonly id: string;
-  readonly dimensionId: string;
-  readonly label: string;
-  readonly sortOrder: number;
-  readonly parentId?: string | null;
-}
-
-export interface TagDimension {
-  readonly id: string;
-  readonly name: string;
-  readonly description?: string;
-  readonly tags: readonly DimensionTag[];
-}
-
-export interface PromptTemplate {
-  readonly id: string;
-  readonly name: string;
-  readonly body: string;
-  readonly notes?: string;
-  readonly sortOrder: number;
-  readonly createdAt: number;
-  readonly updatedAt: number;
-}
-
-export interface PromptLibraryResponse {
-  readonly templates: readonly PromptTemplate[];
-  readonly variableLists: readonly VariableList[];
-  readonly dimensions: readonly TagDimension[];
-}
+export type VariableOption = VariableOptionWire;
+export type VariableList = VariableListWire;
+export type DimensionTag = DimensionTagWire;
+export type TagDimension = TagDimensionWire;
+export type PromptTemplate = PromptTemplateWire;
+export type PromptLibraryResponse = PromptLibraryResponseWire;
 
 // Library coherence diagnosis (deterministic SAT, no LLM).
 //

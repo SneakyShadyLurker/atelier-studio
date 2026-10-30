@@ -21,7 +21,7 @@ function createStallWatchdog(signal: AbortSignal | undefined): {
     disarm();
     stallTimer = setTimeout(() => {
       if (!watchdog.signal.aborted) {
-        watchdog.abort(new DOMException('stalled', 'AbortError'));
+        watchdog.abort(new DOMException('stalled', 'TimeoutError'));
       }
     }, STREAM_STALL_MS);
   };

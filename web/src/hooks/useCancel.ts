@@ -7,6 +7,7 @@ import { loadingTileIdsInBatch, removeBatchFromCache, removeTileFromCache } from
 import { invalidateLibrary } from './invalidateLibrary';
 import { activeScopeKey, liveActiveScopeKey, type ActiveScope } from './scopedHistoryMutation';
 import { getBatch } from './inFlightBatches';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 
 type CancelInput =
   | { kind: 'tile'; batchId: string; tileId: string }
@@ -28,6 +29,7 @@ export function useCancel(scope: Partial<ActiveScope> = {}): {
     scope.activeView !== undefined ? activeScopeKey(scope) : liveActiveScopeKey();
 
   const { mutateAsync } = useMutation({
+    mutationKey: HISTORY_WRITE_MUTATION_KEY,
     mutationFn: async (input: CancelInput): Promise<void> => {
       if (input.kind === 'tile') await deleteTile(input.batchId, input.tileId);
       else await deleteBatch(input.batchId);

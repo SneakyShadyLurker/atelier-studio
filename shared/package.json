@@ -14,7 +14,8 @@
     "./ai-fill": "./src/aiFill.ts",
     "./character-source-text": "./src/characterSourceText.ts",
     "./brainstorm-prompt": "./src/brainstormPrompt.ts",
-    "./prompt-limits": "./src/promptLimits.ts"
+    "./prompt-limits": "./src/promptLimits.ts",
+    "./wire-schemas": "./src/wireSchemas.ts"
   },
   "scripts": {
     "typecheck": "bun check",

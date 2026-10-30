@@ -27,6 +27,7 @@ import {
   stripCardNotesToken,
 } from '@atelier/shared/ai-fill';
 import { nextSeed } from '../lib/seed';
+import { UNCERTAIN_SUBMISSION_NOTICE } from '../lib/errorCopy';
 import { inFlightRollIds } from '../lib/rollQueuePersist';
 import { makeSubmissionRequest } from '../lib/rollQueueSubmit/request';
 import { prepareItem } from '../lib/rollQueueSubmit/prepare';
@@ -379,7 +380,10 @@ export function useRollQueueSubmit({
     const enqueue = (item: FireItem, paid: boolean): boolean => {
       if (!owned()) return false;
       if (!paid) return store().stashRoll(composerRoll(item));
-      store().requeueRoll(composerRoll(item));
+      const roll = composerRoll(item);
+      if (store().draft.rollQueue.some((queued) => queued.id === roll.id)) {
+        store().setDraft({ rollQueue: store().draft.rollQueue.map((queued) => queued.id === roll.id ? roll : queued) });
+      } else store().requeueRoll(roll);
       return true;
     };
     // A press joining a running drain is acknowledged only when taken.
@@ -401,6 +405,11 @@ export function useRollQueueSubmit({
       onFire: () => {
         setComposerExpanded(false);
         pinFeedScope();
+      },
+      onSaved: () => {
+        addToast(UNCERTAIN_SUBMISSION_NOTICE.text, 'error', 30_000, {
+          label: UNCERTAIN_SUBMISSION_NOTICE.actionLabel, onClick: () => { ensureDrain(); },
+        });
       },
     };
 

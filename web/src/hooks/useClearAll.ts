@@ -3,6 +3,7 @@ import { clearHistory, historyKeys } from '../api/history';
 import { APP_VIEW_UNSORTED, useAtelierStore, type AppView } from '../store/atelier';
 import { invalidateLibrary } from './invalidateLibrary';
 import { useToastMutation } from './useToastMutation';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 
 export function clearAllConfirmCopy(view: AppView): string {
   if (view.kind === 'unsorted') return 'Every unsorted batch moves to the Archive.';
@@ -18,6 +19,7 @@ export function useClearAll(scope: { activeView?: AppView } = {}) {
   const clearAllTileProgress = useAtelierStore((state) => state.clearAllTileProgress);
   const activeView = scope.activeView ?? APP_VIEW_UNSORTED;
   return useToastMutation({
+    mutationKey: HISTORY_WRITE_MUTATION_KEY,
     mutationFn: () => clearHistory(activeView),
     successToast: 'Archived',
     errorFallback: "Couldn't clear history.",

@@ -430,6 +430,11 @@ It must print `415`: Ephemera is reachable, accepted the key and origin, and ran
 
 ## Releasing an update
 
+Build and deploy the API and web images from the same revision. The new web
+requires the matching API's `/api/history/refresh` endpoint; update the API before
+the web. The supplied Compose configuration waits for API health before starting
+the web container. Updating only the web against an older API is unsupported.
+
 Atelier applies pending schema migrations at api boot (`api/src/db/migrate.ts`); boot refuses a database newer than the binary. A safe release:
 
 1. **Lock.** Hold one deploy lock per compose directory so a deploy and host maintenance never overlap. `infra/docker/deploy-lock.sh` is a bash 3.2 lock library (BSD and Linux) for this: an owner record in `infra/docker/.deploy.lock`, stale-lock recovery under a kernel flock on `infra/docker/.deploy-reclaim.flock`, and a refusal while a live owner or child holds it. Never delete `.deploy-reclaim.flock`; keep both paths gitignored.

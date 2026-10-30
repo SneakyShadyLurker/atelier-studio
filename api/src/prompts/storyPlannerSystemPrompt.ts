@@ -127,7 +127,7 @@ const StoryPlanJsonSchema = z
 
 /**
  * Parse-side schema. Backends with constrained decoding cannot emit anything
- * the strict wire schema forbids, but the GLM backend rejects `response_format`, so its
+ * the strict wire schema forbids, but the GLM branch never sends `response_format`, so its
  * plan arrives unconstrained. Unknown keys are stripped and a numeric-string
  * duration is accepted; the required fields and their types still hold.
  */

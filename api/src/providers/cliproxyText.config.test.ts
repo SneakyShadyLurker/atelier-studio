@@ -43,7 +43,7 @@ describe('text backend registry', () => {
       grok: 'grok-latest',
       'gemini-argon': 'gemini-4-argon',
       'deepseek-abliterated': 'abliterated-model-large-flash',
-      'glm-abliterated': 'glm-5.3-uncensored',
+      'glm-abliterated': 'glm-5.3',
       gpt: 'gpt-6.1-sol',
     });
     expect(textBackendModels(testConfig({ CLIPROXY_TEXT_MODEL_GLM_ABLITERATED: 'proxy/glm' }))['glm-abliterated'])

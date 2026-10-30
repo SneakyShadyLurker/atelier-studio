@@ -974,8 +974,8 @@ export interface AiFillBatchRequest {
  * served through the configured OpenAI-compatible upstream, each with a
  * configurable model id: 'kimi' = Kimi K3, 'mimo' = MiMo V2.6 Pro,
  * 'grok' = Grok 4.7, 'gemini-argon' = Gemini 4 Argon, 'deepseek-abliterated'
- * = DeepSeek V4.1 Flash Abliterated and 'glm-abliterated' = GLM 5.3
- * Abliterated, a text-only model; 'gpt' = GPT-6.1 Sol for cloud image
+ * = DeepSeek V4.1 Flash Abliterated and 'glm-abliterated' = GLM 5.3, a
+ * text-only model (the key predates its move off an abliterated build); 'gpt' = GPT-6.1 Sol for cloud image
  * targets. Only 'kimi' and 'gpt' are automatic targets; every
  * other backend is user-selectable only.
  * Purely advisory leading frame naming which backend holds the fill: a client
@@ -1001,7 +1001,7 @@ export type AiFillBackend = (typeof AI_FILL_BACKEND_VALUES)[number];
  * `json_schema` (streaming) and `json_object` (non-streaming). GPT-6.1 Sol
  * read image parts with strict schema, medium reasoning and both streaming and
  * non-streaming responses.
- * GLM 5.3 Abliterated ('glm-abliterated') is text-only: the upstream publishes
+ * GLM 5.3 ('glm-abliterated') is text-only: the upstream publishes
  * no image input for it and answers an image part with HTTP 400
  * `image_input_not_supported`.
  * 'deepseek-abliterated' is documented with text plus up to 4 images, but its
@@ -1038,7 +1038,7 @@ export const TEXT_BACKEND_LABELS = {
   grok: 'Grok 4.7',
   'gemini-argon': 'Gemini 4 Argon',
   'deepseek-abliterated': 'DeepSeek V4.1 Flash Abliterated',
-  'glm-abliterated': 'GLM 5.3 Abliterated',
+  'glm-abliterated': 'GLM 5.3',
   gpt: 'GPT-6.1 Sol',
 } as const satisfies Record<AiFillBackend, string>;
 
@@ -1078,8 +1078,8 @@ const TEXT_BACKEND_REASONING_EFFORTS = {
   grok: ['low', 'medium', 'high', 'xhigh'],
   'gemini-argon': ['low', 'medium', 'high'],
   'deepseek-abliterated': TEXT_REASONING_EFFORT_VALUES,
-  // GLM 5.3 always thinks and publishes exactly low/high/max; the upstream
-  // answers 'none' with HTTP 400 `reasoning_required`.
+  // GLM 5.3 always thinks and publishes exactly low/high/max; 'none' still
+  // reasons, so it is not offered.
   'glm-abliterated': ['low', 'high', 'max'],
   // GPT's effort stays pinned for its fixed cloud-image text work.
   gpt: [],

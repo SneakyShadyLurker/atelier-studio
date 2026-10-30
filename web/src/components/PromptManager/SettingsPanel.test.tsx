@@ -122,7 +122,7 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Text backend for Enhance, currently Auto (default)' }));
     expect(screen.getByRole('option', { name: /^Auto \(default\)$/ })).toBeTruthy();
-    for (const label of ['Kimi K3', 'MiMo V2\\.6 Pro', 'Grok 4\\.7', 'Gemini 4 Argon', 'DeepSeek V4\\.1 Flash Abliterated', 'GLM 5\\.3 Abliterated']) {
+    for (const label of ['Kimi K3', 'MiMo V2\\.6 Pro', 'Grok 4\\.7', 'Gemini 4 Argon', 'DeepSeek V4\\.1 Flash Abliterated', 'GLM 5\\.3']) {
       expect(screen.getByRole('option', { name: new RegExp(`^${label}$`) })).toBeTruthy();
     }
     expect(screen.queryByRole('option', { name: /^GPT-6.1 Sol/ })).toBeNull();
@@ -139,7 +139,7 @@ describe('SettingsPanel', () => {
         'Grok 4.7',
         'Gemini 4 Argon',
         'DeepSeek V4.1 Flash Abliterated',
-        'GLM 5.3 Abliterated',
+        'GLM 5.3',
       ]);
       view.unmount();
     }
@@ -181,12 +181,12 @@ describe('SettingsPanel', () => {
     });
   });
 
-  test('selecting GLM 5.3 Abliterated fires the mutation with the glm-abliterated key', async () => {
+  test('selecting GLM 5.3 fires the mutation with the glm-abliterated key', async () => {
     renderPanel();
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof mock>;
 
     fireEvent.click(await screen.findByRole('button', { name: 'Text backend for Ai-fill, currently Auto (default)' }));
-    fireEvent.click(screen.getByRole('option', { name: /^GLM 5\.3 Abliterated/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^GLM 5\.3/ }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -222,7 +222,7 @@ describe('SettingsPanel', () => {
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof mock>;
 
     fireEvent.click(await screen.findByRole('button', { name: 'Text backend for Ai-fill, currently Auto (default)' }));
-    const option = screen.getByRole('option', { name: /^GLM 5\.3 Abliterated unavailable$/ });
+    const option = screen.getByRole('option', { name: /^GLM 5\.3 unavailable$/ });
     expect(option.getAttribute('aria-disabled')).toBe('true');
     expect(screen.getByRole('option', { name: /^Kimi K3$/ }).getAttribute('aria-disabled')).toBeNull();
     fireEvent.click(option);
@@ -257,7 +257,7 @@ describe('SettingsPanel', () => {
     renderPanel({ brainstorm: 'glm-abliterated' }, ['glm-abliterated']);
 
     expect(await screen.findByRole('button', {
-      name: 'Text backend for Brainstorm, currently GLM 5.3 Abliterated unavailable · using Auto',
+      name: 'Text backend for Brainstorm, currently GLM 5.3 unavailable · using Auto',
     })).toBeTruthy();
   });
 });

@@ -189,10 +189,10 @@ describe('InFlightIndicator', () => {
       gpt: 1,
     });
     expect(
-      screen.getByText('·· Kimi K3 + MiMo V2.6 Pro + Grok 4.7 + Gemini 4 Argon + DeepSeek V4.1 Flash Abliterated + GLM 5.3 Abliterated + GPT-6.1 Sol'),
+      screen.getByText('·· Kimi K3 + MiMo V2.6 Pro + Grok 4.7 + Gemini 4 Argon + DeepSeek V4.1 Flash Abliterated + GLM 5.3 + GPT-6.1 Sol'),
     ).toBeTruthy();
     expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe(
-      'Kimi K3, MiMo V2.6 Pro, Grok 4.7, Gemini 4 Argon, DeepSeek V4.1 Flash Abliterated, GLM 5.3 Abliterated and GPT-6.1 Sol are preparing 2 more…',
+      'Kimi K3, MiMo V2.6 Pro, Grok 4.7, Gemini 4 Argon, DeepSeek V4.1 Flash Abliterated, GLM 5.3 and GPT-6.1 Sol are preparing 2 more…',
     );
   });
 
@@ -208,10 +208,10 @@ describe('InFlightIndicator', () => {
     expect(screen.getByLabelText('Gemini 4 Argon is preparing 1 more…')).toBeTruthy();
   });
 
-  test('attributes a preparing fill to GLM 5.3 Abliterated', () => {
+  test('attributes a preparing fill to GLM 5.3', () => {
     renderIndicator([], 1, { ...noActive, 'glm-abliterated': 1 });
-    expect(screen.getByText('·· GLM 5.3 Abliterated')).toBeTruthy();
-    expect(screen.getByLabelText('GLM 5.3 Abliterated is preparing 1 more…')).toBeTruthy();
+    expect(screen.getByText('·· GLM 5.3')).toBeTruthy();
+    expect(screen.getByLabelText('GLM 5.3 is preparing 1 more…')).toBeTruthy();
   });
 
   test('shows a label-only pill for a lone un-queued fill', () => {

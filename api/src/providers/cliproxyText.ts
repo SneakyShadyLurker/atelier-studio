@@ -124,7 +124,7 @@ export type CliproxyTextPolicyKnobs = Pick<
 
 /**
  * The single source of the text resilience policies. `deadlineBackend` keys
- * GLM Abliterated's longer ai-fill attempts. Every policy shares the RESILIENT_*
+ * GLM's longer ai-fill attempts. Every policy shares the RESILIENT_*
  * backoff and breaker knobs; each gets its own breaker instance.
  */
 export function cliproxyTextPolicies(
@@ -561,7 +561,7 @@ type SharedChatBackend = 'kimi' | 'mimo' | 'grok' | 'gemini-argon' | 'deepseek-a
 
 /**
  * The backends that share one OpenAI-compatible wire body. Keyed on the backend
- * key, so GLM Abliterated (its own branch) and an unrouted provider fall through.
+ * key, so GLM (its own branch) and an unrouted provider fall through.
  */
 function sharedChatBackend(backend: AiFillBackend | undefined): SharedChatBackend | null {
   return backend === 'kimi'
@@ -583,7 +583,7 @@ function sharedChatBackend(backend: AiFillBackend | undefined): SharedChatBacken
  * json_schema it could not. The shared chat branch (Kimi, MiMo, Grok, Gemini,
  * DeepSeek Abliterated) and the GPT branch forward that schema form; strict
  * schema in streaming mode was verified through CLIProxyAPI.
- * The GLM Abliterated branch omits `response_format` entirely.
+ * The GLM branch omits `response_format` entirely.
  */
 export type ChatResponseFormat =
   | 'json_object'
@@ -628,17 +628,17 @@ function buildChatBody(
       messages,
     };
   }
-  // GLM 5.3 Abliterated, selected by backend key. OpenAI-compatible, so the
+  // GLM 5.3, selected by backend key. OpenAI-compatible, so the
   // OpenAI knobs are the live ones. Verified through the proxy:
   // `max_completion_tokens` bounds the answer (finish_reason 'length' at 12
-  // tokens) and both stream modes answer. The upstream rejects every
-  // `response_format` on this model (HTTP 400
-  // `model_response_format_unsupported`), so it is never sent; the one
+  // tokens) and both stream modes answer. `response_format` is never sent:
+  // the earlier uncensored build rejected every format (HTTP 400
+  // `model_response_format_unsupported`), and the one
   // GLM-reachable caller that sets one, the story planner, spells out its JSON
   // shape in the prompt and parses leniently against its schema. The model is
   // text-only, so routing never hands it an image. Effort and the output ceiling
   // are pinned, never forwarded from per-path defaults; only a user-pinned
-  // effort replaces the effort ('none' is rejected upstream and never offered).
+  // effort replaces the effort ('none' still reasons, so it is never offered).
   // No `verbosity`, `thinking`, sampling or host cache controls are sent.
   if (backend === 'glm-abliterated') {
     return {

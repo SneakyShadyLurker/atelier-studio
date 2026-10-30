@@ -97,7 +97,7 @@ describe('loadConfig', () => {
       'grok-latest',
       'gemini-4-argon',
       'abliterated-model-large-flash',
-      'glm-5.3-uncensored',
+      'glm-5.3',
       'gpt-6.1-sol',
     ]);
     expect(loadConfig({ ...validEnv(), CLIPROXY_TEXT_MODEL_KIMI: 'proxy/kimi' }).CLIPROXY_TEXT_MODEL_KIMI).toBe('proxy/kimi');

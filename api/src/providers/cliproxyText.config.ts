@@ -19,7 +19,7 @@ export const GROK_SAMPLING = { temperature: 0.7, top_p: 0.95 } as const;
 // verified through CLIProxyAPI.
 export const GPT_REASONING_EFFORT = 'medium';
 
-// GLM 5.3 Abliterated (a text-only model). User-selectable only — never an automatic-routing target.
+// GLM 5.3 (a text-only model, backend key 'glm-abliterated'). User-selectable only — never an automatic-routing target.
 // The upstream publishes low/high/max efforts; the wire branch pins 'low' unless
 // the user pins another. Its catalog `max_output_tokens` is 131,072, but
 // reasoning spends from the completion budget and the stream drain below is
@@ -34,8 +34,8 @@ export const GLM_ABLITERATED_MAX_COMPLETION_TOKENS = 32_768;
 // uncapped: a 7-slot ai-fill took 197s (2,531 completion tokens), a 4-item
 // batch 137s, a 528-word Krea condense 248s, a six-beat story plan 240s and a
 // count-12 brainstorm 1,259s (21,067 tokens), at 13–17 tokens/s and up to ~55
-// SSE bytes per completion token. GLM 5.3 Abliterated streams ~20 tokens/s,
-// so they stay generous ceilings. The stream drain covers emitting
+// SSE bytes per completion token. Stock GLM 5.3 measured 50–70 tokens/s
+// (2026-10-30; the earlier uncensored build ~20), so they stay generous ceilings. The stream drain covers emitting
 // the whole 32,768-token budget at the slowest rate. Every other backend keeps
 // its configured deadline.
 export const GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS = 360_000;

@@ -41,7 +41,7 @@ describe('resolveTextBackend', () => {
     acceptsAuto('gemini-argon');
     // @ts-expect-error DeepSeek Abliterated is selectable only as an override.
     acceptsAuto('deepseek-abliterated');
-    // @ts-expect-error GLM Abliterated is selectable only as an override.
+    // @ts-expect-error GLM is selectable only as an override.
     acceptsAuto('glm-abliterated');
   });
 

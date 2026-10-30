@@ -253,7 +253,7 @@ const ConfigSchema = z.object({
   CLIPROXY_TEXT_MODEL_GROK: stringWithDefault('grok-latest'),
   CLIPROXY_TEXT_MODEL_GEMINI_ARGON: stringWithDefault('gemini-4-argon'),
   CLIPROXY_TEXT_MODEL_DEEPSEEK_ABLITERATED: stringWithDefault('abliterated-model-large-flash'),
-  CLIPROXY_TEXT_MODEL_GLM_ABLITERATED: stringWithDefault('glm-5.3-uncensored'),
+  CLIPROXY_TEXT_MODEL_GLM_ABLITERATED: stringWithDefault('glm-5.3'),
   CLIPROXY_TEXT_MODEL_GPT: stringWithDefault('gpt-6.1-sol'),
   // Runaway-stream guard for the dimensions-infer path (taxonomy + chunk +
   // rescue calls). This counts RAW SSE wire bytes, not parsed content — at

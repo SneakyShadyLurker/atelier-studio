@@ -40,7 +40,11 @@ export function usePendingTaskPicks(): ReadonlySet<TextTask> {
 // change only while the new model still accepts it.
 function optimisticRow(prev: TextModelsResponse, row: TaskRow, { modelId, effort }: TaskPickBody): TaskRow {
   if (modelId === null) {
-    const fallback = prev.defaults.byTask[row.task] ?? prev.defaults.default;
+    // The resolver skips offline models, so the optimistic fallback does too.
+    const fallback = [prev.defaults.byTask[row.task], prev.defaults.default].find((id) => {
+      const model = id === undefined ? undefined : prev.models.find((candidate) => candidate.id === id);
+      return model !== undefined && model.status !== 'offline';
+    });
     return fallback === undefined ? { task: row.task } : { task: row.task, effectiveModelId: fallback };
   }
   const levels = prev.models.find((model) => model.id === modelId)?.reasoningLevels ?? [];

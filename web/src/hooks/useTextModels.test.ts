@@ -136,6 +136,23 @@ describe('useSetTaskPick', () => {
     pending.shift()?.();
   });
 
+  test('clearing a pick optimistically falls back past an offline task assignment', async () => {
+    let resolvePut: ((response: Response) => void) | undefined;
+    const { client, hook } = setup(() => new Promise<Response>((resolve) => { resolvePut = resolve; }));
+    await waitFor(() => { expect(hook.result.current.settings.isSuccess).toBe(true); });
+    // Enhance is assigned to Grok, which is offline; the resolver would serve the Kimi default.
+    client.setQueryData<TextModelsResponse>(textModelKeys.all(), {
+      ...SETTINGS,
+      models: SETTINGS.models.map((model) => (model.id === 'grok' ? { ...model, status: 'offline' } : model)),
+      defaults: { default: 'kimi', byTask: { enhance: 'grok' } },
+    });
+
+    act(() => { void hook.result.current.setPick.mutateAsync({ task: 'enhance', modelId: null }); });
+    await waitFor(() => { expect(enhanceRow(client)).toEqual({ task: 'enhance', effectiveModelId: 'kimi' }); });
+    resolvePut?.(Response.json(SETTINGS));
+    await waitFor(() => { expect(hook.result.current.pending.size).toBe(0); });
+  });
+
   test('rolls back when the save fails', async () => {
     const { client, hook } = setup(() => Promise.resolve(Response.json({ error: 'model is offline' }, { status: 400 })));
     await waitFor(() => { expect(hook.result.current.settings.isSuccess).toBe(true); });

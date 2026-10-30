@@ -151,6 +151,88 @@ describe('useRollQueueSubmit — durable drain (backpressure, no silent drops)',
     }));
   });
 
+  test('an unacknowledged timeout restores a durable prepared roll and retries only its original key', async () => {
+    let timedOut = true;
+    const h = setup({
+      rollQueue: [roll('uncertain', 'a {{ai-fill: x}} b')],
+      generate: () => timedOut ? Promise.reject(new DOMException('stalled', 'TimeoutError')) : Promise.resolve(),
+    });
+    await runDrain(h);
+    const first = h.generate.mock.calls[0]?.[0] as GenerateRequest;
+    expect(h.generate).toHaveBeenCalledTimes(1);
+    expect(loadRollQueue()).toMatchObject([{ id: 'uncertain', text: 'a FILLED b', submission: { prepared: true, lockedSeed: first.seed } }]);
+    expect(useAtelierStore.getState().draft.rollQueue.map((item) => item.id)).toEqual(['uncertain']);
+    timedOut = false;
+    const retry = h.toasts.find((toast) => toast.action?.label === 'Resume queue')?.action;
+    expect(retry).toBeDefined();
+    await act(async () => { retry?.onClick(); await waitUntil(() => !useAtelierStore.getState().draining); });
+    expect(h.generate).toHaveBeenCalledTimes(2);
+    expect(h.generate.mock.calls[1]?.[0]).toEqual(first);
+    expect(resolveAiFillBatchMock).toHaveBeenCalledTimes(1);
+    expect(loadRollQueue()).toEqual([]);
+  });
+
+  test('a late timeout after Stop preserves the row, while Clear prevents its resurrection', async () => {
+    for (const clear of [false, true]) {
+      useAtelierStore.setState(initialAtelierState, true);
+      let rejectPost: ((reason: Error) => void) | undefined;
+      const h = setup({ rollQueue: [roll('q', 'plain')], generate: () => new Promise((_, reject) => { rejectPost = reject; }) });
+      await act(async () => { h.submitDraft(); await waitUntil(() => rejectPost !== undefined); h.stopDraining(); await Promise.resolve(); });
+      if (clear) act(() => { useAtelierStore.getState().clearRollQueue(); });
+      await act(async () => { rejectPost?.(new DOMException('stalled', 'TimeoutError')); await waitUntil(() => !useAtelierStore.getState().draining); });
+      expect(loadRollQueue().map((item) => item.id)).toEqual(clear ? [] : ['q']);
+      if (!clear) expect(loadRollQueue()[0]?.submission?.prepared).toBe(true);
+    }
+  });
+
+  test('standalone replay timeout saves its exact request without starting an automatic drain', async () => {
+    const h = setup({ generate: () => Promise.reject(new DOMException('stalled', 'TimeoutError')) });
+    await act(async () => { h.submitPrepared({ prompt: 'beat', modelId: 'm', ratio: '1:1', count: 1, motionPrompt: 'orbit', seed: 8 }); await waitUntil(() => h.generate.mock.calls.length === 1); await new Promise((resolve) => setTimeout(resolve, 5)); });
+    expect(h.generate).toHaveBeenCalledTimes(1);
+    expect(loadRollQueue()).toMatchObject([{ id: (h.generate.mock.calls[0]?.[0] as GenerateRequest).idempotencyKey, submission: { prepared: true, lockedSeed: 8, request: { motionPrompt: 'orbit' } } }]);
+    expect(useAtelierStore.getState().draining).toBe(false);
+  });
+
+  test('a standalone timeout offers explicit queue-wide resumption when other rolls are paused', async () => {
+    let timedOut = true;
+    const h = setup({
+      rollQueue: [roll('paused-a', 'paused first'), roll('paused-b', 'paused second')],
+      generate: () => timedOut ? Promise.reject(new DOMException('stalled', 'TimeoutError')) : Promise.resolve(),
+    });
+    await act(async () => {
+      h.submitPrepared({ prompt: 'beat', modelId: 'm', ratio: '1:1', count: 1, seed: 8 });
+      await waitUntil(() => h.toasts.some((toast) => toast.text.includes('Submission timed out')));
+    });
+    expect(prompts(h)).toEqual(['beat']);
+    const first = h.generate.mock.calls[0]?.[0] as GenerateRequest;
+    const notice = h.toasts.find((toast) => toast.text.includes('Submission timed out'));
+    expect(notice?.action?.label).toBe('Resume queue');
+    expect(notice?.text).toContain('other queued prompts');
+    expect(loadRollQueue().map((item) => item.text)).toEqual(['paused first', 'paused second', 'beat']);
+    timedOut = false;
+    await act(async () => { notice?.action?.onClick(); await waitUntil(() => loadRollQueue().length === 0 && !useAtelierStore.getState().draining); });
+    expect(prompts(h)).toEqual(['beat', 'paused first', 'paused second', 'beat']);
+    expect(h.generate.mock.calls.at(-1)?.[0]).toEqual(first);
+  });
+
+  test('an uncertain composer head keeps its place between earlier failed rows and later stashes', async () => {
+    let rejectHead: ((reason: Error) => void) | undefined;
+    const h = setup({ prompt: 'head', rollQueue: [roll('before', 'before')], generate: (request) => {
+      if (request.prompt === 'before') return Promise.reject(new ApiError(500, 'down'));
+      return new Promise((_, reject) => { rejectHead = reject; });
+    } });
+    await act(async () => {
+      h.submitDraft();
+      await waitUntil(() => rejectHead !== undefined);
+      useAtelierStore.getState().stashRoll(roll('after', 'after'));
+      h.stopDraining();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      rejectHead?.(new DOMException('stalled', 'TimeoutError'));
+      await waitUntil(() => !useAtelierStore.getState().draining);
+    });
+    expect(loadRollQueue().map((item) => item.text)).toEqual(['before', 'head', 'after']);
+  });
+
   test('ai-fill QUEUE_FULL is backpressure: the roll is retried and fires, never dropped', async () => {
     let calls = 0;
     resolveAiFillBatchMock.mockImplementation((req: AiFillBatchRequest) => {

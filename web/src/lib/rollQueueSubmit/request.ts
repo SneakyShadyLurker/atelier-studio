@@ -6,6 +6,7 @@ import { apiErrorCode } from '../errorCopy';
 import { isRecord } from '../guards';
 import { nextSeed } from '../seed';
 import type { FireItem } from './types';
+import { isAbortError } from '../abort';
 
 // A generate() rejection means a batch was already CREATED (real / billable) iff
 // it is a StreamTruncatedError carrying a string batchId — a mid-stream drop after
@@ -31,6 +32,31 @@ export function generateBackpressure(reason: unknown): number | null {
   if (apiErrorCode(reason) !== ('QUEUE_FULL' satisfies ApiErrorCode)) return null;
   const retryAfter = isRecord(reason.body) ? reason.body[RETRY_AFTER_FIELD] : undefined;
   return clampRetryAfterMs(typeof retryAfter === 'number' ? retryAfter : undefined);
+}
+
+export type SubmissionFailure =
+  | { readonly kind: 'started' }
+  | { readonly kind: 'aborted' }
+  | { readonly kind: 'uncertain' }
+  | { readonly kind: 'backpressure'; readonly retryAfterMs: number }
+  | { readonly kind: 'failed' };
+
+/** One classification boundary for both queue and standalone POST admission. */
+export function classifySubmissionFailure(reason: unknown): SubmissionFailure {
+  if (batchAlreadyStarted(reason)) return { kind: 'started' };
+  if (isAbortError(reason)) return { kind: 'aborted' };
+  if (reason instanceof DOMException && reason.name === 'TimeoutError') return { kind: 'uncertain' };
+  const retryAfterMs = generateBackpressure(reason);
+  return retryAfterMs === null ? { kind: 'failed' } : { kind: 'backpressure', retryAfterMs };
+}
+
+/** Preserve the exact prepared POST settings for an explicit same-key retry. */
+export function uncertainSubmissionItem(item: FireItem, request: GenerateRequest): FireItem {
+  const { prompt: _prompt, seed, idempotencyKey: _key, provenance: _provenance, ...fields } = request;
+  return {
+    ...item,
+    submission: { request: fields, lockedSeed: seed ?? null, wantsMotion: false, motionFields: {}, prepared: true },
+  };
 }
 
 /**

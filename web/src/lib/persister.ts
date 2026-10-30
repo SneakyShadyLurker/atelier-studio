@@ -45,7 +45,8 @@ const PERSIST_DEBOUNCE_MS = 1_000;
 // re-roll changed clip length or failed source validation.
 // v16: discard media URLs issued before the authenticated-media cache revision,
 // so history reloads URLs carrying the fixed media query key.
-export const PERSIST_CACHE_VERSION = '16';
+// v17: retain the effective motion prompt when replaying story I2V batches.
+export const PERSIST_CACHE_VERSION = '17';
 
 // Cap the persisted slice of the default Unsorted history scope. The live
 // in-session cache keeps every fetched page (TanStack `maxPages` can't bound
@@ -75,6 +76,7 @@ const PERSISTED_HISTORY_BATCH_FIELDS = [
   'sequence',
   'durationFrames',
   'i2vSourceUploadId',
+  'motionPrompt',
   'story',
 ] as const satisfies readonly (keyof Batch)[];
 type PersistedHistoryBatch = Pick<Batch, (typeof PERSISTED_HISTORY_BATCH_FIELDS)[number]>;
@@ -243,6 +245,7 @@ function isBatchForPersist(batch: Record<PropertyKey, unknown>): batch is Batch 
     && (batch.queueLengthAhead === undefined || typeof batch.queueLengthAhead === 'number')
     && (batch.durationFrames === undefined || typeof batch.durationFrames === 'number')
     && (batch.i2vSourceUploadId === undefined || typeof batch.i2vSourceUploadId === 'string')
+    && (batch.motionPrompt === undefined || typeof batch.motionPrompt === 'string')
     && (batch.story === undefined || isRecord(batch.story))
     && Array.isArray(batch.tiles);
 }

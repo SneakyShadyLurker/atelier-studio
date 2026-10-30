@@ -7,7 +7,7 @@
  * alone (see build.rollupOptions.input), so nothing here reaches dist.
  */
 import type { Batch, GptModerationNotice, Model } from '@atelier/shared';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import BatchOverflowMenu from '../../src/components/BatchOverflowMenu';
@@ -18,8 +18,12 @@ import dialogStyles from '../../src/styles/dialog.module.css';
 import Lightbox from '../../src/components/Lightbox';
 import ImageTile from '../../src/components/tile/ImageTile';
 import PromptPicker from '../../src/components/PromptPicker';
+import Composer from '../../src/components/Composer';
+import SaveTemplateDialog from '../../src/components/SaveTemplateDialog';
 import { promptKeys } from '../../src/api/prompts';
-import { APP_VIEW_UNSORTED } from '../../src/store/atelier';
+import { historyKeys, type HistoryData } from '../../src/api/history';
+import { useHistory } from '../../src/hooks/useHistory';
+import { APP_VIEW_UNSORTED, initialAtelierState, useAtelierStore } from '../../src/store/atelier';
 import ModerationNotice from '../../src/components/ModerationNotice';
 import FailedTile from '../../src/components/tile/FailedTile';
 import Toast from '../../src/components/Toast';
@@ -449,6 +453,86 @@ function CharacterCardCase() {
   );
 }
 
+const I2V_MODEL: Model = {
+  id: 'minimax-h3-i2v', name: 'MiniMax H3 I2V', backend: 'local', tag: 'video', latency: 'slow', pool: 'local',
+  supportedRatios: ['16:9'], supportedDurations: [124, 243], defaultDuration: 124,
+  supportsI2V: true, outputsVideo: true, concurrencyCapPerUser: 1, maxCountPerBatch: 1,
+};
+const I2V_MODELS = [I2V_MODEL];
+const I2V_MODEL_MAP = new Map(I2V_MODELS.map((model) => [model.id, model]));
+
+function FrontendI2VCase() {
+  useKeyboard(() => undefined);
+  const draft = useAtelierStore((state) => state.draft);
+  const setDraft = useAtelierStore((state) => state.setDraft);
+  return (
+    <main>
+      <h1>Composer keyboard regression</h1>
+      <Composer models={I2V_MODELS} modelById={I2V_MODEL_MAP} prompt={draft.prompt} modelId={I2V_MODEL.id}
+        ratio="16:9" count={1} durationFrames={124}
+        onPromptChange={(prompt) => { setDraft({ prompt }); }} onModelChange={() => undefined}
+        onRatioChange={() => undefined} onDurationChange={() => undefined} onCountChange={() => undefined} onSubmit={() => undefined} />
+    </main>
+  );
+}
+
+function FrontendSaveTemplateCase() {
+  useKeyboard(() => undefined);
+  return (
+    <main>
+      <h1>Template input regression</h1>
+      <button type="button" onClick={() => { useAtelierStore.getState().openSaveTemplate('A fox near a pond'); }}>Open save template</button>
+      <SaveTemplateDialog />
+    </main>
+  );
+}
+
+const REFRESH_DEEP_ID = '00000000-0000-4000-8000-000000000020';
+
+function seedHistoryRefresh(queryClient: QueryClient): void {
+  const now = Date.now();
+  const data: HistoryData = {
+    pages: Array.from({ length: 20 }, (_, index) => {
+      const suffix = String(index + 1).padStart(12, '0');
+      const active = index === 19;
+      const batch: Batch = {
+        ...BATCH,
+        id: `00000000-0000-4000-8000-${suffix}`,
+        prompt: `Polling page ${String(index + 1)}`,
+        createdAt: now - index * 1000,
+        startedAt: now,
+        status: active ? 'running' : 'done',
+        tiles: [active
+          ? { id: `00000000-0000-4000-9000-${suffix}`, seed: 1, status: 'loading' }
+          : { id: `00000000-0000-4000-9000-${suffix}`, seed: 1, status: 'done', url: '/img/polling-complete.png', ext: 'png', mime: 'image/png', completedAt: now }],
+      };
+      return { items: [batch], nextCursor: index === 19 ? null : `cursor-${String(index + 1)}` };
+    }),
+    pageParams: Array.from({ length: 20 }, (_, index) => index === 0 ? null : `cursor-${String(index)}`),
+  };
+  queryClient.setQueryData(historyKeys.list(), data, { updatedAt: now });
+}
+
+function FrontendHistoryRefreshCase() {
+  const history = useHistory();
+  const queryClient = useQueryClient();
+  const cache = queryClient.getQueryData<HistoryData>(historyKeys.list());
+  const deep = history.batches.find((batch) => batch.id === REFRESH_DEEP_ID);
+  return (
+    <main>
+      <h1>Automatic history refresh regression</h1>
+      <output data-testid="history-refresh-state" data-batch={JSON.stringify(deep)}>{history.isError ? 'error' : deep?.tiles[0]?.status ?? 'missing'}</output>
+      {history.isError && <button type="button" onClick={() => { void history.refetch(); }}>Retry active history</button>}
+      <output data-testid="history-refresh-pagination">{JSON.stringify({
+        pageCount: cache?.pages.length,
+        deepPage: cache?.pages.findIndex((page) => page.items.some((batch) => batch.id === REFRESH_DEEP_ID)),
+        cursors: cache?.pages.map((page) => page.nextCursor),
+        pageParams: cache?.pageParams,
+      })}</output>
+    </main>
+  );
+}
+
 const kase = new URLSearchParams(window.location.search).get('case');
 const root = document.getElementById('harness');
 const CASES: Record<string, () => React.JSX.Element> = {
@@ -461,11 +545,20 @@ const CASES: Record<string, () => React.JSX.Element> = {
   picker: PromptPickerCase,
   edit: EditActionsCase,
   'character-card': CharacterCardCase,
+  'frontend-i2v': FrontendI2VCase,
+  'frontend-save-template': FrontendSaveTemplateCase,
+  'frontend-history-refresh': FrontendHistoryRefreshCase,
 };
 const Case = (kase === null ? undefined : CASES[kase]) ?? DialogCase;
-const NEEDS_QUERY_CLIENT = new Set(['feed', 'phone-feed', 'picker', 'edit']);
+const NEEDS_QUERY_CLIENT = new Set(['feed', 'phone-feed', 'picker', 'edit', 'frontend-i2v', 'frontend-save-template', 'frontend-history-refresh']);
 if (root) {
   const queryClient = new QueryClient();
+  if (kase === 'frontend-i2v' || kase === 'frontend-save-template' || kase === 'frontend-history-refresh') useAtelierStore.setState(initialAtelierState, true);
+  if (kase === 'frontend-history-refresh') seedHistoryRefresh(queryClient);
+  if (kase === 'frontend-i2v') {
+    useAtelierStore.getState().setDraft({ modelId: I2V_MODEL.id, motionPrompt: 'Slow camera orbit' });
+    useAtelierStore.getState().setComposerExpanded(false);
+  }
   // The picker reads its library through TanStack Query; seeding the cache is
   // how the harness stays API-free.
   if (kase === 'picker') queryClient.setQueryData(promptKeys.library(), PROMPT_LIBRARY);

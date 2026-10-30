@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-
+import { AI_FILL_BACKEND_VALUES } from '@atelier/shared';
+import type * as AtelierStore from '../src/store/atelier';
+import type * as ErrorCopy from '../src/lib/errorCopy';
 /*
  * Native CSS anchor positioning and the native popovers behind it, asserted
  * where they actually resolve: a real browser (the chromium, webkit-anchors
@@ -18,6 +20,58 @@ const GAP = 8;
 const TIP_GAP = 6;
 const EDGE = 12;
 const SLOP = 1.5;
+
+test('timeout recovery clearly labels a readable queue-wide action on phones', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(HARNESS);
+  await page.evaluate(async () => {
+    const storeUrl = '/src/store/atelier.ts';
+    const copyUrl = '/src/lib/errorCopy.ts';
+    const { useAtelierStore } = await import(/* @vite-ignore */ storeUrl) as typeof AtelierStore;
+    const { UNCERTAIN_SUBMISSION_NOTICE } = await import(/* @vite-ignore */ copyUrl) as typeof ErrorCopy;
+    useAtelierStore.getState().addToast(UNCERTAIN_SUBMISSION_NOTICE.text, 'error', 30_000, {
+      label: UNCERTAIN_SUBMISSION_NOTICE.actionLabel,
+      onClick: () => { document.documentElement.dataset.queueResumed = 'true'; },
+    });
+  });
+  const resume = page.getByRole('button', { name: 'Resume queue', exact: true });
+  const notice = page.getByRole('status').filter({ has: resume });
+  const message = notice.getByText(/Resuming also submits other queued prompts/);
+  await expect(message).toBeVisible();
+  await expect(resume).toBeInViewport({ ratio: 1 });
+  expect(await overflows(notice)).toBe(false);
+  expect(await message.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+  await page.screenshot({ path: `/tmp/atelier-94a2-queue-resume-${testInfo.project.name}.png` });
+  await resume.click();
+  await expect(page.locator('html')).toHaveAttribute('data-queue-resumed', 'true');
+});
+
+test('deferred navigation preserves sidebar focus while only stale feed actions are inert', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const chunk = Promise.withResolvers<undefined>();
+  let requested = false;
+  await page.route('**/src/components/PromptManager/index.tsx*', async (route) => {
+    requested = true;
+    await chunk.promise;
+    await route.continue();
+  });
+  await page.goto('/e2e/studio/index.html');
+  const library = page.getByRole('button', { name: 'Prompt Library', exact: true });
+  await library.focus();
+  await page.keyboard.press('Enter');
+  try {
+    await expect.poll(() => requested).toBe(true);
+    await expect(library).toBeFocused();
+    await expect(page.getByTestId('feed')).toHaveAttribute('inert', '');
+    await expect(page.locator('main')).not.toHaveAttribute('inert');
+    // Navigation stays usable even while an optional destination is loading.
+    await page.getByRole('button', { name: /^Pinned \d+$/ }).click();
+    await expect(page).toHaveURL(/view=pinned/);
+    await expect(page.getByTestId('feed')).not.toHaveAttribute('inert');
+  } finally {
+    chunk.resolve(undefined);
+  }
+});
 
 interface Box { top: number; right: number; bottom: number; left: number; width: number; height: number }
 
@@ -1179,7 +1233,7 @@ test.describe('settings model menus', () => {
     await trigger.click();
     const listbox = page.getByRole('listbox');
     await settle(listbox);
-    await expect(listbox.getByRole('option')).toHaveCount(6);
+    await expect(listbox.getByRole('option')).toHaveCount(AI_FILL_BACKEND_VALUES.filter((backend) => backend !== 'gpt').length + 1);
     expect(await overflows(listbox)).toBe(false);
     for (const option of await listbox.getByRole('option').all()) {
       await expect(option).toBeInViewport({ ratio: 1 });

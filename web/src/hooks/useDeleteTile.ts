@@ -14,6 +14,7 @@ import {
   type HistoryData,
 } from './scopedHistoryMutation';
 import { useCancel } from './useCancel';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 import type { QueryKey } from '@tanstack/react-query';
 
 interface DeleteTileInput {
@@ -39,6 +40,7 @@ export function useDeleteTile(scope: Partial<ActiveScope> = {}) {
   const activeKey = activeScopeKey(scope);
   const { cancelTile } = useCancel(scope);
   return useMutation({
+    mutationKey: HISTORY_WRITE_MUTATION_KEY,
     mutationFn: async ({ batchId, tileId }: DeleteTileInput): Promise<void> => {
       const cached = findTileInCache(queryClient, activeKey, batchId, tileId);
       if (cached?.status === 'loading') {

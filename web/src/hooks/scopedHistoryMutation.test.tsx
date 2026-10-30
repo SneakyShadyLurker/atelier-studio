@@ -6,7 +6,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import { archiveKeys } from '../api/archive';
 import { collectionKeys } from '../api/collections';
-import { historyKeys, historyOpts } from '../api/history';
+import { historyKeys, historyRefreshInterval } from '../api/history';
 import { APP_VIEW_PINNED, APP_VIEW_UNSORTED, collectionView, useAtelierStore } from '../store/atelier';
 import { updateBatchInActiveScope, useScopedBatchPatch, type HistoryData } from './scopedHistoryMutation';
 
@@ -64,9 +64,7 @@ describe('useScopedBatchPatch', () => {
     expect(data?.pages[0]?.loadingTileCount).toBe(0);
     expect(data?.pages[0]?.hasLoadingTiles).toBe(false);
 
-    const refetchInterval = historyOpts().refetchInterval;
-    if (typeof refetchInterval !== 'function') throw new Error('refetchInterval is not defined');
-    expect(refetchInterval({ state: { data, fetchFailureCount: 0 } } as never)).toBe(false);
+    expect(historyRefreshInterval({ state: { data, fetchFailureCount: 0 } })).toBe(false);
   });
 
   test('keeps the active scope hot from the returned batch and invalidates non-active scopes', async () => {

@@ -4,6 +4,7 @@ import { APP_VIEW_ARCHIVE, APP_VIEW_UNSORTED, useAtelierStore, type AppView } fr
 import { replaceUrlState } from '../store/urlState';
 import { invalidateLibrary } from './invalidateLibrary';
 import { useToastMutation } from './useToastMutation';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 
 function collectionIdForView(view: AppView): string | null {
   if (view.kind === 'collection') return view.id;
@@ -14,6 +15,7 @@ function collectionIdForView(view: AppView): string | null {
 export function useDeleteCollection() {
   const queryClient = useQueryClient();
   return useToastMutation({
+    mutationKey: HISTORY_WRITE_MUTATION_KEY,
     mutationFn: ({ id }: { id: string }) => deleteCollection(id),
     errorFallback: "Couldn't delete that collection.",
     onSuccess: async (_data, input) => {

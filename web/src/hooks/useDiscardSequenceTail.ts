@@ -4,11 +4,13 @@ import { historyKeys } from '../api/history';
 import { discardSequenceTail } from '../api/sequences';
 import { describeError } from '../lib/errorCopy';
 import { useAtelierStore } from '../store/atelier';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 
 export function useDiscardSequenceTail() {
   const queryClient = useQueryClient();
   const addToast = useAtelierStore((state) => state.addToast);
   return useMutation({
+    mutationKey: HISTORY_WRITE_MUTATION_KEY,
     mutationFn: discardSequenceTail,
     onSuccess: () => {
       addToast('Tail discarded', 'soft');

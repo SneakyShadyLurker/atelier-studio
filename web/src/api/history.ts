@@ -112,72 +112,49 @@ export const historyOpts = (view: AppView = { kind: 'unsorted' }, q = '', enable
     // authoritative on mutate (surgical setQueryData updates), 30s focus
     // refetch is the right tier.
     staleTime: 30_000,
-    // v3 spec: poll while any loading tile exists. SSE is the real-time
-    // path; this polling is the fallback for connection drops. Stops
-    // automatically once every tile is terminal. Background tabs are
-    // paused by default — they converge on focus.
-    //
-    // Adaptive cadence: start at 3s while events are arriving, back off
-    // toward 30s if no new tile event lands in the polling window. The
-    // stuck-toast cap (STUCK_LOADING_POLL_CAP_MS) is a separate concern —
-    // it suppresses the poll for genuinely-stuck batches.
-    //
-    // Side effects (pendingStory expiry, stuck toast) live here on purpose:
-    // stuck detection is time-driven, and a poll returning structurally
-    // identical data does not re-render, so an effect keyed on the data would
-    // miss the threshold crossing. Both are idempotent (expiry flips the
-    // decision to 'none'; markStuckToastShown dedupes), which matters because
-    // TanStack calls this on every cache/options update, not once per poll.
-    refetchInterval: (query) => {
-      const data = query.state.data as HistoryData | undefined;
-      const pages = data?.pages ?? [];
-      const store = useAtelierStore.getState();
-      const pendingStoryDecision = pendingStoryPollDecision(pages, store.pendingStory, Date.now());
-      if (pendingStoryDecision === 'clear') store.setPendingStory(null);
-      const pendingStory = pendingStoryDecision === 'poll';
-      if (query.state.fetchFailureCount > 3 && !pendingStory) return false;
-      // No page-count gate: a loading tile hydrated from cache or a later page
-      // may have no live SSE subscription, so this poll is its only path to a
-      // terminal state. TanStack refetches the cached pages sequentially, and
-      // the stall backoff below bounds the cost of a deep cache.
-      const stitching = hasStitchingSequence(pages);
-      const activeStory = hasActiveStory(pages);
-      const loadingState = loadingStateFromTaggedPages(pages);
-      if (loadingState.loadingTileCount === 0 && !stitching && !activeStory && !pendingStory) return false;
-      const now = Date.now();
-      let hasFreshLoadingBatch = loadingState.loadingBatches.length === 0;
-      for (const batch of loadingState.loadingBatches) {
-        // A queued batch is waiting its turn, not stuck: however long the
-        // queue, it keeps polling so its dispatch and completion land.
-        if (batch.startedAt !== null && now - batch.startedAt > STUCK_LOADING_POLL_CAP_MS) {
-          if (markStuckToastShown(batch.batchId)) {
-            useAtelierStore.getState().addToast('Generation seems stuck — refresh to retry.', 'soft', 6000);
-          }
-        } else {
-          hasFreshLoadingBatch = true;
-        }
-      }
-      if (!hasFreshLoadingBatch && !pendingStory) return false;
-      if (pendingStory) return 3_000;
-      // stallMs = "time since the most recent meaningful progress on any
-      // loading batch". Uses tile.completedAt (or batch.createdAt as the
-      // baseline) — NOT query.state.dataUpdatedAt, which is bumped by every
-      // optimistic SSE setQueryData write and would keep the clock pegged
-      // at zero so the backoff tiers never fired.
-      // Note: TanStack recomputes refetchInterval on every cache update and
-      // every observer setOptions (each render of a useHistory consumer), not
-      // once per poll; the walks are cheap at the 5-page persisted depth.
-      const mostRecentProgressAt = mostRecentProgressFromPages(pages);
-      const stallMs = mostRecentProgressAt > 0 ? now - mostRecentProgressAt : 0;
-      if (stallMs > 60_000) return 30_000;
-      if (stallMs > 20_000) return 10_000;
-      return 3_000;
-    },
+    // Active work has its own bounded refresh query. Ordinary pagination,
+    // invalidation and focus refetches keep their existing semantics.
     retry: (failureCount, error) => {
       if (error instanceof ApiError && !error.retryable) return false;
       return failureCount < 2;
     },
   });
+
+/** Shared scheduling policy consumed only by the active-work refresh query. */
+export function historyRefreshInterval(query: {
+  state: { data?: { pages: readonly HistoryPage<Batch>[]; loadingTileCount?: number } | undefined; fetchFailureCount?: number };
+}): number | false {
+  const data = query.state.data as HistoryData | undefined;
+  const pages = data?.pages ?? [];
+  const store = useAtelierStore.getState();
+  const pendingStoryDecision = pendingStoryPollDecision(pages, store.pendingStory, Date.now());
+  if (pendingStoryDecision === 'clear') store.setPendingStory(null);
+  const pendingStory = pendingStoryDecision === 'poll';
+  if ((query.state.fetchFailureCount ?? 0) > 3 && !pendingStory) return false;
+  const stitching = hasStitchingSequence(pages);
+  const activeStory = hasActiveStory(pages);
+  const loadingState = loadingStateFromTaggedPages(pages);
+  if (loadingState.loadingTileCount === 0 && !stitching && !activeStory && !pendingStory) return false;
+  const now = Date.now();
+  let hasFreshLoadingBatch = loadingState.loadingBatches.length === 0;
+  for (const batch of loadingState.loadingBatches) {
+    // Queue wait does not count against the stuck-render budget.
+    if (batch.startedAt !== null && now - batch.startedAt > STUCK_LOADING_POLL_CAP_MS) {
+      if (markStuckToastShown(batch.batchId)) {
+        store.addToast('Generation seems stuck — refresh to retry.', 'soft', 6000);
+      }
+    } else hasFreshLoadingBatch = true;
+  }
+  if (!hasFreshLoadingBatch && !pendingStory) return false;
+  if (pendingStory) return 3_000;
+  // Use actual batch/tile progress. Cache writes also bump dataUpdatedAt and
+  // would otherwise keep resetting the backoff clock.
+  const mostRecentProgressAt = mostRecentProgressFromPages(pages);
+  const stallMs = mostRecentProgressAt > 0 ? now - mostRecentProgressAt : 0;
+  if (stallMs > 60_000) return 30_000;
+  if (stallMs > 20_000) return 10_000;
+  return 3_000;
+}
 
 function hasStitchingSequence(pages: readonly HistoryPage<Batch>[]): boolean {
   return pages.some((page) => page.items.some((batch) => batch.sequence?.masterStatus === 'stitching'));
@@ -324,7 +301,7 @@ function tagHistoryPage(page: HistoryPage<Batch>): HistoryPageWithLoading {
   };
 }
 
-function normalizeBatch(batch: Batch): Batch {
+export function normalizeBatch(batch: Batch): Batch {
   return {
     ...batch,
     tiles: batch.tiles.map((tile) => (
@@ -342,7 +319,7 @@ function normalizeBatch(batch: Batch): Batch {
 // Maps a history AppView scope onto the wire query params shared by the
 // GET and DELETE /history endpoints — one place to extend when a new
 // AppView kind is added.
-function applyHistoryScopeParams(params: URLSearchParams, view: AppView): void {
+export function applyHistoryScopeParams(params: URLSearchParams, view: AppView): void {
   if (view.kind === 'pinned') params.set('pinned', 'true');
   if (view.kind === 'unsorted') params.set('collectionId', 'null');
   if (view.kind === 'collection') params.set('collectionId', view.id);

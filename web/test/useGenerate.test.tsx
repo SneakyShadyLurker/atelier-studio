@@ -135,6 +135,42 @@ function sseChunk(lines: readonly string[]): string {
 }
 
 describe('useGenerate', () => {
+  test('the live optimistic batch retains effective motion instructions before history settles', async () => {
+    const stream = controllableSseResponse();
+    globalThis.fetch = mock(() => stream.response) as unknown as typeof fetch;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
+    const generation = result.current.generate({ prompt: 'The subject turns', motionPrompt: 'Slow orbit and hold.', modelId: 'i2v', ratio: '1:1', count: 1 });
+    stream.enqueue('event: batch\ndata: {"batchId":"motion-batch","createdAt":1,"tiles":[]}\n\n');
+    await waitFor(() => {
+      const batch = client.getQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list())?.pages[0]?.items[0];
+      expect(batch?.motionPrompt).toBe('Slow orbit and hold.');
+      expect(batch?.prompt).toBe('The subject turns');
+    });
+    stream.enqueue('event: done\ndata: {"batchId":"motion-batch"}\n\n');
+    stream.close();
+    await act(async () => { await generation; });
+    client.clear();
+  });
+
+  test('a timeout attaching events after server acceptance stays an accepted stream failure', async () => {
+    const fetch = mock((_input: RequestInfo | URL, init?: RequestInit) => init?.method === 'POST'
+      ? Promise.resolve(Response.json({ batchId: 'accepted-timeout' }, { status: 201 }))
+      : Promise.reject(new DOMException('stalled', 'TimeoutError')));
+    globalThis.fetch = fetch as unknown as typeof globalThis.fetch;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const accepted = mock();
+    const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
+    let error: unknown;
+    await act(async () => {
+      error = await rejectedValue(result.current.generate({ prompt: 'p', modelId: 'm', ratio: '1:1', count: 1 }, { onAccepted: accepted }));
+    });
+    expect(error).toMatchObject({ name: 'StreamTruncatedError', batchId: 'accepted-timeout' });
+    expect(accepted).toHaveBeenCalledWith('accepted-timeout');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(useAtelierStore.getState().toasts.filter((toast) => toast.tone === 'error')).toEqual([]);
+    client.clear();
+  });
   test('seeds history from batch event and patches terminal tile events', async () => {
     globalThis.fetch = mock(() => sseResponse([
       'event: batch',

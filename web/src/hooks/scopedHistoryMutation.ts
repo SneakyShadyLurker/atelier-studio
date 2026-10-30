@@ -5,6 +5,7 @@ import { historyKeys, isDefaultHistoryScopeKey, patchBatch, type PatchBatchInput
 import { APP_VIEW_UNSORTED, useAtelierStore, type AppView } from '../store/atelier';
 import { retagHistoryData, type HistoryData } from './historyCache';
 import { invalidateLibrary } from './invalidateLibrary';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 
 export type { HistoryData } from './historyCache';
 
@@ -151,6 +152,7 @@ export function useScopedBatchPatch<TInput extends { batchId: string }>(
   const queryClient = useQueryClient();
   const activeKey = activeScopeKey(scope);
   return useMutation({
+    mutationKey: HISTORY_WRITE_MUTATION_KEY,
     mutationFn: (input: TInput) => patchBatch(input.batchId, options.toPatch(input)),
     onMutate: async (input): Promise<ScopedRollback> => {
       await queryClient.cancelQueries({ queryKey: activeKey });

@@ -1,7 +1,7 @@
 import type { Model } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import Composer from './index';
 import { useKeyboard } from '../../hooks/useKeyboard';
@@ -64,8 +64,7 @@ function wrapper() {
 }
 
 function renderComposer(overrides: Partial<Parameters<typeof Composer>[0]> = {}) {
-  return render(
-    <Composer
+  const composer = (next: Partial<Parameters<typeof Composer>[0]> = {}) => <Composer
       models={models}
       modelById={new Map(models.map((model) => [model.id, model]))}
       prompt="make the still move"
@@ -79,9 +78,10 @@ function renderComposer(overrides: Partial<Parameters<typeof Composer>[0]> = {})
       onCountChange={mock()}
       onSubmit={mock()}
       {...overrides}
-    />,
-    { wrapper: wrapper() },
-  );
+      {...next}
+    />;
+  const view = render(composer(), { wrapper: wrapper() });
+  return { ...view, rerenderComposer: (next: Partial<Parameters<typeof Composer>[0]>) => { view.rerender(composer(next)); } };
 }
 
 afterEach(() => {
@@ -130,6 +130,41 @@ describe('Composer source intents vs pending tile handoffs', () => {
 });
 
 describe('Composer I2V mode', () => {
+  test('changing mode while expanded keeps focus on the model control', async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    window.matchMedia = mock((query: string) => ({
+      matches: query === '(width < 768px)', media: query, onchange: null,
+      addEventListener: mock(), removeEventListener: mock(), addListener: mock(), removeListener: mock(), dispatchEvent: mock(() => true),
+    }));
+    try {
+      useAtelierStore.getState().setComposerExpanded(false);
+      const view = renderComposer();
+      fireEvent.click(screen.getByRole('button', { name: 'Expand composer' }));
+      await waitFor(() => { expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Motion prompt' })); });
+      const model = screen.getByRole('button', { name: 'Model' });
+      model.focus();
+      await act(async () => { view.rerenderComposer({ modelId: imageModel.id }); await Promise.resolve(); });
+      expect(document.activeElement === model).toBe(true);
+    } finally { window.matchMedia = matchMedia; }
+  });
+
+  test('phone expansion focuses the motion field after removing the collapsed trigger', async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    window.matchMedia = mock((query: string) => ({
+      matches: query === '(width < 768px)', media: query, onchange: null,
+      addEventListener: mock(), removeEventListener: mock(), addListener: mock(), removeListener: mock(), dispatchEvent: mock(() => true),
+    }));
+    try {
+      useAtelierStore.getState().setComposerExpanded(false);
+      renderComposer();
+      const trigger = screen.getByRole('button', { name: 'Expand composer' });
+      trigger.focus();
+      fireEvent.click(trigger);
+      await waitFor(() => { expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Motion prompt' })); });
+      expect(trigger.isConnected).toBe(false);
+    } finally { window.matchMedia = matchMedia; }
+  });
+
   test('shows motion controls, locks count to one, and serializes i2v fields', () => {
     useAtelierStore.getState().setDraft({
       i2vSourceUploadId: 'upload-source-1',

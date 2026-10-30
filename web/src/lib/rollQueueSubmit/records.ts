@@ -18,7 +18,12 @@ export function isTerminal(record: RollRecord): boolean {
 
 /** The saved and restored copy: the source roll with the latest text. */
 function currentCopy(record: RollRecord): QueuedRoll | null {
-  return record.source ? { ...record.source, text: record.item.text } : null;
+  const source = record.source ?? record.recoveryRoll;
+  return source ? {
+    ...source,
+    text: record.item.text,
+    ...(record.item.submission ? { submission: record.item.submission } : {}),
+  } : null;
 }
 
 function settle(records: readonly RollRecord[]): void {

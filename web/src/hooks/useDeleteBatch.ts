@@ -14,6 +14,7 @@ import {
   type HistoryData,
 } from './scopedHistoryMutation';
 import { useCancel } from './useCancel';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 import type { QueryKey } from '@tanstack/react-query';
 
 interface DeleteBatchInput {
@@ -56,6 +57,7 @@ export function useDeleteBatch(scope: Partial<ActiveScope> = {}) {
   const activeKey = activeScopeKey(scope);
   const { cancelBatch } = useCancel(scope);
   return useMutation({
+    mutationKey: HISTORY_WRITE_MUTATION_KEY,
     mutationFn: async ({ batchId }: DeleteBatchInput): Promise<void> => {
       const context = batchMutationContext(queryClient, activeKey, batchId);
       if (context.hadAnyLoading) {

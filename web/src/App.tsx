@@ -1,8 +1,9 @@
 import { isVideoMime } from '@atelier/shared';
 import type { ArchivedTile, Batch, Collection, DoneTile, GenerateRequest, Ratio, Tile, VideoDurationFrames } from '@atelier/shared';
 import { resolveDuration } from './lib/durations';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { HISTORY_WRITE_MUTATION_KEY } from './hooks/historyWrites';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { resolveActiveBatchId } from './lib/burstFollow';
 import { describeError } from './lib/errorCopy';
@@ -121,7 +122,11 @@ function AppContent() {
   const draft = useAtelierStore((state) => state.draft);
   const activeBatchId = useAtelierStore((state) => state.activeBatchId);
   const lightbox = useAtelierStore((state) => state.lightbox);
-  const view = useAtelierStore((state) => state.view);
+  const requestedView = useAtelierStore((state) => state.view);
+  // The store and URL own navigation. React defers only its rendering snapshot;
+  // startTransition cannot make an external-store mutation nonblocking.
+  const view = useDeferredValue(requestedView);
+  const isViewPending = view !== requestedView;
   const q = useAtelierStore((state) => state.q);
   const sidebarOpen = useAtelierStore((state) => state.sidebarOpen);
   const composerExpanded = useAtelierStore((state) => state.composerExpanded);
@@ -148,7 +153,6 @@ function AppContent() {
   const [cardTile, setCardTile] = useState<DoneTile | null>(null);
   const [composerResetKey, setComposerResetKey] = useState(0);
   const [canvasResetKey, setCanvasResetKey] = useState(0);
-  const [isViewPending, startViewTransition] = useTransition();
 
   const modelsQuery = useModels();
   const models = useMemo(() => modelsQuery.data ?? [], [modelsQuery.data]);
@@ -261,6 +265,16 @@ function AppContent() {
   }, [addToast, uploadTileSource]);
   const clearAll = useClearAll({ activeView: view });
   const { cancelBatch: cancelBatchForStory } = useCancel({ activeView: view, q: debouncedQ });
+  const cancelStoryMutate = useMutation({
+    mutationKey: HISTORY_WRITE_MUTATION_KEY,
+    mutationFn: async (storyId: string) => {
+      const result = await cancelStoryRequest(storyId);
+      if (result.inflightBatchId !== null) await cancelBatchForStory(result.inflightBatchId);
+      await queryClient.invalidateQueries({ queryKey: historyKeys.all() });
+    },
+    onSuccess: () => { addToast('Story canceled'); },
+    onError: (error) => { addToast(describeError(error, "Couldn't cancel the story."), 'error'); },
+  }).mutate;
   const deleteBatch = useDeleteBatch({ activeView: view, q: debouncedQ });
   const deleteTile = useDeleteTile({ activeView: view, q: debouncedQ });
   const discardTailMutate = useDiscardSequenceTail().mutate;
@@ -426,11 +440,9 @@ function AppContent() {
   }, [clearFollowAnchor, setActiveBatchId, isPhone, setSidebarOpen]);
 
   const selectView = useCallback((nextView: AppView) => {
-    startViewTransition(() => {
-      setView(nextView);
-    });
+    setView(nextView);
     if (isPhone) setSidebarOpen(false);
-  }, [setView, isPhone, setSidebarOpen, startViewTransition]);
+  }, [setView, isPhone, setSidebarOpen]);
   const onManagedViewBack = useCallback(() => { selectView(APP_VIEW_UNSORTED); }, [selectView]);
   const onArchiveRestore = useCallback((tileId: string) => restoreMutateAsync(tileId), [restoreMutateAsync]);
   const onArchivePermanentDelete = useCallback((tileId: string) => permanentDeleteMutateAsync(tileId), [permanentDeleteMutateAsync]);
@@ -465,16 +477,7 @@ function AppContent() {
     if (action === 'cancelStory') {
       const story = batch.story;
       if (!story) return;
-      void (async () => {
-        try {
-          const result = await cancelStoryRequest(story.id);
-          if (result.inflightBatchId !== null) await cancelBatchForStory(result.inflightBatchId);
-          await queryClient.invalidateQueries({ queryKey: historyKeys.all() });
-          addToast('Story canceled');
-        } catch (error) {
-          addToast(describeError(error, "Couldn't cancel the story."), 'error');
-        }
-      })();
+      cancelStoryMutate(story.id);
       return;
     }
     if (action === 'playMaster') {
@@ -529,7 +532,7 @@ function AppContent() {
       return;
     }
     deleteBatchMutate({ batchId: batch.id });
-  }, [openMasterLightbox, downloadMasterMutate, openSaveTemplate, copyPrompt, replayHistorical, deleteBatchMutate, reopenBatchInPicker, setComposerExpanded, addToast, cancelBatchForStory, queryClient, promptsEnabled, pickerAvailable]);
+  }, [openMasterLightbox, downloadMasterMutate, openSaveTemplate, copyPrompt, replayHistorical, deleteBatchMutate, reopenBatchInPicker, setComposerExpanded, addToast, cancelStoryMutate, promptsEnabled, pickerAvailable]);
 
   const handleTileAction = useCallback((action: 'download' | 'delete' | 'retry' | 'dismiss', batch: Batch, tile: Tile) => {
     if (action === 'retry') {
@@ -695,7 +698,7 @@ function AppContent() {
         promptsEnabled={promptsEnabled}
         theme={theme}
         error={historyError}
-        historyReadOnly={isFeedStale}
+        historyReadOnly={isFeedStale || isViewPending}
         hasNextPage={historyQuery.hasNextPage}
         isFetchingNextPage={historyQuery.isFetchingNextPage}
         isFetchNextPageError={historyQuery.isFetchNextPageError}
@@ -729,19 +732,19 @@ function AppContent() {
         onClick={() => { setSidebarOpen(false); }}
       />
       <main className={styles.main} inert={mainInert || undefined}>
+        <Suspense fallback={<LazyFallback label="Loading view" />}>
         <div
           className={styles.viewSwap}
           data-testid="feed"
           key={view.kind === 'collection' ? `collection:${view.id}` : view.kind}
           {...(isFeedStale ? { 'data-stale': 'true' } : {})}
-          inert={feedInert || undefined}
+          inert={feedInert || isViewPending || undefined}
         >
           {view.kind === 'archive' ? (
             // Keyed by the archive sub-scope: the viewSwap key is only
             // view.kind, so without this an Archive error would latch the
             // boundary across every archive scope until "Back to feed".
             <ErrorBoundary key={`archive-${view.scope.kind}-${view.scope.kind === 'collection' ? view.scope.id : ''}`} fallback={viewErrorFallback}>
-            <Suspense fallback={<LazyFallback label="Loading archive" />}>
             <Archive
               items={archiveQuery.items}
               total={archiveQuery.total}
@@ -759,13 +762,10 @@ function AppContent() {
               onBack={onManagedViewBack}
               onOpenTile={onArchiveOpenTile}
             />
-            </Suspense>
             </ErrorBoundary>
           ) : view.kind === 'prompts' && !promptLibrary.gated ? (
             <ErrorBoundary fallback={viewErrorFallback}>
-              <Suspense fallback={<LazyFallback label="Loading prompt library" />}>
                 <PromptManager onBack={onManagedViewBack} />
-              </Suspense>
             </ErrorBoundary>
           ) : (
             <>
@@ -804,6 +804,7 @@ function AppContent() {
             </>
           )}
         </div>
+        </Suspense>
         {feedInert && (
           <button
             type="button"

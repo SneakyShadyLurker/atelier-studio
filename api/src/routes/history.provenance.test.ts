@@ -20,6 +20,14 @@ function seedBatchRow(overrides: Partial<BatchRow>): BatchRow {
 }
 
 describe('toPublicBatch — provenance read-join', () => {
+  test('preserves the effective story motion prompt separately from the display beat', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'atelier-hist-motion-'));
+    const db = new Database(':memory:');
+    migrate(db, dataDir);
+    const batch = toPublicBatchForTest(db, seedBatchRow({ prompt: 'The subject turns', motion_prompt: 'Slow orbit, then hold.' }), [], new Map());
+    expect(batch.prompt).toBe('The subject turns');
+    expect(batch.motionPrompt).toBe('Slow orbit, then hold.');
+  });
   test('joins templateName from prompt_templates when template exists', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-hist-prov-'));
     const db = new Database(':memory:');

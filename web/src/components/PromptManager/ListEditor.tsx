@@ -15,6 +15,7 @@ import { I } from '../icons/I';
 import { useRowReorder } from './useRowReorder';
 import DescribeListDialog from '../DescribeListDialog';
 import InlineFieldChrome from './InlineFieldChrome';
+import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
 import styles from './index.module.css';
 import btn from '../../styles/buttons.module.css';
 import { remapOptionKeys, usePromptDraftStore, type ListDraft, type OptionDraft } from './draftStore';
@@ -268,7 +269,7 @@ export default function ListEditor({ list, dimensions }: ListEditorProps) {
   };
 
   const save = () => {
-    if (!trimmedName || pending) return;
+    if (!trimmedName || trimmedName.length > PROMPT_LIBRARY_NAME_MAX_CHARS || pending) return;
     const tasks: Promise<unknown>[] = [];
     const submittedRows = savedRows(drafts);
     const sentOptions = nextOptions;
@@ -341,7 +342,7 @@ export default function ListEditor({ list, dimensions }: ListEditorProps) {
             <I.sparkle aria-hidden="true" />
             {drafting ? 'Drafting…' : 'Draft List'}
           </button>
-          <button className={btn.primary} type="submit" disabled={!dirty || busy || !trimmedName}>
+          <button className={btn.primary} type="submit" disabled={!dirty || busy || !trimmedName || trimmedName.length > PROMPT_LIBRARY_NAME_MAX_CHARS}>
             Save list
           </button>
         </div>

@@ -23,6 +23,16 @@ function draftDone(payload: unknown): Response {
 }
 
 describe('TemplateEditor — AI Draft Template integration', () => {
+  test('native name length and restored over-length names share the server limit', () => {
+    const fetch = mock(() => Response.json({}));
+    globalThis.fetch = fetch as unknown as typeof globalThis.fetch;
+    wrap(<TemplateEditor template={null} variableLists={[]} initialName={'x'.repeat(65)} />);
+    const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Template name' });
+    expect(input.maxLength).toBe(64);
+    fireEvent.change(screen.getByRole('textbox', { name: /body/i }), { target: { value: 'Prompt' } });
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: /save template/i }).disabled).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
   test('AI button visible in data-zone="head" next to Save template', () => {
     wrap(<TemplateEditor template={null} variableLists={[]} initialName="MyTpl" />);
     const head = document.querySelector('[data-zone="head"]');

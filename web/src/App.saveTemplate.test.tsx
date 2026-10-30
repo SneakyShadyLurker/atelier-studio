@@ -70,7 +70,7 @@ describe('App save-to-templates wiring', () => {
     await waitFor(() => {
       expect(useAtelierStore.getState().saveTemplatePrompt).toBe(firstRendered.prompt);
     });
-    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(await screen.findByRole('dialog', { name: 'Save prompt as template' })).toBeTruthy();
     expect(screen.getByText('Save prompt as template')).toBeTruthy();
   });
 });

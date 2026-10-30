@@ -37,12 +37,14 @@ export type AppView =
   | { kind: 'pinned' }
   | { kind: 'unsorted' }
   | { kind: 'collection'; id: string }
-  | { kind: 'prompts' };
+  | { kind: 'prompts' }
+  | { kind: 'text-models' };
 
 export const APP_VIEW_ARCHIVE: AppView = { kind: 'archive', scope: { kind: 'all' } };
 export const APP_VIEW_PINNED: AppView = { kind: 'pinned' };
 export const APP_VIEW_UNSORTED: AppView = { kind: 'unsorted' };
 export const APP_VIEW_PROMPTS: AppView = { kind: 'prompts' };
+export const APP_VIEW_TEXT_MODELS: AppView = { kind: 'text-models' };
 export const collectionView = (id: string): AppView => ({ kind: 'collection', id });
 export const archiveUnsortedView: AppView = { kind: 'archive', scope: { kind: 'unsorted' } };
 export const archivePinnedView: AppView = { kind: 'archive', scope: { kind: 'pinned' } };

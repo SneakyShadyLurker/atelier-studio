@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import type { TextRoutingResponse } from '@atelier/shared';
+import { registryForConfig } from '../providers/registry';
 import { testRuntime } from '../test/helpers';
 
 // Admin routing writes (spec § 10.2): task assignments, the default model and
@@ -21,6 +23,41 @@ async function setup(): Promise<{ rt: Runtime; enabled: string; disabled: string
   if (!enabled || !disabled) throw new Error('models not created');
   return { rt, enabled: enabled.id, disabled: disabled.id };
 }
+
+describe('GET /api/text-routing', () => {
+  test('returns defaults, writers with their mode and the registered image models', async () => {
+    const { rt, enabled } = await setup();
+    rt.text.store.setDefault('default', enabled);
+    rt.text.store.setDefault('ai-fill', enabled);
+    rt.text.store.setWriter('gpt-image-2.5-sunburst', { modelId: enabled, mode: 'lock' });
+
+    const res = await rt.fetch('/api/text-routing', { headers: { 'Remote-User': 'alice' } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+    const body = (await res.json()) as TextRoutingResponse;
+    expect(body.defaults).toEqual({ default: enabled, byTask: { 'ai-fill': enabled } });
+    expect(body.writers).toEqual({ 'gpt-image-2.5-sunburst': { modelId: enabled, mode: 'lock' } });
+    // The same set the writer PUT validates against, labelled for the admin.
+    const registered = registryForConfig(rt.config).map((entry) => ({ id: entry.model.id, label: entry.model.name }));
+    expect(registered.length).toBeGreaterThan(0);
+    expect(body.imageModels).toEqual(registered);
+    expect(body.imageModels.map((image) => image.id)).toContain('gpt-image-2.5-sunburst');
+  });
+
+  test('writes answer with the same shape', async () => {
+    const { rt, enabled } = await setup();
+    const body = (await (await put(rt, '/defaults/default', { modelId: enabled })).json()) as TextRoutingResponse;
+    expect(body.imageModels.length).toBeGreaterThan(0);
+    expect(body.writers).toEqual({});
+  });
+
+  test('is admin-only', async () => {
+    const { rt } = await setup();
+    const res = await rt.fetch('/api/text-routing', { headers: { 'Remote-User': 'mallory' } });
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain('imageModels');
+  });
+});
 
 describe('PUT /api/text-routing/defaults/:scope', () => {
   test('sets and clears the default and a task assignment, bumping the revision', async () => {

@@ -1257,6 +1257,18 @@ export interface TextModelsResponse {
   readonly writers: Readonly<Record<string, string>>;
 }
 
+/** How a prompt writer applies: 'lock' always, 'prefer' unless the person picked their own. */
+export type TextWriterMode = 'lock' | 'prefer';
+
+/** Admin `GET /api/text-routing` and the answer to every routing PUT. */
+export interface TextRoutingResponse {
+  readonly defaults: TextModelsResponse['defaults'];
+  /** Image model id → prompt writer. */
+  readonly writers: Readonly<Record<string, { readonly modelId: string; readonly mode: TextWriterMode }>>;
+  /** Registered image models a writer can be set for. */
+  readonly imageModels: readonly { readonly id: string; readonly label: string }[];
+}
+
 /** Where a model is referenced; shown before a delete is confirmed. */
 export interface TextModelUsage {
   readonly isDefault: boolean;
@@ -1673,6 +1685,7 @@ type _NoUserIdOnAiFillBatchItem = _Assert<_NoUserIdOn<AiFillBatchItem>>;
 type _NoUserIdOnAiFillBatchRequest = _Assert<_NoUserIdOn<AiFillBatchRequest>>;
 type _NoUserIdOnAiFillBatchSseEvent = _Assert<_NoUserIdOn<AiFillBatchSseEvent>>;
 type _NoUserIdOnTextBackendSettings = _Assert<_NoUserIdOn<TextBackendSettingsResponse>>;
+type _NoUserIdOnTextRouting = _Assert<_NoUserIdOn<TextRoutingResponse>>;
 type _NoUserIdOnModelStepsSettings = _Assert<_NoUserIdOn<ModelStepsSettingsResponse>>;
 type _NoUserIdOnModelStepsSetting = _Assert<_NoUserIdOn<ModelStepsSetting>>;
 type _NoUserIdOnBrainstormCharactersRequest = _Assert<_NoUserIdOn<BrainstormCharactersRequest>>;

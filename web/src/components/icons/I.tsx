@@ -51,6 +51,10 @@ export const I = {
   film: (props: IconProps = {}) => icon(<><rect x="2" y="3" width="10" height="8" rx="1" /><path d="M2 5.5h10" /><path d="M4.5 3v2.5" /><path d="M7 3v2.5" /><path d="M9.5 3v2.5" /></>, props),
   extend: (props: IconProps = {}) => icon(<><path d="M2 4.5h5.5a3.5 3.5 0 0 1 3.5 3.5v3" /><path d="m8.5 8.5 2.5 2.5 2-2.5" /><path d="M2 2.5v4" /></>, props),
   image: (props: IconProps = {}) => icon(<><rect x="1.5" y="1.5" width="11" height="11" rx="1.5" /><circle cx="5" cy="5" r="1.2" /><path d="M12.5 9 8.8 5.3 2 12" /></>, props),
+  /** JSON output capability ({}). */
+  braces: (props: IconProps = {}) => icon(<><path d="M5 2H4.5A1.5 1.5 0 0 0 3 3.5V5.5L1.8 7 3 8.5v2A1.5 1.5 0 0 0 4.5 12H5" /><path d="M9 2h.5A1.5 1.5 0 0 1 11 3.5V5.5L12.2 7 11 8.5v2A1.5 1.5 0 0 1 9.5 12H9" /></>, props),
+  /** Reasoning capability (three waves). */
+  reasoning: (props: IconProps = {}) => icon(<><path d="M1.5 4c1.4-1.2 2.6-1.2 4 0s2.6 1.2 4 0 2.1-.9 3 0" /><path d="M1.5 7.5c1.4-1.2 2.6-1.2 4 0s2.6 1.2 4 0 2.1-.9 3 0" /><path d="M1.5 11c1.4-1.2 2.6-1.2 4 0s2.6 1.2 4 0 2.1-.9 3 0" /></>, props),
   chip: (props: IconProps = {}) => icon(<><rect x="3" y="3" width="8" height="8" rx="1.2" /><path d="M5.5 5.5h3v3h-3z" /><path d="M1.5 5h1.5M1.5 9h1.5M11 5h1.5M11 9h1.5M5 1.5V3M9 1.5V3M5 11v1.5M9 11v1.5" /></>, props),
   paperclip: (props: IconProps = {}) => icon(<path d="m11.2 6.3-4.7 4.7a3 3 0 0 1-4.2-4.2l5.1-5.1a2 2 0 0 1 2.8 2.8L5.1 9.6a1 1 0 0 1-1.4-1.4l4.7-4.7" />, props),
   penLine: (props: IconProps = {}) => icon(<><path d="M8.5 2.5 11.5 5.5" /><path d="M10.6 1.6a1.4 1.4 0 0 1 2 2L4.8 11.4 2 12l.6-2.8Z" /></>, props),

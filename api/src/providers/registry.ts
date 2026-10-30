@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { RATIO_VALUES, type Model, type ModelAvailability, type Pool } from '@atelier/shared';
-import type { Config } from '../config';
+import { cliproxyEnabled, type Config } from '../config';
 import type { KeyStore } from '../keystore';
 import { loggerForConfig } from '../observability/logger';
 import type { Provider } from './types';
@@ -153,7 +153,9 @@ function imageResilientPolicyOptions(config: Config) {
   };
 }
 
+// GPT Image goes through CLIProxyAPI, so it exists only when that is configured.
 function buildRealEntries(config: Config): RegistryEntryDraft[] {
+  if (!cliproxyEnabled(config)) return [];
   const cliproxy = createCliproxyProvider({
     baseUrl: config.CLIPROXY_BASE_URL,
     token: config.CLIPROXY_TOKEN,

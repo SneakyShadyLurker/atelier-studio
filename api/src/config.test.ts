@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BRAINSTORM_MAX_COUNT_CEILING } from '@atelier/shared';
-import { ConfigError, ephemeraEnabled, loadConfig } from './config';
+import { ConfigError, cliproxyEnabled, ephemeraEnabled, loadConfig } from './config';
 
 const validEnv = (): NodeJS.ProcessEnv => ({
   CLIPROXY_BASE_URL: 'http://127.0.0.1:8317',
@@ -149,8 +149,6 @@ describe('loadConfig', () => {
   });
 
   test.each([
-    ['CLIPROXY_BASE_URL'],
-    ['CLIPROXY_TOKEN'],
     ['DATA_DIR'],
   ] as const)('missing required %s throws ConfigError naming the var', (varName) => {
     const env = validEnv();
@@ -197,6 +195,34 @@ describe('loadConfig', () => {
     expect(caught).toBeInstanceOf(ConfigError);
     const issue = (caught as ConfigError).issues.find((i) => i.var === 'API_PORT');
     expect(issue?.message).toBe('must be a positive integer');
+  });
+
+  test('only DATA_DIR is required: CLIProxy is optional', () => {
+    const cfg = loadConfig({ DATA_DIR: '/tmp/atelier-test' });
+    expect(cfg.CLIPROXY_BASE_URL).toBeUndefined();
+    expect(cfg.CLIPROXY_TOKEN).toBeUndefined();
+    expect(cliproxyEnabled(cfg)).toBe(false);
+  });
+
+  test('CLIPROXY_BASE_URL and CLIPROXY_TOKEN together enable CLIProxy', () => {
+    expect(cliproxyEnabled(loadConfig(validEnv()))).toBe(true);
+  });
+
+  test.each([
+    ['CLIPROXY_BASE_URL', 'CLIPROXY_TOKEN'],
+    ['CLIPROXY_TOKEN', 'CLIPROXY_BASE_URL'],
+  ] as const)('%s without %s fails naming the missing var', (_present, missing) => {
+    const env = validEnv();
+    Reflect.deleteProperty(env, missing);
+    let caught: unknown = null;
+    try {
+      loadConfig(env);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ConfigError);
+    const issue = (caught as ConfigError).issues.find((i) => i.var === missing);
+    expect(issue?.message).toBe('CLIPROXY_BASE_URL and CLIPROXY_TOKEN must be set together (or both left unset)');
   });
 
   test('empty CLIPROXY_TOKEN is rejected', () => {
@@ -458,8 +484,8 @@ describe('loadConfig', () => {
     expect(caught).toBeInstanceOf(ConfigError);
     const err = caught as ConfigError;
     const names = err.issues.map((i) => i.var);
-    expect(names).toContain('CLIPROXY_BASE_URL');
-    expect(names).toContain('CLIPROXY_TOKEN');
+    expect(names).not.toContain('CLIPROXY_BASE_URL');
+    expect(names).not.toContain('CLIPROXY_TOKEN');
     expect(names).toContain('DATA_DIR');
   });
 

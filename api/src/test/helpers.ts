@@ -156,15 +156,6 @@ export function testRuntime(overrides: Record<string, unknown> = {}) {
     stop: () => undefined,
     drain: () => Promise.resolve(),
   };
-  // Tests inject a CLIProxy `/v1/models` id set to exercise text-backend
-  // availability; absent means the inventory is unknown (fail-open).
-  const modelInventory = textModels instanceof Set
-    ? {
-        snapshot: () => textModels as ReadonlySet<string>,
-        stop: () => undefined,
-        drain: () => Promise.resolve(),
-      }
-    : undefined;
   // Text-model availability: an explicit fake wins; a `textModels` id set
   // doubles as the listing of every text provider; absent = unknown.
   const textAvailabilityHandle = textAvailability !== undefined
@@ -177,7 +168,6 @@ export function testRuntime(overrides: Record<string, unknown> = {}) {
     logger,
     keyStore,
     healthProbe,
-    ...(modelInventory ? { modelInventory } : {}),
     text,
   });
   return {

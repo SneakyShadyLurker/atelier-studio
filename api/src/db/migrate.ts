@@ -1755,7 +1755,7 @@ export function migrate(
     // Historical-fixture tests only: stop after this version.
     targetVersion?: number;
   } = {},
-): void {
+): { startVersion: number } {
   // Defense in depth: tests open `new Database(':memory:')` and pass it
   // straight into migrate() without going through openDb. Re-apply the
   // PRAGMA baseline so FK cascade actually fires inside the migrations
@@ -1822,4 +1822,5 @@ export function migrate(
         .run(migration.version, new Date().toISOString());
     }
   }
+  return { startVersion: current };
 }

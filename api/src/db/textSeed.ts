@@ -212,7 +212,7 @@ export function legacyTextSeed(
   imageModelIds: readonly string[],
 ): TextSeed | undefined {
   const baseUrl = config.CLIPROXY_BASE_URL;
-  if (baseUrl.length === 0) return undefined;
+  if (baseUrl === undefined) return undefined;
   const gptFamily = imageModelIds.filter((id) => classifyImageModelTarget(id) === 'gpt');
   return {
     baseUrl,
@@ -235,4 +235,20 @@ export function legacyTextModelEnvVars(env: Readonly<Record<string, string | und
   return LEGACY_SEED.models
     .map((model) => model.modelIdEnv)
     .filter((name) => (env[name] ?? '') !== '');
+}
+
+// Migration 58 is the only reader of `CLIPROXY_TEXT_MODEL_*`.
+const LEGACY_SEED_SCHEMA_VERSION = 58;
+
+/**
+ * Legacy `CLIPROXY_TEXT_MODEL_*` variables set in `env` that did nothing on
+ * this boot: everything set, except on the upgrade boot that crossed migration
+ * 58 with a seed offered (that boot's seed read them). Boot warns about these.
+ */
+export function staleLegacyTextModelEnvVars(
+  env: Readonly<Record<string, string | undefined>>,
+  boot: { readonly startVersion: number; readonly seedOffered: boolean },
+): string[] {
+  const seededNow = boot.seedOffered && boot.startVersion > 0 && boot.startVersion < LEGACY_SEED_SCHEMA_VERSION;
+  return seededNow ? [] : legacyTextModelEnvVars(env);
 }

@@ -160,9 +160,9 @@ export type TextBackendModelConfig = Pick<
 >;
 
 /**
- * Single owner of the backend → CLIProxy model id mapping (the configured
- * `CLIPROXY_TEXT_MODEL_*` ids). Routing and the `/v1/models` availability
- * check both read it, so they cannot drift.
+ * Legacy backend → CLIProxy model id mapping (the `CLIPROXY_TEXT_MODEL_*` ids),
+ * read only by the legacy `cliproxyTextForBackend` (Task 17 removes both).
+ * Production routes resolve text models from the database instead.
  */
 export function textBackendModels(config: TextBackendModelConfig): Readonly<Record<AiFillBackend, string>> {
   return {

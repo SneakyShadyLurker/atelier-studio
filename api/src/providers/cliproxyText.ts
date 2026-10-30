@@ -1,4 +1,4 @@
-import type { Config } from '../config';
+import { cliproxyEnabled, type Config } from '../config';
 import type { AiFillBackend, GptModerationNotice, TextLatencyProfile, TextReasoningEffort } from '@atelier/shared';
 import { GptModerationError, moderateGptInput, type GptModerationFailureKind } from '../routing/gptModeration';
 import { errorToRawString as detailOf, readBodyBounded as readBodyBoundedShared, tryParseJson } from './_http';
@@ -1571,6 +1571,7 @@ export function setCliproxyTextProviderForTests(p: TestCliproxyTextProvider | nu
 // only the backend (and its configured model id) varies between the default and
 // explicit feature overrides.
 function cliproxyTextOptions(config: Config, backend: AiFillBackend): CliproxyTextProviderConfig & CliproxyTextPolicies {
+  if (!cliproxyEnabled(config)) throw new Error('the legacy CLIProxy text provider needs CLIPROXY_BASE_URL and CLIPROXY_TOKEN');
   // GLM's deadlines and byte caps follow its legacy latency profile, the same
   // mapping the routes use, so the provider and route deadlines stay in step.
   const latencyProfile = legacyLatencyProfile(backend);

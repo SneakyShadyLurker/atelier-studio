@@ -9,7 +9,7 @@ import { sessionScopeGuard } from './auth/sessionScope';
 import { logAppliedPragmas, openDb } from './db/client';
 import { logDbIntegrity, reportIfCorruption } from './db/integrity';
 import { migrate, MigrationError } from './db/migrate';
-import { legacyTextModelEnvVars, legacyTextSeed } from './db/textSeed';
+import { legacyTextSeed, staleLegacyTextModelEnvVars } from './db/textSeed';
 import { importMasterKey } from './crypto/aes-gcm';
 import { importHmacKey } from './crypto/fingerprint';
 import { createKeyStore, type KeyStore } from './keystore';
@@ -24,11 +24,8 @@ import {
 } from './storage/encryptionBoot';
 import { startupReconcile } from './lifecycle/startup-reconcile';
 import { startHealthProbe, type HealthProbeHandle } from './lifecycle/health-probe';
-import { startModelInventory, type ModelInventoryHandle } from './lifecycle/model-inventory';
 import { startTextAvailability, type TextAvailabilityHandle } from './lifecycle/text-availability';
 import { createTextServices, textProviderStoreFor, UNKNOWN_TEXT_AVAILABILITY, type TextServices } from './routing/textServices';
-import { configureTextBackendAvailability } from './routing/textBackendAvailability';
-import { textBackendModels } from './providers/cliproxyText.config';
 import { drainComfyUi } from './providers/comfyui';
 import { catalogForConfig } from './providers/comfyui/catalog';
 import { queueSlotsFor, registryForConfig } from './providers/registry';
@@ -80,11 +77,6 @@ export interface AppDeps {
    * as available (empty snapshot) — matching v0 behavior pre-probe.
    */
   healthProbe?: HealthProbeHandle;
-  /**
-   * CLIProxyAPI `/v1/models` poller. When omitted, the inventory is unknown and
-   * every text backend counts as available (fail-open).
-   */
-  modelInventory?: ModelInventoryHandle;
   /** The process's text-model services (boot builds them); built from `db` and `config` when omitted. */
   text?: TextServices;
   /**
@@ -96,8 +88,8 @@ export interface AppDeps {
 
 // Refresh cadence and per-request budget of the CLIProxyAPI inventory and the
 // per-provider text-model listing pollers (spec § 9.1: 60 s / 5 s).
-const MODEL_INVENTORY_INTERVAL_MS = 60_000;
-const MODEL_INVENTORY_TIMEOUT_MS = 5_000;
+const TEXT_AVAILABILITY_INTERVAL_MS = 60_000;
+const TEXT_AVAILABILITY_TIMEOUT_MS = 5_000;
 
 const EMPTY_SNAPSHOT: ReadonlyMap<string, ModelAvailability> = new Map();
 const ALWAYS_AVAILABLE: HealthProbeHandle = {
@@ -150,7 +142,6 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     store: textProviderStoreFor(deps.config, deps.db),
     availability: deps.textAvailability ?? UNKNOWN_TEXT_AVAILABILITY,
   });
-  configureTextBackendAvailability(deps.modelInventory, textBackendModels(deps.config));
   configureStitchQueue({ db: deps.db, config: deps.config, logger: deps.logger });
   // Once per app, before any route or queue worker can acquire an LLM slot.
   configureLlmAdmissionPools(deps.config);
@@ -279,7 +270,7 @@ export async function boot(): Promise<{
   db: Database;
   logger: AppLogger;
   healthProbe: HealthProbeHandle;
-  modelInventory: ModelInventoryHandle;
+  /** GPT Image's CLIProxyAPI `/v1/models` poller; null without CLIPROXY_*. */
   textAvailability: TextAvailabilityHandle;
   unsealServer: { stop: () => unknown } | null;
 }> {
@@ -297,8 +288,13 @@ export async function boot(): Promise<{
   // Migration 58 seeds the legacy CLIProxyAPI text provider from this, but only
   // on an upgrade: migrate() ignores it when the database is new.
   const textSeed = legacyTextSeed(config, registryForConfig(config).map((entry) => entry.model.id));
-  migrate(db, config.DATA_DIR, { log: logger, ...(textSeed ? { textSeed } : {}) });
-  const staleTextModelVars = legacyTextModelEnvVars(process.env);
+  const { startVersion } = migrate(db, config.DATA_DIR, { log: logger, ...(textSeed ? { textSeed } : {}) });
+  // Once per boot, and only when the variables did nothing on this boot (the
+  // seed already ran, or nothing seeds from them).
+  const staleTextModelVars = staleLegacyTextModelEnvVars(process.env, {
+    startVersion,
+    seedOffered: textSeed !== undefined,
+  });
   if (staleTextModelVars.length > 0) {
     logger.warn(
       { event: 'legacy_text_model_env', vars: staleTextModelVars },
@@ -345,19 +341,12 @@ export async function boot(): Promise<{
     intervalMs: config.HEALTH_PROBE_INTERVAL_MS,
     probeTimeoutMs: config.HEALTH_PROBE_TIMEOUT_MS,
   });
-  const modelInventory = startModelInventory({
-    baseUrl: config.CLIPROXY_BASE_URL,
-    token: config.CLIPROXY_TOKEN,
-    logger,
-    intervalMs: MODEL_INVENTORY_INTERVAL_MS,
-    timeoutMs: MODEL_INVENTORY_TIMEOUT_MS,
-  });
   const textStore = textProviderStoreFor(config, db);
   const textAvailability = startTextAvailability({
     store: textStore,
     logger,
-    intervalMs: MODEL_INVENTORY_INTERVAL_MS,
-    timeoutMs: MODEL_INVENTORY_TIMEOUT_MS,
+    intervalMs: TEXT_AVAILABILITY_INTERVAL_MS,
+    timeoutMs: TEXT_AVAILABILITY_TIMEOUT_MS,
   });
   const text = createTextServices({ store: textStore, availability: textAvailability });
   const bootDeps: DispatchDeps = {
@@ -370,7 +359,7 @@ export async function boot(): Promise<{
   };
   // createApp configures queue scheduling; it must precede the first kick so a
   // recovered local queue is dequeued under the production residency mapping.
-  const app = createApp({ config, db, logger, keyStore, healthProbe, modelInventory, text });
+  const app = createApp({ config, db, logger, keyStore, healthProbe, text });
   configureUpstreamGateWiring(bootDeps);
   // Queued work that reads stored artifacts waits while storage is sealed
   // (dequeue gate); resume it the moment the root arrives.
@@ -383,7 +372,6 @@ export async function boot(): Promise<{
     db,
     logger,
     healthProbe,
-    modelInventory,
     textAvailability,
     unsealServer,
   };
@@ -391,7 +379,7 @@ export async function boot(): Promise<{
 
 if (import.meta.main) {
   try {
-    const { app, config, db, logger, healthProbe, modelInventory, textAvailability, unsealServer } = await boot();
+    const { app, config, db, logger, healthProbe, textAvailability, unsealServer } = await boot();
     // Process-level safety net so unexpected throws in async paths
     // (orchestrator pipeline, etc.) emit JSON pino logs instead of Bun's
     // default freeform stack — operators grep level:60 / level:50.
@@ -443,7 +431,6 @@ if (import.meta.main) {
       const storyDriverDrain = stopStoryDriver();
       logger.info({ signal }, 'shutdown: stopping accept');
       healthProbe.stop();
-      modelInventory.stop();
       textAvailability.stop();
       unsealServer?.stop();
       // Abort in-flight batches with the typed reason so the orchestrator's
@@ -481,16 +468,15 @@ if (import.meta.main) {
       // queue-delete before process.exit. Bounded by the same deadline as
       // the rest of the drain so a wedged ComfyUI host can't pin shutdown.
       const comfyCancelDrain = drainComfyUi();
-      // healthProbe/modelInventory/textAvailability.stop() above aborted any
+      // healthProbe/textAvailability.stop() above aborted any
       // in-flight fetch; drain() waits for that round's settle so a probe
       // can't outlive process.exit with an open socket. Same deadline cap as
       // the orchestrator drain.
       const probeDrain = healthProbe.drain();
-      const inventoryDrain = modelInventory.drain();
       const textAvailabilityDrain = textAvailability.drain();
       const drained = await Promise.race([
         Promise.all([
-          drain, orchestratorDrain, preparationDrain, storyDriverDrain, probeDrain, inventoryDrain,
+          drain, orchestratorDrain, preparationDrain, storyDriverDrain, probeDrain,
           textAvailabilityDrain, comfyCancelDrain,
         ]).then(() => true),
         deadline,

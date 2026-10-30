@@ -11,8 +11,7 @@ import { textAdapterFor } from '../providers/text/registry';
 import type { ProviderLogger } from '../providers/types';
 
 // Which configured text models their providers currently list (spec § 9.1).
-// Generalises model-inventory.ts (which keeps serving GPT Image) to one poller
-// per enabled provider with listing on: the adapter's bounded list call (1 MiB,
+// One availability poller per enabled provider with listing on: the adapter's bounded list call (1 MiB,
 // redirects refused), its own shorter timeout, the last good snapshot kept on
 // any failure, an empty list treated as "unknown". Unknown fails open.
 //

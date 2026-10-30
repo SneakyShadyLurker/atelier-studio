@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { textBackendModels } from '../../providers/cliproxyText.config';
-import { resetTextBackendAvailabilityForTests } from '../../routing/textBackendAvailability';
 import { testRuntime, testConfig } from '../../test/helpers';
 
 const TEXT_MODELS = textBackendModels(testConfig());
@@ -12,10 +11,6 @@ const GATED = { PROMPT_LIBRARY_USERS: 'alice', seedLegacyText: true };
 const WITHOUT_DEEPSEEK = new Set(
   Object.values(TEXT_MODELS).filter((id) => id !== TEXT_MODELS['deepseek-abliterated']),
 );
-
-afterEach(() => {
-  resetTextBackendAvailabilityForTests();
-});
 
 function headers(user = 'alice') {
   return { 'Content-Type': 'application/json', 'Remote-User': user };

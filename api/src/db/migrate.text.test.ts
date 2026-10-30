@@ -12,7 +12,7 @@ import {
   usesGenericPromptVariant,
 } from '@atelier/shared';
 import { BINARY_SCHEMA_VERSION, migrate } from './migrate';
-import { LEGACY_SEED, legacyTextModelEnvVars, legacyTextSeed, type TextSeed } from './textSeed';
+import { LEGACY_SEED, legacyTextModelEnvVars, legacyTextSeed, staleLegacyTextModelEnvVars, type TextSeed } from './textSeed';
 import {
   AI_FILL_DEFAULTS,
   GLM_ABLITERATED_MAX_COMPLETION_TOKENS,
@@ -391,5 +391,35 @@ describe('legacy text seed', () => {
     expect(legacyTextModelEnvVars({})).toEqual([]);
     expect(legacyTextModelEnvVars({ CLIPROXY_TEXT_MODEL_KIMI: 'k', CLIPROXY_TEXT_MODEL_GPT: '', CLIPROXY_BASE_URL: 'x' }))
       .toEqual(['CLIPROXY_TEXT_MODEL_KIMI']);
+  });
+
+  test('migrate reports the schema version the database started at', () => {
+    const db = new Database(':memory:');
+    expect(migrate(db, '/tmp').startVersion).toBe(0);
+    expect(migrate(db, '/tmp').startVersion).toBe(BINARY_SCHEMA_VERSION);
+  });
+
+  describe('staleLegacyTextModelEnvVars (boot warning)', () => {
+    const env = { CLIPROXY_TEXT_MODEL_KIMI: 'kimi-x' };
+
+    test('nothing is stale when no legacy variable is set', () => {
+      expect(staleLegacyTextModelEnvVars({}, { startVersion: 58, seedOffered: true })).toEqual([]);
+    });
+
+    test('the upgrade boot that seeds from them does not warn', () => {
+      expect(staleLegacyTextModelEnvVars(env, { startVersion: 57, seedOffered: true })).toEqual([]);
+    });
+
+    test('they are stale once the seed migration has already run', () => {
+      expect(staleLegacyTextModelEnvVars(env, { startVersion: 58, seedOffered: true }))
+        .toEqual(['CLIPROXY_TEXT_MODEL_KIMI']);
+    });
+
+    test('they are stale when nothing seeds from them (fresh install or no CLIProxy)', () => {
+      expect(staleLegacyTextModelEnvVars(env, { startVersion: 0, seedOffered: true }))
+        .toEqual(['CLIPROXY_TEXT_MODEL_KIMI']);
+      expect(staleLegacyTextModelEnvVars(env, { startVersion: 57, seedOffered: false }))
+        .toEqual(['CLIPROXY_TEXT_MODEL_KIMI']);
+    });
   });
 });

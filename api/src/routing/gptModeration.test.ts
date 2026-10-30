@@ -5,6 +5,7 @@ import { setJevSystemOneProviderForTests } from '../providers/jevSystemOne';
 import { moderateGptInput } from './gptModeration';
 import { rejectionOf, legacyTextUpstreamIds } from '../test/helpers';
 import { testTextPolicies } from '../test/textPolicies';
+import { genericTextModel, testTextModelProvider } from '../test/textModelProvider';
 
 const TEXT_MODELS = legacyTextUpstreamIds();
 
@@ -177,5 +178,66 @@ describe('GPT moderation gate', () => {
       expect(await collect(provider.enhance('input', [], signal()))).toMatchObject([{ type: 'delta' }, { type: 'done' }]);
     }
     expect(jev).not.toHaveBeenCalled();
+  });
+});
+
+describe('per-model screening (screenRequests)', () => {
+  const textEvidence = { task: 'text-generation' as const, input: 'A landscape' };
+  // Two models on the same provider row ('prov-test'); only one is screened.
+  const screened = genericTextModel('house-gpt', { displayName: 'House GPT', screenRequests: true });
+  const sibling = genericTextModel('house-open', { displayName: 'House Open', screenRequests: false });
+
+  function okUpstream(): ReturnType<typeof mock> {
+    const upstream = mock(() => Promise.resolve(new Response(
+      'data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream' } },
+    )));
+    globalThis.fetch = Object.assign(upstream, { preconnect: originalFetch.preconnect });
+    return upstream;
+  }
+
+  test('text notices carry the screened model label; image notices never do', async () => {
+    setJevSystemOneProviderForTests(() => Promise.resolve(decision(0.95)));
+    expect(await rejectionOf(moderateGptInput(undefined, textEvidence, signal(), { modelLabel: 'House GPT' }))).toMatchObject({
+      kind: 'moderation-blocked', status: 422, moderation: { reason: 'sexual-age', target: 'text', modelLabel: 'House GPT' },
+    });
+    setJevSystemOneProviderForTests(() => Promise.resolve(new Response('', { status: 500 })));
+    expect(await rejectionOf(moderateGptInput(undefined, textEvidence, signal(), { modelLabel: 'House GPT' }))).toMatchObject({
+      kind: 'moderation-unavailable', status: 503, moderation: { reason: 'unavailable', target: 'text', modelLabel: 'House GPT' },
+    });
+    const image = await rejectionOf(moderateGptInput(undefined, evidence, signal(), { modelLabel: 'House GPT' }));
+    expect((image as { moderation: object }).moderation).not.toHaveProperty('modelLabel');
+  });
+
+  test('the screened model is checked and blocked, naming itself', async () => {
+    const upstream = okUpstream();
+    setJevSystemOneProviderForTests(() => Promise.resolve(decision(0.95)));
+    const provider = testTextModelProvider({ origin: 'http://x', model: screened, moderation: { openrouterApiKey: 'or-key' } });
+    expect(await collect(provider.enhance('input', [], signal()))).toEqual([{
+      type: 'failed', kind: 'moderation-blocked', status: 422,
+      detail: 'Atelier blocked this request under its GPT content policy.',
+      moderation: { reason: 'sexual-age', categories: ['sexual-age'], target: 'text', modelLabel: 'House GPT' },
+    }]);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  test('a screened model fails closed (503) without a moderation key, naming itself', async () => {
+    const upstream = okUpstream();
+    const provider = testTextModelProvider({ origin: 'http://x', model: screened, moderation: { openrouterApiKey: undefined } });
+    expect(await provider.aiFill({ systemPrompt: 's', userContent: 'u' }, signal())).toMatchObject({
+      type: 'failed', kind: 'moderation-unavailable', status: 503,
+      moderation: { reason: 'unavailable', target: 'text', modelLabel: 'House GPT' },
+    });
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  test('an unscreened sibling on the same provider is never checked', async () => {
+    const upstream = okUpstream();
+    const jev = mock(() => Promise.resolve(decision(1, 1, 1)));
+    setJevSystemOneProviderForTests(jev);
+    const provider = testTextModelProvider({ origin: 'http://x', model: sibling, moderation: { openrouterApiKey: 'or-key' } });
+    expect((await collect(provider.enhance('input', [], signal()))).at(-1)).toEqual({ type: 'done' });
+    expect(jev).not.toHaveBeenCalled();
+    expect(upstream).toHaveBeenCalledTimes(1);
   });
 });

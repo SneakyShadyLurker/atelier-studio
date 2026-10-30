@@ -704,4 +704,28 @@ describe('generate', () => {
     expect(await res.json()).toEqual({ error: 'upload not found' });
     expect(runtime.db.query('SELECT id FROM batches').all()).toHaveLength(0);
   });
+
+  describe('GPT Image needs CLIProxyAPI', () => {
+    const gptImage = { prompt: 'a lighthouse', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 };
+
+    test('without CLIPROXY_* GPT Image is not registered', async () => {
+      const runtime = testRuntime({ CLIPROXY_BASE_URL: '', CLIPROXY_TOKEN: '' });
+      const models = await runtime.app.request('/api/models', { headers: { 'Remote-User': 'alice' } });
+      const ids = ((await models.json()) as { id: string }[]).map((model) => model.id);
+      expect(ids).not.toContain('gpt-image-2.5-sunburst');
+      const res = await jsonRequest(runtime.app, '/api/generate', gptImage, 'alice');
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'validation failed',
+        issues: [{ path: ['modelId'], message: 'unknown modelId' }],
+      });
+    });
+
+    test('with CLIPROXY_* set GPT Image is registered', async () => {
+      const runtime = testRuntime();
+      const models = await runtime.app.request('/api/models', { headers: { 'Remote-User': 'alice' } });
+      const ids = ((await models.json()) as { id: string }[]).map((model) => model.id);
+      expect(ids).toContain('gpt-image-2.5-sunburst');
+    });
+  });
 });

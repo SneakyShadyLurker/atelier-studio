@@ -7,6 +7,7 @@ import { useAtelierStore } from '../../store/atelier';
 import { I } from '../icons/I';
 import { useRowReorder } from './useRowReorder';
 import InlineFieldChrome from './InlineFieldChrome';
+import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
 import styles from './index.module.css';
 import btn from '../../styles/buttons.module.css';
 import {
@@ -215,7 +216,7 @@ export default function DimensionEditor({ dimension, onRename, renamePending = f
   };
 
   const save = () => {
-    if (tagsPending || metadataPending) return;
+    if (tagsPending || metadataPending || trimmedName.length > PROMPT_LIBRARY_NAME_MAX_CHARS) return;
     const tasks: Promise<unknown>[] = [];
     const submittedTags = drafts;
     // Mirrors every settlement applied to the retained draft, so the final
@@ -233,6 +234,8 @@ export default function DimensionEditor({ dimension, onRename, renamePending = f
       submitted = applyDimensionSettlement(submitted, settlement);
     };
     if (nameDirty || descriptionDirty) {
+      // An empty name means no rename; metadata still needs a valid name.
+      const submittedName = nameDirty ? trimmedName : dimension.name;
       const fromName = dimension.name;
       const fromDescription = serverDescription;
       const settleBases = (nextName: string, nextDescription: string) => {
@@ -247,10 +250,10 @@ export default function DimensionEditor({ dimension, onRename, renamePending = f
       if (nameDirty) setNameBase(null);
       if (descriptionDirty) setDescriptionBase(null);
       draftStore?.setDimension(dimension.id, submitted);
-      tasks.push(Promise.resolve(onRename(trimmedName, descriptionDirty ? trimmedDescription : undefined)).then(
+      tasks.push(Promise.resolve(onRename(submittedName, descriptionDirty ? trimmedDescription : undefined)).then(
         // Success: the server now holds the submitted text. Failure: the cache
         // rolled back, so the kept text is an edit against the prior value.
-        () => { settleBases(trimmedName, trimmedDescription); },
+        () => { settleBases(submittedName, trimmedDescription); },
         (error: unknown) => {
           settleBases(fromName, fromDescription);
           throw error;
@@ -307,7 +310,7 @@ export default function DimensionEditor({ dimension, onRename, renamePending = f
           }}
         />
         <div className={styles.headActions}>
-          <button className={btn.primary} type="submit" disabled={!dirty || tagsPending || metadataPending}>
+          <button className={btn.primary} type="submit" disabled={!dirty || tagsPending || metadataPending || trimmedName.length > PROMPT_LIBRARY_NAME_MAX_CHARS}>
             Save dimension
           </button>
         </div>

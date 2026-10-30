@@ -6,20 +6,14 @@ import type {
   Batch,
   Collection,
   CollectionsResponse,
-  DimensionTag,
   HistoryPage,
   Model,
   PromptLibraryResponse,
-  PromptTemplate,
-  TagDimension,
-  Tile,
-  VariableList,
-  VariableOption,
 } from '@atelier/shared';
 
 import { removePersistedQueryClient } from '../lib/persister';
-import { isMediaPair, isNumber, isRecord, isStringArray, isTileErrorCategory } from '../lib/guards';
-import { GptModerationNoticeSchema } from '@atelier/shared';
+import { isMediaPair, isNumber, isRecord, isStringArray } from '../lib/guards';
+import { BatchHistoryPageSchema, PromptLibraryResponseSchema } from '@atelier/shared/wire-schemas';
 import { invalidateSessionScope, isSessionLocked, sessionBinding } from '../lib/sessionScope';
 import { mediaUrl } from './mediaUrl';
 
@@ -400,60 +394,6 @@ export function isModelList(value: unknown): value is readonly Model[] {
   return Array.isArray(value) && value.every(isModel);
 }
 
-function isTile(value: unknown): value is Tile {
-  if (!isRecord(value) || typeof value.id !== 'string' || !isNumber(value.seed)) return false;
-  if (value.refImageIds !== undefined && !isStringArray(value.refImageIds)) return false;
-  if (value.status === 'loading') return true;
-  if (value.status === 'failed') {
-    return isTileErrorCategory(value.error) && isNumber(value.completedAt)
-      && (value.moderation === undefined || GptModerationNoticeSchema.safeParse(value.moderation).success);
-  }
-  return value.status === 'done'
-    && typeof value.url === 'string'
-    && (value.thumbUrl === undefined || typeof value.thumbUrl === 'string')
-    && isMediaPair(value.ext, value.mime)
-    && isNumber(value.completedAt);
-}
-
-function isProvenance(value: unknown): value is NonNullable<Batch['provenance']> {
-  return isRecord(value)
-    && (value.templateId === null || typeof value.templateId === 'string')
-    && (value.templateName === null || typeof value.templateName === 'string')
-    && isNumber(value.rollSeed)
-    && isRecord(value.pins)
-    && Object.values(value.pins).every((pin) => typeof pin === 'string');
-}
-
-function isVideoSequenceSummary(value: unknown): value is NonNullable<Batch['sequence']> {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && isNumber(value.segmentCount)
-    && isNumber(value.totalDurationFrames)
-    && (value.masterStatus === 'idle' || value.masterStatus === 'stitching' || value.masterStatus === 'ready' || value.masterStatus === 'failed')
-    && (value.masterUpdatedAt === undefined || isNumber(value.masterUpdatedAt));
-}
-
-function isBatch(value: unknown): value is Batch {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && typeof value.prompt === 'string'
-    && typeof value.ratio === 'string'
-    && ratios.has(value.ratio)
-    && typeof value.modelId === 'string'
-    && typeof value.modelLabel === 'string'
-    && isNumber(value.createdAt)
-    && (value.collectionId === null || typeof value.collectionId === 'string')
-    && typeof value.pinned === 'boolean'
-    && (value.status === 'queued' || value.status === 'running' || value.status === 'done')
-    && (value.queueLengthAhead === undefined || isNumber(value.queueLengthAhead))
-    && (value.sequenceId === undefined || typeof value.sequenceId === 'string')
-    && (value.sequenceIndex === undefined || isNumber(value.sequenceIndex))
-    && (value.sequence === undefined || isVideoSequenceSummary(value.sequence))
-    && (value.provenance === undefined || isProvenance(value.provenance))
-    && Array.isArray(value.tiles)
-    && value.tiles.every(isTile);
-}
-
 function isHistoryPageOf<T>(value: unknown, itemGuard: (item: unknown) => item is T): value is HistoryPage<T> {
   return isRecord(value)
     && Array.isArray(value.items)
@@ -462,7 +402,7 @@ function isHistoryPageOf<T>(value: unknown, itemGuard: (item: unknown) => item i
 }
 
 export function isBatchHistoryPage(value: unknown): value is HistoryPage<Batch> {
-  return isHistoryPageOf(value, isBatch);
+  return BatchHistoryPageSchema.safeParse(value).success;
 }
 
 function isArchivedTile(value: unknown): value is ArchivedTile {
@@ -489,60 +429,6 @@ export function isArchivePage(value: unknown): value is ArchivePage {
     && (value.total === null || isNumber(value.total));
 }
 
-function isVariableOption(value: unknown): value is VariableOption {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && typeof value.listId === 'string'
-    && typeof value.value === 'string'
-    && isStringArray(value.tagIds)
-    && isNumber(value.sortOrder)
-    && isNumber(value.weight);
-}
-
-function isVariableList(value: unknown): value is VariableList {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && typeof value.name === 'string'
-    && Array.isArray(value.options)
-    && value.options.every(isVariableOption)
-    && isNumber(value.sortOrder)
-    && isNumber(value.createdAt)
-    && isNumber(value.updatedAt);
-}
-
-function isDimensionTag(value: unknown): value is DimensionTag {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && typeof value.dimensionId === 'string'
-    && typeof value.label === 'string'
-    && isNumber(value.sortOrder);
-}
-
-function isTagDimension(value: unknown): value is TagDimension {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && typeof value.name === 'string'
-    && Array.isArray(value.tags)
-    && value.tags.every(isDimensionTag);
-}
-
-function isPromptTemplate(value: unknown): value is PromptTemplate {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && typeof value.name === 'string'
-    && typeof value.body === 'string'
-    && (value.notes === undefined || typeof value.notes === 'string')
-    && isNumber(value.sortOrder)
-    && isNumber(value.createdAt)
-    && isNumber(value.updatedAt);
-}
-
 export function isPromptLibraryResponse(value: unknown): value is PromptLibraryResponse {
-  return isRecord(value)
-    && Array.isArray(value.templates)
-    && value.templates.every(isPromptTemplate)
-    && Array.isArray(value.variableLists)
-    && value.variableLists.every(isVariableList)
-    && Array.isArray(value.dimensions)
-    && value.dimensions.every(isTagDimension);
+  return PromptLibraryResponseSchema.safeParse(value).success;
 }

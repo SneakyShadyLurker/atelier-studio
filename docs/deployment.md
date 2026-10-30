@@ -432,6 +432,11 @@ It must print `415`: Ephemera is reachable, accepted the key and origin, and ran
 
 ## Releasing an update
 
+Build and deploy the API and web images from the same revision. The new web
+requires the matching API's `/api/history/refresh` endpoint; update the API before
+the web. The supplied Compose configuration waits for API health before starting
+the web container. Updating only the web against an older API is unsupported.
+
 Atelier applies pending schema migrations at api boot (`api/src/db/migrate.ts`); boot refuses a database newer than the binary.
 
 Schema v57 adds a partial index for upload references held by rendering stories;

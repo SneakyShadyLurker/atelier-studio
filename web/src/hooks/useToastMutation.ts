@@ -1,8 +1,9 @@
-import { useMutation, type UseMutationResult } from '@tanstack/react-query';
+import { useMutation, type MutationKey, type UseMutationResult } from '@tanstack/react-query';
 import { describeError } from '../lib/errorCopy';
 import { useAtelierStore } from '../store/atelier';
 
 interface ToastMutationOptions<TData, TVars> {
+  mutationKey?: MutationKey;
   mutationFn: (vars: TVars) => Promise<TData>;
   /** Fallback copy for the error toast when the thrown error has no friendly message. */
   errorFallback: string;
@@ -27,6 +28,7 @@ export function useToastMutation<TData, TVars = void>(
 ): UseMutationResult<TData, Error, TVars> {
   const addToast = useAtelierStore((state) => state.addToast);
   return useMutation<TData, Error, TVars>({
+    ...(options.mutationKey ? { mutationKey: options.mutationKey } : {}),
     mutationFn: options.mutationFn,
     onSuccess: async (data, vars) => {
       await options.onSuccess?.(data, vars);

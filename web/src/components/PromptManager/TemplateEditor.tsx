@@ -1,4 +1,5 @@
 import { MAX_PROMPT_CHARS } from '@atelier/shared';
+import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
 import { aiFillMeasuredLength, hasAiFillTokens } from '@atelier/shared/ai-fill';
 import type { PromptTemplate, VariableList } from '@atelier/shared';
 import { describeError } from '../../lib/errorCopy';
@@ -109,7 +110,7 @@ export default function TemplateEditor({ template, initialName = '', variableLis
 
   const save = () => {
     const trimmedName = name.trim();
-    if (busy || !trimmedName || !body.trim()) return;
+    if (busy || !trimmedName || trimmedName.length > PROMPT_LIBRARY_NAME_MAX_CHARS || !body.trim()) return;
     const submitted: TemplateDraft = { name, body };
     const done = () => {
       draftStore?.clearTemplateIfUnchanged(draftKey, submitted);
@@ -184,7 +185,7 @@ export default function TemplateEditor({ template, initialName = '', variableLis
           <button
             className={btn.primary}
             type="submit"
-            disabled={!changed || busy || !name.trim() || !body.trim()}
+            disabled={!changed || busy || !trimmedName || trimmedName.length > PROMPT_LIBRARY_NAME_MAX_CHARS || !body.trim()}
           >
             Save template
           </button>

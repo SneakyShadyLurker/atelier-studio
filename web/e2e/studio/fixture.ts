@@ -1,4 +1,4 @@
-import type { Batch, Collection, CollectionsResponse, Model, PromptLibraryResponse } from '@atelier/shared';
+import type { Batch, Collection, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse } from '@atelier/shared';
 
 // Local SVG stills keep the preview deterministic and completely offline.
 function still(primary: string, secondary: string, accent: string, motif: number): string {
@@ -75,6 +75,21 @@ export const promptLibrary: PromptLibraryResponse = {
   }],
 };
 
+const libraryDiagnosis: LibraryDiagnosisResponse = {
+  templates: promptLibrary.templates.map((template) => ({ templateName: template.name, satisfiable: true })),
+  librarySnapshotHash: 'offline-library',
+  templatesDigest: 'offline-templates',
+};
+
+const libraryCoverage: LibraryCoverageResponse = {
+  untaggedByList: [],
+  lowCoverageLists: [],
+  orphanTags: [],
+  missingDimensions: [],
+  librarySnapshotHash: 'offline-library',
+  templatesDigest: 'offline-templates',
+};
+
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -85,7 +100,9 @@ export function installOfflineResponses(): void {
   const offlineFetch = Object.assign((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
-    if (method !== 'GET') return Promise.resolve(json({ error: 'Preview is read only' }, 403));
+    if (method === 'POST' && url.pathname === '/api/prompts/library-diagnosis') return Promise.resolve(json(libraryDiagnosis));
+    if (method === 'POST' && url.pathname === '/api/prompts/library-coverage') return Promise.resolve(json(libraryCoverage));
+    if (method !== 'GET') return Promise.resolve(json({ error: 'Preview is read only' }, 405));
     if (url.pathname === '/api/models') return Promise.resolve(json(models));
     if (url.pathname === '/api/collections') return Promise.resolve(json(library));
     if (url.pathname === '/api/prompts') return Promise.resolve(json(promptLibrary));

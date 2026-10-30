@@ -220,6 +220,7 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
                 // Client already holds the source still id (it submitted it), so
                 // the loading tile can veil it immediately — no wait for refetch.
                 ...(request.i2vSourceUploadId ? { i2vSourceUploadId: request.i2vSourceUploadId } : {}),
+                ...(request.motionPrompt !== undefined ? { motionPrompt: request.motionPrompt } : {}),
                 // Mirror the server's clip-length resolution so an immediate
                 // Re-roll/Retry of this batch replays the same duration.
                 ...(optimisticDuration !== undefined ? { durationFrames: optimisticDuration } : {}),
@@ -417,6 +418,10 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
       // historyOpts refetchInterval (separate change) will reconcile the
       // cache. Silent, consistent with the AbortError branch above.
       if (error instanceof StreamTruncatedError) return;
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        if (!isDrainOwned(variables.request)) addToast('Submission timed out. Check history before retrying.', 'error');
+        return;
+      }
       addToast(describeError(error, 'Generation failed. Please try again.'), 'error');
       void queryClient.invalidateQueries({ queryKey: historyKeys.all() });
     },

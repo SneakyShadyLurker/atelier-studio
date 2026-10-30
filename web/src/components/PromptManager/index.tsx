@@ -1,4 +1,5 @@
 import type { LibraryDiagnosisResponse, PromptTemplate, TagDimension, VariableList } from '@atelier/shared';
+import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -186,7 +187,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
     const name = draft.trim();
     const context = inlineContext;
     setInlineContext(null);
-    if (!name || context?.kind !== kind) return;
+    if (!name || name.length > PROMPT_LIBRARY_NAME_MAX_CHARS || context?.kind !== kind) return;
     if (context.tab === 'templates') {
       setNewTemplateName(name);
       setSelectedTemplateId(null);
@@ -226,6 +227,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
     <div className={styles.inlineInputWrap}>
       <label className="srOnly" htmlFor={inputId}>{label}</label>
       <input
+        maxLength={PROMPT_LIBRARY_NAME_MAX_CHARS}
         ref={inputRef}
         id={inputId}
         className={styles.inlineInput}

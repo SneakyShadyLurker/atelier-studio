@@ -64,6 +64,38 @@ const dimension: TagDimension = {
 };
 
 describe('DimensionEditor — hierarchy and description', () => {
+  test('tag-only edits save without renaming when the name field is cleared', async () => {
+    const onRename = mock((_: string, __?: string) => undefined);
+    const bodies = captureTagPuts((body) => Response.json(echoSaved(body, (index) => `saved-${index}`)));
+    wrap(<DimensionEditor dimension={dimension} onRename={onRename} />);
+    fireEvent.change(screen.getByLabelText('Dimension name'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Parent of ancient'), { target: { value: 't2' } });
+    const save = screen.getByRole('button', { name: /save dimension/i });
+    expect(save.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() => { expect(bodies).toHaveLength(1); });
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  test('description edits retain the saved name when the name field is cleared', () => {
+    const onRename = mock((_: string, __?: string) => undefined);
+    wrap(<DimensionEditor dimension={dimension} onRename={onRename} />);
+    fireEvent.change(screen.getByLabelText('Dimension name'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Dimension description'), { target: { value: 'time of day' } });
+    fireEvent.click(screen.getByRole('button', { name: /save dimension/i }));
+    expect(onRename).toHaveBeenCalledWith('Epoch', 'time of day');
+  });
+
+  test('an over-length restored name cannot be submitted with description edits', () => {
+    const onRename = mock((_: string, __?: string) => undefined);
+    wrap(<DimensionEditor dimension={dimension} onRename={onRename} />);
+    fireEvent.change(screen.getByLabelText('Dimension name'), { target: { value: 'x'.repeat(65) } });
+    fireEvent.change(screen.getByLabelText('Dimension description'), { target: { value: 'time of day' } });
+    expect(screen.getByRole('button', { name: /save dimension/i }).hasAttribute('disabled')).toBe(true);
+    fireEvent.submit(screen.getByRole('form', { name: 'Edit dimension Epoch' }));
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
   test('a tag cannot be offered itself as a parent, and picking one marks dirty', () => {
     wrap(<DimensionEditor dimension={dimension} onRename={() => undefined} />);
     const parentOfAncient = screen.getByLabelText<HTMLSelectElement>('Parent of ancient');

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { invalidFieldResponse, parseBody, parseParams, parseQuery } from './_http';
 import { decodeCursor, encodeCursor } from './_cursor';
 import { isVideoDurationFrames } from '@atelier/shared';
+import { HistoryRefreshRequestSchema } from '@atelier/shared/wire-schemas';
 import type { Batch, HistoryPage, Pool, StorySummary, Tile, VideoSequenceSummary } from '@atelier/shared';
 import type { BatchRow, TileRow } from '../db/types';
 import { BATCH_COLUMNS, TILE_COLUMNS } from '../db/columns';
@@ -89,40 +90,7 @@ export const historyRoutes = new Hono<AppEnv>()
       () => {
         const rows = listBatches(c.var.db, filters, query.value.limit + 1);
         const pageRows = rows.slice(0, query.value.limit);
-        // Bulk-fetch every tile for the page in a single query rather than
-        // running one tiles SELECT per batch (prior shape was 1 + N queries
-        // per page; default page size 20 → 21 roundtrips). SQLite's parameter
-        // limit is 32766; HistoryQuerySchema caps `limit` at 50.
-        const tilesByBatch = pageRows.length === 0
-          ? new Map<string, TileRow[]>()
-          : fetchTilesForBatches(c.var.db, c.var.userId, pageRows.map((r) => r.id));
-        const allTiles = [...tilesByBatch.values()].flat();
-        const refIdsByTile = allTiles.length === 0
-          ? new Map<string, string[]>()
-          : refImageIdsByTile(c.var.db, c.var.userId, allTiles.map((tile) => tile.id));
-        // Resolve provenance template names in ONE bulk query for the whole
-        // page (Finding D) rather than one SELECT per provenance-bearing row.
-        const namesByTemplateId = fetchTemplateNamesForBatches(c.var.db, c.var.userId, pageRows);
-        const summariesBySequenceId = fetchSequenceSummaries(
-          c.var.db,
-          c.var.userId,
-          pageRows.flatMap((row) => row.sequence_id === null ? [] : [row.sequence_id]),
-        );
-        const storiesByBatchId = fetchStorySummaries(
-          c.var.db,
-          c.var.userId,
-          pageRows.map((row) => row.id),
-        );
-        const items = pageRows.map((row) =>
-          toPublicBatch(
-            c.var.db,
-            row,
-            tilesByBatch.get(row.id) ?? [],
-            refIdsByTile,
-            namesByTemplateId,
-            summariesBySequenceId,
-            storiesByBatchId,
-          ));
+        const items = projectHistoryRows(c, pageRows);
         const last = pageRows.at(-1);
         const hasNext = rows.length > query.value.limit && last !== undefined;
         const page: HistoryPage<Batch> = {
@@ -132,6 +100,29 @@ export const historyRoutes = new Hono<AppEnv>()
         return c.json(page);
       },
     );
+  })
+  .post('/history/refresh', async (c) => {
+    const parsed = await parseBody(c, HistoryRefreshRequestSchema);
+    if (!parsed.ok) return parsed.response;
+    const { batchIds, storyIds, ...scope } = parsed.value;
+    if (batchIds.length === 0 && storyIds.length === 0) return c.json({ items: [], missingBatchIds: [] });
+    const predicate = historyPredicate({
+      userId: c.var.userId,
+      ...(scope.collectionId !== undefined ? { collectionId: scope.collectionId } : {}),
+      ...(scope.pinned !== undefined ? { pinned: scope.pinned } : {}),
+      ...(scope.q !== undefined ? { q: scope.q } : {}),
+    });
+    const rows = c.var.db.query<BatchRow, (string | number)[]>(
+      `SELECT ${BATCH_COLUMNS} FROM batches ${predicate.where}
+         AND (id IN (SELECT value FROM json_each(?)) OR id IN (
+           SELECT ss.batch_id FROM story_segments ss
+           JOIN stories s ON s.id = ss.story_id AND s.user_id = ss.user_id
+           WHERE ss.user_id = ? AND s.user_id = ?
+             AND s.id IN (SELECT value FROM json_each(?))
+         )) ORDER BY created_at DESC, id DESC`,
+    ).all(...predicate.params, JSON.stringify(batchIds), c.var.userId, c.var.userId, JSON.stringify(storyIds));
+    const found = new Set(rows.map((row) => row.id));
+    return c.json({ items: projectHistoryRows(c, rows), missingBatchIds: batchIds.filter((id) => !found.has(id)) });
   })
   .patch('/history/:batchId', async (c) => {
     const params = parseParams(c, UuidParamSchema);
@@ -392,6 +383,20 @@ export const historyRoutes = new Hono<AppEnv>()
 
 function batchUploadIds(c: Context<AppEnv>, batchId: string): string[] {
   return uploadIdsForBatchScope(c.var.db, 'SELECT id FROM batches WHERE id = ? AND user_id = ?', [batchId, c.var.userId]);
+}
+
+/** Both history readers use the same bounded bulk projection, without N+1 joins. */
+function projectHistoryRows(c: Context<AppEnv>, rows: readonly BatchRow[]): Batch[] {
+  const db = c.var.db;
+  const userId = c.var.userId;
+  const ids = rows.map((row) => row.id);
+  const tilesByBatch = fetchTilesForBatches(db, userId, ids);
+  const tiles = [...tilesByBatch.values()].flat();
+  const refIdsByTile = tiles.length === 0 ? new Map<string, string[]>() : refImageIdsByTile(db, userId, tiles.map((tile) => tile.id));
+  const names = fetchTemplateNamesForBatches(db, userId, rows);
+  const sequences = fetchSequenceSummaries(db, userId, rows.flatMap((row) => row.sequence_id === null ? [] : [row.sequence_id]));
+  const stories = fetchStorySummaries(db, userId, ids);
+  return rows.map((row) => toPublicBatch(db, row, tilesByBatch.get(row.id) ?? [], refIdsByTile, names, sequences, stories));
 }
 
 function listBatches(
@@ -740,6 +745,7 @@ function toPublicBatch(
     ...(queuePosition >= 0 ? { queueLengthAhead: queuePosition } : {}),
     ...(provenance ? { provenance } : {}),
     ...(batch.i2v_source_upload_id ? { i2vSourceUploadId: batch.i2v_source_upload_id } : {}),
+    ...(batch.motion_prompt !== null ? { motionPrompt: batch.motion_prompt } : {}),
     ...(story ? { story } : {}),
     ...(batch.sequence_id !== null && batch.sequence_index !== null && sequence !== undefined
       ? {

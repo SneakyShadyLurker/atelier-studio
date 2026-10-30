@@ -1,7 +1,6 @@
 import type { GenerateRequest } from '@atelier/shared';
-import { isAbortError } from '../abort';
 import { markDrainOwned } from '../drainOwnership';
-import { batchAlreadyStarted, generateBackpressure } from './request';
+import { classifySubmissionFailure, uncertainSubmissionItem } from './request';
 import { delay, IDLE_BACKPRESSURE_BUDGET_MS, jitterRetryDelayMs, nextBackpressureDelayMs } from '../../api/queueFullRetry';
 import type { FireItem } from './types';
 
@@ -72,6 +71,7 @@ type Generate = (request: GenerateRequest, options?: { onAccepted?: (batchId: st
 export type PostAnswer =
   | { readonly kind: 'started' }
   | { readonly kind: 'backpressure'; readonly retryAfterMs: number }
+  | { readonly kind: 'uncertain' }
   | { readonly kind: 'failed' };
 
 const STARTED: PostAnswer = { kind: 'started' };
@@ -86,13 +86,13 @@ export function postUntilAnswered(generate: Generate, request: GenerateRequest):
   const answered = Promise.withResolvers<PostAnswer>();
   const stream = generate(request, { onAccepted: () => { answered.resolve(STARTED); } });
   void stream.then(() => { answered.resolve(STARTED); }, (error: unknown) => {
-    if (batchAlreadyStarted(error) || isAbortError(error)) {
+    const failure = classifySubmissionFailure(error);
+    if (failure.kind === 'started' || failure.kind === 'aborted') {
       answered.resolve(STARTED);
       return;
     }
     // useGenerate toasts a genuine failure itself.
-    const retryAfterMs = generateBackpressure(error);
-    answered.resolve(retryAfterMs === null ? { kind: 'failed' } : { kind: 'backpressure', retryAfterMs });
+    answered.resolve(failure);
   });
   return answered.promise;
 }
@@ -112,6 +112,8 @@ export interface AdmissionContext {
   readonly enqueue: (item: FireItem, paid: boolean) => boolean;
   /** Runs before the POST: composer collapse and feed scope. */
   readonly onFire: () => void;
+  /** Offers an explicit queue-only retry after an unacknowledged POST. */
+  readonly onSaved?: () => void;
 }
 
 export interface PreparedPress {
@@ -134,7 +136,7 @@ export interface PreparedPress {
  * - capacity: refused with QUEUE_FULL and requeued for the drain to retry;
  * - refused:  the queue did not admit it.
  */
-export type Admission = 'started' | 'failed' | 'queued' | 'capacity' | 'refused';
+export type Admission = 'started' | 'failed' | 'queued' | 'capacity' | 'refused' | 'saved';
 
 /**
  * Admits a prepared press at its turn. While a drain owns the queue, POSTing
@@ -150,6 +152,11 @@ export async function admitPrepared(ctx: AdmissionContext, press: PreparedPress)
   // A QUEUE_FULL refusal is requeued here, so useGenerate does not toast it.
   markDrainOwned(request);
   const answer = await postUntilAnswered(ctx.generate, request);
+  if (answer.kind === 'uncertain') {
+    if (!ctx.enqueue(uncertainSubmissionItem(press.item, request), true)) return 'refused';
+    ctx.onSaved?.();
+    return 'saved';
+  }
   if (answer.kind !== 'backpressure') return answer.kind;
   // System recovery of a press already admitted: past the cap, prepared text kept.
   return ctx.enqueue(press.item, true) ? 'capacity' : 'refused';
@@ -188,6 +195,11 @@ export async function admitStandalonePrepared(ctx: StandaloneAdmissionContext, i
     const request = ctx.makeRequest(item);
     markDrainOwned(request);
     const answer = await postUntilAnswered(ctx.generate, request);
+    if (answer.kind === 'uncertain') {
+      if (!ctx.enqueue(uncertainSubmissionItem(item, request), true)) return 'refused';
+      ctx.onSaved?.();
+      return 'saved';
+    }
     if (answer.kind !== 'backpressure') {
       if (saved && answer.kind === 'started') ctx.retire(item.key);
       return answer.kind;

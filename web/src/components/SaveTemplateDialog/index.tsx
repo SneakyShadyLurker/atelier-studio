@@ -4,6 +4,7 @@ import { ApiError } from '../../api/client';
 import { useCreateTemplate } from '../../hooks/usePromptMutations';
 import { useExitTransition } from '../../hooks/useExitTransition';
 import { runWhenReachable } from '../../lib/focus';
+import { isImeComposing } from '../../lib/ime';
 import { useAtelierStore } from '../../store/atelier';
 import { DialogShell } from '../DialogShell';
 import { deriveTemplateName } from './deriveTemplateName';
@@ -41,7 +42,7 @@ function SaveTemplateDialogInner({ prompt }: { prompt: string }) {
   const [name, setName] = useState(() => deriveTemplateName(prompt));
   const [inlineError, setInlineError] = useState<string | null>(null);
   const busy = create.isPending;
-  const canSave = name.trim().length > 0 && !busy;
+  const canSave = name.trim().length > 0 && name.trim().length <= PROMPT_LIBRARY_NAME_MAX_CHARS && !busy;
 
   useEffect(() => {
     const target = inputRef.current;
@@ -93,7 +94,7 @@ function SaveTemplateDialogInner({ prompt }: { prompt: string }) {
             autoCorrect="off"
             spellCheck={false}
             placeholder="Name this template"
-            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); save(); } }}
+            onKeyDown={(event) => { if (event.key === 'Enter' && !isImeComposing(event)) { event.preventDefault(); save(); } }}
             value={name}
             maxLength={PROMPT_LIBRARY_NAME_MAX_CHARS}
             onChange={(event) => {

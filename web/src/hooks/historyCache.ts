@@ -220,7 +220,7 @@ function setHistory(
 
 // The server's canonical order: `ORDER BY created_at DESC, id DESC`
 // (`api/src/routes/history.ts`). True when `a` sorts before `b`.
-function sortsBefore(a: Batch, b: Batch): boolean {
+export function sortsBefore(a: Batch, b: Batch): boolean {
   return a.createdAt > b.createdAt || (a.createdAt === b.createdAt && a.id > b.id);
 }
 
@@ -244,40 +244,38 @@ function preserveSequenceFields(incoming: Batch, existing: Batch | undefined): B
 }
 
 export function upsertNewBatch(queryClient: QueryClient, key: QueryKey, batch: Batch): void {
-  setHistory(queryClient, key, (data) => {
-    // Drop any stale entry across all pages, then insert at the canonical
-    // position on the page that position falls in (almost always page 0; a
-    // late event for an older batch lands on a later page). The previous "prepend to index 0" path encoded
-    // SSE arrival order into the cache, which diverged from the server's
-    // `created_at DESC` ordering whenever 15+ parallel streams arrived
-    // out-of-order — any refetch then visibly reordered adjacent batches.
-    // Canonical insertion keeps the optimistic cache stable across refetches.
-    let removedLoadingCount = 0;
-    let existingBatch: Batch | undefined;
-    const cleaned = data.pages.map((page) => {
-      const filtered = page.items.filter((existing) => {
-        if (existing.id !== batch.id) return true;
-        existingBatch = existing;
-        removedLoadingCount += loadingCountForBatch(existing);
-        return false;
-      });
-      if (filtered.length === page.items.length) return page;
-      return tagPage(page, filtered);
+  setHistory(queryClient, key, (data) => upsertHistoryBatch(data, batch));
+}
+
+/** Canonical page placement shared by streamed and discovered story batches. */
+export function upsertHistoryBatch(data: HistoryData, batch: Batch): HistoryData {
+  // Place delayed arrivals on their canonical page, without encoding SSE
+  // delivery order or changing cursor coverage.
+  let removedLoadingCount = 0;
+  let existingBatch: Batch | undefined;
+  const cleaned = data.pages.map((page) => {
+    const filtered = page.items.filter((existing) => {
+      if (existing.id !== batch.id) return true;
+      existingBatch = existing;
+      removedLoadingCount += loadingCountForBatch(existing);
+      return false;
     });
-    const anyPageChanged = cleaned.some((page, idx) => page !== data.pages[idx]);
-    const sourcePages = anyPageChanged ? cleaned : data.pages;
-    const nextBatch = preserveSequenceFields(batch, existingBatch);
-    const target = sourcePages.findIndex((page) => {
-      const last = page.items.at(-1);
-      return last === undefined || sortsBefore(nextBatch, last);
-    });
-    const pageIndex = target === -1 ? Math.max(0, sourcePages.length - 1) : target;
-    const page = sourcePages[pageIndex] ?? { items: [], nextCursor: null };
-    const pages = sourcePages.slice();
-    pages[pageIndex] = tagPage(page, insertCanonical(page.items, nextBatch));
-    const next = { ...data, pages };
-    return withLoadingCount(next, loadingCountForData(data) - removedLoadingCount + loadingCountForBatch(nextBatch));
+    if (filtered.length === page.items.length) return page;
+    return tagPage(page, filtered);
   });
+  const anyPageChanged = cleaned.some((page, idx) => page !== data.pages[idx]);
+  const sourcePages = anyPageChanged ? cleaned : data.pages;
+  const nextBatch = preserveSequenceFields(batch, existingBatch);
+  const target = sourcePages.findIndex((page) => {
+    const last = page.items.at(-1);
+    return last === undefined || sortsBefore(nextBatch, last);
+  });
+  const pageIndex = target === -1 ? Math.max(0, sourcePages.length - 1) : target;
+  const page = sourcePages[pageIndex] ?? { items: [], nextCursor: null };
+  const pages = sourcePages.slice();
+  pages[pageIndex] = tagPage(page, insertCanonical(page.items, nextBatch));
+  const next = { ...data, pages };
+  return withLoadingCount(next, loadingCountForData(data) - removedLoadingCount + loadingCountForBatch(nextBatch));
 }
 
 export function updateBatchTile(

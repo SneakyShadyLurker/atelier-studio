@@ -10,7 +10,6 @@ import { promptPickerAvailable } from '../../lib/modelSelection';
 import { describeError } from '../../lib/errorCopy';
 import { runWhenReachable } from '../../lib/focus';
 import { useDeleteUpload } from '../../hooks/useDeleteUpload';
-import { MOTION_PROMPT_SELECTOR } from '../../hooks/useAnimateFromTile';
 import { useAttachRefImages } from '../../hooks/useAttachRefImages';
 import { useComposerViewportInsets } from '../../hooks/useComposerViewportInsets';
 import { useIsPhone } from '../../hooks/useIsPhone';
@@ -124,6 +123,7 @@ function Composer({
   const isPhone = useIsPhone();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const motionRef = useRef<HTMLTextAreaElement | null>(null);
   const sourceUploadRef = useRef<HTMLInputElement | null>(null);
   const collapsedExpandRef = useRef<HTMLButtonElement | null>(null);
   const motionPromptId = useId();
@@ -376,13 +376,14 @@ function Composer({
       previousComposerExpanded.current = composerExpanded;
       return;
     }
-    if (composerExpanded) {
-      textRef.current?.focus();
-    } else if (previousComposerExpanded.current) {
+    if (composerExpanded && !previousComposerExpanded.current) {
+      const target = isI2VMode ? motionRef.current : textRef.current;
+      runWhenReachable(() => { target?.focus(); }, target);
+    } else if (!composerExpanded && previousComposerExpanded.current) {
       collapsedExpandRef.current?.focus();
     }
     previousComposerExpanded.current = composerExpanded;
-  }, [composerExpanded, isPhone]);
+  }, [composerExpanded, isPhone, isI2VMode]);
 
   if (noModels) {
     return (
@@ -733,7 +734,7 @@ function Composer({
             setComposerExpanded(true);
             if (!isPhone) {
               runWhenReachable(() => {
-                const target = isI2VMode ? document.querySelector<HTMLElement>(MOTION_PROMPT_SELECTOR) : textRef.current;
+                const target = isI2VMode ? motionRef.current : textRef.current;
                 target?.focus();
               }, wrapRef.current);
             }
@@ -882,6 +883,7 @@ function Composer({
               <span className={styles.motionLabel}>Motion prompt</span>
               <textarea
                 id={motionPromptId}
+                ref={motionRef}
                 aria-label="Motion prompt"
                 className={styles.motionTextarea}
                 value={motionPrompt ?? ''}

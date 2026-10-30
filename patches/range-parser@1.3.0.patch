@@ -2,9 +2,7 @@ diff --git a/index.js b/index.js
 index 1d09e26ffe3101531c9d56b3b6ffaa2123aff45a..f6daec30e3fca17ee4713e217605d7d993e59250 100644
 --- a/index.js
 +++ b/index.js
-@@ -56,7 +56,7 @@ function rangeParser (size, str, options) {
-     var end = parsePos(endStr)
- 
+@@ -58,5 +58,5 @@ function rangeParser (size, str, options) {
      if (startStr.length === 0) {
 -      start = size - end
 +      start = Math.max(0, size - end)

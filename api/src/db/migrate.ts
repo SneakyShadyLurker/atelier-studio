@@ -1516,7 +1516,8 @@ function migration58Run(db: Database, ctx: MigrationContext): void {
   })();
 }
 
-function seedLegacyTextProvider(db: Database, seed: TextSeed): void {
+/** Seeds the legacy CLIProxyAPI provider (spec § 11.1); exported for test fixtures. */
+export function seedLegacyTextProvider(db: Database, seed: TextSeed): void {
   const now = Date.now();
   const { provider } = LEGACY_SEED;
   const providerId = randomUUID();

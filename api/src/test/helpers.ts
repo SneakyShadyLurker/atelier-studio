@@ -2,12 +2,18 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach } from 'bun:test';
+import type { Database } from 'bun:sqlite';
 import pino from 'pino';
 import { loadConfig, type Config } from '../config';
 import type { ModelAvailability } from '@atelier/shared';
 import { createApp, createKeyStoreForConfig } from '../server';
 import { openDb } from '../db/client';
-import { migrate } from '../db/migrate';
+import { migrate, seedLegacyTextProvider } from '../db/migrate';
+import { bumpTextConfigRevision } from '../db/textProviders';
+import { legacyTextSeed } from '../db/textSeed';
+import type { TextAvailabilityHandle } from '../lifecycle/text-availability';
+import { registryForConfig } from '../providers/registry';
+import { UNKNOWN_TEXT_AVAILABILITY } from '../routing/textServices';
 import { resetConcurrencyForTests } from '../orchestrator/concurrency';
 import { resetKeyProbeRuntimeForTests } from '../routes/keys';
 import { resetUploadsRuntimeForTests } from '../routes/uploads-runtime';
@@ -51,14 +57,38 @@ export function testConfig(overrides: Partial<NodeJS.ProcessEnv> = {}): Config {
   });
 }
 
+/**
+ * Seeds the migrated CLIProxyAPI text provider, its seven legacy-keyed models,
+ * the Kimi default and the GPT prompt writers (spec § 11.1), as migration 58
+ * does on an upgrade. Model ids come from `config`'s `CLIPROXY_TEXT_MODEL_*`.
+ */
+export function seedLegacyTextConfig(db: Database, config: Config = testConfig()): void {
+  const seed = legacyTextSeed(config, registryForConfig(config).map((entry) => entry.model.id));
+  if (!seed) throw new Error('seedLegacyTextConfig needs CLIPROXY_BASE_URL');
+  seedLegacyTextProvider(db, seed);
+  bumpTextConfigRevision();
+}
+
+/** Text availability that lists exactly `listed` upstream model ids on every provider. */
+export function listedTextAvailability(listed: ReadonlySet<string>): TextAvailabilityHandle {
+  return {
+    ...UNKNOWN_TEXT_AVAILABILITY,
+    statusOf: (model) => (listed.has(model.modelId) ? 'available' : 'offline'),
+    snapshot: () => listed,
+  };
+}
+
 export function testRuntime(overrides: Record<string, unknown> = {}) {
-  const { disableByok, availability, textModels, ...rawEnvOverrides } = overrides;
+  const {
+    disableByok, availability, textModels, textAvailability, seedLegacyText, ...rawEnvOverrides
+  } = overrides;
   const envOverrides = rawEnvOverrides as Partial<NodeJS.ProcessEnv>;
   const config = testConfig(
     disableByok === true ? { ...envOverrides, BYOK_ENCRYPTION_KEY: undefined } : envOverrides,
   );
   const db = openDb({ dataDir: config.DATA_DIR });
   migrate(db, config.DATA_DIR);
+  if (seedLegacyText === true) seedLegacyTextConfig(db, config);
   const logs: string[] = [];
   const logger = pino({ level: config.LOG_LEVEL }, { write: (line) => logs.push(line) });
   const keyStore = createKeyStoreForConfig(config, db);
@@ -82,8 +112,19 @@ export function testRuntime(overrides: Record<string, unknown> = {}) {
         drain: () => Promise.resolve(),
       }
     : undefined;
+  // Text-model availability: an explicit fake wins; a `textModels` id set
+  // doubles as the listing of every text provider; absent = unknown.
+  const textAvailabilityHandle = textAvailability !== undefined
+    ? textAvailability as TextAvailabilityHandle
+    : textModels instanceof Set ? listedTextAvailability(textModels as ReadonlySet<string>) : undefined;
   const app = createApp({
-    config, db, logger, keyStore, healthProbe, ...(modelInventory ? { modelInventory } : {}),
+    config,
+    db,
+    logger,
+    keyStore,
+    healthProbe,
+    ...(modelInventory ? { modelInventory } : {}),
+    ...(textAvailabilityHandle ? { textAvailability: textAvailabilityHandle } : {}),
   });
   return {
     app,

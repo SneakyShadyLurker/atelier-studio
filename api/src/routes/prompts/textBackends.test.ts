@@ -5,7 +5,8 @@ import { testRuntime, testConfig } from '../../test/helpers';
 
 const TEXT_MODELS = textBackendModels(testConfig());
 
-const GATED = { PROMPT_LIBRARY_USERS: 'alice' };
+// The legacy keys map onto the models migration 58 seeds from CLIProxyAPI.
+const GATED = { PROMPT_LIBRARY_USERS: 'alice', seedLegacyText: true };
 // A proxy inventory serving every routed model except DeepSeek Abliterated's,
 // which the upstream does not serve.
 const WITHOUT_DEEPSEEK = new Set(
@@ -126,7 +127,8 @@ describe('text backend settings routes', () => {
     const rt = testRuntime({ ...GATED, textModels: WITHOUT_DEEPSEEK });
     rt.db.query("INSERT INTO users (id, created_at) VALUES ('alice', 1)").run();
     rt.db.query(
-      "INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('alice', 'ai-fill', 'deepseek-abliterated', 1)",
+      `INSERT INTO user_text_models (user_id, task, text_model_id, updated_at)
+       SELECT 'alice', 'ai-fill', id, 1 FROM text_models WHERE legacy_key = 'deepseek-abliterated'`,
     ).run();
     const res = await rt.fetch('/api/prompts/settings/text-backends', { headers: headers() });
     expect(await res.json()).toEqual({ efforts: {}, overrides: { 'ai-fill': 'deepseek-abliterated' }, unavailable: ['deepseek-abliterated'] });

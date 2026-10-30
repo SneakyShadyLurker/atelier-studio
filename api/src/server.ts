@@ -25,6 +25,9 @@ import {
 import { startupReconcile } from './lifecycle/startup-reconcile';
 import { startHealthProbe, type HealthProbeHandle } from './lifecycle/health-probe';
 import { startModelInventory, type ModelInventoryHandle } from './lifecycle/model-inventory';
+import { startTextAvailability, type TextAvailabilityHandle } from './lifecycle/text-availability';
+import type { TextProviderStore } from './db/textProviders';
+import { createTextServices, textProviderStoreFor, UNKNOWN_TEXT_AVAILABILITY } from './routing/textServices';
 import { configureTextBackendAvailability } from './routing/textBackendAvailability';
 import { textBackendModels } from './providers/cliproxyText.config';
 import { drainComfyUi } from './providers/comfyui';
@@ -58,6 +61,7 @@ import { MAX_UPLOAD_REQUEST_BYTES, uploadsRoutes } from './routes/uploads';
 import { jsonBodyLimit } from './routes/_json-body-limit';
 import { sequencesRoutes } from './routes/sequences';
 import { storiesRoutes } from './routes/stories';
+import { textModelsRoutes } from './routes/textModels';
 import { ephemeraRoutes } from './routes/ephemera';
 import { configureStitchQueue } from './orchestrator/stitchQueue';
 import { configureStoryDriver, recoverStories, stopStoryDriver } from './orchestrator/storyDriver';
@@ -80,9 +84,17 @@ export interface AppDeps {
    * every text backend counts as available (fail-open).
    */
   modelInventory?: ModelInventoryHandle;
+  /** The process's text-model store; built from `db` and `config` when omitted. */
+  textStore?: TextProviderStore;
+  /**
+   * Per-provider text-model listing poller (boot starts it over `textStore`).
+   * When omitted, every model is 'unknown' (fail-open); tests inject fakes here.
+   */
+  textAvailability?: TextAvailabilityHandle;
 }
 
-// CLIProxyAPI inventory refresh cadence and per-request budget.
+// Refresh cadence and per-request budget of the CLIProxyAPI inventory and the
+// per-provider text-model listing pollers (spec § 9.1: 60 s / 5 s).
 const MODEL_INVENTORY_INTERVAL_MS = 60_000;
 const MODEL_INVENTORY_TIMEOUT_MS = 5_000;
 
@@ -133,6 +145,10 @@ export function createKeyStoreForConfig(config: Config, db: Database): KeyStore 
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const probe = deps.healthProbe ?? ALWAYS_AVAILABLE;
+  const text = createTextServices({
+    store: deps.textStore ?? textProviderStoreFor(deps.config, deps.db),
+    availability: deps.textAvailability ?? UNKNOWN_TEXT_AVAILABILITY,
+  });
   configureTextBackendAvailability(deps.modelInventory, textBackendModels(deps.config));
   configureStitchQueue({ db: deps.db, config: deps.config, logger: deps.logger });
   // Once per app, before any route or queue worker can acquire an LLM slot.
@@ -204,6 +220,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     c.set('keyStore', deps.keyStore);
     c.set('healthSnapshot', healthSnapshot);
     c.set('probeModelNow', (modelId) => probe.probeNow(modelId));
+    c.set('text', text);
     await next();
   });
   app.route('/api', modelsRoutes);
@@ -222,6 +239,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.route('/api', ephemeraRoutes);
   app.route('/api', sequencesRoutes);
   app.route('/api', storiesRoutes);
+  app.route('/api', textModelsRoutes);
   app.notFound((c) => c.json({ error: 'not found' }, 404));
   app.onError((err, c) => {
     // HTTPException is the recommended Hono 4 escape hatch for typed
@@ -258,6 +276,7 @@ export async function boot(): Promise<{
   logger: AppLogger;
   healthProbe: HealthProbeHandle;
   modelInventory: ModelInventoryHandle;
+  textAvailability: TextAvailabilityHandle;
   unsealServer: { stop: () => unknown } | null;
 }> {
   const config = loadConfig();
@@ -336,6 +355,13 @@ export async function boot(): Promise<{
     intervalMs: MODEL_INVENTORY_INTERVAL_MS,
     timeoutMs: MODEL_INVENTORY_TIMEOUT_MS,
   });
+  const textStore = textProviderStoreFor(config, db);
+  const textAvailability = startTextAvailability({
+    store: textStore,
+    logger,
+    intervalMs: MODEL_INVENTORY_INTERVAL_MS,
+    timeoutMs: MODEL_INVENTORY_TIMEOUT_MS,
+  });
   bootDeps = {
     db,
     config,
@@ -345,7 +371,7 @@ export async function boot(): Promise<{
   };
   // createApp configures queue scheduling; it must precede the first kick so a
   // recovered local queue is dequeued under the production residency mapping.
-  const app = createApp({ config, db, logger, keyStore, healthProbe, modelInventory });
+  const app = createApp({ config, db, logger, keyStore, healthProbe, modelInventory, textStore, textAvailability });
   configureUpstreamGateWiring(bootDeps);
   // Queued work that reads stored artifacts waits while storage is sealed
   // (dequeue gate); resume it the moment the root arrives.
@@ -360,13 +386,14 @@ export async function boot(): Promise<{
     logger,
     healthProbe,
     modelInventory,
+    textAvailability,
     unsealServer,
   };
 }
 
 if (import.meta.main) {
   try {
-    const { app, config, db, logger, healthProbe, modelInventory, unsealServer } = await boot();
+    const { app, config, db, logger, healthProbe, modelInventory, textAvailability, unsealServer } = await boot();
     // Process-level safety net so unexpected throws in async paths
     // (orchestrator pipeline, etc.) emit JSON pino logs instead of Bun's
     // default freeform stack — operators grep level:60 / level:50.
@@ -419,6 +446,7 @@ if (import.meta.main) {
       logger.info({ signal }, 'shutdown: stopping accept');
       healthProbe.stop();
       modelInventory.stop();
+      textAvailability.stop();
       unsealServer?.stop();
       // Abort in-flight batches with the typed reason so the orchestrator's
       // cancel path emits a terminal SSE event before tearing down. Without
@@ -455,14 +483,18 @@ if (import.meta.main) {
       // queue-delete before process.exit. Bounded by the same deadline as
       // the rest of the drain so a wedged ComfyUI host can't pin shutdown.
       const comfyCancelDrain = drainComfyUi();
-      // healthProbe.stop() and modelInventory.stop() above aborted any
+      // healthProbe/modelInventory/textAvailability.stop() above aborted any
       // in-flight fetch; drain() waits for that round's settle so a probe
       // can't outlive process.exit with an open socket. Same deadline cap as
       // the orchestrator drain.
       const probeDrain = healthProbe.drain();
       const inventoryDrain = modelInventory.drain();
+      const textAvailabilityDrain = textAvailability.drain();
       const drained = await Promise.race([
-        Promise.all([drain, orchestratorDrain, preparationDrain, storyDriverDrain, probeDrain, inventoryDrain, comfyCancelDrain]).then(() => true),
+        Promise.all([
+          drain, orchestratorDrain, preparationDrain, storyDriverDrain, probeDrain, inventoryDrain,
+          textAvailabilityDrain, comfyCancelDrain,
+        ]).then(() => true),
         deadline,
       ]).catch((err: unknown) => {
         logger.error({ err }, 'shutdown: drain failed');

@@ -3,6 +3,7 @@ import type { ModelAvailability } from '@atelier/shared';
 import type { Config } from './config';
 import type { KeyStore } from './keystore';
 import type { AppLogger } from './observability/logger';
+import type { TextServices } from './routing/textServices';
 
 export type HealthSnapshot = () => ReadonlyMap<string, ModelAvailability>;
 export type ProbeModelNow = (modelId: string) => Promise<ModelAvailability | undefined>;
@@ -27,6 +28,8 @@ export interface AppBindings extends BaseBindings {
   keyStore: KeyStore | undefined;
   healthSnapshot: HealthSnapshot;
   probeModelNow: ProbeModelNow;
+  /** Text-model store, routing snapshot, availability and resolver (one per process). */
+  text: TextServices;
 }
 
 export interface BaseEnv {

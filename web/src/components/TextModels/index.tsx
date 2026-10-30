@@ -2,62 +2,30 @@ import { useId, useState } from 'react';
 import type { AdminModel, AdminProvider } from '@atelier/shared';
 import { describeError } from '../../lib/errorCopy';
 import { useAtelierStore } from '../../store/atelier';
-import { useExitTransition } from '../../hooks/useExitTransition';
 import { useDeleteModel, useTextProviders, useTextRouting } from '../../hooks/useTextProviders';
 import ConfirmDialog from '../ConfirmDialog';
-import { DialogShell } from '../DialogShell';
 import { ManagedViewHeader } from '../ManagedViewHeader';
 import { ErrorState, LoadingState, StateView } from '../StateView';
 import { I } from '../icons/I';
 import btn from '../../styles/buttons.module.css';
-import dialogStyles from '../../styles/dialog.module.css';
 import { removeModelCopy, type ModelAction } from './ModelRow';
 import ProviderSection from './ProviderSection';
 import RoutingPanel from './RoutingPanel';
+import AddModelsDialog from './AddModelsDialog';
 import AddProviderDialog from './AddProviderDialog';
+import EditModelDialog from './EditModelDialog';
 import EditProviderDialog from './EditProviderDialog';
 import styles from './index.module.css';
 
 const GUIDE_URL = 'https://github.com/SneakyShadyLurker/atelier-studio/blob/main/docs/connect-a-text-model.md';
 
-/**
- * Dialogs this view opens. 'add-provider' / 'edit-provider' are built;
- * Task 16 replaces the placeholder for 'add-models' / 'edit-model' / 'test-model'.
- */
+/** Dialogs this view opens. 'test-model' is the model dialog with its test already running. */
 export type TextModelsDialog =
   | { readonly kind: 'add-provider' }
   | { readonly kind: 'edit-provider'; readonly provider: AdminProvider }
   | { readonly kind: 'add-models'; readonly provider: AdminProvider }
   | { readonly kind: 'edit-model'; readonly provider: AdminProvider; readonly model: AdminModel }
   | { readonly kind: 'test-model'; readonly provider: AdminProvider; readonly model: AdminModel };
-
-type PendingKind = Exclude<TextModelsDialog['kind'], 'add-provider' | 'edit-provider'>;
-
-const DIALOG_TITLE: Record<PendingKind, string> = {
-  'add-models': 'Add models',
-  'edit-model': 'Edit model',
-  'test-model': 'Test model',
-};
-
-// Placeholder until Task 16 replaces each kind with its real dialog.
-function PendingDialog({ kind, onClose }: { kind: PendingKind; onClose: () => void }) {
-  const titleId = useId();
-  const { closing, requestClose } = useExitTransition(onClose, true);
-  return (
-    <DialogShell open onCancel={requestClose} closing={closing} labelledBy={titleId}>
-      <div className={dialogStyles.dialog}>
-        <div className={dialogStyles.handle} aria-hidden="true" />
-        <h2 id={titleId} className={dialogStyles.title}>{DIALOG_TITLE[kind]}</h2>
-        <p className={dialogStyles.body}>This form is not built yet.</p>
-        <div className={dialogStyles.actions}>
-          <div className={dialogStyles.actionsRight}>
-            <button type="button" className={btn.secondary} onClick={requestClose}>Close</button>
-          </div>
-        </div>
-      </div>
-    </DialogShell>
-  );
-}
 
 interface TextModelsProps {
   readonly onBack: () => void;
@@ -141,12 +109,26 @@ export default function TextModels({ onBack }: TextModelsProps) {
         </ManagedViewHeader>
       </div>
       {content}
-      {dialog?.kind === 'add-provider' && <AddProviderDialog byokMissing={byokMissing} onClose={closeDialog} />}
+      {dialog?.kind === 'add-provider' && (
+        <AddProviderDialog
+          byokMissing={byokMissing}
+          onClose={closeDialog}
+          onSaved={(provider) => { setDialog({ kind: 'add-models', provider }); }}
+        />
+      )}
       {dialog?.kind === 'edit-provider' && (
         <EditProviderDialog provider={dialog.provider} imageLabel={imageLabel} onClose={closeDialog} />
       )}
-      {dialog !== null && dialog.kind !== 'add-provider' && dialog.kind !== 'edit-provider' && (
-        <PendingDialog kind={dialog.kind} onClose={closeDialog} />
+      {dialog?.kind === 'add-models' && <AddModelsDialog provider={dialog.provider} onClose={closeDialog} />}
+      {(dialog?.kind === 'edit-model' || dialog?.kind === 'test-model') && (
+        <EditModelDialog
+          key={`${dialog.kind}:${dialog.model.id}`}
+          provider={dialog.provider}
+          model={dialog.model}
+          imageLabel={imageLabel}
+          startTest={dialog.kind === 'test-model'}
+          onClose={closeDialog}
+        />
       )}
       {removing !== null && (
         <ConfirmDialog

@@ -1,18 +1,9 @@
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from 'react';
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import type { ReactNode } from 'react';
+import { useRef, useState } from 'react';
 import type { AdminModel, TextModelStatus, TextModelUsage } from '@atelier/shared';
 import { TEXT_REASONING_EFFORT_LABELS, TEXT_TASK_LABELS } from '@atelier/shared';
-import { focusableInside, useFocusTrap } from '../../hooks/useFocusTrap';
-import { useIsPhone } from '../../hooks/useIsPhone';
-import { useModalChrome } from '../../hooks/useModalChrome';
-import { useAnchoredPopover } from '../../hooks/useNativeAnchor';
-import { useOutsidePointer } from '../../hooks/useOutsidePointer';
-import { useExitTransition } from '../../hooks/useExitTransition';
-import { focusRovingItem, runWhenReachable } from '../../lib/focus';
 import { I } from '../icons/I';
-import anchors from '../../styles/anchors.module.css';
-import menu from '../BatchOverflowMenu/index.module.css';
+import OverflowMenu, { type OverflowMenuGroup } from '../OverflowMenu';
 import styles from './index.module.css';
 
 export type ModelAction = 'edit' | 'test' | 'remove';
@@ -51,96 +42,14 @@ function capabilityMarks(model: AdminModel): readonly { key: string; label: stri
   return marks;
 }
 
-const MENU_ITEMS: readonly { action: ModelAction; label: string; icon: ReactNode; danger?: boolean }[] = [
-  { action: 'edit', label: 'Edit', icon: <I.pencil /> },
-  { action: 'test', label: 'Test', icon: <I.check /> },
-  { action: 'remove', label: 'Remove', icon: <I.trash />, danger: true },
-];
-
-interface ModelMenuProps {
-  readonly label: string;
-  readonly anchorRef: RefObject<HTMLElement | null>;
-  readonly open: boolean;
-  readonly onSelect: (action: ModelAction) => void;
-  readonly onClose: () => void;
-}
-
-// Same grammar as BatchOverflowMenu (anchored popover on desktop, sheet with
-// backdrop on phone, roving focus, shared shell and row styles); only the
-// items differ.
-function ModelMenu({ label, anchorRef, open, onSelect, onClose }: ModelMenuProps) {
-  const isPhone = useIsPhone();
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const portalRootRef = useRef<HTMLDivElement | null>(null);
-  const { closing, requestClose } = useExitTransition(onClose, open);
-
-  useModalChrome({ open, onCancel: requestClose, portalRef: portalRootRef, toastHostRef: panelRef, containerKey: isPhone });
-  useFocusTrap(panelRef, { active: open, returnFocusTo: anchorRef, containerKey: isPhone });
-  useOutsidePointer([panelRef, anchorRef], requestClose, { enabled: open && !isPhone });
-  const popoverProps = useAnchoredPopover(panelRef, anchorRef, {
-    active: open && !isPhone,
-    containerKey: isPhone,
-    onNativeClose: requestClose,
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    const target = focusableInside(panelRef.current)[0] ?? null;
-    runWhenReachable(() => { target?.focus(); }, target);
-  }, [open]);
-
-  const onMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    focusRovingItem(event, panelRef.current, '[role="menuitem"]');
-  };
-
-  if (!open) return null;
-
-  const panel = (
-    <div
-      ref={panelRef}
-      className={`${menu.panel} ${isPhone ? menu.sheet : `${menu.popover} ${anchors.panel}`}`}
-      data-closing={closing ? 'true' : undefined}
-      role="menu"
-      aria-label={`${label} actions`}
-      data-mobile={isPhone ? 'true' : 'false'}
-      data-anchor-place={isPhone ? undefined : 'below-end'}
-      {...popoverProps}
-      onKeyDown={onMenuKeyDown}
-    >
-      <div className={menu.content} data-overlay-scroll="true">
-        {MENU_ITEMS.map((item) => (
-          <button
-            key={item.action}
-            type="button"
-            role="menuitem"
-            tabIndex={0}
-            className={menu.row}
-            data-danger={item.danger ? 'true' : undefined}
-            onClick={() => {
-              if (closing) return;
-              onSelect(item.action);
-            }}
-          >
-            <span className={menu.icon} aria-hidden="true">{item.icon}</span>
-            <span className={menu.name}>{item.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
-  return createPortal(
-    <div ref={portalRootRef} className={menu.portalRoot}>
-      {isPhone ? (
-        <>
-          <button className={menu.backdrop} type="button" aria-label="Close menu" data-closing={closing ? 'true' : undefined} onClick={requestClose} />
-          {panel}
-        </>
-      ) : panel}
-    </div>,
-    document.body,
-  );
-}
+const MENU_GROUPS: readonly OverflowMenuGroup<ModelAction>[] = [{
+  key: 'model',
+  items: [
+    { action: 'edit', label: 'Edit', icon: <I.pencil /> },
+    { action: 'test', label: 'Test', icon: <I.check /> },
+    { action: 'remove', label: 'Remove', icon: <I.trash />, danger: true },
+  ],
+}];
 
 const STATUS_WORD: Record<TextModelStatus, string> = {
   available: 'available',
@@ -183,6 +92,18 @@ export default function ModelRow({ model, checking, toggling, checkingAgain, onT
           <span className={styles.statusDot} aria-hidden="true" />
           <span>{word}</span>
         </span>
+        {model.verifiedAt === null && model.lastTest === null && (
+          // Imported rows start from unverified list hints; the quiet way in to the test.
+          <button
+            className={styles.textButton}
+            type="button"
+            aria-label="Untested: test to confirm capabilities"
+            data-tip="Test to confirm capabilities"
+            onClick={() => { onAction('test'); }}
+          >
+            Untested
+          </button>
+        )}
         {model.status !== 'available' && !checking && (
           <button className={styles.textButton} type="button" disabled={checkingAgain} onClick={onCheckAgain}>
             Check again
@@ -215,10 +136,11 @@ export default function ModelRow({ model, checking, toggling, checkingAgain, onT
           <I.more />
         </button>
       </div>
-      <ModelMenu
-        label={model.displayName}
+      <OverflowMenu
+        label={`${model.displayName} actions`}
         anchorRef={moreRef}
         open={menuOpen}
+        groups={MENU_GROUPS}
         onClose={() => { setMenuOpen(false); }}
         onSelect={(action) => {
           setMenuOpen(false);

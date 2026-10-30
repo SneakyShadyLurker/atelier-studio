@@ -53,6 +53,7 @@ export const KIMI = adminModel({
   vision: true,
   structuredOutput: 'json_schema',
   reasoningLevels: ['low', 'high', 'max'],
+  verifiedAt: 1_790_000_000_000,
   usage: { isDefault: true, tasks: ['ai-fill'], writers: ['gpt-image-2.5-sunburst'], userPicks: 3 },
 });
 

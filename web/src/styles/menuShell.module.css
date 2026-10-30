@@ -1,4 +1,4 @@
-/* Shared shell for the anchored action menus (BatchOverflowMenu,
+/* Shared shell for the anchored action menus (OverflowMenu,
    MovePopover): portal root, surface, desktop popover, scrolling content,
    phone sheet and backdrop, with their enter/leave motion. Owners compose
    these classes and set --menu-width plus the sheet padding properties;

@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import type { TextPreset, TextProviderConnectionTestRequest } from '@atelier/shared';
+import type { AdminProvider, TextPreset, TextProviderConnectionTestRequest } from '@atelier/shared';
 import { TEXT_PRESETS } from '@atelier/shared';
 import { testDraftConnection, type ProviderCreateBody } from '../../api/textProviders';
 import { useExitTransition } from '../../hooks/useExitTransition';
@@ -80,9 +80,11 @@ interface AddProviderDialogProps {
   /** The server reported `byok-not-configured`: keys cannot be stored. */
   readonly byokMissing: boolean;
   readonly onClose: () => void;
+  /** The provider exists; the view moves straight on to adding its models. */
+  readonly onSaved: (provider: AdminProvider) => void;
 }
 
-export default function AddProviderDialog({ byokMissing, onClose }: AddProviderDialogProps) {
+export default function AddProviderDialog({ byokMissing, onClose, onSaved }: AddProviderDialogProps) {
   const titleId = useId();
   const keyId = useId();
   const keyHintId = useId();
@@ -161,7 +163,7 @@ export default function AddProviderDialog({ byokMissing, onClose }: AddProviderD
     create.mutateAsync(body)
       .then((provider) => {
         addToast(`Saved ${provider.name}`);
-        onClose();
+        onSaved(provider);
       })
       .catch((error: unknown) => {
         if (isByokRefusal(error)) setByokRefused(true);

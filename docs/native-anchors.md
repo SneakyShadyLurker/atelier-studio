@@ -21,7 +21,7 @@ Verification: the real-browser lane (`bun run --cwd web test:browser`) runs the 
 
 | Surface | Layer | Relationship | Why |
 |---|---|---|---|
-| BatchOverflowMenu (desktop) | top layer, manual popover | implicit anchor: the More trigger | Toasts raised while it is open render inside its panel (`useModalChrome` toast host), so the top layer covers nothing they need. |
+| OverflowMenu (desktop): BatchOverflowMenu, the text-model row's More | top layer, manual popover | implicit anchor: the More trigger | Toasts raised while it is open render inside its panel (`useModalChrome` toast host), so the top layer covers nothing they need. |
 | MovePopover (desktop, from More or the collection chip) | top layer, manual popover | implicit anchor: whichever trigger opened it | As above. Manual mode is required: the 260ms pending single-click move (so a double-click can rename), the exit choreography, focus and Escape stay the owner's. |
 | AxisDropdown (desktop popover) | top layer, manual popover, above PromptPicker | implicit anchor: the axis trigger | It portals nothing of its own and hosts the toast while open (`useModalToastHost`), so nothing is stranded beneath it. |
 | BatchPrompt card | page layer, `z-index` popover + 1, portalled to `<body>` | declared name `--prompt-<useId>` in `--prompt-anchor`, as `anchor-name` on the active source (a zero-size pointer stand-in after a dwell, or the prompt after focus or a tap) and `position-anchor` on the card | The body portal escapes the feed scroller's clip and the `contain: strict` feed. Below the global toast stack (`--z-toast`, 200), so a tall card never covers an Undo, whichever opened first; a top-layer card did. |
@@ -43,7 +43,7 @@ A desktop panel carries `anchors.panel`, a `data-anchor-place` and, when an anch
 
 | Place | Owners | Preferred | Gap / edge clearance |
 |---|---|---|---|
-| `below-end` | BatchOverflowMenu, MovePopover | below, right edges aligned | 8px to the trigger, 12px from the left edge |
+| `below-end` | OverflowMenu (BatchOverflowMenu, text-model rows), MovePopover | below, right edges aligned | 8px to the trigger, 12px from the left edge |
 | `below-start` | AxisDropdown | below, left edges aligned | 8px, 12px from the right edge |
 | `above-start` | ChipSelect | above, left edges aligned, at least trigger-wide (`anchor-size(width)`) | 8px, 12px from the top and right edges |
 

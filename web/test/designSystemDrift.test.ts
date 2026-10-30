@@ -151,7 +151,7 @@ describe('design system drift guards', () => {
     const geometry = /getBoundingClientRect|getClientRects|offset(Width|Height|Top|Left)|inner(Width|Height)|scroll(X|Y)|-9999|useAnchoredPosition/;
     // Top-layer owners take their implicit anchor from showPopover({ source }).
     for (const path of [
-      'web/src/components/BatchOverflowMenu/index.tsx',
+      'web/src/components/OverflowMenu/index.tsx',
       'web/src/components/MovePopover/index.tsx',
       'web/src/components/PromptPicker/AxisDropdown.tsx',
     ]) {

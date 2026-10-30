@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
-import type { ConnectionReport } from '@atelier/shared';
+import type { AdminProvider, ConnectionReport } from '@atelier/shared';
 import { useAtelierStore } from '../../store/atelier';
 import AddProviderDialog from './AddProviderDialog';
 import { adminProvider } from './fixtures';
@@ -50,11 +50,12 @@ function setup(options: { test?: Answer; create?: Answer; byokMissing?: boolean 
   }) as unknown as typeof fetch;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const onClose = mock(() => undefined);
+  const onSaved = mock((_provider: AdminProvider) => undefined);
   function Wrapper({ children }: PropsWithChildren) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   }
-  render(<AddProviderDialog byokMissing={options.byokMissing ?? false} onClose={onClose} />, { wrapper: Wrapper });
-  return { calls, onClose, client };
+  render(<AddProviderDialog byokMissing={options.byokMissing ?? false} onClose={onClose} onSaved={onSaved} />, { wrapper: Wrapper });
+  return { calls, onClose, onSaved, client };
 }
 
 const field = (name: string) => screen.getByLabelText<HTMLInputElement>(name);
@@ -172,8 +173,8 @@ describe('Add provider: fields', () => {
 });
 
 describe('Add provider: connection test and save', () => {
-  test('a passing test reads as a sentence and enables Save, which creates the provider', async () => {
-    const { calls, onClose } = setup();
+  test('a passing test reads as a sentence and enables Save, which creates the provider and moves on to its models', async () => {
+    const { calls, onClose, onSaved } = setup();
     fireEvent.click(preset('OpenAI'));
     fill('API key', 'sk-test-123');
     expect(button('Save provider').disabled).toBe(true);
@@ -192,7 +193,10 @@ describe('Add provider: connection test and save', () => {
     expect(screen.queryByRole('button', { name: 'Save anyway' })).toBeNull();
 
     fireEvent.click(button('Save provider'));
-    await waitFor(() => { expect(onClose).toHaveBeenCalled(); });
+    // The next step is adding its models, so the dialog hands over instead of closing.
+    await waitFor(() => { expect(onSaved).toHaveBeenCalled(); });
+    expect(onSaved.mock.calls[0]?.[0]).toMatchObject({ id: 'p-new', name: 'Ollama' });
+    expect(onClose).not.toHaveBeenCalled();
     expect(posts(calls, '/text-providers')[0]?.body).toEqual({
       name: 'OpenAI',
       protocol: 'openai-compatible',
@@ -232,7 +236,7 @@ describe('Add provider: connection test and save', () => {
   });
 
   test('a server without a model list can be saved anyway', async () => {
-    const { calls, onClose } = setup({ test: () => Response.json(NO_LIST) });
+    const { calls, onSaved } = setup({ test: () => Response.json(NO_LIST) });
     fireEvent.click(preset('Custom OpenAI-compatible'));
     fill('Name', 'vLLM box');
     fill('Base URL', 'http://10.0.0.5:8000/v1');
@@ -241,7 +245,7 @@ describe('Add provider: connection test and save', () => {
     expect(alert.textContent).toContain('The server has no model list at this address (404/405).');
     expect(button('Save provider').disabled).toBe(true);
     fireEvent.click(button('Save anyway'));
-    await waitFor(() => { expect(onClose).toHaveBeenCalled(); });
+    await waitFor(() => { expect(onSaved).toHaveBeenCalled(); });
     expect(posts(calls, '/text-providers')[0]?.body).toMatchObject({ name: 'vLLM box', baseUrl: 'http://10.0.0.5:8000/v1', preset: 'custom-openai' });
   });
 

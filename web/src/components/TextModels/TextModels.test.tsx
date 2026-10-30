@@ -53,6 +53,7 @@ function installFetch(options: {
     }
     if (url.includes('/api/text-routing')) return Response.json(options.routing ?? ROUTING);
     if (url.includes('/api/text-models')) return Response.json({ models: [], tasks: [], defaults: { byTask: {} }, writers: {} });
+    if (method === 'POST' && url.endsWith('/test')) return Response.json({ checks: [], proposed: {}, advertised: {}, wireNotes: [] });
     if (method === 'DELETE') return Response.json({ ok: true });
     if (method === 'PATCH') return Response.json({});
     return Response.json({});
@@ -213,7 +214,7 @@ describe('Text models view', () => {
     expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({ enabled: false });
   });
 
-  test('More menu: Edit and Test open the dialog slot, Remove confirms with usage', async () => {
+  test('More menu: Edit opens the model, Test opens it and starts the test, Remove confirms with usage', async () => {
     const { calls } = renderView();
     const kimi = await screen.findByRole('listitem', { name: 'Kimi K3' });
 
@@ -221,11 +222,22 @@ describe('Text models view', () => {
     const menu = await screen.findByRole('menu', { name: 'Kimi K3 actions' });
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Edit', 'Test', 'Remove']);
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
-    expect(await screen.findByRole('dialog', { name: 'Edit model' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    const edit = await screen.findByRole('dialog', { name: 'Edit model' });
+    expect(within(edit).getByLabelText<HTMLInputElement>('Display name').value).toBe('Kimi K3');
+    fireEvent.click(within(edit).getByRole('button', { name: 'Cancel' }));
     // The exit transition unmounts on a timer, which waitFor can miss.
     await act(() => Bun.sleep(300));
     expect(screen.queryByRole('dialog', { name: 'Edit model' })).toBeNull();
+    expect(calls.some((call) => call.url.endsWith('/test'))).toBe(false);
+
+    fireEvent.click(within(kimi).getByRole('button', { name: 'More actions for Kimi K3' }));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Test' }));
+    expect(await screen.findByRole('dialog', { name: 'Edit model' })).toBeTruthy();
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/api/text-providers/p-cli/models/m-kimi/test'))).toBe(true);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(() => Bun.sleep(300));
 
     fireEvent.click(within(kimi).getByRole('button', { name: 'More actions for Kimi K3' }));
     fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Remove' }));
@@ -236,6 +248,25 @@ describe('Text models view', () => {
     fireEvent.click(within(confirm).getByRole('button', { name: 'Remove model' }));
     await waitFor(() => {
       expect(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/api/text-providers/p-cli/models/m-kimi'))).toBe(true);
+    });
+  });
+
+  test('Add models opens the picker for that provider', async () => {
+    renderView();
+    const ollama = await screen.findByRole('region', { name: 'Ollama on this Mac' });
+    fireEvent.click(within(ollama).getByRole('button', { name: 'Add models' }));
+    expect(await screen.findByRole('dialog', { name: 'Add models from Ollama on this Mac' })).toBeTruthy();
+  });
+
+  test('an untested model says so quietly and offers the test', async () => {
+    const { calls } = renderView();
+    const glm = await screen.findByRole('listitem', { name: 'GLM 5.3' });
+    const untested = within(glm).getByRole('button', { name: 'Untested: test to confirm capabilities' });
+    expect(untested.getAttribute('data-tip')).toBe('Test to confirm capabilities');
+    expect(within(screen.getByRole('listitem', { name: 'Kimi K3' })).queryByText('Untested')).toBeNull();
+    fireEvent.click(untested);
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/api/text-providers/p-cli/models/m-glm/test'))).toBe(true);
     });
   });
 

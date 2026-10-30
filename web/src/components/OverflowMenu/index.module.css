@@ -1,5 +1,6 @@
-/* Shell (portal root, surface, popover, sheet, backdrop and their motion)
-   lives in styles/menuShell.module.css; only sizes and rows are local. */
+/* The More (⋯) action menu shared by BatchOverflowMenu and the text-model
+   rows. Shell (portal root, surface, popover, sheet, backdrop and their
+   motion) lives in styles/menuShell.module.css; only sizes and rows are local. */
 .portalRoot {
   composes: portalRoot from '../../styles/menuShell.module.css';
 }

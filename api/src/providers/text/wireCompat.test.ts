@@ -1,11 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type {
-  JSONSchema7,
-  LanguageModelV4CallOptions,
-  LanguageModelV4FilePart,
-  LanguageModelV4StreamPart,
-  LanguageModelV4TextPart,
-} from '@ai-sdk/provider';
+import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import type { TextReasoningEffort, TextTokenField } from '@atelier/shared';
 import { LEGACY_SEED, type LegacySeedModel } from '../../db/textSeed';
 import type { TextModelRecord } from '../../db/textProviders';
@@ -27,8 +21,9 @@ import {
 } from '../../test/legacyChatBody';
 import { boundedFetch } from './fetch';
 import { classifyFinish } from './finish';
-import { OPENAI_COMPATIBLE_OPTIONS_KEY, openaiCompatibleAdapter } from './openaiCompatible';
+import { openaiCompatibleAdapter } from './openaiCompatible';
 import type { ResolvedProvider } from './protocol';
+import { textCallOptions } from './textModel';
 
 // Spec § 11.2 item 1: for every migrated model and every feature call shape,
 // the AI SDK adapter sends the body the legacy `buildChatBody` sent.
@@ -214,54 +209,16 @@ function legacyBody(model: TextModelRecord, shape: CallShape): Record<string, un
   );
 }
 
-type SdkResponseFormat = NonNullable<LanguageModelV4CallOptions['responseFormat']>;
-
-function sdkResponseFormat(format: ChatResponseFormat): { format: SdkResponseFormat; strict?: boolean } {
-  if (format === 'json_object') return { format: { type: 'json' } };
-  const { name, strict, schema, description } = format.json_schema;
-  return {
-    format: {
-      type: 'json',
-      schema: schema as JSONSchema7,
-      ...(typeof name === 'string' ? { name } : {}),
-      ...(typeof description === 'string' ? { description } : {}),
-    },
-    ...(typeof strict === 'boolean' ? { strict } : {}),
-  };
-}
-
-/** Call options as spec § 5.4 derives them from the model row and the task. */
+/** Call options from the production builder, for the feature call this shape stands for. */
 function callOptions(model: TextModelRecord, shape: CallShape): LanguageModelV4CallOptions {
-  // Empty levels: users cannot pick, the default is always sent (GPT's pin).
-  const effort = model.reasoningLevels.length === 0
-    ? model.reasoningDefault
-    : (shape.userEffort ?? model.reasoningDefault);
-  const format = model.structuredOutput === 'none' || shape.responseFormat === undefined
-    ? undefined
-    : sdkResponseFormat(shape.responseFormat);
-  const userParts: (LanguageModelV4TextPart | LanguageModelV4FilePart)[] = [
-    { type: 'text', text: shape.user },
-    ...imagesFor(model, shape).map((img): LanguageModelV4FilePart => ({
-      type: 'file',
-      mediaType: img.mime,
-      data: { type: 'data', data: img.bytes },
-    })),
-  ];
-  const compatibleOptions = {
-    ...(effort === null ? {} : { reasoningEffort: effort }),
-    ...(format?.strict === undefined ? {} : { strictJsonSchema: format.strict }),
-  };
-  return {
-    prompt: [
-      { role: 'system', content: shape.systemPrompt },
-      { role: 'user', content: userParts },
-    ],
-    maxOutputTokens: model.fixedOutputTokens ?? shape.defaults.max_completion_tokens,
-    ...(model.temperature === null ? {} : { temperature: model.temperature }),
-    ...(model.topP === null ? {} : { topP: model.topP }),
-    ...(format === undefined ? {} : { responseFormat: format.format }),
-    providerOptions: { [OPENAI_COMPATIBLE_OPTIONS_KEY]: compatibleOptions },
-  };
+  return textCallOptions(openaiCompatibleAdapter, model, {
+    maxOutputTokens: shape.defaults.max_completion_tokens,
+    systemPrompt: shape.systemPrompt,
+    user: shape.user,
+    ...(shape.images === undefined ? {} : { images: shape.images }),
+    ...(shape.responseFormat === undefined ? {} : { responseFormat: shape.responseFormat }),
+    ...(shape.userEffort === undefined ? {} : { userEffort: shape.userEffort }),
+  });
 }
 
 async function drain(stream: ReadableStream<LanguageModelV4StreamPart>): Promise<LanguageModelV4StreamPart[]> {

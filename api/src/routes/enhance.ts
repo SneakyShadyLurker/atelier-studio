@@ -5,7 +5,7 @@ import { withLlmSlot } from '../lifecycle/withLlmSlot';
 import { enhancePool } from '../orchestrator/llmAdmission';
 import type { CliproxyTextProvider, EnhanceCallOptions, EnhanceImageInput } from '../providers/cliproxyText';
 import { aiFillTextProviderForConfig, motionEnhanceTextProviderForConfig } from '../providers/textRouting';
-import { AI_FILL_DEFAULTS, MOTION_ENHANCE_DEFAULTS, textStreamDrainMs } from '../providers/cliproxyText.config';
+import { AI_FILL_DEFAULTS, legacyLatencyProfile, MOTION_ENHANCE_DEFAULTS, textStreamDrainMs } from '../providers/cliproxyText.config';
 import { videoDurationSeconds } from '@atelier/shared';
 import { motionEnhanceSystemPrompt } from '../prompts/motionEnhanceSystemPrompt';
 import { motionExtendEnhanceSystemPrompt } from '../prompts/motionExtendEnhanceSystemPrompt';
@@ -128,7 +128,7 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
   }
   // Server-owned hard ceiling on one enhance stream (the cloud upstream timeout,
   // longer for GLM). Admission control + slot lifecycle live in withLlmSlot.
-  const timeoutMs = textStreamDrainMs(textBackend, c.var.config.CLOUD_TIMEOUT_MS);
+  const timeoutMs = textStreamDrainMs(legacyLatencyProfile(textBackend), c.var.config.CLOUD_TIMEOUT_MS);
 
   return withLlmSlot(c, enhancePool, userId, 5, () => ({
     timeoutMs,

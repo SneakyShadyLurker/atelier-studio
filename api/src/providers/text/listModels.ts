@@ -17,10 +17,17 @@ export const LIST_MAX_BYTES = 1024 * 1024;
 /** Version header Anthropic expects; the same value `@ai-sdk/anthropic` sends. */
 const ANTHROPIC_VERSION = '2023-06-01';
 
+/** Why a list call failed, for logs and the availability poller. */
+export type TextListFailure = 'timeout' | 'too_large' | 'redirect' | 'transport' | 'http_status' | 'invalid_body';
+
 /** The list call failed; `message` is plain English and already redacted. */
 export class TextListError extends Error {
   override readonly name = 'TextListError';
-  constructor(message: string, readonly status: number | null = null) {
+  constructor(
+    message: string,
+    readonly status: number | null = null,
+    readonly reason: TextListFailure = status === null ? 'transport' : 'http_status',
+  ) {
     super(message);
   }
 }
@@ -141,7 +148,7 @@ export function extractHints(entry: unknown): TextModelHints | undefined {
 /** Reads `data` (OpenAI, Anthropic, OpenRouter, llama.cpp, Mistral) or `models` (LM Studio native). */
 export function parseModelList(body: unknown): ListedModel[] {
   const entries = isObject(body) ? (Array.isArray(body.data) ? body.data : body.models) : undefined;
-  if (!Array.isArray(entries)) throw new TextListError('The server answered, but not with a model list.');
+  if (!Array.isArray(entries)) throw new TextListError('The server answered, but not with a model list.', null, 'invalid_body');
   const seen = new Set<string>();
   const models: ListedModel[] = [];
   for (const entry of entries as unknown[]) {
@@ -206,10 +213,10 @@ export async function listModels(
     text = await response.text();
   } catch (err) {
     if (signal.aborted) throw err;
-    if (timeout.aborted) throw new TextListError(`The model list did not answer within ${Math.round(timeoutMs / 1000)} seconds.`);
-    if (err instanceof TextResponseTooLargeError) throw new TextListError('The model list is larger than 1 MiB.');
+    if (timeout.aborted) throw new TextListError(`The model list did not answer within ${Math.round(timeoutMs / 1000)} seconds.`, null, 'timeout');
+    if (err instanceof TextResponseTooLargeError) throw new TextListError('The model list is larger than 1 MiB.', null, 'too_large');
     if (isRedirectRefusal(err)) {
-      throw new TextListError('The server answered with a redirect. Enter the address it redirects to instead.');
+      throw new TextListError('The server answered with a redirect. Enter the address it redirects to instead.', null, 'redirect');
     }
     const detail = err instanceof Error ? err.message : String(err);
     throw new TextListError(`Could not reach the server: ${redactFor(provider.credential, detail)}`);
@@ -220,7 +227,7 @@ export async function listModels(
   try {
     body = JSON.parse(text);
   } catch {
-    throw new TextListError('The server answered, but the model list is not JSON.');
+    throw new TextListError('The server answered, but the model list is not JSON.', null, 'invalid_body');
   }
   return { models: parseModelList(body), listUnsupported: false };
 }

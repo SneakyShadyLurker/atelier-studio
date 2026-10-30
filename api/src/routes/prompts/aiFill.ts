@@ -22,6 +22,7 @@ import {
   aiFillBatchRouteTimeoutMs,
   aiFillPerAttemptTimeoutMs,
   aiFillRouteTimeoutMs,
+  legacyLatencyProfile,
 } from '../../providers/cliproxyText.config';
 import { parseBody } from '../_http';
 import { AiFillBatchRequestSchema, AiFillRequestSchema } from './aiFill.schema';
@@ -160,7 +161,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
     perSlotWordBudget,
   });
   const userContent = buildAiFillUserContent({ skeleton, instructions });
-  const perAttemptTimeoutMs = aiFillPerAttemptTimeoutMs(backend, config.AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
+  const perAttemptTimeoutMs = aiFillPerAttemptTimeoutMs(legacyLatencyProfile(backend), config.AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
   const timeoutMs = aiFillRouteTimeoutMs(
     [perAttemptTimeoutMs, perAttemptTimeoutMs],
     config.RESILIENT_MAX_BACKOFF_MS,
@@ -299,7 +300,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
   }));
   // The whole batch shares one image-model target, so one backend serves it.
   const backend = resolveAiFillBackend(c, modelId);
-  const timeoutMs = aiFillBatchRouteTimeoutMs(backend, config.RESILIENT_MAX_BACKOFF_MS);
+  const timeoutMs = aiFillBatchRouteTimeoutMs(legacyLatencyProfile(backend), config.RESILIENT_MAX_BACKOFF_MS);
 
   return withLlmSlot(c, enhancePool, userId, 2, () => ({
     timeoutMs,

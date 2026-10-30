@@ -11,7 +11,7 @@ const defaults = loadConfig({
 // with millisecond backoff, so retry paths stay fast. Fresh breakers per call.
 export function testTextPolicies(overrides: Partial<CliproxyTextPolicies> = {}): CliproxyTextPolicies {
   return {
-    ...cliproxyTextPolicies({ ...defaults, RESILIENT_INITIAL_BACKOFF_MS: 1, RESILIENT_MAX_BACKOFF_MS: 1 }, null),
+    ...cliproxyTextPolicies({ ...defaults, RESILIENT_INITIAL_BACKOFF_MS: 1, RESILIENT_MAX_BACKOFF_MS: 1 }, 'standard'),
     ...overrides,
   };
 }

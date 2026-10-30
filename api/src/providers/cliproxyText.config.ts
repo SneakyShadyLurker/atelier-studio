@@ -1,4 +1,4 @@
-import type { AiFillBackend, TextReasoningEffort } from '@atelier/shared';
+import type { AiFillBackend, TextLatencyProfile, TextReasoningEffort } from '@atelier/shared';
 import type { Config } from '../config';
 
 export const CLIPROXY_CHAT_PATH = '/v1/chat/completions';
@@ -43,25 +43,29 @@ export const GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS = 420_000;
 export const GLM_ABLITERATED_STREAM_DRAIN_MS = 2_700_000;
 export const GLM_ABLITERATED_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
-// `null` = a provider whose model is not a routed backend key (the caller passes
-// 'glm-abliterated' when its model is that backend's).
-const isSlowGlmBackend = (backend: AiFillBackend | null): boolean => backend === 'glm-abliterated';
+/**
+ * Legacy: the latency profile of a fixed backend key, for callers not yet on
+ * the model resolver. Only GLM was slow (spec § 6.2).
+ */
+export function legacyLatencyProfile(backend: AiFillBackend | null): TextLatencyProfile {
+  return backend === 'glm-abliterated' ? 'slow' : 'standard';
+}
 
 /** Per-attempt ai-fill timeout; the provider's policy and the route envelope both read it. */
-export function aiFillPerAttemptTimeoutMs(backend: AiFillBackend | null, configuredMs: number): number {
-  return isSlowGlmBackend(backend)
+export function aiFillPerAttemptTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
+  return profile === 'slow'
     ? Math.max(configuredMs, GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS)
     : configuredMs;
 }
 
 /** Drain budget of one enhance, storytelling-planner or brainstorm stream. */
-export function textStreamDrainMs(backend: AiFillBackend, cloudTimeoutMs: number): number {
-  return isSlowGlmBackend(backend) ? Math.max(cloudTimeoutMs, GLM_ABLITERATED_STREAM_DRAIN_MS) : cloudTimeoutMs;
+export function textStreamDrainMs(profile: TextLatencyProfile, cloudTimeoutMs: number): number {
+  return profile === 'slow' ? Math.max(cloudTimeoutMs, GLM_ABLITERATED_STREAM_DRAIN_MS) : cloudTimeoutMs;
 }
 
 /** Krea condense deadline; condense fails open, so a short one silently skips it. */
-export function kreaCondenseTimeoutMs(backend: AiFillBackend, configuredMs: number): number {
-  return isSlowGlmBackend(backend)
+export function kreaCondenseTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
+  return profile === 'slow'
     ? Math.max(configuredMs, GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS)
     : configuredMs;
 }
@@ -82,9 +86,9 @@ export function pinnedEffortMaxResponseBytes(
     : Math.max(configuredBytes, PINNED_EFFORT_MAX_RESPONSE_BYTES);
 }
 
-/** Raw SSE byte cap; GLM's long streams would exhaust the shared 1 MiB cap first. */
-export function textMaxResponseBytes(backend: AiFillBackend | null, configuredBytes: number): number {
-  return isSlowGlmBackend(backend) ? Math.max(configuredBytes, GLM_ABLITERATED_MAX_RESPONSE_BYTES) : configuredBytes;
+/** Raw SSE byte cap; slow models' long streams would exhaust the shared 1 MiB cap first. */
+export function textMaxResponseBytes(profile: TextLatencyProfile, configuredBytes: number): number {
+  return profile === 'slow' ? Math.max(configuredBytes, GLM_ABLITERATED_MAX_RESPONSE_BYTES) : configuredBytes;
 }
 
 // Generic prompt enhancement runs on Kimi K3 with low reasoning.
@@ -237,17 +241,17 @@ export function aiFillRouteTimeoutMs(
 export const AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS = 150_000;
 export const AI_FILL_BATCH_MAX_COMPLETION_TOKENS = 144_000;
 
-export function aiFillBatchPerAttemptTimeoutMs(backend: AiFillBackend | null): number {
-  return aiFillPerAttemptTimeoutMs(backend, AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS);
+export function aiFillBatchPerAttemptTimeoutMs(profile: TextLatencyProfile): number {
+  return aiFillPerAttemptTimeoutMs(profile, AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS);
 }
 
 export function aiFillBatchRouteTimeoutMs(
-  backend: AiFillBackend,
+  profile: TextLatencyProfile,
   maxBackoffMs: number,
 ): number {
   // The batch permits the initial call plus one format recovery call, and
   // each of those calls owns a complete retry policy.
-  const perAttemptMs = aiFillBatchPerAttemptTimeoutMs(backend);
+  const perAttemptMs = aiFillBatchPerAttemptTimeoutMs(profile);
   return aiFillRouteTimeoutMs([perAttemptMs, perAttemptMs], maxBackoffMs);
 }
 

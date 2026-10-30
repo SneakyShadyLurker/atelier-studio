@@ -11,6 +11,7 @@ import {
   aiFillBatchPerAttemptTimeoutMs,
   aiFillPerAttemptTimeoutMs,
   kreaCondenseTimeoutMs,
+  legacyLatencyProfile,
   textMaxResponseBytes,
   textStreamDrainMs,
   brainstormDefaults,
@@ -112,20 +113,20 @@ describe('brainstormRouteTimeoutMs', () => {
 describe('GLM deadlines', () => {
   test('extend every GLM deadline and byte cap without touching other backends', () => {
     for (const backend of ['kimi', 'mimo', 'grok', 'gemini-argon', 'deepseek-abliterated', 'gpt'] as const) {
-      expect(aiFillPerAttemptTimeoutMs(backend, 120_000)).toBe(120_000);
-      expect(aiFillBatchPerAttemptTimeoutMs(backend)).toBe(150_000);
-      expect(textStreamDrainMs(backend, 300_000)).toBe(300_000);
-      expect(kreaCondenseTimeoutMs(backend, 150_000)).toBe(150_000);
-      expect(textMaxResponseBytes(backend, 1024 * 1024)).toBe(1024 * 1024);
+      expect(aiFillPerAttemptTimeoutMs(legacyLatencyProfile(backend), 120_000)).toBe(120_000);
+      expect(aiFillBatchPerAttemptTimeoutMs(legacyLatencyProfile(backend))).toBe(150_000);
+      expect(textStreamDrainMs(legacyLatencyProfile(backend), 300_000)).toBe(300_000);
+      expect(kreaCondenseTimeoutMs(legacyLatencyProfile(backend), 150_000)).toBe(150_000);
+      expect(textMaxResponseBytes(legacyLatencyProfile(backend), 1024 * 1024)).toBe(1024 * 1024);
     }
-    expect(aiFillPerAttemptTimeoutMs(null, 120_000)).toBe(120_000);
-    expect(aiFillPerAttemptTimeoutMs('glm-abliterated', 120_000)).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
-    expect(aiFillBatchPerAttemptTimeoutMs('glm-abliterated')).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
-    expect(textStreamDrainMs('glm-abliterated', 300_000)).toBe(GLM_ABLITERATED_STREAM_DRAIN_MS);
-    expect(kreaCondenseTimeoutMs('glm-abliterated', 150_000)).toBe(GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS);
-    expect(textMaxResponseBytes('glm-abliterated', 1024 * 1024)).toBe(GLM_ABLITERATED_MAX_RESPONSE_BYTES);
+    expect(aiFillPerAttemptTimeoutMs(legacyLatencyProfile(null), 120_000)).toBe(120_000);
+    expect(aiFillPerAttemptTimeoutMs(legacyLatencyProfile('glm-abliterated'), 120_000)).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
+    expect(aiFillBatchPerAttemptTimeoutMs(legacyLatencyProfile('glm-abliterated'))).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
+    expect(textStreamDrainMs(legacyLatencyProfile('glm-abliterated'), 300_000)).toBe(GLM_ABLITERATED_STREAM_DRAIN_MS);
+    expect(kreaCondenseTimeoutMs(legacyLatencyProfile('glm-abliterated'), 150_000)).toBe(GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS);
+    expect(textMaxResponseBytes(legacyLatencyProfile('glm-abliterated'), 1024 * 1024)).toBe(GLM_ABLITERATED_MAX_RESPONSE_BYTES);
     // A configured value above the GLM floor still wins.
-    expect(textStreamDrainMs('glm-abliterated', GLM_ABLITERATED_STREAM_DRAIN_MS + 1))
+    expect(textStreamDrainMs(legacyLatencyProfile('glm-abliterated'), GLM_ABLITERATED_STREAM_DRAIN_MS + 1))
       .toBe(GLM_ABLITERATED_STREAM_DRAIN_MS + 1);
   });
 

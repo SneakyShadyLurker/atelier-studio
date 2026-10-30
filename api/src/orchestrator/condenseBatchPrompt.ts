@@ -9,7 +9,7 @@ import {
   KREA_PROMPT_CONDENSE_TRIGGER_WORDS,
   promptWordBudgetForModel,
 } from '../prompts/promptBudget';
-import { kreaCondenseTimeoutMs } from '../providers/cliproxyText.config';
+import { kreaCondenseTimeoutMs, legacyLatencyProfile } from '../providers/cliproxyText.config';
 import { aiFillTextProviderForConfig } from '../providers/textRouting';
 import { resolveTextBackend, resolveTextBackendEffort } from '../routing/textBackendPreference';
 import { enhancePool } from './llmAdmission';
@@ -73,7 +73,7 @@ export async function condenseBatchPrompt(
   } catch {
     return skip('error');
   }
-  const timeoutSignal = AbortSignal.timeout(kreaCondenseTimeoutMs(backend, deps.config.KREA_CONDENSE_TIMEOUT_MS));
+  const timeoutSignal = AbortSignal.timeout(kreaCondenseTimeoutMs(legacyLatencyProfile(backend), deps.config.KREA_CONDENSE_TIMEOUT_MS));
   const signal = AbortSignal.any([deps.signal, timeoutSignal]);
   let releaseEnhanceSlot: (() => void) | null = null;
 

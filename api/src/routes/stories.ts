@@ -28,7 +28,7 @@ import {
   storyPlannerUserContent,
   type StorySourceMode,
 } from '../prompts/storyPlannerSystemPrompt';
-import { STORY_PLANNER_DEFAULTS, textStreamDrainMs } from '../providers/cliproxyText.config';
+import { legacyLatencyProfile, STORY_PLANNER_DEFAULTS, textStreamDrainMs } from '../providers/cliproxyText.config';
 import type { EnhanceImageInput } from '../providers/cliproxyText';
 import {
   findModel,
@@ -200,7 +200,7 @@ export const storiesRoutes = new Hono<AppEnv>()
     const reasoningEffort = resolveTextBackendEffort(c.var.db, c.var.userId, 'storytelling', backend);
 
     return withLlmSlot(c, enhancePool, c.var.userId, 5, () => ({
-      timeoutMs: textStreamDrainMs(backend, c.var.config.CLOUD_TIMEOUT_MS),
+      timeoutMs: textStreamDrainMs(legacyLatencyProfile(backend), c.var.config.CLOUD_TIMEOUT_MS),
       disconnect: c.req.raw.signal,
       run: async ({ send, signal, clientDisconnected }) => {
         const emit = (frame: StoryPlanSseEvent): void => { send(frame.event, frame.data); };

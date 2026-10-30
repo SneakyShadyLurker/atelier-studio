@@ -1,5 +1,5 @@
 import type { Config } from '../config';
-import type { AiFillBackend, GptModerationNotice, TextReasoningEffort } from '@atelier/shared';
+import type { AiFillBackend, GptModerationNotice, TextLatencyProfile, TextReasoningEffort } from '@atelier/shared';
 import { GptModerationError, moderateGptInput, type GptModerationFailureKind } from '../routing/gptModeration';
 import { errorToRawString as detailOf, readBodyBounded as readBodyBoundedShared, tryParseJson } from './_http';
 import { frameDataText, readSseFrames, type ParsedSseFrame } from './_sse';
@@ -19,6 +19,7 @@ import {
   GPT_REASONING_EFFORT,
   GROK_SAMPLING,
   INFER_DIMENSIONS_DEFAULTS,
+  legacyLatencyProfile,
   MAX_DRAFT_RAW_BODY_CHARS,
   TEXT_BACKEND_DEFAULT_REASONING_EFFORT,
   brainstormDefaults,
@@ -123,13 +124,13 @@ export type CliproxyTextPolicyKnobs = Pick<
 >;
 
 /**
- * The single source of the text resilience policies. `deadlineBackend` keys
- * GLM's longer ai-fill attempts. Every policy shares the RESILIENT_*
+ * The single source of the text resilience policies. A 'slow' latency profile
+ * keys the longer ai-fill attempts. Every policy shares the RESILIENT_*
  * backoff and breaker knobs; each gets its own breaker instance.
  */
 export function cliproxyTextPolicies(
   knobs: CliproxyTextPolicyKnobs,
-  deadlineBackend: 'glm-abliterated' | null,
+  latencyProfile: TextLatencyProfile,
 ): CliproxyTextPolicies {
   const policy = (timeoutPerAttemptMs: number, maxAttempts: number, noTimeout = false): IPolicy => buildResilientPolicy({
     timeoutPerAttemptMs,
@@ -153,8 +154,8 @@ export function cliproxyTextPolicies(
     inferRetryGapsPolicy: policy(knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS, 1),
     // ai-fill: one retry on transient errors, retaining the historical
     // per-attempt ceiling as latency headroom.
-    aiFillPolicy: policy(aiFillPerAttemptTimeoutMs(deadlineBackend, knobs.AI_FILL_PER_ATTEMPT_TIMEOUT_MS), AI_FILL_MAX_ATTEMPTS),
-    aiFillBatchPolicy: policy(aiFillBatchPerAttemptTimeoutMs(deadlineBackend), AI_FILL_MAX_ATTEMPTS),
+    aiFillPolicy: policy(aiFillPerAttemptTimeoutMs(latencyProfile, knobs.AI_FILL_PER_ATTEMPT_TIMEOUT_MS), AI_FILL_MAX_ATTEMPTS),
+    aiFillBatchPolicy: policy(aiFillBatchPerAttemptTimeoutMs(latencyProfile), AI_FILL_MAX_ATTEMPTS),
   };
 }
 
@@ -300,7 +301,7 @@ export const inferResultFromErrorForTests = inferResultFromError;
 const IN_STREAM_TIMEOUT_RE = /timed?\s*out|deadline\s*exceeded|connection\s*reset/i;
 const TEXT_DETAIL_LOG_CAP = 2048;
 
-function safeTextDetail(detail: string): string {
+export function safeTextDetail(detail: string): string {
   const redacted = redactSecrets(detail);
   return redacted.length > TEXT_DETAIL_LOG_CAP
     ? `${redacted.slice(0, TEXT_DETAIL_LOG_CAP)}…[truncated]`
@@ -358,7 +359,7 @@ function moderationFailure(err: GptModerationError) {
   return { type: 'failed' as const, kind: err.kind, status: err.status, detail: err.message, moderation: err.moderation };
 }
 
-function inferResultFromError(err: unknown): InferResult {
+export function inferResultFromError(err: unknown): InferResult {
   if (err instanceof GptModerationError) return moderationFailure(err);
   if (err instanceof QuotaExhaustedError) {
     return {
@@ -392,7 +393,7 @@ function inferResultFromError(err: unknown): InferResult {
   return { type: 'failed', kind: 'permanent', status: null, detail: safeTextDetail(detailOf(err)) };
 }
 
-function draftResultFromError(err: unknown): Extract<DraftResult, { type: 'failed' }> {
+export function draftResultFromError(err: unknown): Extract<DraftResult, { type: 'failed' }> {
   if (err instanceof GptModerationError) return moderationFailure(err);
   if (err instanceof QuotaExhaustedError) {
     return {
@@ -411,7 +412,7 @@ function draftResultFromError(err: unknown): Extract<DraftResult, { type: 'faile
   return { type: 'failed', status: null, detail: safeTextDetail(detailOf(err)) };
 }
 
-function enhanceFailureChunk(err: unknown): EnhanceChunk {
+export function enhanceFailureChunk(err: unknown): EnhanceChunk {
   if (err instanceof GptModerationError) return moderationFailure(err);
   if (err instanceof QuotaExhaustedError) {
     return {
@@ -445,7 +446,7 @@ class CliproxyTextTooLargeError extends Error {
 }
 
 
-function parseDraftPayload(raw: string): DraftVariableListResponse | null {
+export function parseDraftPayload(raw: string): DraftVariableListResponse | null {
   const parsed = tryParseJson(sliceJsonObject(raw));
   if (typeof parsed !== 'object' || parsed === null) return null;
   const obj = parsed as { kind?: unknown; entries?: unknown; question?: unknown };
@@ -459,7 +460,7 @@ function parseDraftPayload(raw: string): DraftVariableListResponse | null {
   return null;
 }
 
-function draftBrief(input: DraftListProviderInput): string {
+export function draftBrief(input: DraftListProviderInput): string {
   const lines = [
     `List name: ${JSON.stringify(input.name)}`,
     `Existing values (do not repeat these): ${input.existing.length > 0 ? JSON.stringify(input.existing) : 'none'}`,
@@ -469,7 +470,7 @@ function draftBrief(input: DraftListProviderInput): string {
   return lines.join('\n');
 }
 
-function draftTemplateBrief(input: DraftTemplateProviderInput): string {
+export function draftTemplateBrief(input: DraftTemplateProviderInput): string {
   const parts: string[] = [];
   parts.push(`<name>${JSON.stringify(input.name)}</name>`);
   if (input.existingBody) {
@@ -529,7 +530,61 @@ function stripUnknownTokens(
   return { body: out, warnings };
 }
 
-interface ChatDefaults {
+/**
+ * Turns a draft-template answer into the result: parses the JSON (fences and
+ * prose tolerated), caps the body at MAX_DRAFT_RAW_BODY_CHARS and strips
+ * unknown tokens. `status` is the HTTP status reported on parse failures.
+ */
+export function draftTemplateResultFromContent(
+  content: string,
+  knownNames: ReadonlySet<string>,
+  status: number | null,
+): DraftTemplateResult {
+  const stripped = sliceJsonObject(content);
+  const parsed = tryParseJson(stripped);
+  if (!parsed || typeof parsed !== 'object') {
+    return { type: 'failed', status, detail: 'unparseable draft response' };
+  }
+
+  const kind = (parsed as { kind?: unknown }).kind;
+  if (kind === 'clarify') {
+    const q = (parsed as { question?: unknown }).question;
+    if (typeof q !== 'string' || !q.trim()) {
+      return { type: 'failed', status, detail: 'unparseable draft response' };
+    }
+    return { type: 'ok', payload: { kind: 'clarify', question: q.trim() } };
+  }
+  if (kind !== 'body') {
+    return { type: 'failed', status, detail: 'unparseable draft response' };
+  }
+
+  const rawBodyText = (parsed as { body?: unknown }).body;
+  if (typeof rawBodyText !== 'string') {
+    return { type: 'failed', status, detail: 'unparseable draft response' };
+  }
+  let bodyText: string = rawBodyText.replace(/\s+$/, '');
+
+  const truncationWarnings: string[] = [];
+  const codepoints = Array.from(bodyText);
+  if (codepoints.length > MAX_DRAFT_RAW_BODY_CHARS) {
+    bodyText = codepoints.slice(0, MAX_DRAFT_RAW_BODY_CHARS).join('');
+    // Strip a partial token if the cap landed inside an unclosed {{.
+    const lastClose = bodyText.lastIndexOf('}}');
+    const lastOpen = bodyText.lastIndexOf('{{');
+    if (lastOpen > lastClose) {
+      bodyText = bodyText.slice(0, lastOpen).replace(/\s+$/, '');
+    }
+    truncationWarnings.push('Body truncated at MAX_DRAFT_RAW_BODY_CHARS');
+  }
+
+  const { body: cleaned, warnings: stripWarnings } = stripUnknownTokens(bodyText, knownNames);
+  return {
+    type: 'ok',
+    payload: { kind: 'body', body: cleaned, warnings: [...truncationWarnings, ...stripWarnings] },
+  };
+}
+
+export interface ChatDefaults {
   reasoning_effort: string;
   verbosity: string;
   max_completion_tokens: number;
@@ -890,6 +945,149 @@ async function callWithPolicy<T>(
   }, outerSignal);
 }
 
+/**
+ * Splits a brainstorm answer into records and assembles each into an image
+ * prompt. `push` takes streamed content and returns the prompts completed so
+ * far; `finish` runs after a graceful terminal only and returns the remaining
+ * prompts plus the final done/failed chunk. A returned `failed` chunk is
+ * always last: the caller stops there.
+ */
+export interface BrainstormRecordAssembler {
+  push(content: string): BrainstormChunk[];
+  /** The requested count has been emitted. */
+  fulfilled(): boolean;
+  finish(): BrainstormChunk[];
+}
+
+export function createBrainstormRecordAssembler(
+  input: BrainstormCharactersInput,
+  logger: ProviderLogger,
+): BrainstormRecordAssembler {
+  let buffer = '';
+  let emitted = 0;
+  const deferredShortRecords: { fieldCount: number; text: string }[] = [];
+  // A record that is non-empty but holds only separators/whitespace has no
+  // usable field content; assembling it would emit a constraints-only prompt
+  // and count it toward done. Drop such records instead of promoting them.
+  const hasUsableContent = (record: string): boolean =>
+    record.split(BRAINSTORM_FIELD_SEPARATOR).some((field) => field.trim().length > 0);
+  const brainstormTarget = classifyImageModelTarget(input.modelId);
+  const toPromptChunk = (record: string, index: number): BrainstormChunk | null => {
+    const result = assembleBrainstormCharacterPrompt(record, brainstormTarget, input.layout, input.medium);
+    const refusal = isLikelyModelRefusal(record);
+    if (refusal) {
+      logger.warn({ event: 'brainstorm_output_rejected', cause: 'refusal', index }, 'brainstorm record rejected');
+      return {
+        type: 'failed',
+        kind: 'content-filter',
+        status: null,
+        detail: 'brainstorm output did not satisfy the prompt contract',
+      };
+    }
+    if (result.usedFallback) {
+      // Keep short records out of the stream while a conforming record may
+      // still arrive. If the cleanly-finished response contains no valid
+      // record at all, the complete prose is still a usable image prompt:
+      // assembleBrainstormCharacterPrompt has preserved it and appended the
+      // code-owned target constraints. Deferring avoids promoting a short
+      // preamble ahead of a later well-formed concept.
+      deferredShortRecords.push({ fieldCount: result.fieldCount, text: result.text });
+      return null;
+    }
+    if (result.fieldCount > 3) {
+      logger.info(
+        { event: 'brainstorm_output_merged', cause: 'extra-fields', fields: result.fieldCount, index },
+        'brainstorm record fields merged',
+      );
+    }
+    return { type: 'prompt', index, text: result.text };
+  };
+  const flushComplete = (out: BrainstormChunk[]): boolean => {
+    for (;;) {
+      if (emitted >= input.count) {
+        buffer = '';
+        return true;
+      }
+      const idx = buffer.indexOf(BRAINSTORM_RECORD_SEPARATOR);
+      if (idx === -1) return true;
+      const record = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + BRAINSTORM_RECORD_SEPARATOR.length);
+      if (hasUsableContent(record)) {
+        const chunk = toPromptChunk(record, emitted);
+        if (chunk === null) continue;
+        out.push(chunk);
+        if (chunk.type === 'failed') {
+          buffer = '';
+          return false;
+        }
+        emitted += 1;
+      }
+    }
+  };
+
+  return {
+    push(content) {
+      buffer += content;
+      const out: BrainstormChunk[] = [];
+      flushComplete(out);
+      return out;
+    },
+    fulfilled: () => emitted >= input.count,
+    finish() {
+      const out: BrainstormChunk[] = [];
+      if (!flushComplete(out)) return out;
+      // Models commonly omit the trailing separator after the FINAL prompt (they
+      // stop generating once the last concept is written), so a complete last
+      // record sits unterminated in the buffer. On graceful stream end (callers
+      // only get here after stop/[DONE]/fulfilled count; incomplete EOF and
+      // errors return early), emit that tail rather than silently dropping it.
+      // Without this, count=1 yields zero prompts presented as success.
+      const tail = buffer.trim();
+      if (emitted < input.count && hasUsableContent(tail)) {
+        const chunk = toPromptChunk(tail, emitted);
+        if (chunk !== null) {
+          out.push(chunk);
+          if (chunk.type === 'failed') return out;
+          emitted += 1;
+        }
+        buffer = '';
+      }
+      // Short records are recoverable only after a graceful terminal stream.
+      // Provider errors, aborts, response caps, content filters, and token-cap
+      // truncation all return early, so incomplete output can never reach this
+      // fallback. Prefer any well-formed record; salvage only when rejecting the
+      // short prose would otherwise turn a complete response into a hard failure.
+      if (emitted === 0 && deferredShortRecords.length > 0) {
+        for (const candidate of deferredShortRecords.slice(0, input.count)) {
+          logger.warn(
+            { event: 'brainstorm_output_salvaged', cause: 'short-record', fields: candidate.fieldCount, index: emitted },
+            'brainstorm short record salvaged',
+          );
+          out.push({ type: 'prompt', index: emitted, text: candidate.text });
+          emitted += 1;
+        }
+      } else {
+        for (const candidate of deferredShortRecords) {
+          logger.warn(
+            { event: 'brainstorm_output_rejected', cause: 'field-count-mismatch', fields: candidate.fieldCount },
+            'brainstorm record rejected',
+          );
+        }
+      }
+      // A terminal stream that produced zero prompts is a failure, not a silent
+      // done{count:0} — mirrors the enhance path's "ended without content" rule.
+      // An empty / refused-as-empty terminal still lands here; complete short
+      // prose has already been salvaged above.
+      if (emitted === 0) {
+        out.push({ type: 'failed', status: null, detail: 'stream ended without content' });
+        return out;
+      }
+      out.push({ type: 'done', count: emitted });
+      return out;
+    },
+  };
+}
+
 export function createCliproxyTextProvider(config: CliproxyTextProviderConfig & CliproxyTextPolicies): CliproxyTextProvider {
   const baseUrl = config.baseUrl.replace(/\/+$/, '');
   const inferMaxResponseBytes = config.inferMaxResponseBytes ?? config.maxResponseBytes;
@@ -1078,68 +1276,8 @@ export function createCliproxyTextProvider(config: CliproxyTextProviderConfig & 
         return;
       }
 
-      let buffer = '';
-      let emitted = 0;
+      const records = createBrainstormRecordAssembler(input, logger);
       let completed = false;
-      const deferredShortRecords: { fieldCount: number; text: string }[] = [];
-      // A record that is non-empty but holds only separators/whitespace has no
-      // usable field content; assembling it would emit a constraints-only prompt
-      // and count it toward done. Drop such records instead of promoting them.
-      const hasUsableContent = (record: string): boolean =>
-        record.split(BRAINSTORM_FIELD_SEPARATOR).some((field) => field.trim().length > 0);
-      const brainstormTarget = classifyImageModelTarget(input.modelId);
-      const toPromptChunk = (record: string, index: number): BrainstormChunk | null => {
-        const result = assembleBrainstormCharacterPrompt(record, brainstormTarget, input.layout, input.medium);
-        const refusal = isLikelyModelRefusal(record);
-        if (refusal) {
-          logger.warn({ event: 'brainstorm_output_rejected', cause: 'refusal', index }, 'brainstorm record rejected');
-          return {
-            type: 'failed',
-            kind: 'content-filter',
-            status: null,
-            detail: 'brainstorm output did not satisfy the prompt contract',
-          };
-        }
-        if (result.usedFallback) {
-          // Keep short records out of the stream while a conforming record may
-          // still arrive. If the cleanly-finished response contains no valid
-          // record at all, the complete prose is still a usable image prompt:
-          // assembleBrainstormCharacterPrompt has preserved it and appended the
-          // code-owned target constraints. Deferring avoids promoting a short
-          // preamble ahead of a later well-formed concept.
-          deferredShortRecords.push({ fieldCount: result.fieldCount, text: result.text });
-          return null;
-        }
-        if (result.fieldCount > 3) {
-          logger.info(
-            { event: 'brainstorm_output_merged', cause: 'extra-fields', fields: result.fieldCount, index },
-            'brainstorm record fields merged',
-          );
-        }
-        return { type: 'prompt', index, text: result.text };
-      };
-      const flushComplete = function* (): Generator<BrainstormChunk> {
-        for (;;) {
-          if (emitted >= input.count) {
-            buffer = '';
-            return;
-          }
-          const idx = buffer.indexOf(BRAINSTORM_RECORD_SEPARATOR);
-          if (idx === -1) return;
-          const record = buffer.slice(0, idx).trim();
-          buffer = buffer.slice(idx + BRAINSTORM_RECORD_SEPARATOR.length);
-          if (hasUsableContent(record)) {
-            const chunk = toPromptChunk(record, emitted);
-            if (chunk === null) continue;
-            yield chunk;
-            if (chunk.type === 'failed') {
-              buffer = '';
-              return;
-            }
-            emitted += 1;
-          }
-        }
-      };
 
       try {
         for await (const frame of readSseFrames(
@@ -1173,18 +1311,17 @@ export function createCliproxyTextProvider(config: CliproxyTextProviderConfig & 
           }
           const content = decoded.content;
           if (typeof content === 'string' && content.length > 0) {
-            buffer += content;
-            for (const c of flushComplete()) {
+            for (const c of records.push(content)) {
               yield c;
               if (c.type === 'failed') return;
             }
           }
           // Preserve the existing full-count length exception: complete records
           // have already satisfied the request and no partial tail is needed.
-          if (decoded.finishReason === 'length' && emitted >= input.count) { completed = true; break; }
+          if (decoded.finishReason === 'length' && records.fulfilled()) { completed = true; break; }
           const finishError = chatFinishFailure(decoded.finishReason);
           if (finishError) throw finishError;
-          if (decoded.finishReason === 'stop' || emitted >= input.count) { completed = true; break; }
+          if (decoded.finishReason === 'stop' || records.fulfilled()) { completed = true; break; }
         }
         if (!completed) throw incompleteChatStream();
       } catch (error) {
@@ -1209,57 +1346,7 @@ export function createCliproxyTextProvider(config: CliproxyTextProviderConfig & 
         return;
       }
 
-      for (const c of flushComplete()) {
-        yield c;
-        if (c.type === 'failed') return;
-      }
-      // Models commonly omit the trailing separator after the FINAL prompt (they
-      // stop generating once the last concept is written), so a complete last
-      // record sits unterminated in the buffer. On graceful stream end (we only
-      // reach here after stop/[DONE]/fulfilled count; incomplete EOF and errors
-      // return early above), emit that tail rather than silently dropping it.
-      // Without this, count=1 yields zero prompts presented as success.
-      const tail = buffer.trim();
-      if (emitted < input.count && hasUsableContent(tail)) {
-        const chunk = toPromptChunk(tail, emitted);
-        if (chunk !== null) {
-          yield chunk;
-          if (chunk.type === 'failed') return;
-          emitted += 1;
-        }
-        buffer = '';
-      }
-      // Short records are recoverable only after a graceful terminal stream.
-      // Provider errors, aborts, response caps, content filters, and token-cap
-      // truncation all return above, so incomplete output can never reach this
-      // fallback. Prefer any well-formed record; salvage only when rejecting the
-      // short prose would otherwise turn a complete response into a hard failure.
-      if (emitted === 0 && deferredShortRecords.length > 0) {
-        for (const candidate of deferredShortRecords.slice(0, input.count)) {
-          logger.warn(
-            { event: 'brainstorm_output_salvaged', cause: 'short-record', fields: candidate.fieldCount, index: emitted },
-            'brainstorm short record salvaged',
-          );
-          yield { type: 'prompt', index: emitted, text: candidate.text };
-          emitted += 1;
-        }
-      } else {
-        for (const candidate of deferredShortRecords) {
-          logger.warn(
-            { event: 'brainstorm_output_rejected', cause: 'field-count-mismatch', fields: candidate.fieldCount },
-            'brainstorm record rejected',
-          );
-        }
-      }
-      // A terminal stream that produced zero prompts is a failure, not a silent
-      // done{count:0} — mirrors the enhance path's "ended without content" rule.
-      // An empty / refused-as-empty terminal still lands here; complete short
-      // prose has already been salvaged above.
-      if (emitted === 0) {
-        yield { type: 'failed', status: null, detail: 'stream ended without content' };
-        return;
-      }
-      yield { type: 'done', count: emitted };
+      yield* records.finish();
     },
 
     async draftList(input: DraftListProviderInput, signal: AbortSignal): Promise<DraftResult> {
@@ -1347,48 +1434,7 @@ export function createCliproxyTextProvider(config: CliproxyTextProviderConfig & 
       if (typeof content !== 'string') {
         return { type: 'failed', status: response.status, detail: 'unparseable draft response' };
       }
-      const stripped = sliceJsonObject(content);
-      const parsed = tryParseJson(stripped);
-      if (!parsed || typeof parsed !== 'object') {
-        return { type: 'failed', status: response.status, detail: 'unparseable draft response' };
-      }
-
-      const kind = (parsed as { kind?: unknown }).kind;
-      if (kind === 'clarify') {
-        const q = (parsed as { question?: unknown }).question;
-        if (typeof q !== 'string' || !q.trim()) {
-          return { type: 'failed', status: response.status, detail: 'unparseable draft response' };
-        }
-        return { type: 'ok', payload: { kind: 'clarify', question: q.trim() } };
-      }
-      if (kind !== 'body') {
-        return { type: 'failed', status: response.status, detail: 'unparseable draft response' };
-      }
-
-      const rawBodyText = (parsed as { body?: unknown }).body;
-      if (typeof rawBodyText !== 'string') {
-        return { type: 'failed', status: response.status, detail: 'unparseable draft response' };
-      }
-      let bodyText: string = rawBodyText.replace(/\s+$/, '');
-
-      const truncationWarnings: string[] = [];
-      const codepoints = Array.from(bodyText);
-      if (codepoints.length > MAX_DRAFT_RAW_BODY_CHARS) {
-        bodyText = codepoints.slice(0, MAX_DRAFT_RAW_BODY_CHARS).join('');
-        // Strip a partial token if the cap landed inside an unclosed {{.
-        const lastClose = bodyText.lastIndexOf('}}');
-        const lastOpen = bodyText.lastIndexOf('{{');
-        if (lastOpen > lastClose) {
-          bodyText = bodyText.slice(0, lastOpen).replace(/\s+$/, '');
-        }
-        truncationWarnings.push('Body truncated at MAX_DRAFT_RAW_BODY_CHARS');
-      }
-
-      const { body: cleaned, warnings: stripWarnings } = stripUnknownTokens(bodyText, knownNames);
-      return {
-        type: 'ok',
-        payload: { kind: 'body', body: cleaned, warnings: [...truncationWarnings, ...stripWarnings] },
-      };
+      return draftTemplateResultFromContent(content, knownNames, response.status);
     },
 
     async aiFill(input: AiFillProviderInput, signal: AbortSignal): Promise<AiFillResult> {
@@ -1525,23 +1571,23 @@ export function setCliproxyTextProviderForTests(p: TestCliproxyTextProvider | nu
 // only the backend (and its configured model id) varies between the default and
 // explicit feature overrides.
 function cliproxyTextOptions(config: Config, backend: AiFillBackend): CliproxyTextProviderConfig & CliproxyTextPolicies {
-  // GLM's deadlines and byte caps are keyed by its backend, the same key the
-  // router selects, so the provider and route keys stay in step.
-  const deadlineBackend = backend === 'glm-abliterated' ? backend : null;
+  // GLM's deadlines and byte caps follow its legacy latency profile, the same
+  // mapping the routes use, so the provider and route deadlines stay in step.
+  const latencyProfile = legacyLatencyProfile(backend);
   return {
     baseUrl: config.CLIPROXY_BASE_URL,
     token: config.CLIPROXY_TOKEN,
     openrouterApiKey: config.OPENROUTER_API_KEY,
     model: textBackendModels(config)[backend],
     backend,
-    maxResponseBytes: textMaxResponseBytes(deadlineBackend, config.CLIPROXY_TEXT_MAX_RESPONSE_BYTES),
+    maxResponseBytes: textMaxResponseBytes(latencyProfile, config.CLIPROXY_TEXT_MAX_RESPONSE_BYTES),
     inferMaxResponseBytes: config.CLIPROXY_TEXT_INFER_MAX_RESPONSE_BYTES,
-    brainstormMaxResponseBytes: textMaxResponseBytes(deadlineBackend, config.BRAINSTORM_MAX_RESPONSE_BYTES),
+    brainstormMaxResponseBytes: textMaxResponseBytes(latencyProfile, config.BRAINSTORM_MAX_RESPONSE_BYTES),
     quotaMinRetryAfterMs: config.QUOTA_MIN_RETRY_AFTER_MS,
     enhanceOpenTimeoutMs: config.ENHANCE_OPEN_TIMEOUT_MS,
     brainstormOpenTimeoutMs: config.BRAINSTORM_OPEN_TIMEOUT_MS,
     logger: loggerForConfig(config),
-    ...cliproxyTextPolicies(config, deadlineBackend),
+    ...cliproxyTextPolicies(config, latencyProfile),
   };
 }
 

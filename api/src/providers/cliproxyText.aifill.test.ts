@@ -10,6 +10,7 @@ import {
   aiFillBatchRouteTimeoutMs,
   aiFillPolicyEnvelopeMs,
   aiFillRouteTimeoutMs,
+  legacyLatencyProfile,
 } from './cliproxyText.config';
 import { testTextPolicies } from '../test/textPolicies';
 
@@ -158,14 +159,14 @@ describe('aiFill retry policy', () => {
 
     // The initial call plus one format-recovery call.
     const policyCallCount = 2;
-    const timeoutMs = aiFillBatchRouteTimeoutMs('kimi', 8_000);
+    const timeoutMs = aiFillBatchRouteTimeoutMs(legacyLatencyProfile('kimi'), 8_000);
     expect(timeoutMs).toBe(
       policyEnvelopeMs * policyCallCount + AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
     );
     expect(timeoutMs).toBeGreaterThan(300_000);
 
     // A GLM batch budgets its own longer per-attempt timeout for both calls.
-    expect(aiFillBatchRouteTimeoutMs('glm-abliterated', 8_000)).toBe(
+    expect(aiFillBatchRouteTimeoutMs(legacyLatencyProfile('glm-abliterated'), 8_000)).toBe(
       2 * aiFillPolicyEnvelopeMs(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS, 8_000) + AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
     );
 

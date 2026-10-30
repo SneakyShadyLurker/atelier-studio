@@ -12,7 +12,7 @@ import { failedToSseError } from '../lifecycle/llm-error';
 import { classifyImageModelTarget } from '../prompts/gptImagePhrasing';
 import { resolveTextBackend, resolveTextBackendEffort } from '../routing/textBackendPreference';
 import { isSunburstModel } from '../prompts/gptSystemPrompt';
-import { brainstormRouteTimeoutMs, textStreamDrainMs } from '../providers/cliproxyText.config';
+import { brainstormRouteTimeoutMs, legacyLatencyProfile, textStreamDrainMs } from '../providers/cliproxyText.config';
 
 const SAFE_ERROR_MESSAGE = "Couldn't brainstorm characters. Please try again.";
 
@@ -56,7 +56,7 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
   // backend groups is added on top so a failover that finally opens is not cut
   // off mid-stream by the route deadline. The failover partner is never GLM.
   const timeoutMs = brainstormRouteTimeoutMs(
-    textStreamDrainMs(backend, c.var.config.CLOUD_TIMEOUT_MS),
+    textStreamDrainMs(legacyLatencyProfile(backend), c.var.config.CLOUD_TIMEOUT_MS),
     c.var.config.BRAINSTORM_OPEN_TIMEOUT_MS,
     c.var.config.RESILIENT_MAX_ATTEMPTS,
     c.var.config.RESILIENT_MAX_BACKOFF_MS,

@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { PromptLibraryResponse, RescueBundle, TemplateConflict, VariableList } from '@atelier/shared';
-import { setCliproxyTextProviderForTests } from '../providers/cliproxyText';
 import { parseInferDone, parseSse, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 
-afterEach(() => { setCliproxyTextProviderForTests(null); });
+afterEach(() => { setTextModelProviderForTests(null); });
 
 function req<T>(value: T | undefined, message = 'expected value'): T {
   if (value === undefined) throw new Error(message);
@@ -45,7 +45,7 @@ async function seedPromptUser(
 }
 
 test('infer -> apply tags Orc=Warhammer / Orion=Star Trek; Human stays wildcard', async () => {
-  setCliproxyTextProviderForTests({
+  setTextModelProviderForTests({
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
     draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -57,7 +57,7 @@ test('infer -> apply tags Orc=Warhammer / Orion=Star Trek; Human stays wildcard'
     inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: [] }),
     rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
   });
-  const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   const userId = 'alice';
   await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc', 'Orion', 'Human'] }] });
   const inferRes = await app.fetch(new Request('http://local/api/prompts/dimensions/infer', {
@@ -137,7 +137,7 @@ test('rescue + apply: single failing template gets bridged and shipped end-to-en
     value: 'business consultant',
     tags: [{ dimName: 'Genre', label: 'Modern' }],
   };
-  setCliproxyTextProviderForTests({
+  setTextModelProviderForTests({
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
     draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -145,7 +145,7 @@ test('rescue + apply: single failing template gets bridged and shipped end-to-en
     inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: inferOps }),
     rescueDimension: () => Promise.resolve({ type: 'ok', ops: [rescueOp] }),
   });
-  const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   const userId = 'alice';
   await seedPromptUser(app, userId, {
     lists: [
@@ -230,7 +230,7 @@ test('rescue one template + acceptUnsatisfiable another: partial rescue applies 
     value: 'business consultant',
     tags: [{ dimName: 'Genre', label: 'Modern' }],
   };
-  setCliproxyTextProviderForTests({
+  setTextModelProviderForTests({
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
     draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -238,7 +238,7 @@ test('rescue one template + acceptUnsatisfiable another: partial rescue applies 
     inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: inferOps }),
     rescueDimension: () => Promise.resolve({ type: 'ok', ops: [rescueOp] }),
   });
-  const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   const userId = 'alice';
   await seedPromptUser(app, userId, {
     lists: [
@@ -336,7 +336,7 @@ test('rescue + apply: defensive cross-template guard exercised on addOption resc
     value: 'business consultant',
     tags: [{ dimName: 'Genre', label: 'Modern' }],
   };
-  setCliproxyTextProviderForTests({
+  setTextModelProviderForTests({
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
     draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -344,7 +344,7 @@ test('rescue + apply: defensive cross-template guard exercised on addOption resc
     inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: inferOps }),
     rescueDimension: () => Promise.resolve({ type: 'ok', ops: [rescueOp] }),
   });
-  const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   const userId = 'alice';
   await seedPromptUser(app, userId, {
     lists: [

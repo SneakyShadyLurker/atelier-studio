@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
-import { setCliproxyTextProviderForTests, type RescueDimensionArgs, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type RescueDimensionArgs, type TestCliproxyTextProvider } from '../providers/cliproxyText';
 import { parseInferDone, parseSse, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 import { putProposal, takeProposalForUser } from '../prompts/proposalStore';
 import { snapshotHash, templatesDigest, toLibrarySnapshot } from '../prompts/librarySnapshot';
 import type { RawBundle } from '../prompts/inferTypes';
 
-afterEach(() => { setCliproxyTextProviderForTests(null); });
+afterEach(() => { setTextModelProviderForTests(null); });
 
 function req<T>(value: T | undefined, message = 'expected value'): T {
   if (value === undefined) throw new Error(message);
@@ -141,7 +142,7 @@ async function setupUnsatisfiableScene(
     { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Fantasy' }] },
     { op: 'assignOptionTags', listIdx: 1, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Modern' }] },
   ];
-  setCliproxyTextProviderForTests(fakeProvider({
+  setTextModelProviderForTests(fakeProvider({
     infer: ops,
     ...(rescueOp ? { rescueOp } : {}),
     captured,
@@ -170,7 +171,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
     [{ dimName: '', label: 'Modern' }]]) {
     test(`rejects an invalid whole rescue tag bag ${JSON.stringify(tags)} and commits spent state`, async () => {
       const { app, userId, proposalId } = await setupUnsatisfiableScene(
-        () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+        () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
         { op: 'addOption', listIdx: 0, value: 'bridge', tags },
       );
       const response = await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
@@ -194,7 +195,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
 
   for (const supplier of ['create', 'add', 'rename', 'merge'] as const) {
     test(`accepting only rescue closes over its non-culprit ${supplier} supplier with actual keys`, async () => {
-      const { app, db } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+      const { app, db } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
       await seedPromptUser(app, 'alice', { lists: [{ name: 'Roles', options: ['paladin'] }, { name: 'Outfits', options: ['bikini'] }] });
       await createTemplate(app, 'alice', 'Scene', '{{var::Roles}} {{var::Outfits}}');
       const seedDim = (name: string, labels: string[]) => {
@@ -224,7 +225,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
       const proposalId = putProposal({ userId: 'alice', rawBundles, baseSnapshotHash: snapshotHash(snap),
         baseTemplateHash: templatesDigest(before.templates), expiresAt: Date.now() + 600_000,
         conflicts: [{ templateName: 'Scene', reason: 'disjoint Genre', culpritBundleKeys: ['actual culprit'], culpritKind: 'local', rescueAttempted: false }] });
-      setCliproxyTextProviderForTests(fakeProvider({ infer: [], rescueOp: { op: 'addOption', listIdx: 0,
+      setTextModelProviderForTests(fakeProvider({ infer: [], rescueOp: { op: 'addOption', listIdx: 0,
         value: 'bridge', tags: [{ dimName: 'Genre', label: 'Modern' }, { dimName: 'Aux', label: 'x' }] } }));
       const frames = await parseSse(await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
         method: 'POST', headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' },
@@ -260,7 +261,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
       tags: [{ dimName: 'Genre', label: 'Modern' }],
     };
     const { app, userId, proposalId, conflictTemplate, captured } = await setupUnsatisfiableScene(
-      () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+      () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
       rescueOp,
     );
     const libBefore = await getLibrary(app, userId);
@@ -306,7 +307,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
       tags: [{ dimName: 'Genre', label: 'Modern' }],
     };
     const { app, userId, proposalId, conflictTemplate, rescueCallCount } = await setupUnsatisfiableScene(
-      () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+      () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
       rescueOp,
     );
     const first = await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
@@ -343,7 +344,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
       tags: [{ dimName: 'Genre', label: 'Fantasy' }],
     };
     const { app, userId, proposalId, conflictTemplate } = await setupUnsatisfiableScene(
-      () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+      () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
       rescueOp,
     );
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
@@ -392,8 +393,8 @@ describe('POST /api/prompts/dimensions/rescue', () => {
     const rescueOp: RawInferOp = {
       op: 'addOption', listIdx: 0, value: 'consultant', tags: [{ dimName: 'Genre', label: 'Modern' }],
     };
-    setCliproxyTextProviderForTests(fakeProvider({ infer: ops, rescueOp, captured, rescueCallCount }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    setTextModelProviderForTests(fakeProvider({ infer: ops, rescueOp, captured, rescueCallCount }));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedPromptUser(app, userId, {
       lists: [
         { name: 'Roles', options: ['paladin'] },
@@ -443,8 +444,8 @@ describe('POST /api/prompts/dimensions/rescue', () => {
     const rescueOp: RawInferOp = {
       op: 'addOption', listIdx: 0, value: 'consultant', tags: [{ dimName: 'Genre', label: 'Modern' }],
     };
-    setCliproxyTextProviderForTests(fakeProvider({ infer: ops, rescueOp, captured, rescueCallCount }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    setTextModelProviderForTests(fakeProvider({ infer: ops, rescueOp, captured, rescueCallCount }));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedPromptUser(app, userId, {
       lists: [
         { name: 'Roles', options: ['paladin'] },
@@ -484,7 +485,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
       tags: [{ dimName: 'Genre', label: 'Modern' }],
     };
     const { app, userId, proposalId, conflictTemplate } = await setupUnsatisfiableScene(
-      () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+      () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
       rescueOp,
     );
     // Mutate the library: add a brand-new dimension to shift the snapshot hash.
@@ -518,7 +519,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
       tags: [{ dimName: 'Genre', label: 'Modern' }],
     };
     const { app, userId, proposalId, conflictTemplate } = await setupUnsatisfiableScene(
-      () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+      () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
       rescueOp,
     );
     // Find the template id and PATCH its body. The body change must not
@@ -559,7 +560,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
       tags: [{ dimName: 'Genre', label: 'Modern' }],
     };
     const { app, userId, proposalId, conflictTemplate } = await setupUnsatisfiableScene(
-      () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+      () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
       rescueOp,
       {
         extraLists: [{ name: 'Era', options: ['1980s'] }],
@@ -585,7 +586,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
     // returns { ok: false, reason: 'no-target' }. The route surfaces this as
     // SSE rescue-failed { reason: 'no-target' } and the cap is consumed.
     const userId = 'alice';
-    setCliproxyTextProviderForTests(fakeProvider({
+    setTextModelProviderForTests(fakeProvider({
       infer: [
         { op: 'createDimension', name: 'D1', tags: ['x', 'y'] },
         { op: 'createDimension', name: 'D2', tags: ['p', 'q'] },
@@ -606,7 +607,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
         tags: [{ dimName: 'D1', label: 'x' }],
       },
     }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedPromptUser(app, userId, {
       lists: [
         { name: 'A', options: ['a'] },
@@ -644,7 +645,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
       tags: [{ dimName: 'Genre', label: 'Modern' }],
     };
     const { app, userId, proposalId, conflictTemplate } = await setupUnsatisfiableScene(
-      () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+      () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
       rescueOp,
     );
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
@@ -663,7 +664,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
   });
 
   test('rescue-failed when provider returns upstream error', async () => {
-    setCliproxyTextProviderForTests(fakeProvider({
+    setTextModelProviderForTests(fakeProvider({
       infer: [
         { op: 'createDimension', name: 'Genre', tags: ['Fantasy', 'Modern'] },
         { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Fantasy' }] },
@@ -671,7 +672,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
       ],
       rescueFailed: { kind: 'transient', detail: 'upstream 503' },
     }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     await seedPromptUser(app, userId, {
       lists: [
@@ -698,7 +699,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
 
   test('404 on unknown templateName for a valid proposal', async () => {
     const { app, userId, proposalId } = await setupUnsatisfiableScene(
-      () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+      () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
     );
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
       method: 'POST',
@@ -715,7 +716,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
   test('pre-stream rescue validation failures do not keep proposals protected from cap eviction', async () => {
     const { MAX_PROPOSALS_PER_USER } = await import('../prompts/proposalStore');
     const { app, userId, proposalId } = await setupUnsatisfiableScene(
-      () => testRuntime({ PROMPT_LIBRARY_USERS: 'alice' }),
+      () => testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' }),
     );
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
       method: 'POST',
@@ -732,7 +733,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
   });
 
   test('404 on unknown proposalId', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
       method: 'POST',
       headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' },
@@ -742,7 +743,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
   });
 
   test('non-allowlisted user gets 404 (gate)', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
       method: 'POST',
       headers: { 'Remote-User': 'stranger', 'Content-Type': 'application/json' },

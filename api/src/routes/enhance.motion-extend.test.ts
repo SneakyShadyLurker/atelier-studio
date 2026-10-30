@@ -1,20 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import { MAX_PROMPT_CHARS } from '@atelier/shared';
 import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import {
-  setCliproxyTextProviderForTests,
   type EnhanceChunk,
   type EnhanceImageInput,
   type TestCliproxyTextProvider,
 } from '../providers/cliproxyText';
-import { textBackendModels } from '../providers/cliproxyText.config';
 import { writeAtomic } from '../storage/files';
-import { parseSse, restoreFetch, testRuntime, testConfig } from '../test/helpers';
+import { parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds } from '../test/helpers';
 import { EnhancePromptRequestSchema } from './enhance.schema';
 
-const TEXT_MODELS = textBackendModels(testConfig());
+const TEXT_MODELS = legacyTextUpstreamIds();
 
 const VIDEO_ON = {
+  seedLegacyText: true,
   COMFYUI_BASE_URL: 'http://127.0.0.1:1',
   VIDEO_MODELS_ENABLED: 'true',
   LOCAL_MODELS_USERS: 'test',
@@ -108,12 +108,12 @@ describe('enhance-prompt h3-motion extend branch', () => {
   afterEach(() => {
     restoreFetch();
     resetLlmAdmissionForTests();
-    setCliproxyTextProviderForTests(null);
+    setTextModelProviderForTests(null);
   });
 
   test('Kimi receives the handoff image and previous motion prompt', async () => {
     const capture: Capture = {};
-    setCliproxyTextProviderForTests(stub(capture));
+    setTextModelProviderForTests(stub(capture));
     const runtime = testRuntime(VIDEO_ON);
     const handoffUploadId = await seedHandoffUpload(runtime, await validPng());
 
@@ -145,7 +145,7 @@ describe('enhance-prompt h3-motion extend branch', () => {
         headers: { 'Content-Type': 'text/event-stream' },
       }));
     }) as typeof fetch;
-    setCliproxyTextProviderForTests(null);
+    setTextModelProviderForTests(null);
     const runtime = testRuntime({ ...VIDEO_ON, CLIPROXY_TOKEN: 'sk-test' });
     const handoffUploadId = await seedHandoffUpload(runtime, await validPng());
 
@@ -171,7 +171,7 @@ describe('enhance-prompt h3-motion extend branch', () => {
 
   test('the handoff image always reaches Kimi on extend', async () => {
     const capture: Capture = {};
-    setCliproxyTextProviderForTests(stub(capture));
+    setTextModelProviderForTests(stub(capture));
     const runtime = testRuntime(VIDEO_ON);
     const handoffUploadId = await seedHandoffUpload(runtime, await validPng());
 
@@ -190,7 +190,7 @@ describe('enhance-prompt h3-motion extend branch', () => {
 
   test('an unreadable Kimi handoff degrades to text-only context', async () => {
     const capture: Capture = {};
-    setCliproxyTextProviderForTests(stub(capture));
+    setTextModelProviderForTests(stub(capture));
     const runtime = testRuntime({ ...VIDEO_ON, LOG_LEVEL: 'info' });
     const handoffUploadId = await seedHandoffUpload(runtime, new Uint8Array([0, 1, 2, 3]));
 

@@ -18,6 +18,7 @@ export const BrainstormCharactersRequestSchema = z.object({
   layout: z.enum(BRAINSTORM_LAYOUTS).optional(),
   medium: z.enum(BRAINSTORM_MEDIA).optional(),
   modelId: z.string().trim().min(1).check(maxUtf16Length(200)),
+  textModelId: z.string().trim().min(1).check(maxUtf16Length(200)).optional(),
   textBackend: z.enum(BRAINSTORM_TEXT_BACKENDS).optional(),
   variationSeed: z.number().int().nonnegative().max(BRAINSTORM_VARIATION_SEED_MAX).optional(),
 });

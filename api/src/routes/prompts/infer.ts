@@ -6,7 +6,7 @@ import { parseBody, parseJsonText } from '../_http';
 import { ApplyDimensions, InferRequestBody } from '../prompts.schema';
 import { diagnoseLibrary } from '../../prompts/libraryDiagnosis';
 import { buildInferDimensionsSystemPrompt } from '../../prompts/inferDimensionsSystemPrompt';
-import { imageTextProvider } from '../../routing/imageTextProvider';
+import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
 import { toLibrarySnapshot, snapshotHash, templatesDigest } from '../../prompts/librarySnapshot';
 import { resolveProposalForInference } from '../../prompts/dimensionResolver';
 import { orderedOperations } from '../../prompts/bundleOperations';
@@ -63,13 +63,16 @@ export const inferRoutes = new Hono<AppEnv>()
     const config = c.var.config;
     const logger = c.var.logger;
     const userId = c.var.userId;
+    const resolved = c.var.text.resolve({ userId, task: 'infer', ...imageModelRouting(config, modelId) });
+    if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
+    const textModel = resolved.model;
     return withLlmSlot(c, inferPool, userId, 5, () => {
     const lib = promptLibrary(c.var.db, userId);
     const priorDiagnosis = diagnoseLibrary(lib);
     const systemPrompt = buildInferDimensionsSystemPrompt({ priorDiagnosis });
     const snap = toLibrarySnapshot(lib);
     const snapshotJson = JSON.stringify(snap);
-    const provider = imageTextProvider(config, modelId);
+    const provider = textProviderForResolved(config, c.var.text, textModel);
     return {
       timeoutMs: config.INFER_TOTAL_BUDGET_MS,
       disconnect: c.req.raw.signal,

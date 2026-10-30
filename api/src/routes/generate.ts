@@ -69,6 +69,7 @@ function depsFromContext(c: Context<AppEnv>): DispatchDeps {
     logger: c.var.logger,
     keyStore: c.var.keyStore,
     healthSnapshot: c.var.healthSnapshot,
+    text: c.var.text,
   };
 }
 

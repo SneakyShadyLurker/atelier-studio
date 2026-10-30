@@ -1,19 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import { allowJevForProviderTests, resetJevForProviderTests } from '../test/jev-fixture';
 import { MAX_PROMPT_CHARS } from '@atelier/shared';
-import { parseSse, restoreFetch, testRuntime, testConfig } from '../test/helpers';
+import { addTestTextModel, legacyTextModelId, parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds, pickLegacyTextModel } from '../test/helpers';
 import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { writeAtomic } from '../storage/files';
-import { setCliproxyTextProviderForTests, type TestCliproxyTextProvider, type EnhanceChunk } from '../providers/cliproxyText';
+import { type TestCliproxyTextProvider, type EnhanceChunk } from '../providers/cliproxyText';
 import {
   ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
 } from '../prompts/enhanceSystemPrompt';
 import { SUNBURST_ENHANCE_SYSTEM_PROMPT } from '../prompts/gptSystemPrompt';
-import { writeTextBackendOverride } from '../routing/textBackendPreference';
-import { textBackendModels } from '../providers/cliproxyText.config';
 
-const TEXT_MODELS = textBackendModels(testConfig());
+const TEXT_MODELS = legacyTextUpstreamIds();
 
 // The api workspace runs every *.test.ts in one bun process; sibling suites
 // (google/byok/keys/etc.) mock `globalThis.fetch`, and routes/keys.test.ts
@@ -88,12 +87,12 @@ async function seedUpload(
 
 describe('POST /api/enhance-prompt', () => {
   test('400 on empty prompt', async () => {
-    const { app } = testRuntime();
+    const { app } = testRuntime({ seedLegacyText: true });
     expect((await post(app, '   ')).status).toBe(400);
   });
 
   test('400 on oversized prompt', async () => {
-    const { app } = testRuntime();
+    const { app } = testRuntime({ seedLegacyText: true });
     expect((await post(app, 'x'.repeat(MAX_PROMPT_CHARS + 1))).status).toBe(400);
   });
 
@@ -104,7 +103,7 @@ describe('POST /api/enhance-prompt', () => {
       JSON.stringify({ choices: [{ index: 0, delta: { content: 'cat' }, finish_reason: 'stop' }] }),
       '[DONE]',
     ]));
-    const { app } = testRuntime({ CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
+    const { app } = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
     const res = await post(app, 'cat');
     expect(res.headers.get('content-type')).toContain('text/event-stream');
     const events = await parseSse(res);
@@ -126,6 +125,7 @@ describe('POST /api/enhance-prompt', () => {
       ]);
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       CLIPROXY_BASE_URL: upstream,
       CLIPROXY_TOKEN: 'sk-x',
       MAX_CONCURRENT_LLM_ENHANCE_PER_USER: '1',
@@ -156,7 +156,7 @@ describe('POST /api/enhance-prompt', () => {
 
   test('upstream non-200 emits a single safe error event and logs detail', async () => {
     const upstream = serve(() => new Response(JSON.stringify({ error: { message: 'leaky upstream detail' } }), { status: 500 }));
-    const { app, logs } = testRuntime({ CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x', LOG_LEVEL: 'info' });
+    const { app, logs } = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x', LOG_LEVEL: 'info' });
     const events = await parseSse(await post(app, 'cat'));
     expect(events).toHaveLength(1);
     expect(events[0]?.event).toBe('error');
@@ -170,6 +170,7 @@ describe('POST /api/enhance-prompt', () => {
       JSON.stringify({ choices: [{ index: 0, delta: { content: huge }, finish_reason: null }] }),
     ]));
     const { app } = testRuntime({
+      seedLegacyText: true,
       CLIPROXY_BASE_URL: upstream,
       CLIPROXY_TOKEN: 'sk-x',
       CLIPROXY_TEXT_MAX_RESPONSE_BYTES: '256',
@@ -185,6 +186,7 @@ describe('POST /api/enhance-prompt', () => {
       return chatSse([JSON.stringify({ choices: [{ index: 0, delta: { content: 'too late' }, finish_reason: 'stop' }] }), '[DONE]']);
     });
     const { app, logs } = testRuntime({
+      seedLegacyText: true,
       CLIPROXY_BASE_URL: upstream,
       CLIPROXY_TOKEN: 'sk-x',
       CLOUD_TIMEOUT_MS: '60',
@@ -199,7 +201,7 @@ describe('POST /api/enhance-prompt', () => {
   });
 
   test('400 on non-uuid refImageIds', async () => {
-    const { app } = testRuntime();
+    const { app } = testRuntime({ seedLegacyText: true });
     const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Remote-User': 'test' },
@@ -209,7 +211,7 @@ describe('POST /api/enhance-prompt', () => {
   });
 
   test('400 on duplicate refImageIds', async () => {
-    const { app } = testRuntime();
+    const { app } = testRuntime({ seedLegacyText: true });
     const id = crypto.randomUUID();
     const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
@@ -220,7 +222,7 @@ describe('POST /api/enhance-prompt', () => {
   });
 
   test('400 on more than 10 refImageIds', async () => {
-    const { app } = testRuntime();
+    const { app } = testRuntime({ seedLegacyText: true });
     const ids = Array.from({ length: 11 }, () => crypto.randomUUID());
     const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
@@ -235,7 +237,7 @@ describe('POST /api/enhance-prompt', () => {
       JSON.stringify({ choices: [{ index: 0, delta: { content: 'cat' }, finish_reason: 'stop' }] }),
       '[DONE]',
     ]));
-    const { app } = testRuntime({ CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
+    const { app } = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
     const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Remote-User': 'test' },
@@ -254,7 +256,7 @@ describe('POST /api/enhance-prompt', () => {
         '[DONE]',
       ]);
     });
-    const runtime = testRuntime({ CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
+    const runtime = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
     const uploadId = await seedUpload(runtime, 'test');
     const res = await runtime.app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
@@ -281,7 +283,7 @@ describe('POST /api/enhance-prompt', () => {
         '[DONE]',
       ]);
     });
-    const runtime = testRuntime({ CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
+    const runtime = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
     const idA = await seedUpload(runtime, 'test');
     const idB = await seedUpload(runtime, 'test');
     const res = await runtime.app.fetch(new Request('http://local/api/enhance-prompt', {
@@ -297,7 +299,7 @@ describe('POST /api/enhance-prompt', () => {
 
   test('400 when a refImageId is not owned by the user', async () => {
     const upstream = serve(() => chatSse(['[DONE]']));
-    const runtime = testRuntime({ CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
+    const runtime = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
     await seedUpload(runtime, 'alice');
     const bobId = await seedUpload(runtime, 'bob');
     const res = await runtime.app.fetch(new Request('http://local/api/enhance-prompt', {
@@ -310,7 +312,7 @@ describe('POST /api/enhance-prompt', () => {
 
   test('400 when the ref byte-total exceeds MAX_REF_BYTES_PER_BATCH', async () => {
     const upstream = serve(() => chatSse(['[DONE]']));
-    const runtime = testRuntime({ CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x', MAX_REF_BYTES_PER_BATCH: '10' });
+    const runtime = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x', MAX_REF_BYTES_PER_BATCH: '10' });
     const uploadId = await seedUpload(runtime, 'test'); // PNG > 10 bytes
     const res = await runtime.app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
@@ -324,6 +326,7 @@ describe('POST /api/enhance-prompt', () => {
     const pending = streamingChat();
     const upstream = serve(() => pending.response);
     const runtime = testRuntime({
+      seedLegacyText: true,
       CLIPROXY_BASE_URL: upstream,
       CLIPROXY_TOKEN: 'sk-x',
       MAX_CONCURRENT_LLM_ENHANCE_PER_USER: '1',
@@ -352,7 +355,7 @@ describe('POST /api/enhance-prompt', () => {
       JSON.stringify({ choices: [{ index: 0, delta: { content: 'unused' }, finish_reason: 'stop' }] }),
       '[DONE]',
     ]));
-    const runtime = testRuntime({ CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
+    const runtime = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x' });
     const uploadId = await seedUpload(runtime, 'test', { corrupt: true });
     const res = await runtime.app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
@@ -368,7 +371,7 @@ describe('POST /api/enhance-prompt', () => {
       await Bun.sleep(1000);
       return chatSse([JSON.stringify({ choices: [{ index: 0, delta: { content: 'late' }, finish_reason: 'stop' }] }), '[DONE]']);
     });
-    const { app, logs } = testRuntime({ CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x', LOG_LEVEL: 'info' });
+    const { app, logs } = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x', LOG_LEVEL: 'info' });
     const ctrl = new AbortController();
     // app.fetch resolves with the streaming Response immediately; the abort
     // propagates via c.req.raw.signal to the upstream fetch + the route loop.
@@ -390,7 +393,7 @@ describe('POST /api/enhance-prompt', () => {
 
 describe('POST /api/enhance-prompt — quota error surfacing', () => {
   afterEach(() => {
-    setCliproxyTextProviderForTests(null);
+    setTextModelProviderForTests(null);
     resetLlmAdmissionForTests();
   });
 
@@ -418,8 +421,8 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
   }
 
   test('quota failure on enhance → quota-exhausted code + retryAfterSeconds', async () => {
-    setCliproxyTextProviderForTests(fakeEnhanceProvider(quotaChunk()));
-    const { app } = testRuntime();
+    setTextModelProviderForTests(fakeEnhanceProvider(quotaChunk()));
+    const { app } = testRuntime({ seedLegacyText: true });
     const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Remote-User': 'test' },
@@ -435,7 +438,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
 
   test('modelId routes the system prompt: gpt-image and Krea get variants, gemini / missing keep provider default', async () => {
     const seen: (string | undefined)[] = [];
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       async *enhance(_prompt, _images, _signal, systemPrompt) {
         seen.push(systemPrompt);
         await Promise.resolve();
@@ -448,7 +451,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
       inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: [] }),
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'x' }),
     });
-    const { app } = testRuntime({ LOCAL_MODELS_USERS: 'test' });
+    const { app } = testRuntime({ seedLegacyText: true, LOCAL_MODELS_USERS: 'test' });
     const call = async (body: Record<string, unknown>): Promise<void> => {
       const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
         method: 'POST',
@@ -474,7 +477,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
   // target sends NO system prompt so the provider substitutes its own default.
   test('an enhance override to Grok sends the same prompts as every other backend', async () => {
     const seen: (string | undefined)[] = [];
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       async *enhance(_prompt, _images, _signal, systemPrompt) {
         seen.push(systemPrompt);
         await Promise.resolve();
@@ -487,8 +490,8 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
       inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: [] }),
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'x' }),
     });
-    const { app, db } = testRuntime({ LOCAL_MODELS_USERS: 'test' });
-    writeTextBackendOverride(db, 'test', 'enhance', 'grok');
+    const { app, db } = testRuntime({ seedLegacyText: true, LOCAL_MODELS_USERS: 'test' });
+    pickLegacyTextModel(db, 'test', 'enhance', 'grok');
     const call = async (body: Record<string, unknown>): Promise<void> => {
       const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
         method: 'POST',
@@ -518,8 +521,8 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
       }));
     }) as unknown as typeof fetch;
     try {
-      const { app, db } = testRuntime({ LOCAL_MODELS_USERS: 'test' });
-      writeTextBackendOverride(db, 'test', 'enhance', 'gemini-argon');
+      const { app, db } = testRuntime({ seedLegacyText: true, LOCAL_MODELS_USERS: 'test' });
+      pickLegacyTextModel(db, 'test', 'enhance', 'gemini-argon');
       const call = async (body: Record<string, unknown>): Promise<void> => {
         const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
           method: 'POST',
@@ -550,7 +553,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
   // non-gpt target still sends NO system prompt, not a named default.
   test('an enhance override to Kimi leaves the non-gpt system prompt undefined', async () => {
     const seen: (string | undefined)[] = [];
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       async *enhance(_prompt, _images, _signal, systemPrompt) {
         seen.push(systemPrompt);
         await Promise.resolve();
@@ -563,8 +566,8 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
       inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: [] }),
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'x' }),
     });
-    const { app, db } = testRuntime({ LOCAL_MODELS_USERS: 'test' });
-    writeTextBackendOverride(db, 'test', 'enhance', 'kimi');
+    const { app, db } = testRuntime({ seedLegacyText: true, LOCAL_MODELS_USERS: 'test' });
+    pickLegacyTextModel(db, 'test', 'enhance', 'kimi');
     const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Remote-User': 'test' },
@@ -576,7 +579,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
 
   test('a pinned enhance effort reaches the provider only for its pinned backend', async () => {
     const efforts: unknown[] = [];
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       async *enhance(_prompt, _images, _signal, _systemPrompt, opts) {
         efforts.push(opts?.reasoningEffort);
         await Promise.resolve();
@@ -589,8 +592,8 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
       inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: [] }),
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'x' }),
     });
-    const { app, db } = testRuntime({ LOCAL_MODELS_USERS: 'test' });
-    writeTextBackendOverride(db, 'test', 'enhance', 'kimi', 'max');
+    const { app, db } = testRuntime({ seedLegacyText: true, LOCAL_MODELS_USERS: 'test' });
+    pickLegacyTextModel(db, 'test', 'enhance', 'kimi', 'max');
     const call = async (modelId: string): Promise<void> => {
       await parseSse(await app.fetch(new Request('http://local/api/enhance-prompt', {
         method: 'POST',
@@ -614,6 +617,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
       ]);
     });
     const runtime = testRuntime({
+      seedLegacyText: true,
       CLIPROXY_BASE_URL: upstream,
       CLIPROXY_TOKEN: 'sk-x',
       LOCAL_MODELS_USERS: 'test',
@@ -677,6 +681,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
       ]);
     });
     const runtime = testRuntime({
+      seedLegacyText: true,
       CLIPROXY_BASE_URL: upstream,
       CLIPROXY_TOKEN: 'sk-x',
       LOCAL_MODELS_USERS: 'test',
@@ -690,9 +695,9 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
       }));
       expect((await parseSse(res)).at(-1)?.event).toBe('done');
     };
-    writeTextBackendOverride(runtime.db, 'test', 'enhance', 'mimo');
+    pickLegacyTextModel(runtime.db, 'test', 'enhance', 'mimo');
     await call('portrait with a reference', [uploadId]);
-    writeTextBackendOverride(runtime.db, 'test', 'enhance', 'deepseek-abliterated');
+    pickLegacyTextModel(runtime.db, 'test', 'enhance', 'deepseek-abliterated');
     await call('portrait with a reference', [uploadId]);
     await call('portrait without references');
 
@@ -715,8 +720,8 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
   });
 
   test('non-quota provider failure on enhance → provider-error code', async () => {
-    setCliproxyTextProviderForTests(fakeEnhanceProvider(providerErrorChunk()));
-    const { app } = testRuntime();
+    setTextModelProviderForTests(fakeEnhanceProvider(providerErrorChunk()));
+    const { app } = testRuntime({ seedLegacyText: true });
     const res = await app.fetch(new Request('http://local/api/enhance-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Remote-User': 'test' },
@@ -726,5 +731,47 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
     expect(events.map((e) => e.event)).toEqual(['error']);
     const err = events[0]?.data as { code?: string };
     expect(err.code).toBe('provider-error');
+  });
+});
+
+describe('enhance text model routing failures', () => {
+  function postEnhance(app: ReturnType<typeof testRuntime>['app'], body: Record<string, unknown>): Promise<Response> {
+    return Promise.resolve(app.fetch(new Request('http://local/api/enhance-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Remote-User': 'test' },
+      body: JSON.stringify(body),
+    })));
+  }
+
+  test('no text model → 409 TEXT_MODEL_NOT_CONFIGURED', async () => {
+    const { app } = testRuntime();
+    const res = await postEnhance(app, { prompt: 'a cat' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: 'No text model is set up. An admin can add one under Text models.',
+      code: 'TEXT_MODEL_NOT_CONFIGURED',
+    });
+  });
+
+  test('reference images with only text-only models → 409 TEXT_MODEL_NO_VISION', async () => {
+    const runtime = testRuntime();
+    const model = await addTestTextModel(runtime.text.store, { modelId: 'text-only', vision: false });
+    runtime.text.store.setDefault('default', model.id);
+    const res = await postEnhance(runtime.app, { prompt: 'a cat', refImageIds: [crypto.randomUUID()] });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: 'None of the available text models accepts images. Remove the reference images or ask an admin to enable image input on a model.',
+      code: 'TEXT_MODEL_NO_VISION',
+    });
+    // Without images the same model serves the call.
+    expect((await postEnhance(runtime.app, { prompt: 'a cat' })).status).toBe(200);
+  });
+
+  test('a turned-off locked writer → 409 TEXT_MODEL_UNAVAILABLE', async () => {
+    const runtime = testRuntime({ seedLegacyText: true });
+    runtime.text.store.updateModel(legacyTextModelId(runtime.db, 'gpt'), { enabled: false });
+    const res = await postEnhance(runtime.app, { prompt: 'a cat', modelId: 'gpt-image-2.5-sunburst' });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe('TEXT_MODEL_UNAVAILABLE');
   });
 });

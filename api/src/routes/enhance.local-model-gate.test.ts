@@ -1,20 +1,20 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { parseSse, restoreFetch, testRuntime, testConfig } from '../test/helpers';
+import { setTextModelProviderForTests } from '../providers/text/registry';
+import { parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds } from '../test/helpers';
 import {
-  setCliproxyTextProviderForTests,
   type EnhanceChunk,
   type TestCliproxyTextProvider,
 } from '../providers/cliproxyText';
-import { textBackendModels } from '../providers/cliproxyText.config';
 import {
   ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
   MOSS_ENHANCE_SYSTEM_PROMPT,
 } from '../prompts/enhanceSystemPrompt';
 
-const TEXT_MODELS = textBackendModels(testConfig());
+const TEXT_MODELS = legacyTextUpstreamIds();
 
 const VIDEO_ON = {
+  seedLegacyText: true,
   COMFYUI_BASE_URL: 'http://127.0.0.1:1',
   VIDEO_MODELS_ENABLED: 'true',
   LOCAL_MODELS_USERS: 'alice',
@@ -82,13 +82,13 @@ function postEnhance(
 
 afterEach(async () => {
   restoreFetch();
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   await Promise.all(servers.splice(0).map((server) => server.stop(true)));
 });
 
 describe('POST /api/enhance-prompt local-model allowlist', () => {
   test('a non-listed user cannot reach h3-motion through a registered local id', async () => {
-    setCliproxyTextProviderForTests(provider());
+    setTextModelProviderForTests(provider());
     const { app } = testRuntime(VIDEO_ON);
 
     const local = await postEnhance(app, 'bob', 'minimax-h3-i2v');

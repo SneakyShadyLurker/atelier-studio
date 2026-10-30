@@ -3,7 +3,7 @@ import type { AppEnv } from '../../server-env';
 import { ensureUser } from '../../db/users';
 import { reorderOwned } from '../../db/reorder';
 import type { DraftTemplateResult } from '../../providers/cliproxyText';
-import { imageTextProvider } from '../../routing/imageTextProvider';
+import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
 import { failedToSseError } from '../../lifecycle/llm-error';
 import { libraryOverviewForUser } from './libraryOverviewDb';
 import { draftPool } from '../../orchestrator/llmAdmission';
@@ -125,9 +125,11 @@ export const templatesRoutes = new Hono<AppEnv>()
     const overview = libraryOverviewForUser(c.var.db, c.var.userId);
 
     const SAFE = "Couldn't draft the template. Please try again.";
-    const provider = imageTextProvider(c.var.config, parsed.value.modelId);
     const logger = c.var.logger;
     const userId = c.var.userId;
+    const resolved = c.var.text.resolve({ userId, task: 'template-draft', ...imageModelRouting(c.var.config, parsed.value.modelId) });
+    if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
+    const provider = textProviderForResolved(c.var.config, c.var.text, resolved.model);
     // SSE (not single-shot JSON): the upstream LLM call can outlive the
     // Cloudflare edge's ~100s idle cutoff, which would sever a plain-JSON
     // response with a silent 502. The shared helper emits a 15s :keepalive

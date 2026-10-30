@@ -1,14 +1,14 @@
 import { afterEach, expect, mock, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import { generateEvents, jsonRequest, parseSse, testRuntime } from '../test/helpers';
 import { setJevSystemOneProviderForTests } from '../providers/jevSystemOne';
-import { setCliproxyTextProviderForTests } from '../providers/cliproxyText';
 import type { GptModerationCategory } from '@atelier/shared';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = originalFetch;
   setJevSystemOneProviderForTests(null);
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
 });
 
 function blockCategories(categories: readonly GptModerationCategory[]) {
@@ -31,7 +31,7 @@ test.each([
   [['sexual-age', 'graphic-violence'], 'sexual-age-and-violence'],
   [['nudity', 'sexual-age', 'graphic-violence'], 'sexual-age-and-violence'],
 ] as const)('image categories %j survive SSE, history, replay and SQLite', async (categories, reason) => {
-  const runtime = testRuntime({ ENABLE_MOCK_PROVIDER: 'false' });
+  const runtime = testRuntime({ seedLegacyText: true, ENABLE_MOCK_PROVIDER: 'false' });
   const network = blockCategories(categories);
   const frames = await generateEvents(runtime.app, {
     prompt: 'moderation fixture', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1, seed: 1,
@@ -50,7 +50,7 @@ test.each([
 });
 
 test('enhance reports the local block as a terminal SSE error before any GPT call', async () => {
-  const runtime = testRuntime({ ENABLE_MOCK_PROVIDER: 'false' });
+  const runtime = testRuntime({ seedLegacyText: true, ENABLE_MOCK_PROVIDER: 'false' });
   const network = blockCategories(['nudity']);
   const response = await jsonRequest(runtime.app, '/api/enhance-prompt', { prompt: 'moderation fixture', modelId: 'gpt-image-2.5-sunburst' });
   const frames = await parseSse(response);

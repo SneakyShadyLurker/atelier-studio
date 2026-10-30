@@ -42,6 +42,7 @@ function kickQueuesAfterQueuedCancellation(c: Context<AppEnv>): void {
     logger: c.var.logger,
     keyStore: c.var.keyStore,
     healthSnapshot: c.var.healthSnapshot,
+    text: c.var.text,
   });
 }
 

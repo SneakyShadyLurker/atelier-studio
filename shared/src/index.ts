@@ -280,6 +280,12 @@ export const API_ERROR_CODES = [
   // The request carried the previous account's session scope (account switch
   // behind the edge). The web locks the session and reloads.
   'SESSION_CHANGED',
+  // Text-model routing (409): no model is set up for the call, none that is
+  // available accepts its images, or the image model's locked prompt writer
+  // cannot serve it. The envelope's `error` carries the plain-English copy.
+  'TEXT_MODEL_NOT_CONFIGURED',
+  'TEXT_MODEL_NO_VISION',
+  'TEXT_MODEL_UNAVAILABLE',
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -1382,13 +1388,24 @@ export interface ModelStepsPutRequest {
   readonly steps: number | null;
 }
 
+/**
+ * Advisory leading ai-fill frame naming the text model serving the fill.
+ * `backend` is the migrated row's legacy key, present only for the seven
+ * migrated models while the web still reads it.
+ */
+export interface AiFillBackendFrame {
+  readonly modelId: string;
+  readonly label: string;
+  readonly backend?: AiFillBackend;
+}
+
 export type AiFillSseEvent =
-  | { event: 'backend'; data: { backend: AiFillBackend } }
+  | { event: 'backend'; data: AiFillBackendFrame }
   | { event: 'result'; data: { prompt: string; fills: readonly string[] } }
   | { event: 'error'; data: { message: string; code?: string } };
 
 export type AiFillBatchSseEvent =
-  | { event: 'backend'; data: { backend: AiFillBackend } }
+  | { event: 'backend'; data: AiFillBackendFrame }
   | {
       event: 'result';
       data: {
@@ -1431,7 +1448,12 @@ export interface BrainstormCharactersRequest {
   readonly medium?: BrainstormMedium;
   /** Target image model id — tunes phrasing; the composer renders against it. */
   readonly modelId: string;
-  /** Pin the writing LLM. Default: kimi (GPT-6.1 Sol for Sunburst); every other backend is pin-only. */
+  /**
+   * Pin the writing model by text model row id (an enabled model). A locked
+   * prompt writer for the image model still wins. Omitted = routed.
+   */
+  readonly textModelId?: string;
+  /** Legacy pin by migrated backend key; maps to the row with that legacy key. Prefer `textModelId`. */
   readonly textBackend?: BrainstormTextBackend;
   /** Optional 32-bit entropy source for a meaningfully different take of the same brief. */
   readonly variationSeed?: number;

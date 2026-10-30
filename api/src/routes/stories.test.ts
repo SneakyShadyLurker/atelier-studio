@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { Database } from 'bun:sqlite';
 import type { ModelAvailability } from '@atelier/shared';
 import { adoptStandaloneBatch, appendSegment } from '../db/sequences';
@@ -11,11 +12,9 @@ import {
   resetLlmAdmissionForTests,
 } from '../orchestrator/llmAdmission';
 import type { EnhanceChunk, TestCliproxyTextProvider } from '../providers/cliproxyText';
-import { setCliproxyTextProviderForTests } from '../providers/cliproxyText';
-import { writeTextBackendOverride } from '../routing/textBackendPreference';
 import { writeAtomic } from '../storage/files';
 import { grayCardPng } from '../test/image-fixtures';
-import { parseSse, testRuntime } from '../test/helpers';
+import { parseSse, testRuntime, pickLegacyTextModel } from '../test/helpers';
 import * as queue from '../orchestrator/queue';
 import {
   configureStoryDriver,
@@ -24,6 +23,7 @@ import {
 } from '../orchestrator/storyDriver';
 
 const VIDEO_ON = {
+  seedLegacyText: true,
   VIDEO_MODELS_ENABLED: 'true',
   LOCAL_MODELS_USERS: 'alice',
 };
@@ -90,6 +90,7 @@ function configureIdleDriver(runtime: ReturnType<typeof testRuntime>): void {
     db: runtime.db,
     config: runtime.config,
     logger: runtime.logger,
+    text: runtime.text,
     kickLocalQueue: () => undefined,
   });
 }
@@ -189,7 +190,7 @@ async function seedExtensionSequence(
 afterEach(async () => {
   await waitForStoryDriverIdle();
   resetStoryDriverForTests();
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   resetLlmAdmissionForTests();
   queue.resetQueueForTests();
 });
@@ -202,7 +203,7 @@ describe('story routes', () => {
     let resume = (): void => undefined;
     const gate = new Promise<void>((resolve) => { resume = resolve; });
     const base = fakeProvider(validPlan());
-    setCliproxyTextProviderForTests({ ...base, async *enhance(...args) {
+    setTextModelProviderForTests({ ...base, async *enhance(...args) {
       if (args[3]?.includes('story planner')) { planned += 1; await gate; }
       yield* base.enhance(...args);
     } });
@@ -238,7 +239,7 @@ describe('story routes', () => {
     const gate = new Promise<void>((resolve) => { resume = resolve; });
     const base = fakeProvider(validPlan());
     let writerCalls = 0;
-    setCliproxyTextProviderForTests({ ...base, async *enhance(...args) {
+    setTextModelProviderForTests({ ...base, async *enhance(...args) {
       if (args[3]?.includes('story planner')) { entered(); await gate; }
       else writerCalls += 1;
       yield* base.enhance(...args);
@@ -272,7 +273,7 @@ describe('story routes', () => {
   });
 
   test('both routes are leak-safe when video is disabled or local models are gated', async () => {
-    const disabled = testRuntime({ LOCAL_MODELS_USERS: 'alice' });
+    const disabled = testRuntime({ seedLegacyText: true, LOCAL_MODELS_USERS: 'alice' });
     const missingStory = crypto.randomUUID();
     expect((await postStory(disabled, { outline: 'x', ratio: '16:9' })).status).toBe(404);
     expect((await cancelStory(disabled, missingStory)).status).toBe(404);
@@ -283,7 +284,7 @@ describe('story routes', () => {
   });
 
   test('plans a t2v story, inserts rows, and submits segment one queued', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(validPlan()));
+    setTextModelProviderForTests(fakeProvider(validPlan()));
     const runtime = testRuntime({ ...VIDEO_ON, availability });
     configureIdleDriver(runtime);
     const response = await postStory(runtime, { outline: 'A short arc', ratio: '16:9' });
@@ -311,7 +312,7 @@ describe('story routes', () => {
   test('the planner call carries the storytelling pin effort', async () => {
     const plannerEfforts: unknown[] = [];
     const base = fakeProvider(validPlan());
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...base,
       enhance(prompt, images, signal, systemPrompt, opts) {
         if (systemPrompt?.includes('story planner')) plannerEfforts.push(opts?.reasoningEffort);
@@ -320,14 +321,14 @@ describe('story routes', () => {
     });
     const runtime = testRuntime({ ...VIDEO_ON, availability });
     configureIdleDriver(runtime);
-    writeTextBackendOverride(runtime.db, 'alice', 'storytelling', 'grok', 'high');
+    pickLegacyTextModel(runtime.db, 'alice', 'storytelling', 'grok', 'high');
     await parseSse(await postStory(runtime, { outline: 'A short arc', ratio: '16:9' }));
     await waitForStoryDriverIdle();
     expect(plannerEfforts).toEqual(['high']);
   });
 
   test('snaps planner durations onto the supported frame grid', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(validPlan([130, 350])));
+    setTextModelProviderForTests(fakeProvider(validPlan([130, 350])));
     const runtime = testRuntime({ ...VIDEO_ON, availability });
     configureIdleDriver(runtime);
     const frames = await parseSse(await postStory(runtime, { outline: 'Arc', ratio: '16:9' }));
@@ -338,7 +339,7 @@ describe('story routes', () => {
   });
 
   test('returns an error frame and inserts nothing when too few beats remain', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(validPlan([124])));
+    setTextModelProviderForTests(fakeProvider(validPlan([124])));
     const runtime = testRuntime({ ...VIDEO_ON, availability });
     configureIdleDriver(runtime);
     const frames = await parseSse(await postStory(runtime, { outline: 'Arc', ratio: '16:9' }));
@@ -372,7 +373,7 @@ describe('story routes', () => {
 
   test('rejects planning when an extension sequence has fewer than two slots left', async () => {
     let providerCalls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider(validPlan()),
       async *enhance() {
         await Promise.resolve();
@@ -398,7 +399,7 @@ describe('story routes', () => {
     const runtime = testRuntime({ ...VIDEO_ON, availability });
     const source = await seedExtensionSequence(runtime.db, runtime.config.DATA_DIR, 2);
     const planner = fakeProvider(validPlan());
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...planner,
       async *enhance(...args) {
         runtime.db.query('DELETE FROM uploads WHERE id = ?').run(source.uploadId);
@@ -418,7 +419,7 @@ describe('story routes', () => {
   });
 
   test('clamps an extension plan to the exact remaining sequence capacity', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(validPlan([124, 243, 362, 124, 243, 362])));
+    setTextModelProviderForTests(fakeProvider(validPlan([124, 243, 362, 124, 243, 362])));
     const runtime = testRuntime({ ...VIDEO_ON, availability, MAX_SEQUENCE_SEGMENTS: '5' });
     const source = await seedExtensionSequence(runtime.db, runtime.config.DATA_DIR, 2);
 
@@ -440,7 +441,7 @@ describe('story routes', () => {
 
   test('returns QUEUE_FULL when the storytelling planner admission slot is saturated', async () => {
     let providerCalls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider(validPlan()),
       async *enhance() {
         await Promise.resolve();

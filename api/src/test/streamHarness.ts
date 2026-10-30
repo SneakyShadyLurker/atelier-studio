@@ -2,6 +2,7 @@ import { transitionQueuedToRunning } from '../db/queueOps';
 import * as bus from '../orchestrator/bus';
 import { runBatchPipeline, type GenerationContext } from '../orchestrator';
 import { createBatch } from '../orchestrator/createBatch';
+import { testTextServices } from './helpers';
 
 // Test-only harness — the legacy *coupled* SSE driver. Production decouples
 // generation from streaming: routes/generate.ts runs the batch detached via
@@ -10,7 +11,11 @@ import { createBatch } from '../orchestrator/createBatch';
 // runBatchPipeline and collects its bus frames into one ReadableStream so a test
 // can drive and observe a batch end-to-end synchronously. It is not shipped; the
 // live subscriber glue is covered by batches-events*.test.ts.
-export function createGenerationStream(ctx: GenerationContext): ReadableStream<Uint8Array> {
+// `text` defaults to services over the test DB (no text model unless seeded).
+export function createGenerationStream(
+  input: Omit<GenerationContext, 'text'> & Partial<Pick<GenerationContext, 'text'>>,
+): ReadableStream<Uint8Array> {
+  const ctx: GenerationContext = { ...input, text: input.text ?? testTextServices(input.db, input.config) };
   const prepared = createBatch(ctx.db, ctx.userId, ctx.request, ctx.registryEntry);
   transitionQueuedToRunning(ctx.db, prepared.batch.id, ctx.logger);
   prepared.batch.status = 'running';

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import { jsonRequest, restoreFetch, testRuntime } from './helpers';
 import * as queue from '../orchestrator/queue';
 import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { resetUpstreamGateForTests } from '../orchestrator/upstreamGate';
 import {
-  setCliproxyTextProviderForTests,
   type EnhanceChunk,
   type TestCliproxyTextProvider,
 } from '../providers/cliproxyText';
@@ -41,6 +41,7 @@ function fakeCondenseProvider(
 
 function kreaRuntime() {
   return testRuntime({
+    seedLegacyText: true,
     availability: new Map([
       ['krea-2-gonzalomo', { ok: true as const, checkedAt: 1_700_000_000_000 }],
     ]),
@@ -74,7 +75,7 @@ beforeEach(() => {
 afterEach(async () => {
   await stopQueuedPromptPreparation();
   restoreFetch();
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   resetLlmAdmissionForTests();
   resetUpstreamGateForTests();
 });
@@ -87,7 +88,7 @@ test('the batch id comes back before condensation has even started', async () =>
   let releaseCondense!: () => void;
   const condenseGate = new Promise<void>((resolve) => { releaseCondense = resolve; });
 
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* () {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
     condenseEntered();
     // Stands in for the 57-120s V4 Pro call. Nothing may depend on it
     // finishing before /api/generate answers.
@@ -129,7 +130,7 @@ for (const failOpen of [false, true]) {
     const original = wordPrompt(400);
     const candidate = wordPrompt(300, 'short');
     let calls = 0;
-    setCliproxyTextProviderForTests(fakeCondenseProvider(async function* () {
+    setTextModelProviderForTests(fakeCondenseProvider(async function* () {
       await Promise.resolve();
       calls += 1;
       if (!failOpen) yield { type: 'delta', text: candidate };
@@ -156,7 +157,7 @@ for (const lastTile of [false, true]) {
     let finish: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => { finish = resolve; });
     let signal: AbortSignal | undefined;
-    setCliproxyTextProviderForTests(fakeCondenseProvider(async function* (_prompt, _images, activeSignal) {
+    setTextModelProviderForTests(fakeCondenseProvider(async function* (_prompt, _images, activeSignal) {
       signal = activeSignal;
       entered();
       await gate;
@@ -188,7 +189,7 @@ for (const lastTile of [false, true]) {
 test('a prompt under the trigger is never rewritten by the worker', async () => {
   const original = wordPrompt(KREA_PROMPT_CONDENSE_TRIGGER_WORDS);
   let calls = 0;
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* () {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
     await Promise.resolve();
     calls += 1;
     yield { type: 'done' } satisfies EnhanceChunk;

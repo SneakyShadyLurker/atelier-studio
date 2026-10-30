@@ -26,8 +26,7 @@ import { startupReconcile } from './lifecycle/startup-reconcile';
 import { startHealthProbe, type HealthProbeHandle } from './lifecycle/health-probe';
 import { startModelInventory, type ModelInventoryHandle } from './lifecycle/model-inventory';
 import { startTextAvailability, type TextAvailabilityHandle } from './lifecycle/text-availability';
-import type { TextProviderStore } from './db/textProviders';
-import { createTextServices, textProviderStoreFor, UNKNOWN_TEXT_AVAILABILITY } from './routing/textServices';
+import { createTextServices, textProviderStoreFor, UNKNOWN_TEXT_AVAILABILITY, type TextServices } from './routing/textServices';
 import { configureTextBackendAvailability } from './routing/textBackendAvailability';
 import { textBackendModels } from './providers/cliproxyText.config';
 import { drainComfyUi } from './providers/comfyui';
@@ -84,11 +83,11 @@ export interface AppDeps {
    * every text backend counts as available (fail-open).
    */
   modelInventory?: ModelInventoryHandle;
-  /** The process's text-model store; built from `db` and `config` when omitted. */
-  textStore?: TextProviderStore;
+  /** The process's text-model services (boot builds them); built from `db` and `config` when omitted. */
+  text?: TextServices;
   /**
-   * Per-provider text-model listing poller (boot starts it over `textStore`).
-   * When omitted, every model is 'unknown' (fail-open); tests inject fakes here.
+   * Per-provider text-model listing poller, used only when `text` is omitted.
+   * When both are omitted, every model is 'unknown' (fail-open); tests inject fakes here.
    */
   textAvailability?: TextAvailabilityHandle;
 }
@@ -145,8 +144,8 @@ export function createKeyStoreForConfig(config: Config, db: Database): KeyStore 
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const probe = deps.healthProbe ?? ALWAYS_AVAILABLE;
-  const text = createTextServices({
-    store: deps.textStore ?? textProviderStoreFor(deps.config, deps.db),
+  const text = deps.text ?? createTextServices({
+    store: textProviderStoreFor(deps.config, deps.db),
     availability: deps.textAvailability ?? UNKNOWN_TEXT_AVAILABILITY,
   });
   configureTextBackendAvailability(deps.modelInventory, textBackendModels(deps.config));
@@ -159,10 +158,11 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     logger: deps.logger,
     keyStore: deps.keyStore,
     healthSnapshot: () => probe.snapshot(),
+    text,
   };
   const kickLocalQueue = (): void => { kickQueues(dispatchDeps); };
-  configureQueuedPromptPreparation({ db: deps.db, config: deps.config, logger: deps.logger, kickLocalQueue });
-  configureStoryDriver({ db: deps.db, config: deps.config, logger: deps.logger, kickLocalQueue });
+  configureQueuedPromptPreparation({ db: deps.db, config: deps.config, logger: deps.logger, text, kickLocalQueue });
+  configureStoryDriver({ db: deps.db, config: deps.config, logger: deps.logger, text, kickLocalQueue });
   // Owned here (not only in boot) so the test runtime exercises the production
   // scheduling wiring; boot builds the app before its first queue kick.
   configureQueueScheduling({
@@ -314,16 +314,9 @@ export async function boot(): Promise<{
   const unsealServer = unsealSocketPath
     ? startUnsealSocket({ path: unsealSocketPath, keyring: storage, dataDir: config.DATA_DIR, db, logger })
     : null;
-  let bootDeps: DispatchDeps | null = null;
   configureStitchQueue({ db, config, logger });
-  configureStoryDriver({
-    db,
-    config,
-    logger,
-    kickLocalQueue: () => {
-      if (bootDeps) kickQueues(bootDeps);
-    },
-  });
+  // The story driver is configured by createApp below (it needs the text
+  // services), before recoverStories or the first queue kick.
   startupReconcile(db, config.DATA_DIR, logger, {
     uploadTtlMs: config.UPLOAD_TTL_MS,
     orphanThreshold: config.RECONCILE_ORPHAN_THRESHOLD,
@@ -362,21 +355,22 @@ export async function boot(): Promise<{
     intervalMs: MODEL_INVENTORY_INTERVAL_MS,
     timeoutMs: MODEL_INVENTORY_TIMEOUT_MS,
   });
-  bootDeps = {
+  const text = createTextServices({ store: textStore, availability: textAvailability });
+  const bootDeps: DispatchDeps = {
     db,
     config,
     logger,
     keyStore,
     healthSnapshot: () => healthProbe.snapshot(),
+    text,
   };
   // createApp configures queue scheduling; it must precede the first kick so a
   // recovered local queue is dequeued under the production residency mapping.
-  const app = createApp({ config, db, logger, keyStore, healthProbe, modelInventory, textStore, textAvailability });
+  const app = createApp({ config, db, logger, keyStore, healthProbe, modelInventory, text });
   configureUpstreamGateWiring(bootDeps);
   // Queued work that reads stored artifacts waits while storage is sealed
   // (dequeue gate); resume it the moment the root arrives.
-  const unsealedDeps = bootDeps;
-  storage.onUnsealed(() => { kickQueues(unsealedDeps); });
+  storage.onUnsealed(() => { kickQueues(bootDeps); });
   kickQueues(bootDeps);
   recoverStories();
   return {

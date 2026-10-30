@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import { testRuntime } from '../test/helpers';
 import { findModel } from '../providers/registry';
-import { setCliproxyTextProviderForTests, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type TestCliproxyTextProvider } from '../providers/cliproxyText';
 import { configureQueuedPromptPreparation, prepareQueuedPrompts, stopQueuedPromptPreparation } from './queuedPromptPreparation';
 import * as queue from './queue';
 import { getBatchForUser, resetRegistryForTests, snapshotBatchControllers, snapshotBatchDonePromises } from './registry';
@@ -34,7 +35,7 @@ function heldProvider(): TestCliproxyTextProvider {
 }
 
 function setup(overrides: Record<string, unknown> = {}) {
-  const configured = testRuntime({ LOCAL_MODELS_USERS: 'alice', LOG_LEVEL: 'info', ...overrides });
+  const configured = testRuntime({ seedLegacyText: true, LOCAL_MODELS_USERS: 'alice', LOG_LEVEL: 'info', ...overrides });
   let kicks = 0;
   configureQueuedPromptPreparation({ ...configured, kickLocalQueue: () => { kicks += 1; } });
   return { ...configured, kicks: () => kicks };
@@ -63,14 +64,14 @@ beforeEach(() => {
   resetLlmAdmissionForTests();
   resetConcurrencyForTests();
   calls = 0; gates.length = 0; signals.length = 0;
-  setCliproxyTextProviderForTests(heldProvider());
+  setTextModelProviderForTests(heldProvider());
 });
 
 afterEach(async () => {
   const stopped = stopQueuedPromptPreparation();
   for (const release of gates) release();
   await stopped;
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   resetLlmAdmissionForTests();
   resetRegistryForTests();
   queue.resetQueueForTests();

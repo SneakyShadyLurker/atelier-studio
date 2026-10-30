@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import { MAX_PROMPT_CHARS, type AiFillBackend, type TextReasoningEffort } from '@atelier/shared';
+import { MAX_PROMPT_CHARS } from '@atelier/shared';
 import type { Config } from '../config';
 import type { AppLogger } from '../observability/logger';
 import { buildCondensePromptSystemPrompt } from '../prompts/condensePromptSystemPrompt';
@@ -9,14 +9,15 @@ import {
   KREA_PROMPT_CONDENSE_TRIGGER_WORDS,
   promptWordBudgetForModel,
 } from '../prompts/promptBudget';
-import { kreaCondenseTimeoutMs, legacyLatencyProfile } from '../providers/cliproxyText.config';
-import { aiFillTextProviderForConfig } from '../providers/textRouting';
-import { resolveTextBackend, resolveTextBackendEffort } from '../routing/textBackendPreference';
+import { kreaCondenseTimeoutMs } from '../providers/cliproxyText.config';
+import { imageModelRouting, textProviderForResolved } from '../providers/textRouting';
+import type { ResolvedTextModel } from '../routing/textModelResolver';
+import type { TextServices } from '../routing/textServices';
 import { enhancePool } from './llmAdmission';
 
 export interface CondenseDeps {
-  readonly db: Database;
   readonly config: Config;
+  readonly text: TextServices;
   readonly logger: AppLogger;
   readonly userId: string;
   /** Batch controller signal — user cancel, DELETE /history, SIGTERM drain. */
@@ -35,7 +36,8 @@ export interface CondenseDeps {
  * and costs no caller anything, so the pass gets a real budget instead of one
  * squeezed under someone else's proxy timeout.
  *
- * Fail-open at EVERY step: refused admission, provider failure, timeout,
+ * Fail-open at EVERY step: no text model to serve it, refused admission,
+ * provider failure, timeout,
  * cancellation, empty output, a refusal, an over-length result, or a result
  * that is not strictly shorter all return the original prompt and log
  * `krea_prompt_condense_skipped`. A condense failure must never fail a batch
@@ -62,18 +64,18 @@ export async function condenseBatchPrompt(
     );
     return prompt;
   };
-  // Condensation runs only for Krea rows, whose automatic backend is Kimi.
-  // A user override can move it to any selectable backend; the system prompt
-  // follows below. Resolved before the timer so the deadline follows the backend.
-  let backend: AiFillBackend;
-  let reasoningEffort: TextReasoningEffort | undefined;
+  // Condensation runs only for Krea rows, on the `condense` task's model.
+  // Resolved before the timer so the deadline follows the model.
+  let resolved: ResolvedTextModel;
   try {
-    backend = resolveTextBackend(deps.db, deps.userId, 'condense', 'kimi', { targetPool: 'local' });
-    reasoningEffort = resolveTextBackendEffort(deps.db, deps.userId, 'condense', backend);
+    resolved = deps.text.resolve({ userId: deps.userId, task: 'condense', ...imageModelRouting(deps.config, modelId) });
   } catch {
     return skip('error');
   }
-  const timeoutSignal = AbortSignal.timeout(kreaCondenseTimeoutMs(legacyLatencyProfile(backend), deps.config.KREA_CONDENSE_TIMEOUT_MS));
+  if (!resolved.ok) return skip(`text-model-${resolved.reason}`);
+  const textModel = resolved.model;
+  const reasoningEffort = resolved.effort;
+  const timeoutSignal = AbortSignal.timeout(kreaCondenseTimeoutMs(textModel.latencyProfile, deps.config.KREA_CONDENSE_TIMEOUT_MS));
   const signal = AbortSignal.any([deps.signal, timeoutSignal]);
   let releaseEnhanceSlot: (() => void) | null = null;
 
@@ -82,7 +84,7 @@ export async function condenseBatchPrompt(
     if (!slot.ok) return skip(`admission-${slot.reason}`);
     releaseEnhanceSlot = () => { slot.release(); };
 
-    const provider = aiFillTextProviderForConfig(deps.config, backend);
+    const provider = textProviderForResolved(deps.config, deps.text, textModel);
     const systemPrompt = buildCondensePromptSystemPrompt(wordBudget);
     let condensed = '';
     let completed = false;

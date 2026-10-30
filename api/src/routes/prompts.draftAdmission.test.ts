@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import type {
   DraftTemplateResponse,
   DraftVariableListResponse,
 } from '@atelier/shared';
 import {
-  setCliproxyTextProviderForTests,
   type DraftResult,
   type DraftTemplateResult,
   type EnhanceChunk,
@@ -14,7 +14,7 @@ import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { parseSseText, testRuntime } from '../test/helpers';
 
 afterEach(() => {
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   resetLlmAdmissionForTests();
 });
 
@@ -91,8 +91,9 @@ describe('prompt draft LLM admission', () => {
       type: 'ok',
       payload: { kind: 'entries', entries: ['wistful'] } satisfies DraftVariableListResponse,
     });
-    setCliproxyTextProviderForTests(pending.provider);
+    setTextModelProviderForTests(pending.provider);
     const { app, db } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       MAX_CONCURRENT_LLM_DRAFT_PER_USER: '1',
     });
@@ -118,8 +119,9 @@ describe('prompt draft LLM admission', () => {
       type: 'ok',
       payload: { kind: 'body', body: 'portrait body', warnings: [] } satisfies DraftTemplateResponse,
     });
-    setCliproxyTextProviderForTests(pending.provider);
+    setTextModelProviderForTests(pending.provider);
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       MAX_CONCURRENT_LLM_DRAFT_PER_USER: '1',
     });

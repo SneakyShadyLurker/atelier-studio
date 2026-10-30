@@ -5,15 +5,21 @@ import { afterEach } from 'bun:test';
 import type { Database } from 'bun:sqlite';
 import pino from 'pino';
 import { loadConfig, type Config } from '../config';
-import type { ModelAvailability } from '@atelier/shared';
+import type { ModelAvailability, TextReasoningEffort, TextTask } from '@atelier/shared';
 import { createApp, createKeyStoreForConfig } from '../server';
 import { openDb } from '../db/client';
 import { migrate, seedLegacyTextProvider } from '../db/migrate';
 import { bumpTextConfigRevision } from '../db/textProviders';
-import { legacyTextSeed } from '../db/textSeed';
+import { legacyTextSeed, type LegacyTextKey } from '../db/textSeed';
 import type { TextAvailabilityHandle } from '../lifecycle/text-availability';
 import { registryForConfig } from '../providers/registry';
-import { UNKNOWN_TEXT_AVAILABILITY } from '../routing/textServices';
+import {
+  createTextProviderStore,
+  type NewTextModel,
+  type TextModelRecord,
+  type TextProviderStore,
+} from '../db/textProviders';
+import { createTextServices, textProviderStoreFor, UNKNOWN_TEXT_AVAILABILITY, type TextServices } from '../routing/textServices';
 import { resetConcurrencyForTests } from '../orchestrator/concurrency';
 import { resetKeyProbeRuntimeForTests } from '../routes/keys';
 import { resetUploadsRuntimeForTests } from '../routes/uploads-runtime';
@@ -78,6 +84,53 @@ export function listedTextAvailability(listed: ReadonlySet<string>): TextAvailab
   };
 }
 
+/** Upstream model id of each seeded legacy-keyed model (from `config`'s `CLIPROXY_TEXT_MODEL_*`). */
+export function legacyTextUpstreamIds(config: Config = testConfig()): Readonly<Record<LegacyTextKey, string>> {
+  const seed = legacyTextSeed(config, registryForConfig(config).map((entry) => entry.model.id));
+  if (!seed) throw new Error('legacyTextUpstreamIds needs CLIPROXY_BASE_URL');
+  return seed.modelIds;
+}
+
+/** Text services over `db` (unknown availability unless given), for runtimes built outside `testRuntime`. */
+export function testTextServices(
+  db: Database,
+  config: Config = testConfig(),
+  availability: TextAvailabilityHandle = UNKNOWN_TEXT_AVAILABILITY,
+): TextServices {
+  return createTextServices({ store: textProviderStoreFor(config, db), availability });
+}
+
+/** Row id of the seeded model migrated from legacy backend `key` (needs `seedLegacyTextConfig`). */
+export function legacyTextModelId(db: Database, key: string): string {
+  const model = createTextProviderStore({ db }).listModels().find((row) => row.legacyKey === key);
+  if (!model) throw new Error(`no seeded text model with legacy key ${key}`);
+  return model.id;
+}
+
+/** An admin-added model (no legacy key) on its own keyless OpenAI-compatible provider. */
+export async function addTestTextModel(store: TextProviderStore, model: NewTextModel): Promise<TextModelRecord> {
+  const provider = await store.createProvider({
+    name: `Test ${model.modelId}`,
+    protocol: 'openai-compatible',
+    baseUrl: 'http://127.0.0.1:1/v1',
+  });
+  const [row] = store.createModels(provider.id, [model]);
+  if (!row) throw new Error('model was not created');
+  return row;
+}
+
+/** Stores the user's pick of the seeded `key` model for `task` (the legacy per-workload override). */
+export function pickLegacyTextModel(
+  db: Database,
+  userId: string,
+  task: TextTask,
+  key: string,
+  effort: TextReasoningEffort | null = null,
+): void {
+  db.run('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)', [userId, Date.now()]);
+  createTextProviderStore({ db }).writeUserPick(userId, task, { modelId: legacyTextModelId(db, key), effort });
+}
+
 export function testRuntime(overrides: Record<string, unknown> = {}) {
   const {
     disableByok, availability, textModels, textAvailability, seedLegacyText, ...rawEnvOverrides
@@ -117,6 +170,7 @@ export function testRuntime(overrides: Record<string, unknown> = {}) {
   const textAvailabilityHandle = textAvailability !== undefined
     ? textAvailability as TextAvailabilityHandle
     : textModels instanceof Set ? listedTextAvailability(textModels as ReadonlySet<string>) : undefined;
+  const text = testTextServices(db, config, textAvailabilityHandle);
   const app = createApp({
     config,
     db,
@@ -124,13 +178,14 @@ export function testRuntime(overrides: Record<string, unknown> = {}) {
     keyStore,
     healthProbe,
     ...(modelInventory ? { modelInventory } : {}),
-    ...(textAvailabilityHandle ? { textAvailability: textAvailabilityHandle } : {}),
+    text,
   });
   return {
     app,
     config,
     db,
     logger,
+    text,
     keyStore,
     logs,
     fetch(path: string, init?: RequestInit): Promise<Response> {

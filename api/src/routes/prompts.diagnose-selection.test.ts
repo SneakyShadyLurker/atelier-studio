@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
-import { setCliproxyTextProviderForTests, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type TestCliproxyTextProvider } from '../providers/cliproxyText';
 import { parseInferDone, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 
-afterEach(() => { setCliproxyTextProviderForTests(null); });
+afterEach(() => { setTextModelProviderForTests(null); });
 
 async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
   await Promise.resolve();
@@ -125,8 +126,8 @@ async function setupSceneUnsat(): Promise<{
     { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Fantasy' }] },
     { op: 'assignOptionTags', listIdx: 1, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Modern' }] },
   ];
-  setCliproxyTextProviderForTests(fake(ops));
-  const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  setTextModelProviderForTests(fake(ops));
+  const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   const { app } = runtime;
   await seedPromptUser(app, userId, {
     lists: [
@@ -170,7 +171,7 @@ describe('POST /api/prompts/dimensions/diagnose-selection', () => {
   });
 
   test('410 on missing proposal', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await diagnose(app, 'alice', {
       proposalId: crypto.randomUUID(),
       acceptedBundleKeys: [],
@@ -188,8 +189,8 @@ describe('POST /api/prompts/dimensions/diagnose-selection', () => {
     const ops: RawInferOp[] = [
       { op: 'createDimension', name: 'Genre', tags: ['Fantasy'] },
     ];
-    setCliproxyTextProviderForTests(fake(ops));
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice,stranger' });
+    setTextModelProviderForTests(fake(ops));
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice,stranger' });
     const { app } = runtime;
     await seedPromptUser(app, userId, { lists: [{ name: 'Roles', options: ['paladin'] }] });
     const prop = await infer(app, userId);
@@ -253,7 +254,7 @@ describe('POST /api/prompts/dimensions/diagnose-selection', () => {
       value: 'fantasy warrior',
       tags: [{ dimName: 'Genre', label: 'Fantasy' }],
     };
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -261,7 +262,7 @@ describe('POST /api/prompts/dimensions/diagnose-selection', () => {
       inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: [...ops] }),
       rescueDimension: () => Promise.resolve({ type: 'ok', ops: [failingRescueOp] }),
     });
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedPromptUser(app, userId, {
       lists: [
         { name: 'Roles', options: ['paladin'] },
@@ -329,7 +330,7 @@ describe('POST /api/prompts/dimensions/diagnose-selection', () => {
   });
 
   test('non-allowlisted user gets 404 (router gate)', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/diagnose-selection', {
       method: 'POST',
       headers: { 'Remote-User': 'stranger', 'Content-Type': 'application/json' },

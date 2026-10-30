@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite';
 import type { Config } from '../config';
 import { reportIfCorruption } from '../db/integrity';
 import type { AppLogger } from '../observability/logger';
+import type { TextServices } from '../routing/textServices';
 import { findModel } from '../providers/registry';
 import { countPromptWords, KREA_PROMPT_CONDENSE_TRIGGER_WORDS, promptWordBudgetForModel } from '../prompts/promptBudget';
 import { condenseBatchPrompt } from './condenseBatchPrompt';
@@ -14,6 +15,7 @@ interface PreparationRuntime {
   readonly db: Database;
   readonly config: Config;
   readonly logger: AppLogger;
+  readonly text: TextServices;
   readonly kickLocalQueue: () => void;
 }
 

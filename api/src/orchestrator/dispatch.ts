@@ -2,6 +2,7 @@
 // start of an accepted batch (immediate from POST /generate, or dequeued).
 // Routes and boot import it; it never imports a route.
 import type { Database } from 'bun:sqlite';
+import type { TextServices } from '../routing/textServices';
 import { isVideoDurationFrames } from '@atelier/shared';
 import type { Config } from '../config';
 import { BATCH_COLUMNS, TILE_COLUMNS } from '../db/columns';
@@ -30,6 +31,8 @@ export interface DispatchDeps {
   logger: AppLogger;
   keyStore: KeyStore | undefined;
   healthSnapshot: HealthSnapshot;
+  /** Text-model routing for the pipeline's fallback prompt condensation. */
+  text: TextServices;
 }
 
 export function kickQueues(deps: DispatchDeps): void {
@@ -102,7 +105,7 @@ export interface StartPreparedOptions {
 // reservation per tile, with the remainder released on setup failure or
 // settle.
 export function startPrepared(
-  deps: Pick<DispatchDeps, 'db' | 'config' | 'logger'>,
+  deps: Pick<DispatchDeps, 'db' | 'config' | 'logger' | 'text'>,
   prepared: PreparedBatch,
   opts: StartPreparedOptions,
 ): Promise<void> {
@@ -110,6 +113,7 @@ export function startPrepared(
     db: deps.db,
     config: deps.config,
     logger: deps.logger,
+    text: deps.text,
     userId: opts.userId,
     request: opts.request,
     registryEntry: opts.registryEntry,

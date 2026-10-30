@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { createCliproxyProvider } from '../providers/cliproxy';
 import { createCliproxyTextProvider } from '../providers/cliproxyText';
-import { textBackendModels } from '../providers/cliproxyText.config';
 import { setJevSystemOneProviderForTests } from '../providers/jevSystemOne';
 import { moderateGptInput } from './gptModeration';
-import { rejectionOf, testConfig } from '../test/helpers';
+import { rejectionOf, legacyTextUpstreamIds } from '../test/helpers';
 import { testTextPolicies } from '../test/textPolicies';
 
-const TEXT_MODELS = textBackendModels(testConfig());
+const TEXT_MODELS = legacyTextUpstreamIds();
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {

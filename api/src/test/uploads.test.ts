@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import { testRuntime } from './helpers';
 import { animatedWebpBytes, pngBytes, progressiveJpegBytes } from './image-fixtures';
@@ -46,6 +47,22 @@ async function uploadJson(app: ReturnType<typeof createApp>, bytes: Uint8Array, 
 
 function countUploads(deps: AppDeps, userId = 'alice'): number {
   return deps.db.query<{ count: number }, [string]>('SELECT COUNT(*) AS count FROM uploads WHERE user_id = ?').get(userId)?.count ?? 0;
+}
+
+function seedUploads(deps: AppDeps, count: number, sizeBytes = 1024): void {
+  // Quota admission depends on existing rows, not their artifacts. Keep the
+  // boundary-crossing requests real without encrypting/fsyncing the setup.
+  const now = Date.now();
+  deps.db.transaction(() => {
+    deps.db.query('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)').run('alice', now);
+    const insert = deps.db.query(
+      "INSERT INTO uploads (id, user_id, ext, mime, size_bytes, width, height, sha256, created_at) VALUES (?, 'alice', 'png', 'image/png', ?, 64, 64, ?, ?)",
+    );
+    for (let index = 0; index < count; index += 1) {
+      const id = crypto.randomUUID();
+      insert.run(id, sizeBytes, `sha-${id}`, now);
+    }
+  })();
 }
 
 function seedReferencedTile(deps: AppDeps, uploadId: string, userId = 'alice'): void {
@@ -130,14 +147,27 @@ describe('/api/uploads', () => {
       },
     });
     try {
-      const form = new FormData();
-      form.set('file', new File([pngBytes(64, 64, MAX_UPLOAD_REQUEST_BYTES + 1)], 'too-big.png', { type: 'image/png' }));
-      const res = await fetch(`http://127.0.0.1:${server.port}/api/uploads`, {
-        method: 'POST',
-        headers: { 'Remote-User': 'alice' },
-        body: form,
+      // Bun rejects an oversized Content-Length from the headers. Send only
+      // those headers so its early response cannot race a large fetch body
+      // write (and no giant image fixture needs to be allocated).
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        const req = httpRequest(`http://127.0.0.1:${server.port}/api/uploads`, {
+          method: 'POST',
+          agent: false,
+          headers: {
+            'Remote-User': 'alice',
+            'Content-Type': 'multipart/form-data; boundary=oversized',
+            'Content-Length': MAX_UPLOAD_REQUEST_BYTES + 1,
+          },
+        }, (res) => {
+          res.on('error', reject);
+          res.on('end', () => { resolve(res.statusCode); });
+          res.resume();
+        });
+        req.on('error', reject);
+        req.end();
       });
-      expect(res.status).toBe(413);
+      expect(status).toBe(413);
       expect(didFetch).toBe(false);
     } finally {
       await server.stop(true);
@@ -146,9 +176,7 @@ describe('/api/uploads', () => {
 
   test('accepts uploads beyond the former 20-upload count limit', async () => {
     const runtime = testRuntime();
-    for (let index = 0; index < 20; index += 1) {
-      expect((await upload(runtime.app, pngBytes(64, 64, 1024), { name: `ref-${index}.png` })).status).toBe(201);
-    }
+    seedUploads(runtime, 20);
     const res = await upload(runtime.app, pngBytes(64, 64, 1024), { name: 'ref-21.png' });
     expect(res.status).toBe(201);
     expect(countUploads(runtime)).toBe(21);
@@ -156,20 +184,16 @@ describe('/api/uploads', () => {
 
   test('accepts uploads beyond the former 400 MB accumulated-byte limit', async () => {
     const runtime = testRuntime();
-    for (let index = 0; index < 16; index += 1) {
-      const res = await upload(runtime.app, pngBytes(64, 64, MAX_UPLOAD_FILE_BYTES), { name: `big-${index}.png` });
-      expect(res.status).toBe(201);
-    }
+    seedUploads(runtime, 16, MAX_UPLOAD_FILE_BYTES);
     const res = await upload(runtime.app, pngBytes(64, 64, 1024), { name: 'over-cap.png' });
     expect(res.status).toBe(201);
     expect(countUploads(runtime)).toBe(17);
-  }, 15000);
+    expect(runtime.db.query<{ bytes: number }, []>('SELECT SUM(size_bytes) AS bytes FROM uploads').get()?.bytes).toBeGreaterThan(400 * 1024 * 1024);
+  });
 
   test('parallel uploads both succeed across the former count limit', async () => {
     const runtime = testRuntime();
-    for (let index = 0; index < 19; index += 1) {
-      expect((await upload(runtime.app, pngBytes(64, 64, 1024), { name: `seed-${index}.png` })).status).toBe(201);
-    }
+    seedUploads(runtime, 19);
     const [a, b] = await Promise.all([
       upload(runtime.app, pngBytes(64, 64, 1024), { name: 'race-a.png' }),
       upload(runtime.app, pngBytes(64, 64, 1024), { name: 'race-b.png' }),

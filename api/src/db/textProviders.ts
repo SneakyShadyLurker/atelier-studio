@@ -134,6 +134,12 @@ export interface TextProviderStore {
   createModels(providerId: string, models: readonly NewTextModel[]): TextModelRecord[];
   updateModel(id: string, patch: TextModelPatch): TextModelRecord | null;
   deleteModel(id: string): boolean;
+  /**
+   * Persists the last "Test model" report (bounded to 8 KiB) and, when
+   * `verifiedAt` is given, the verification time. Touches nothing else, so
+   * capability edits made while the test ran survive; never bumps the revision.
+   */
+  recordModelTest(id: string, report: TestReport, verifiedAt: number | null): TextModelRecord | null;
   readDefaults(): TextDefaults;
   /** null clears the assignment. */
   setDefault(scope: TextRoutingScope, modelId: string | null): void;
@@ -285,6 +291,45 @@ const MODEL_DEFAULTS: TextModelCapabilities = {
   latencyProfile: 'standard',
   promptVariant: 'generic',
 };
+
+/** Bound on a stored test report (`text_models.probe_json`). */
+export const TEXT_PROBE_JSON_MAX_BYTES = 8 * 1024;
+
+const REPORT_TEXT_CLIP = 200;
+
+function utf8Bytes(text: string): number {
+  return Buffer.byteLength(text, 'utf8');
+}
+
+function clip(text: string): string {
+  return text.length > REPORT_TEXT_CLIP ? `${text.slice(0, REPORT_TEXT_CLIP)}…` : text;
+}
+
+/**
+ * The report as JSON within TEXT_PROBE_JSON_MAX_BYTES. Shrinks in steps so the
+ * stored value always parses: clip messages and notes, then drop them, keeping
+ * every check's verdict and the confirmed proposals.
+ */
+function boundedReportJson(report: TestReport): string {
+  const full = JSON.stringify(report);
+  if (utf8Bytes(full) <= TEXT_PROBE_JSON_MAX_BYTES) return full;
+  const clipped: TestReport = {
+    ...report,
+    checks: report.checks.map((check) => ({ ...check, message: clip(check.message) })),
+    wireNotes: report.wireNotes.map(clip),
+  };
+  const second = JSON.stringify(clipped);
+  if (utf8Bytes(second) <= TEXT_PROBE_JSON_MAX_BYTES) return second;
+  const bare: TestReport = {
+    checks: report.checks.map((check) => ({ id: clip(check.id), status: check.status, message: '' })),
+    proposed: report.proposed,
+    advertised: {},
+    wireNotes: ['The full report was too large to keep.'],
+  };
+  const third = JSON.stringify(bare);
+  if (utf8Bytes(third) <= TEXT_PROBE_JSON_MAX_BYTES) return third;
+  return JSON.stringify({ checks: [], proposed: {}, advertised: {}, wireNotes: ['The report was too large to keep.'] });
+}
 
 function invalid(message: string): never {
   throw new TextConfigValidationError(message);
@@ -596,6 +641,15 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
       if (!readModel(id)) return false;
       write(() => db.run('DELETE FROM text_models WHERE id = ?', [id]));
       return true;
+    },
+
+    recordModelTest(id, report, verifiedAt) {
+      db.run(
+        'UPDATE text_models SET probe_json = ?, verified_at = COALESCE(?, verified_at) WHERE id = ?',
+        [boundedReportJson(report), verifiedAt, id],
+      );
+      const row = readModel(id);
+      return row ? modelFromRow(row) : null;
     },
 
     readDefaults() {

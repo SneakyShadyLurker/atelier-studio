@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import type { TextProtocol } from '@atelier/shared';
 import {
   anthropicHints,
+  bodyExcerpt,
   extractHints,
   listModels,
   lmStudioHints,
@@ -339,5 +340,15 @@ describe('listModels', () => {
     expect(thrown).toBeInstanceOf(Error);
     expect(thrown).not.toBeInstanceOf(TextListError);
     expect((thrown as Error).name).toBe('AbortError');
+  });
+});
+
+describe('bodyExcerpt', () => {
+  test('a key straddling the 160-character cut never leaks a prefix', () => {
+    const key = 'sk-straddle-0123456789abcdef';
+    const body = `${'x'.repeat(150)}${key} tail`;
+    const excerpt = bodyExcerpt(key, body);
+    expect(excerpt).not.toContain('sk-straddle');
+    expect(excerpt.length).toBeLessThanOrEqual(161);
   });
 });

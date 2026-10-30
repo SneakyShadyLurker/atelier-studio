@@ -349,6 +349,9 @@ const ConfigSchema = z.object({
   ),
   PROMPT_LIBRARY_USERS: csvAllowlist(''),
   LOCAL_MODELS_USERS: csvAllowlist(''),
+  // Users who manage text providers, models and routing (admin API). Unset or
+  // empty = nobody; every admin route answers 404 to everyone else.
+  TEXT_PROVIDER_ADMINS: csvAllowlist(''),
   MAX_PROMPT_TEMPLATES: numericString(200),
   MAX_VARIABLE_LISTS: numericString(100),
   MAX_OPTIONS_PER_LIST: numericString(MAX_OPTIONS_PER_LIST).pipe(

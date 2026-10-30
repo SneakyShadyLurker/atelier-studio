@@ -61,6 +61,8 @@ import { jsonBodyLimit } from './routes/_json-body-limit';
 import { sequencesRoutes } from './routes/sequences';
 import { storiesRoutes } from './routes/stories';
 import { textModelsRoutes } from './routes/textModels';
+import { textProvidersRoutes } from './routes/textProviders';
+import { textRoutingRoutes } from './routes/textRouting';
 import { ephemeraRoutes } from './routes/ephemera';
 import { configureStitchQueue } from './orchestrator/stitchQueue';
 import { configureStoryDriver, recoverStories, stopStoryDriver } from './orchestrator/storyDriver';
@@ -240,6 +242,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.route('/api', sequencesRoutes);
   app.route('/api', storiesRoutes);
   app.route('/api', textModelsRoutes);
+  app.route('/api', textProvidersRoutes);
+  app.route('/api', textRoutingRoutes);
   app.notFound((c) => c.json({ error: 'not found' }, 404));
   app.onError((err, c) => {
     // HTTPException is the recommended Hono 4 escape hatch for typed

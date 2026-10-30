@@ -14,6 +14,7 @@ import { migrate } from './migrate';
 import { LEGACY_SEED, type TextSeed } from './textSeed';
 import {
   createTextProviderStore,
+  TEXT_PROBE_JSON_MAX_BYTES,
   TextConfigConflictError,
   TextConfigValidationError,
   type TextProviderStore,
@@ -316,6 +317,48 @@ describe('text provider store: models', () => {
 
     expect(store.getModel(present(model).id)).toMatchObject({ lastTest: report, verifiedAt: 5 });
     expect(store.updateModel('missing', { enabled: false })).toBeNull();
+  });
+
+  test('recordModelTest stores the report, sets verifiedAt only when given and never bumps the revision', async () => {
+    const { store } = setup();
+    const p = await provider(store);
+    const [model] = store.createModels(p.id, [{ modelId: 'a', vision: true }]);
+    const id = present(model).id;
+    const before = store.revision();
+    const report: TestReport = {
+      checks: [{ id: 'plain', status: 'pass', message: 'ok' }],
+      proposed: { vision: false },
+      advertised: {},
+      wireNotes: [],
+    };
+
+    expect(store.recordModelTest(id, report, 1234)).toMatchObject({ lastTest: report, verifiedAt: 1234, vision: true });
+    const failed: TestReport = { ...report, checks: [{ id: 'plain', status: 'fail', message: 'down' }] };
+    expect(store.recordModelTest(id, failed, null)).toMatchObject({ lastTest: failed, verifiedAt: 1234 });
+    expect(store.revision()).toBe(before);
+    expect(store.recordModelTest('missing', report, 1)).toBeNull();
+  });
+
+  test('recordModelTest keeps an oversized report within 8 KiB as valid JSON', async () => {
+    const { db, store } = setup();
+    const p = await provider(store);
+    const [model] = store.createModels(p.id, [{ modelId: 'a' }]);
+    const id = present(model).id;
+    const long = 'x'.repeat(4000);
+    const report: TestReport = {
+      checks: ['plain', 'json', 'image', 'reasoning'].map((check) => ({ id: check, status: 'pass', message: long })),
+      proposed: { structuredOutput: 'json_object' },
+      advertised: {},
+      wireNotes: [long, long],
+    };
+
+    const stored = store.recordModelTest(id, report, null);
+    const raw = db.query<{ probe_json: string }, [string]>('SELECT probe_json FROM text_models WHERE id = ?').get(id);
+    expect(new TextEncoder().encode(present(raw).probe_json).byteLength).toBeLessThanOrEqual(TEXT_PROBE_JSON_MAX_BYTES);
+    expect(stored?.lastTest?.checks.map((check) => [check.id, check.status])).toEqual([
+      ['plain', 'pass'], ['json', 'pass'], ['image', 'pass'], ['reasoning', 'pass'],
+    ]);
+    expect(stored?.lastTest?.proposed).toEqual({ structuredOutput: 'json_object' });
   });
 
   test('usage reports every reference and deleting a model cascades them', async () => {

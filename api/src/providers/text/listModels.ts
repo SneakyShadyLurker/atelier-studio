@@ -170,9 +170,9 @@ export function redactFor(credential: string | null, text: string): string {
 
 /** A short, redacted excerpt of an upstream body for plain messages. */
 export function bodyExcerpt(credential: string | null, body: string | undefined): string {
-  const flat = (body ?? '').replace(/\s+/g, ' ').trim();
-  const cut = flat.length > 160 ? `${flat.slice(0, 160)}…` : flat;
-  return redactFor(credential, cut);
+  // Redact before cutting: a key straddling the cut would otherwise leak a prefix.
+  const flat = redactFor(credential, (body ?? '').replace(/\s+/g, ' ').trim());
+  return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat;
 }
 
 /** True when `err` came from the fetch refusing a redirect. */

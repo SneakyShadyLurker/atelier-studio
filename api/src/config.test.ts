@@ -120,6 +120,13 @@ describe('loadConfig', () => {
     expect(c.PROMPT_LIBRARY_USERS.size).toBe(0);
   });
 
+  test('TEXT_PROVIDER_ADMINS defaults to nobody, splits, trims and dedupes', () => {
+    expect(loadConfig(validEnv()).TEXT_PROVIDER_ADMINS.size).toBe(0);
+    expect(loadConfig({ ...validEnv(), TEXT_PROVIDER_ADMINS: '' }).TEXT_PROVIDER_ADMINS.size).toBe(0);
+    const c = loadConfig({ ...validEnv(), TEXT_PROVIDER_ADMINS: ' bob , alice ,bob ' });
+    expect([...c.TEXT_PROVIDER_ADMINS].sort()).toEqual(['alice', 'bob']);
+  });
+
   test('LOCAL_MODELS_USERS splits, trims, dedupes', () => {
     const c = loadConfig({ ...validEnv(), LOCAL_MODELS_USERS: ' bob , alice ,bob ' });
     expect([...c.LOCAL_MODELS_USERS].sort()).toEqual(['alice', 'bob']);

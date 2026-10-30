@@ -1,19 +1,20 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { cleanup, render, screen } from '@testing-library/react';
-import type { AiFillBackend, Batch, Model } from '@atelier/shared';
+import type { Batch, Model } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { historyKeys } from '../../api/history';
 import InFlightIndicator from './InFlightIndicator';
 
-const noActive: Readonly<Record<AiFillBackend, number>> = {
-  kimi: 0,
-  mimo: 0,
-  grok: 0,
-  'gemini-argon': 0,
-  'deepseek-abliterated': 0,
-  'glm-abliterated': 0,
-  gpt: 0,
-};
+const noActive: Readonly<Record<string, number>> = {};
+
+// Text model display names by row id, as `GET /api/text-models` (or the
+// ai-fill `backend` frame) supplies them.
+const labelById = new Map<string, string>([
+  ['kimi', 'Kimi K3'],
+  ['mimo', 'MiMo V2.6 Pro'],
+  ['grok', 'Grok 4.7'],
+  ['ollama-llama-4-scout', 'Llama 4 Scout'],
+]);
 
 const sharedModel: Model = {
   id: 'gpt-image-2.5-sunburst',
@@ -66,7 +67,7 @@ function batch(id: string, modelId: string, status: Batch['status'], tileCount: 
 function renderIndicator(
   batches: readonly Batch[],
   preparing = 0,
-  aiFillActive: Readonly<Record<AiFillBackend, number>> = noActive,
+  aiFillActive: Readonly<Record<string, number>> = noActive,
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -83,6 +84,7 @@ function renderIndicator(
         modelById={modelById}
         preparing={preparing}
         aiFillActive={aiFillActive}
+        labelById={labelById}
       />
     </QueryClientProvider>,
   );
@@ -166,56 +168,45 @@ describe('InFlightIndicator', () => {
   });
 
   test('attributes a preparing fill to Kimi K3', () => {
-    const { container } = renderIndicator([], 3, { ...noActive, kimi: 1 });
+    const { container } = renderIndicator([], 3, { kimi: 1 });
     expect(screen.getByText('·· Kimi K3')).toBeTruthy();
     expect(screen.getByLabelText('Kimi K3 is preparing 3 more…')).toBeTruthy();
     expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe('Kimi K3 is preparing 3 more…');
   });
 
-  test('combines the labels when both fill backends are active', () => {
-    renderIndicator([], 2, { ...noActive, kimi: 1, mimo: 1 });
+  test('combines the labels when two models are filling', () => {
+    renderIndicator([], 2, { kimi: 1, mimo: 1 });
     expect(screen.getByText('·· Kimi K3 + MiMo V2.6 Pro')).toBeTruthy();
     expect(screen.getByLabelText('Kimi K3 and MiMo V2.6 Pro are preparing 2 more…')).toBeTruthy();
   });
 
-  test('lists every backend without a combinatorial table', () => {
-    const { container } = renderIndicator([], 2, {
-      kimi: 1,
-      mimo: 1,
-      grok: 1,
-      'gemini-argon': 1,
-      'deepseek-abliterated': 1,
-      'glm-abliterated': 1,
-      gpt: 1,
-    });
-    expect(
-      screen.getByText('·· Kimi K3 + MiMo V2.6 Pro + Grok 4.7 + Gemini 4 Argon + DeepSeek V4.1 Flash Abliterated + GLM 5.3 + GPT-6.1 Sol'),
-    ).toBeTruthy();
+  test('lists every active model without a combinatorial table', () => {
+    const { container } = renderIndicator([], 2, { kimi: 1, mimo: 1, grok: 1, 'ollama-llama-4-scout': 1 });
+    expect(screen.getByText('·· Kimi K3 + MiMo V2.6 Pro + Grok 4.7 + Llama 4 Scout')).toBeTruthy();
     expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe(
-      'Kimi K3, MiMo V2.6 Pro, Grok 4.7, Gemini 4 Argon, DeepSeek V4.1 Flash Abliterated, GLM 5.3 and GPT-6.1 Sol are preparing 2 more…',
+      'Kimi K3, MiMo V2.6 Pro, Grok 4.7 and Llama 4 Scout are preparing 2 more…',
     );
   });
 
-  test('attributes a preparing fill to Grok 4.7', () => {
-    renderIndicator([], 1, { ...noActive, grok: 1 });
-    expect(screen.getByText('·· Grok 4.7')).toBeTruthy();
+  test('names an admin-added model by its display name', () => {
+    renderIndicator([], 0, { 'ollama-llama-4-scout': 1 });
+    expect(screen.getByText('Llama 4 Scout')).toBeTruthy();
+    expect(screen.getByLabelText('Llama 4 Scout is filling the prompt…')).toBeTruthy();
+  });
+
+  test('an unknown model id falls back to "a text model"', () => {
+    const { container } = renderIndicator([], 1, { 'removed-model': 1 });
+    expect(screen.getByText('·· a text model')).toBeTruthy();
+    expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe('A text model is preparing 1 more…');
+  });
+
+  test('a model whose count dropped to zero is not named', () => {
+    renderIndicator([], 1, { kimi: 0, grok: 1 });
     expect(screen.getByLabelText('Grok 4.7 is preparing 1 more…')).toBeTruthy();
   });
 
-  test('attributes a preparing fill to Gemini 4 Argon', () => {
-    renderIndicator([], 1, { ...noActive, 'gemini-argon': 1 });
-    expect(screen.getByText('·· Gemini 4 Argon')).toBeTruthy();
-    expect(screen.getByLabelText('Gemini 4 Argon is preparing 1 more…')).toBeTruthy();
-  });
-
-  test('attributes a preparing fill to GLM 5.3', () => {
-    renderIndicator([], 1, { ...noActive, 'glm-abliterated': 1 });
-    expect(screen.getByText('·· GLM 5.3')).toBeTruthy();
-    expect(screen.getByLabelText('GLM 5.3 is preparing 1 more…')).toBeTruthy();
-  });
-
   test('shows a label-only pill for a lone un-queued fill', () => {
-    renderIndicator([], 0, { ...noActive, kimi: 1 });
+    renderIndicator([], 0, { kimi: 1 });
     expect(screen.getByText('Kimi K3')).toBeTruthy();
     expect(screen.queryByText('·· Kimi K3')).toBeNull();
     expect(screen.getByLabelText('Kimi K3 is filling the prompt…')).toBeTruthy();

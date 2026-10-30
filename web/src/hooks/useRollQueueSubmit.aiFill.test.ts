@@ -3,7 +3,6 @@ import type { Mock } from 'bun:test';
 import { renderHook, act } from '@testing-library/react';
 import { MAX_PROMPT_CHARS } from '@atelier/shared';
 import type {
-  AiFillBackend,
   AiFillBatchRequest,
   AiFillRequest,
   GenerateRequest,
@@ -15,13 +14,14 @@ import { useAtelierStore, initialAtelierState } from '../store/atelier';
 import { StreamTruncatedError } from './useGenerate';
 import { QuotaExhaustedError } from '../api/sse';
 import { QueueFullError } from '../api/queueFullRetry';
+import type { AiFillModel } from '../api/aiFill';
 import { ApiError } from '../api/client';
 import { AI_FILL_MAX_INSTRUCTION_CHARS } from '@atelier/shared/ai-fill';
 import { isDrainOwned } from '../lib/drainOwnership';
 
 // Mock the ai-fill SSE client before the hook module is loaded (mock.module is
 // not auto-hoisted in bun, so the hook is dynamic-imported below).
-const resolveAiFillMock = mock((req: AiFillRequest, _signal?: AbortSignal, _onBackend?: (backend: AiFillBackend) => void) =>
+const resolveAiFillMock = mock((req: AiFillRequest, _signal?: AbortSignal, _onBackend?: (model: AiFillModel) => void) =>
   Promise.resolve({ prompt: req.staticSegments.join('FILLED'), fills: req.instructions.map(() => 'FILLED') }),
 );
 interface BatchMockResult {
@@ -30,7 +30,7 @@ interface BatchMockResult {
 const resolveAiFillBatchMock = mock((
   req: AiFillBatchRequest,
   _signal?: AbortSignal,
-  _onBackend?: (backend: AiFillBackend) => void,
+  _onBackend?: (model: AiFillModel) => void,
 ): Promise<BatchMockResult> => Promise.resolve({
   items: req.items.map((item) => ({
     ok: true as const,
@@ -514,28 +514,29 @@ describe('useRollQueueSubmit — {{ai-fill}} resolution', () => {
     }
   });
 
-  test('an announced backend counts in aiFillActive during the fill and releases after it', async () => {
-    const midFill: Record<AiFillBackend, number>[] = [];
-    resolveAiFillMock.mockImplementation((req: AiFillRequest, _signal?: AbortSignal, onBackend?: (backend: AiFillBackend) => void) => {
-      onBackend?.('kimi');
-      midFill.push({ ...useAtelierStore.getState().aiFillActive });
+  test('an announced model counts in aiFillActive during the fill and releases after it', async () => {
+    const midFill: { active: Record<string, number>; labels: Record<string, string> }[] = [];
+    resolveAiFillMock.mockImplementation((req: AiFillRequest, _signal?: AbortSignal, onBackend?: (model: AiFillModel) => void) => {
+      onBackend?.({ modelId: 'ollama-llama-4-scout', label: 'Llama 4 Scout' });
+      const { aiFillActive, aiFillLabels } = useAtelierStore.getState();
+      midFill.push({ active: { ...aiFillActive }, labels: { ...aiFillLabels } });
       return Promise.resolve({ prompt: req.staticSegments.join('FILLED'), fills: req.instructions.map(() => 'FILLED') });
     });
     const h = setup({ prompt: 'a {{ai-fill: yard}} b' });
     await h.submit();
-    expect(midFill).toEqual([{ kimi: 1, mimo: 0, grok: 0, 'gemini-argon': 0, 'deepseek-abliterated': 0, 'glm-abliterated': 0, gpt: 0 }]);
-    expect(useAtelierStore.getState().aiFillActive).toEqual({ kimi: 0, mimo: 0, grok: 0, 'gemini-argon': 0, 'deepseek-abliterated': 0, 'glm-abliterated': 0, gpt: 0 });
+    expect(midFill).toEqual([{ active: { 'ollama-llama-4-scout': 1 }, labels: { 'ollama-llama-4-scout': 'Llama 4 Scout' } }]);
+    expect(useAtelierStore.getState().aiFillActive).toEqual({});
   });
 
-  test('a fill that fails after announcing its backend still releases the counter', async () => {
-    resolveAiFillMock.mockImplementation((_req: AiFillRequest, _signal?: AbortSignal, onBackend?: (backend: AiFillBackend) => void) => {
-      onBackend?.('mimo');
+  test('a fill that fails after announcing its model still releases the counter', async () => {
+    resolveAiFillMock.mockImplementation((_req: AiFillRequest, _signal?: AbortSignal, onBackend?: (model: AiFillModel) => void) => {
+      onBackend?.({ modelId: 'mimo', label: 'MiMo V2.6 Pro' });
       return Promise.reject(new Error('boom'));
     });
     const h = setup({ prompt: 'a {{ai-fill: yard}} b' });
     await h.submit();
     expect(h.generate).not.toHaveBeenCalled();
-    expect(useAtelierStore.getState().aiFillActive).toEqual({ kimi: 0, mimo: 0, grok: 0, 'gemini-argon': 0, 'deepseek-abliterated': 0, 'glm-abliterated': 0, gpt: 0 });
+    expect(useAtelierStore.getState().aiFillActive).toEqual({});
   });
 
   test('a retired card-notes token is stripped before ai-fill', async () => {

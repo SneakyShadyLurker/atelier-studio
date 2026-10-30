@@ -1,5 +1,4 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { AI_FILL_BACKEND_VALUES } from '@atelier/shared';
 import type * as AtelierStore from '../src/store/atelier';
 import type * as ErrorCopy from '../src/lib/errorCopy';
 /*
@@ -1227,13 +1226,14 @@ test.describe('composer · phone landscape (short window)', () => {
 test.describe('settings model menus', () => {
   test.use({ viewport: VIEWPORTS.desktop });
 
-  test('grows to fit every backend when the opposite side has room', async ({ page }) => {
+  test('grows to fit every model when the opposite side has room', async ({ page }) => {
     await page.goto(`${HARNESS}?case=settings`);
-    const trigger = page.getByRole('button', { name: /Text backend for Ai-fill/ });
+    const trigger = page.getByRole('button', { name: /Text model for AI fill/ });
     await trigger.click();
     const listbox = page.getByRole('listbox');
     await settle(listbox);
-    await expect(listbox.getByRole('option')).toHaveCount(AI_FILL_BACKEND_VALUES.filter((backend) => backend !== 'gpt').length + 1);
+    // "Use default" plus the harness's six models across two provider groups.
+    await expect(listbox.getByRole('option')).toHaveCount(7);
     expect(await overflows(listbox)).toBe(false);
     for (const option of await listbox.getByRole('option').all()) {
       await expect(option).toBeInViewport({ ratio: 1 });

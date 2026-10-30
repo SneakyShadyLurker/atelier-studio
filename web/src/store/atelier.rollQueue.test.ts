@@ -229,16 +229,20 @@ describe('ai-fill active counters', () => {
   beforeEach(() => { useAtelierStore.setState(initialAtelierState, true); });
   afterEach(() => { useAtelierStore.setState(initialAtelierState, true); });
 
-  test('increments and decrements each backend independently, flooring at zero', () => {
+  test('counts each model id independently, flooring at zero and dropping idle ids', () => {
     const { beginAiFill, endAiFill } = useAtelierStore.getState();
-    beginAiFill('kimi');
-    beginAiFill('kimi');
-    beginAiFill('mimo');
-    expect(useAtelierStore.getState().aiFillActive).toEqual({ kimi: 2, mimo: 1, grok: 0, 'gemini-argon': 0, 'deepseek-abliterated': 0, 'glm-abliterated': 0, gpt: 0 });
+    expect(useAtelierStore.getState().aiFillActive).toEqual({});
+    beginAiFill('kimi', 'Kimi K3');
+    beginAiFill('kimi', 'Kimi K3');
+    beginAiFill('ollama-llama-4-scout', 'Llama 4 Scout');
+    expect(useAtelierStore.getState().aiFillActive).toEqual({ kimi: 2, 'ollama-llama-4-scout': 1 });
+    expect(useAtelierStore.getState().aiFillLabels).toEqual({ kimi: 'Kimi K3', 'ollama-llama-4-scout': 'Llama 4 Scout' });
 
     endAiFill('kimi');
-    endAiFill('mimo');
-    endAiFill('mimo');
-    expect(useAtelierStore.getState().aiFillActive).toEqual({ kimi: 1, mimo: 0, grok: 0, 'gemini-argon': 0, 'deepseek-abliterated': 0, 'glm-abliterated': 0, gpt: 0 });
+    endAiFill('ollama-llama-4-scout');
+    endAiFill('ollama-llama-4-scout');
+    endAiFill('never-started');
+    expect(useAtelierStore.getState().aiFillActive).toEqual({ kimi: 1 });
+    expect(useAtelierStore.getState().aiFillLabels).toEqual({ kimi: 'Kimi K3' });
   });
 });

@@ -1,6 +1,5 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import type { AiFillBackend, Batch, Model } from '@atelier/shared';
-import { TEXT_BACKEND_LABELS } from '@atelier/shared';
+import type { Batch, Model } from '@atelier/shared';
 import { memo } from 'react';
 import { historyOpts } from '../../api/history';
 import type { ActiveModelCounts } from '../../lib/historyAggregation';
@@ -15,8 +14,12 @@ interface InFlightIndicatorProps {
   // alongside running/queued tiles as the pipeline drains; the at-capacity badge
   // still takes precedence.
   preparing?: number;
-  aiFillActive: Readonly<Record<AiFillBackend, number>>;
+  // In-flight ai-fill count per text model id; names come from `labelById`.
+  aiFillActive: Readonly<Record<string, number>>;
+  labelById: ReadonlyMap<string, string>;
 }
+
+const UNKNOWN_TEXT_MODEL = 'a text model';
 
 function InFlightIndicator({
   pool,
@@ -24,6 +27,7 @@ function InFlightIndicator({
   modelById,
   preparing = 0,
   aiFillActive,
+  labelById,
 }: InFlightIndicatorProps) {
   const historyQuery = useInfiniteQuery(historyOpts({ kind: 'unsorted' }, '', false));
   const activeByModel = historyQuery.data?.activeByModel;
@@ -34,27 +38,26 @@ function InFlightIndicator({
   const atCap = cap > 0 && count >= cap;
   const queueText = queueDepth > 0 ? `${queueDepth} queued` : null;
   const label = `${atCap ? 'All slots busy — new batches will queue — ' : ''}${count} of ${cap} tile slots in use${queueText ? `, ${queueText}` : ''}`;
-  // Labels derive from whichever backends are actually in flight — no
+  // Labels derive from whichever models are actually in flight — no
   // combinatorial table. Pill keeps a short form; the live region spells names.
-  const activeBackends = (Object.keys(TEXT_BACKEND_LABELS) as AiFillBackend[])
-    .filter((backend) => aiFillActive[backend] > 0);
-  const backendLabel = activeBackends.length > 0
-    ? activeBackends.map((backend) => TEXT_BACKEND_LABELS[backend]).join(' + ')
-    : null;
-  const fullNames = activeBackends.length > 0
-    ? joinNames(activeBackends.map((backend) => TEXT_BACKEND_LABELS[backend]))
-    : null;
+  // Distinct names, so two unknown ids don't read "a text model + a text model".
+  const activeNames = [...new Set(Object.entries(aiFillActive)
+    .filter(([, active]) => active > 0)
+    .map(([modelId]) => labelById.get(modelId) ?? UNKNOWN_TEXT_MODEL))];
+  const backendLabel = activeNames.length > 0 ? activeNames.join(' + ') : null;
+  const fullNames = activeNames.length > 0 ? joinNames(activeNames) : null;
+  const verb = activeNames.length > 1 ? 'are' : 'is';
   // "Preparing N more…" persists alongside tiles as the pipeline resolves the
   // rest of the burst (it takes the slot over the plain tile count). At-capacity
   // still wins both the chip and the live region so preparing never masks the
   // server-owned capacity state.
   const tileVisible = !(count <= 0 && queueDepth <= 0) && cap > 0;
   const showPreparing = !atCap && (preparing > 0 || backendLabel !== null);
-  const preparingLabel = preparing > 0
+  const preparingLabel = sentenceCase(preparing > 0
     ? fullNames !== null
-      ? `${fullNames} ${activeBackends.length > 1 ? 'are' : 'is'} preparing ${preparing} more…`
+      ? `${fullNames} ${verb} preparing ${preparing} more…`
       : `Preparing ${preparing} more…`
-    : `${fullNames ?? ''} ${activeBackends.length > 1 ? 'are' : 'is'} filling the prompt…`;
+    : `${fullNames ?? ''} ${verb} filling the prompt…`);
   const liveText = atCap ? label : showPreparing ? preparingLabel : '';
   return (
     <>
@@ -76,7 +79,11 @@ function InFlightIndicator({
   );
 }
 
-/** "A", "A and B", "A, B and C" — no combinatorial table as backends grow. */
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** "A", "A and B", "A, B and C" — no combinatorial table as models grow. */
 function joinNames(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? '';
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;

@@ -68,3 +68,17 @@ test('untrusted provider prose cannot become a moderation notice', async () => {
   for await (const _frame of readSseFrames(body)) { /* drain */ }
   expect(useModerationNotice.getState().notice).toBeNull();
 });
+
+test('a text-target notice names the screened model', () => {
+  expect(moderationCopy({ reason: 'graphic-violence', target: 'text', modelLabel: 'Llama 4 Scout' }).delivery)
+    .toBe('Not sent to Llama 4 Scout');
+});
+
+test('a text-target notice without a model label stays generic', () => {
+  expect(moderationCopy({ reason: 'unavailable', target: 'text' }).delivery).toBe('Not sent to the text model');
+});
+
+test('image-target copy ignores any model label', () => {
+  expect(moderationCopy({ reason: 'graphic-violence', target: 'image', modelLabel: 'Llama 4 Scout' }).delivery)
+    .toBe('Not sent to GPT Image');
+});

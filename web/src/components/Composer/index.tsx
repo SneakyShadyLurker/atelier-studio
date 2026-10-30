@@ -2,6 +2,8 @@ import { MAX_TILE_COUNT, VAR_TOKEN_PATTERN } from '@atelier/shared';
 import type { Model, Ratio } from '@atelier/shared';
 import { AI_FILL_MAX_SLOTS, hasAiFillTokens, parseAiFillTokens } from '@atelier/shared/ai-fill';
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { textModelsOpts } from '../../api/textModels';
 import { refImageUrl, uploadRefImage } from '../../api/uploads';
 import { beginSourceHandoff, supersedeSourceHandoffs } from '../../lib/composerSourceHandoff';
 import { I2V_ESTIMATED_LABEL } from '../../lib/i2v';
@@ -145,6 +147,19 @@ function Composer({
   const resolving = useAtelierStore((state) => state.resolving);
   const preparing = useAtelierStore((state) => state.preparing);
   const aiFillActive = useAtelierStore((state) => state.aiFillActive);
+  const aiFillLabels = useAtelierStore((state) => state.aiFillLabels);
+  // Fallback names for the in-flight pill when a frame carried no label; only
+  // fetched while a fill is running.
+  const { data: textModels } = useQuery({
+    ...textModelsOpts(),
+    enabled: Object.keys(aiFillActive).length > 0,
+    select: (data) => data.models,
+  });
+  const aiFillLabelById = useMemo(() => {
+    const labels = new Map(textModels?.map((model) => [model.id, model.displayName]));
+    for (const [modelId, label] of Object.entries(aiFillLabels)) labels.set(modelId, label);
+    return labels;
+  }, [textModels, aiFillLabels]);
   const draining = useAtelierStore((state) => state.draining);
   const canStop = draining || retryingPrepared;
   const removeQueuedRoll = useAtelierStore((state) => state.removeQueuedRoll);
@@ -1114,6 +1129,7 @@ function Composer({
               modelById={modelById}
               preparing={preparing}
               aiFillActive={aiFillActive}
+              labelById={aiFillLabelById}
             />
           </div>
         </div>

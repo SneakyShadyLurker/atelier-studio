@@ -1,5 +1,4 @@
 import type { GptModerationCategory, GptModerationNotice, GptModerationReason } from '@atelier/shared';
-import { TEXT_BACKEND_LABELS } from '@atelier/shared';
 import { create } from 'zustand';
 
 // Ephemeral UI only. Durable image decisions live on the failed history tile.
@@ -64,7 +63,7 @@ export function moderationCopy(notice: GptModerationNotice) {
     explanation: details.map((detail) => detail.explanation).join(' '),
     guidance: details.map((detail) => detail.guidance).join(' '),
     title: notice.reason === 'unavailable' ? 'Content check unavailable' : 'Request stopped',
-    delivery: `Not sent to ${notice.target === 'image' ? 'GPT Image' : TEXT_BACKEND_LABELS.gpt}`,
+    delivery: `Not sent to ${notice.target === 'image' ? 'GPT Image' : notice.modelLabel ?? 'the text model'}`,
   };
 }
 

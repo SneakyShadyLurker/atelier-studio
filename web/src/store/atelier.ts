@@ -1,5 +1,4 @@
 import type {
-  AiFillBackend,
   EnhancePromptRequest,
   GenerateRequest,
   Model,
@@ -7,7 +6,7 @@ import type {
   UploadRef,
   VideoDurationFrames,
 } from '@atelier/shared';
-import { AI_FILL_BACKEND_VALUES, BRAINSTORM_DEFAULT_COUNT, MAX_HISTORY_Q_LEN, MAX_TILE_COUNT } from '@atelier/shared';
+import { BRAINSTORM_DEFAULT_COUNT, MAX_HISTORY_Q_LEN, MAX_TILE_COUNT } from '@atelier/shared';
 import { create, type StateCreator } from 'zustand';
 import { refImageUrl } from '../api/uploads';
 import { pinAt, withoutPin } from '../lib/promptPins';
@@ -296,12 +295,14 @@ interface UiSlice {
   addPreparing: (n: number) => void;
   settlePreparing: (n: number) => void;
   /**
-   * Per-backend count of in-flight {{ai-fill}} calls. Drives the Generate
-   * pill's model attribution.
+   * Per-text-model (row id) count of in-flight {{ai-fill}} calls; idle ids are
+   * dropped. Drives the Generate pill's model attribution.
    */
-  aiFillActive: Readonly<Record<AiFillBackend, number>>;
-  beginAiFill: (backend: AiFillBackend) => void;
-  endAiFill: (backend: AiFillBackend) => void;
+  aiFillActive: Readonly<Record<string, number>>;
+  /** Display name each active model announced in its ai-fill `backend` frame. */
+  aiFillLabels: Readonly<Record<string, string>>;
+  beginAiFill: (modelId: string, label?: string) => void;
+  endAiFill: (modelId: string) => void;
   // True while the single-owner roll-queue drain is actively working through the
   // queue (resolving + firing, including inter-pass backpressure waits). Drives
   // the "Draining… [Stop]" affordance and gates re-entrant submits so a second
@@ -642,16 +643,23 @@ const createUiSlice: StateCreator<AtelierState, [], [], UiSlice> = (set) => ({
   preparing: 0,
   addPreparing: (n) => { set((state) => ({ preparing: state.preparing + n })); },
   settlePreparing: (n) => { set((state) => ({ preparing: Math.max(0, state.preparing - n) })); },
-  aiFillActive: Object.fromEntries(AI_FILL_BACKEND_VALUES.map((backend) => [backend, 0])) as Record<AiFillBackend, number>,
-  beginAiFill: (backend) => {
+  aiFillActive: {},
+  aiFillLabels: {},
+  beginAiFill: (modelId, label) => {
     set((state) => ({
-      aiFillActive: { ...state.aiFillActive, [backend]: state.aiFillActive[backend] + 1 },
+      aiFillActive: { ...state.aiFillActive, [modelId]: (state.aiFillActive[modelId] ?? 0) + 1 },
+      ...(label ? { aiFillLabels: { ...state.aiFillLabels, [modelId]: label } } : {}),
     }));
   },
-  endAiFill: (backend) => {
-    set((state) => ({
-      aiFillActive: { ...state.aiFillActive, [backend]: Math.max(0, state.aiFillActive[backend] - 1) },
-    }));
+  endAiFill: (modelId) => {
+    set((state) => {
+      const count = state.aiFillActive[modelId];
+      if (count === undefined) return state;
+      if (count > 1) return { aiFillActive: { ...state.aiFillActive, [modelId]: count - 1 } };
+      const { [modelId]: _count, ...aiFillActive } = state.aiFillActive;
+      const { [modelId]: _label, ...aiFillLabels } = state.aiFillLabels;
+      return { aiFillActive, aiFillLabels };
+    });
   },
   draining: false,
   setDraining: (draining) => { set({ draining }); },

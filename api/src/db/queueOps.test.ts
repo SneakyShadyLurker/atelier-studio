@@ -54,6 +54,12 @@ test('countQueuedForUser counts only queued rows for that user', () => {
   expect(countQueuedForUser(db, 'u1')).toBe(2);
 });
 
+test('an explicit claim timestamp is persisted by the canonical transition', () => {
+  seedBatch(db, 'stamped', 'u1', 'queued');
+  expect(transitionQueuedToRunning(db, 'stamped', undefined, 12345)).toBe(12345);
+  expect(db.query('SELECT started_at FROM batches WHERE id=?').get('stamped')).toEqual({ started_at: 12345 });
+});
+
 test('transitionQueuedToRunning claims once and returns null when already claimed or missing (no logger, silent)', () => {
   seedBatch(db, 'b1', 'u1', 'queued');
   expect(transitionQueuedToRunning(db, 'b1')).toBeNumber();

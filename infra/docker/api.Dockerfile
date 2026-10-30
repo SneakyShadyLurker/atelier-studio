@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Multi-stage build for atelier-api. Pinned to oven/bun:1.4.3 exact tag so
+# Multi-stage build for atelier-api. Pinned to oven/bun:1.4.4 exact tag so
 # the runtime image matches the Bun version pinned in root package.json
 # engines. Two details matter here:
 #   - the runtime base (debian:trixie under the hood) has no wget/curl, so
@@ -14,7 +14,7 @@
 #     install of node_modules to leak through the build context).
 # Both fixes land below.
 
-FROM oven/bun:1.4.3 AS deps
+FROM oven/bun:1.4.4 AS deps
 
 WORKDIR /app
 
@@ -22,10 +22,11 @@ COPY package.json bun.lock bunfig.toml ./
 COPY api/package.json ./api/package.json
 COPY web/package.json ./web/package.json
 COPY shared/package.json ./shared/package.json
+COPY patches ./patches
 
 RUN bun install --frozen-lockfile --production
 
-FROM oven/bun:1.4.3 AS runtime
+FROM oven/bun:1.4.4 AS runtime
 
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.revision=$VCS_REF

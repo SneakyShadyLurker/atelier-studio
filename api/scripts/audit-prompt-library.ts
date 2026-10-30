@@ -8,15 +8,19 @@
 //     bun api/scripts/audit-prompt-library.ts
 //
 // Reads the live library via the same query helper the server uses,
-// runs the same SAT engine, prints a summary, and exits non-zero on
-// the first unsatisfiable template.
+// runs the same SAT engine and prints proven OK, BROKEN and INCOMPLETE groups.
+// Diagnosis exits: 0 = all proven coherent, 1 = a confirmed failure,
+// 5 = incomplete with no confirmed failure (bounded solver work exhausted).
+// Other exits: 2 = missing DB, 3 = user/config error, 4 = live-DB guard.
+// Offline work defaults to the HTTP budget per template; a positive safe integer
+// ATELIER_AUDIT_NODE_BUDGET overrides the total allowance for this audit.
 
 import { Database } from 'bun:sqlite';
 import { existsSync } from 'node:fs';
 import type { LibraryDiagnosisResponse, PromptLibraryResponse } from '@atelier/shared';
 import { VAR_TOKEN_PATTERN, parseVarToken } from '@atelier/shared';
 import { hasAiFillTokens, parseAiFillTokens } from '@atelier/shared/ai-fill';
-import { diagnoseLibrary } from '../src/prompts/libraryDiagnosis';
+import { diagnoseLibrary, DIAGNOSIS_NODE_BUDGET } from '../src/prompts/libraryDiagnosis';
 import { promptLibrary } from '../src/routes/prompts/_shared';
 
 const DB_PATH = process.env.ATELIER_DB_PATH ?? '/data/atelier.sqlite';
@@ -27,8 +31,26 @@ export function auditUserId(env: NodeJS.ProcessEnv): string | null {
   return userId === undefined || userId === '' ? null : userId;
 }
 
-export function computeExitCodeFromDiagnosis(diag: LibraryDiagnosisResponse): 0 | 1 {
-  return diag.templates.some((t) => !t.satisfiable) ? 1 : 0;
+export function auditNodeBudgetOverride(env: NodeJS.ProcessEnv): number | undefined {
+  if (env.ATELIER_AUDIT_NODE_BUDGET === undefined) return undefined;
+  const value = Number(env.ATELIER_AUDIT_NODE_BUDGET);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error('ATELIER_AUDIT_NODE_BUDGET must be a positive safe integer.');
+  }
+  return value;
+}
+
+export function diagnoseLibraryForAudit(lib: PromptLibraryResponse, nodeBudgetOverride?: number): LibraryDiagnosisResponse {
+  const totalBudget = nodeBudgetOverride
+    ?? Math.min(Number.MAX_SAFE_INTEGER, DIAGNOSIS_NODE_BUDGET * Math.max(1, lib.templates.length));
+  return diagnoseLibrary(lib, { totalBudget,
+    ...(nodeBudgetOverride === undefined ? { maxTemplateBudget: DIAGNOSIS_NODE_BUDGET } : {}),
+  });
+}
+
+export function computeExitCodeFromDiagnosis(diag: LibraryDiagnosisResponse): 0 | 1 | 5 {
+  if (diag.templates.some((t) => t.satisfiable === false)) return 1;
+  return diag.templates.some((t) => t.satisfiable === null) ? 5 : 0;
 }
 
 // Exported for unit-testing without running the CLI entry point.
@@ -47,8 +69,9 @@ export function isLikelyLiveDbPath(dbPath: string): boolean {
 
 export function format(diag: LibraryDiagnosisResponse): string {
   const lines: string[] = [];
-  const ok = diag.templates.filter((t) => t.satisfiable);
-  const broken = diag.templates.filter((t) => !t.satisfiable);
+  const ok = diag.templates.filter((t) => t.satisfiable === true);
+  const broken = diag.templates.filter((t) => t.satisfiable === false);
+  const incomplete = diag.templates.filter((t) => t.satisfiable === null);
   lines.push(`OK     (${ok.length}/${diag.templates.length})`);
   for (const t of ok) lines.push(`  - ${t.templateName}`);
   lines.push('');
@@ -59,6 +82,9 @@ export function format(diag: LibraryDiagnosisResponse): string {
       lines.push(`      ${p.listA} ↔ ${p.listB} on ${p.dimensionName}`);
     }
   }
+  lines.push('');
+  lines.push(`INCOMPLETE (${incomplete.length}/${diag.templates.length})`);
+  for (const t of incomplete) lines.push(`  - ${t.templateName}${t.reason ? ` — ${t.reason}` : ''}`);
   return lines.join('\n');
 }
 
@@ -88,7 +114,7 @@ export function format(diag: LibraryDiagnosisResponse): string {
 //
 // WARNINGS, not failures: a few are legitimate (a body-marker anachronism correctly
 // scoped to Modern Earth). The audit surfaces them for a human to confirm; exit code
-// stays driven by satisfiability.
+// stays driven by the three-state diagnosis verdict above.
 
 // Dimensions where every option of a list is expected to share one value.
 const SILOING_DIMENSIONS: ReadonlySet<string> = new Set(['Genre']);
@@ -497,6 +523,13 @@ export function formatHygiene(warnings: readonly TagHygieneWarning[]): string {
 }
 
 if (import.meta.main) {
+  let nodeBudgetOverride: number | undefined;
+  try {
+    nodeBudgetOverride = auditNodeBudgetOverride(process.env);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(3);
+  }
   const USER_ID = auditUserId(process.env);
   if (USER_ID === null) {
     console.error('ATELIER_USER_ID is required: set it to the id of the library owner to audit.');
@@ -521,7 +554,7 @@ if (import.meta.main) {
   try {
     // User-existence check before running diagnosis — a missing user produces a
     // misleading empty library rather than a clear error. Exit code 3 lets CI
-    // distinguish "user missing" from "library broken" (1) or "path missing" (2).
+    // distinguish "user missing" from "library broken" (1) or incomplete (5).
     const userCheck = verifyUserExists(db, USER_ID);
     if (!userCheck.ok) {
       console.error(userCheck.reason);
@@ -530,7 +563,7 @@ if (import.meta.main) {
     }
 
     const lib = promptLibrary(db, USER_ID);
-    const diag = diagnoseLibrary(lib);
+    const diag = diagnoseLibraryForAudit(lib, nodeBudgetOverride);
     console.log(format(diag));
     console.log('');
     console.log(formatHygiene(auditTagHygiene(lib)));

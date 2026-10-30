@@ -8,7 +8,7 @@ import { applyPragmas } from './client';
 import { namedArtifactDir, namedArtifactRoot } from '../storage/files';
 import type { AppLogger } from '../observability/logger';
 
-export const BINARY_SCHEMA_VERSION = 56;
+export const BINARY_SCHEMA_VERSION = 57;
 
 export class MigrationError extends Error {
   constructor(message: string) {
@@ -598,6 +598,7 @@ const migration55Sql = loadMigration('0055_proxy_text_backends.sql');
 // Per-user base-sampler step overrides for local models (2026-10-25). Only
 // overrides are stored; an absent row means the model's `defaultSteps`.
 const migration56Sql = loadMigration('0056_user_model_steps.sql');
+const migration57Sql = loadMigration('0057_stories_source_upload_index.sql');
 
 // Wraps migration 19 with a conditional `tile_ref_images` rebuild and the
 // SQLite-recommended foreign-key dance for ALTER-table-style rebuilds.
@@ -1604,6 +1605,7 @@ const migrations: readonly Migration[] = [
   { version: 54, fn: migration54Run },
   { version: 55, fn: migration55Run },
   { version: 56, sql: migration56Sql },
+  { version: 57, sql: migration57Sql },
 ];
 
 export function migrate(

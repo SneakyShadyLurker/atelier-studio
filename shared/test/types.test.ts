@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { DIAGNOSIS_VERSION, DIAGNOSIS_VERSION_HEADER } from '../src/index';
 import type {
   Batch,
   BatchEvent,
@@ -333,12 +334,20 @@ describe('shared wire types', () => {
       conflictingPairs: [pair],
     };
     const response: LibraryDiagnosisResponse = {
-      templates: [entry, { templateName: 'OK', satisfiable: true }],
+      templates: [entry, { templateName: 'OK', satisfiable: true }, { templateName: 'Incomplete', satisfiable: null }],
       librarySnapshotHash: 'h',
       templatesDigest: 'd',
     };
-    expect(response.templates.length).toBe(2);
+    expect(response.templates.length).toBe(3);
+    expect(response.templates[2]?.satisfiable).toBeNull();
     expect(response.templates[0]?.conflictingPairs?.[0]?.dimensionName).toBe('D');
+    const legacy: LibraryDiagnosisResponse = {
+      ...response, templates: response.templates.filter((item) => item.satisfiable !== null), incompleteTemplateNames: ['Incomplete'],
+    };
+    expect(legacy.templates.every((item) => typeof item.satisfiable === 'boolean')).toBe(true);
+    expect(legacy.incompleteTemplateNames).toEqual(['Incomplete']);
+    expect(DIAGNOSIS_VERSION_HEADER).toBe('X-Atelier-Diagnosis-Version');
+    expect(DIAGNOSIS_VERSION).toBe('2');
   });
 
   test('_NoUserIdOn rejects optional userId (audit T2-005)', () => {

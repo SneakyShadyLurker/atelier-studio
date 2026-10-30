@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { MAX_UPLOAD_REQUEST_BYTES } from '../../api/src/routes/uploads';
 
 type ComposeVolume = string | { type?: string; source?: string; target?: string; read_only?: boolean };
 interface ComposeService {
@@ -19,6 +20,13 @@ function loadCompose(name: string): ComposeFile {
 function services(file: ComposeFile): [string, ComposeService][] {
   return Object.entries(file.services ?? {});
 }
+
+test('SWAG accepts the upload input ceiling plus multipart envelope', () => {
+  const text = readFileSync(new URL('../swag/atelier.subdomain.conf', import.meta.url), 'utf8');
+  const match = /client_max_body_size\s+(\d+)M;/.exec(text);
+  expect(match).not.toBeNull();
+  expect(Number(match?.[1]) * 1024 * 1024).toBeGreaterThanOrEqual(MAX_UPLOAD_REQUEST_BYTES);
+});
 
 test('base compose file pins no platform on any service', () => {
   const base = loadCompose('docker-compose.yml');

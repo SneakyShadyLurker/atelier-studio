@@ -1,33 +1,43 @@
 import { z } from 'zod';
 import { maxUtf16Length } from '../validation/stringLength';
-import type { RawInferOp } from './inferTypes';
 import { sliceJsonObject } from './lenientJson';
 
 const Label = z.string().trim().min(1).check(maxUtf16Length(64));
 const TagList = z.array(Label).min(1).max(50);
-const OpSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('createDimension'), name: Label, tags: TagList }).strict(),
-  z.object({ op: z.literal('addTags'), dimIdx: z.number().int().min(0), tags: TagList }).strict(),
-  z.object({ op: z.literal('renameDimension'), dimIdx: z.number().int().min(0), newName: Label }).strict(),
+const Index = z.union([z.number(), z.string().regex(/^\d+$/)]).pipe(z.coerce.number<string | number>().int().min(0));
+const TagRef = z.object({ dimName: Label, label: Label });
+const AddOptionOpSchema = z.object({
+  op: z.literal('addOption'), listIdx: Index, value: Label,
+  tags: z.array(TagRef).min(1).max(50),
+});
+
+export const InferOpSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('createDimension'), name: Label, tags: TagList }),
+  z.object({ op: z.literal('addTags'), dimIdx: Index, tags: TagList }),
+  z.object({ op: z.literal('renameDimension'), dimIdx: Index, newName: Label }),
   z.object({
     op: z.literal('mergeDimensions'),
-    fromIdx: z.number().int().min(0),
-    intoIdx: z.number().int().min(0),
+    fromIdx: Index,
+    intoIdx: Index,
     tagMap: z.record(Label, Label),
-  }).strict(),
+  }),
   z.object({
     op: z.literal('assignOptionTags'),
-    listIdx: z.number().int().min(0),
-    optionIdx: z.number().int().min(0),
-    tags: z.array(z.object({ dimName: Label, label: Label }).strict()).min(1).max(50),
-  }).strict(),
-  z.object({
-    op: z.literal('addOption'),
-    listIdx: z.number().int().min(0),
-    value: Label,
-    tags: z.array(z.object({ dimName: Label, label: Label }).strict()).min(1).max(50),
-  }).strict(),
+    listIdx: Index,
+    optionIdx: Index,
+    tags: z.array(TagRef).min(1).max(50),
+  }),
+  AddOptionOpSchema,
 ]);
+
+export type RawInferOp = z.output<typeof InferOpSchema>;
+const InferPayloadSchema = z.object({ ops: z.array(InferOpSchema).max(500) });
+const RescuePayloadSchema = z.object({ ops: z.array(AddOptionOpSchema).min(1).max(1) }).strict();
+const { $schema: _dialect, ...rescueSchema } = z.toJSONSchema(RescuePayloadSchema, { target: 'draft-7', io: 'output' });
+export const RESCUE_RESPONSE_FORMAT = {
+  type: 'json_schema',
+  json_schema: { name: 'dimension_rescue', strict: true, schema: rescueSchema },
+} as const;
 
 export function parseInferPayload(raw: string): RawInferOp[] | null {
   let parsed: unknown;
@@ -36,13 +46,10 @@ export function parseInferPayload(raw: string): RawInferOp[] | null {
   } catch {
     return null;
   }
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const ops = (parsed as { ops?: unknown }).ops;
-  if (!Array.isArray(ops) || ops.length > 500) return null;
-  const out: RawInferOp[] = [];
-  for (const o of ops) {
-    const r = OpSchema.safeParse(o);
-    if (r.success) out.push(r.data);
-  }
-  return out;
+  // Schemas strip harmless extra keys and normalize digit-string indices.
+  // Operations may depend on one another. Validate the complete proposal:
+  // silently removing malformed operations can manufacture partial success
+  // or turn an invalid response into an apparently intentional empty result.
+  const result = InferPayloadSchema.safeParse(parsed);
+  return result.success ? result.data.ops : null;
 }

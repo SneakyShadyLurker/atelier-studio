@@ -17,30 +17,46 @@ export function DiagnosisCard(props: DiagnosisCardProps) {
   const titleId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const failing = diagnosis.templates.filter((t) => !t.satisfiable);
-  const broken: readonly LibraryDiagnosisEntry[] = props.mode === 'library'
-    ? failing
-    : failing.filter((t) => t.templateName === props.templateName);
+  const visible = props.mode === 'library'
+    ? diagnosis.templates
+    : diagnosis.templates.filter((t) => t.templateName === props.templateName);
+  const broken: readonly LibraryDiagnosisEntry[] = visible.filter((t) => t.satisfiable === false);
+  const incomplete = visible.filter((t) => t.satisfiable === null);
 
-  if (broken.length === 0) return null;
+  if (broken.length === 0 && incomplete.length === 0) return null;
 
   return (
     <section className={styles.card} aria-labelledby={titleId}>
       <header className={styles.head}>
         <I.warn />
         <h3 id={titleId} className={styles.title}>
-          {broken.length === 1 ? '1 template' : `${broken.length} templates`} currently unsatisfiable
+          {broken.length > 0
+            ? `${broken.length === 1 ? '1 template' : `${broken.length} templates`} currently unsatisfiable`
+            : 'Diagnosis incomplete'}
         </h3>
       </header>
 
-      <ul className={styles.list}>
+      {broken.length > 0 && <ul className={styles.list}>
         {broken.map((t) => (
           <li key={t.templateName} className={styles.item}>
             <span className={styles.name}>{t.templateName}</span>
             {t.reason && <span className={styles.reason}>{t.reason}</span>}
           </li>
         ))}
-      </ul>
+      </ul>}
+
+      {incomplete.length > 0 && (
+        <div className={styles.details}>
+          {broken.length > 0 && <strong>Diagnosis incomplete</strong>}
+          <div className={styles.reason}>
+            The check reached its work limit. Coherence is unknown for these templates.
+            You can continue with AI; no conflict has been established for them.
+          </div>
+          <ul className={styles.list}>
+            {incomplete.map((t) => <li key={t.templateName} className={styles.item}><span className={styles.name}>{t.templateName}</span></li>)}
+          </ul>
+        </div>
+      )}
 
       {detailsOpen && (
         <div className={styles.details}>
@@ -69,16 +85,16 @@ export function DiagnosisCard(props: DiagnosisCardProps) {
           onClick={() => { onFixWithAi(diagnosis); }}
         >
           <I.sparkle aria-hidden="true" />
-          {props.mode === 'template' ? 'Fix Template' : 'Fix Library'}
+          {broken.length === 0 ? 'Continue with AI' : props.mode === 'template' ? 'Fix Template' : 'Fix Library'}
         </button>
-        <button
+        {broken.length > 0 && <button
           type="button"
           className={btn.secondary}
           onClick={() => { setDetailsOpen((s) => !s); }}
           aria-expanded={detailsOpen}
         >
           {detailsOpen ? 'Hide details' : 'Show details'}
-        </button>
+        </button>}
         <button
           type="button"
           className={btn.secondary}

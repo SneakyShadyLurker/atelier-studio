@@ -94,14 +94,15 @@ try:
         ready = (data.get('protocol') == 2 and data.get('ready') is True
                  and all(caps.get(key) is True for key in (
                      'job_status', 'image_outputs', 'preview_control', 'lease_renewal',
-                     'job_admission', 'video_outputs'))
+                     'job_admission', 'video_outputs', 'execution_budget', 'residency_tracking'))
                  and isinstance(data.get('worker_build'), str)
                  and re.fullmatch('[a-f0-9]{64}', data['worker_build']) is not None
                  and isinstance(data.get('allowed_nodes'), list) and bool(data['allowed_nodes'])
                  and all(isinstance(node, str) and node for node in data['allowed_nodes'])
                  and all(type(limits.get(key)) is int and limits[key] > 0 for key in (
                      'max_jobs', 'max_payload_bytes', 'max_image_bytes', 'max_images',
-                     'pre_submit_seconds', 'terminal_idle_seconds', 'terminal_max_seconds')))
+                     'pre_submit_seconds', 'terminal_idle_seconds', 'terminal_max_seconds',
+                     'max_execution_seconds')))
         sys.exit(0 if ready else 1)
 except Exception:
     sys.exit(1)

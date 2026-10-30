@@ -10,6 +10,7 @@ import { storageKeyring } from '../storage/crypto';
 import { jsonRequest, testRuntime } from '../test/helpers';
 import { pngBytes } from '../test/image-fixtures';
 import { setBeforeTailMutationForTests } from './sequences';
+import { withUploadSlot } from './uploads-runtime';
 
 afterEach(async () => {
   await waitForStitchQueueIdle();
@@ -176,6 +177,10 @@ describe('video sequence routes and submit validation', () => {
       }));
       expect(response.status).toBe(404);
     }
+    const bodyResponse = await runtime.app.fetch(new Request(`http://local/api/tiles/${id}/handoff-frame`, {
+      method: 'POST', headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' }, body: '{}',
+    }));
+    expect(bodyResponse.status).toBe(404);
   });
 
   test('cross-user sequence reads/actions and handoff extraction return 404', async () => {
@@ -203,6 +208,88 @@ describe('video sequence routes and submit validation', () => {
       { method: 'POST', headers: { 'Remote-User': 'alice' } },
     ));
     expect(response.status).toBe(404);
+  });
+
+  test('bodyless handoff respects media admission and releases cancelled waiters', async () => {
+    const runtime = videoRuntime();
+    const seeded = await seedSequence(runtime.db, runtime.config.DATA_DIR);
+    const gate = Promise.withResolvers<undefined>();
+    let calls = 0;
+    setLastFrameRunnerForTests(async () => { calls += 1; await gate.promise; return pngBytes(); });
+    const abort = new AbortController();
+    const run = (signal?: AbortSignal) => runtime.app.fetch(new Request(
+      `http://local/api/tiles/${seeded.tiles[1]}/handoff-frame`, {
+        method: 'POST', headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' },
+        ...(signal ? { signal } : {}),
+      },
+    ));
+    const first = run();
+    const second = run();
+    const waiting = run(abort.signal);
+    try {
+      const deadline = Date.now() + 1_000;
+      while (calls < 2 && Date.now() < deadline) await Bun.sleep(1);
+      expect(calls).toBe(2);
+      abort.abort();
+      expect((await waiting).status).toBe(499);
+    } finally { gate.resolve(undefined); }
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(200);
+    expect(calls).toBe(2);
+    expect(runtime.db.query('SELECT COUNT(*) AS n FROM uploads').get()).toEqual({ n: 2 });
+    expect(await withUploadSlot('alice', () => Promise.resolve('released'))).toBe('released');
+  });
+  test('body-bearing handoff is rejected unread before extraction regardless of tile ownership', async () => {
+    const runtime = videoRuntime();
+    const seeded = await seedSequence(runtime.db, runtime.config.DATA_DIR);
+    let calls = 0;
+    setLastFrameRunnerForTests(() => { calls += 1; return Promise.resolve(pngBytes()); });
+    for (const user of ['alice', 'bob']) {
+      let consumed = false;
+      let canceled = false;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) { consumed = true; controller.enqueue(new TextEncoder().encode('{}')); controller.close(); },
+        cancel() { canceled = true; },
+      }, { highWaterMark: 0 });
+      const response = await runtime.app.fetch(new Request(`http://local/api/tiles/${seeded.tiles[1]}/handoff-frame`, {
+        method: 'POST', headers: { 'Remote-User': user, 'Content-Type': 'application/json' }, body,
+      }));
+      expect(response.status).toBe(400);
+      expect(consumed).toBe(false);
+      expect(canceled).toBe(true);
+    }
+    expect(calls).toBe(0);
+    expect(runtime.db.query('SELECT COUNT(*) AS n FROM uploads').get()).toEqual({ n: 0 });
+  });
+
+  test('real Bun HTTP handoff accepts bodyless and Content-Length zero but rejects a nonempty body', async () => {
+    const runtime = videoRuntime();
+    const seeded = await seedSequence(runtime.db, runtime.config.DATA_DIR);
+    let calls = 0;
+    const observedBodies: boolean[] = [];
+    setLastFrameRunnerForTests(() => { calls += 1; return Promise.resolve(pngBytes()); });
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: (request) => {
+      observedBodies.push(request.body !== null);
+      return runtime.app.fetch(request);
+    } });
+    try {
+      const url = `http://127.0.0.1:${server.port}/api/tiles/${seeded.tiles[1]}/handoff-frame`;
+      for (const [options, status] of [
+        [{}, 200],
+        [{ headers: { 'Content-Length': '0' } }, 200],
+        [{ body: '{}' }, 400],
+      ] as const) {
+        const response = await fetch(url, {
+          method: 'POST', ...options, headers: { 'Remote-User': 'alice', ...('headers' in options ? options.headers : {}) },
+          signal: AbortSignal.timeout(2000),
+        });
+        expect(response.status).toBe(status);
+        await response.body?.cancel();
+      }
+      expect(observedBodies).toEqual([false, false, true]);
+      expect(calls).toBe(2);
+      expect(runtime.db.query('SELECT COUNT(*) AS n FROM uploads').get()).toEqual({ n: 2 });
+    } finally { await server.stop(true); }
   });
 
   test('submit rejects a non-tail source with 409 not-tail', async () => {

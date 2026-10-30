@@ -9,6 +9,8 @@ Use [Getting started](getting-started.md) for a local trial. This guide is for
 an operator setting up a persistent server. After installation, [Using Atelier](user-guide.md)
 covers the app itself; [Architecture](architecture.md) describes its contracts.
 
+The checked-in `patches/` directory is required input to Bun installs, including frozen-lockfile installs and both Docker build stages. Root `patchedDependencies` applies the `range-parser@1.3.0` suffix-range correction automatically. Include these files when preparing a source or manifest-only build context; do not install from manifests and lockfile alone.
+
 ## Requirements
 
 - A Docker host with [Compose v2](https://docs.docker.com/compose/install/), Git
@@ -303,7 +305,7 @@ docker exec atelier-api bun scripts/storage.ts verify   # authenticates EVERY ar
 
 The socket lives on a container tmpfs, so every container start needs a new unseal. A host-side agent that reads the identity from a secret store and runs `unseal` on each container start automates this.
 
-**Guards.** In production the api refuses to boot, before opening the database, unless `DATA_DIR/.atelier-data-volume` exists (written last by the migration below). Decrypted copies exist only in the container's tmpfs `/tmp` and never touch a file on disk: ffmpeg inputs (1.5 GiB budget), seekable playback copies of clips and masters so Bun can answer HTTP Range (1 GiB budget, evicted after 5 idle minutes; a Range request that finds no room gets `503` with `Retry-After`), and HEIC decode scratch. Host swap can still page container memory; disable it on the Docker VM where possible.
+**Guards.** In production the api refuses to boot, before opening the database, unless `DATA_DIR/.atelier-data-volume` exists (written last by the migration below). Decrypted copies exist only in the container's tmpfs `/tmp` and never touch a file on disk: ffmpeg inputs (1.5 GiB budget), seekable playback copies of clips and masters with HTTP Range support (1 GiB budget, retired after 5 idle minutes; active reader leases retain their files and budget until completion, cancellation, or error; readers making no byte progress for 5 minutes are cancelled and their responses error; a Range request that finds no room gets `503` with `Retry-After`), and HEIC decode scratch. Host swap can still page container memory; disable it on the Docker VM where possible.
 
 **Not protected:** a live attacker with access to the secret store, the Docker socket or container memory; upstream cloud-provider retention; prompt text and metadata in SQLite (protected only by the volume's own encryption).
 
@@ -435,7 +437,14 @@ requires the matching API's `/api/history/refresh` endpoint; update the API befo
 the web. The supplied Compose configuration waits for API health before starting
 the web container. Updating only the web against an older API is unsupported.
 
-Atelier applies pending schema migrations at api boot (`api/src/db/migrate.ts`); boot refuses a database newer than the binary. A safe release:
+Atelier applies pending schema migrations at api boot (`api/src/db/migrate.ts`); boot refuses a database newer than the binary.
+
+Schema v57 adds a partial index for upload references held by rendering stories;
+it leaves existing rows intact. Rehearse this migration before promotion. Once
+v57 is recorded, a v56 image refuses the database, so retain a forward-fix path
+instead of relying on the previous image alone.
+
+Follow these steps for a release:
 
 1. **Lock.** Hold one deploy lock per compose directory so a deploy and host maintenance never overlap. `infra/docker/deploy-lock.sh` is a bash 3.2 lock library (BSD and Linux) for this: an owner record in `infra/docker/.deploy.lock`, stale-lock recovery under a kernel flock on `infra/docker/.deploy-reclaim.flock`, and a refusal while a live owner or child holds it. Never delete `.deploy-reclaim.flock`; keep both paths gitignored.
 2. **Check the tree.** Build only from a clean checkout of the revision you intend to ship, and label the image with it (`ATELIER_BUILD_REVISION="$(git rev-parse HEAD)"`). A `git archive` build context avoids permission surprises from a working tree.

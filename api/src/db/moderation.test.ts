@@ -11,6 +11,7 @@ test('v48 preserves historical reasons and dependent rows without inventing cate
       CREATE TABLE tiles (id TEXT PRIMARY KEY, moderation_reason TEXT);
       INSERT INTO tiles VALUES ('old', 'sexual-age');
       CREATE TABLE tile_ref_images (tile_id TEXT REFERENCES tiles(id) ON DELETE CASCADE);
+      CREATE TABLE stories (id TEXT PRIMARY KEY, source_upload_id TEXT, status TEXT NOT NULL);
       INSERT INTO tile_ref_images VALUES ('old');`);
     migrate(db, '/tmp');
     migrate(db, '/tmp');

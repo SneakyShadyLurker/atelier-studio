@@ -145,7 +145,7 @@ export function buildInferDimensionsSystemPrompt(
 }
 
 function formatPriorDiagnosis(diag: LibraryDiagnosisResponse): string {
-  const failing = diag.templates.filter((t) => !t.satisfiable);
+  const failing = diag.templates.filter((t) => t.satisfiable === false);
   if (failing.length === 0) return '';
   const lines: string[] = [];
   lines.push('### DETERMINISTIC PRIOR DIAGNOSIS');

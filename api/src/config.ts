@@ -279,12 +279,12 @@ const ConfigSchema = z.object({
   BRAINSTORM_MAX_RESPONSE_BYTES: numericString(4 * 1024 * 1024),
   INFER_TOTAL_BUDGET_MS: numericString(500_000).pipe(z.number().int().min(120_000).max(580_000)),
   RESILIENT_PER_ATTEMPT_TIMEOUT_MS: numericString(70_000).pipe(z.number().int().min(15_000).max(180_000)),
-  // Pass-1 (taxonomy) per-attempt timeout. The taxonomy call is a single,
+  // Pass-1 (taxonomy) shared wall-time envelope. Taxonomy is a
   // non-parallelizable reasoning call over the WHOLE library; for large
   // libraries (70+ lists) its output-bound latency runs ~140s — well past the
   // 70s RESILIENT_PER_ATTEMPT_TIMEOUT_MS used for the fast per-list Pass-2
-  // chunks. It gets its own larger ceiling and a single attempt (every attempt
-  // takes the same ~140s, so retrying just burns the total budget). Wired into
+  // chunks. Provider calls each make one attempt; route recovery of one
+  // transient result shares this ceiling across both calls. Wired into
   // the totalEnvelope invariant below. Min 70s so it never undercuts the chunk
   // timeout; max 300s to stay within INFER_TOTAL_BUDGET_MS headroom.
   INFER_TAXONOMY_TIMEOUT_MS: numericString(180_000).pipe(z.number().int().min(70_000).max(300_000)),

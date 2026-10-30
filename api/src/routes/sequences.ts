@@ -11,7 +11,8 @@ import {
 import { streamArtifact } from '../storage/files';
 import { StorageSealedError } from '../storage/crypto';
 import { withDecryptedArtifactFiles } from '../storage/decryptedTemp';
-import { decryptedVideoFile } from '../storage/decryptedVideoCache';
+import { acquireDecryptedVideo } from '../storage/decryptedVideoCache';
+import { videoResponse } from './_video-response';
 import { extractLastFramePng } from '../storage/lastFrame';
 import {
   InvalidUploadSizeError,
@@ -23,6 +24,7 @@ import { artifactResponseHeaders, artifactStreamResponse } from './_artifact-res
 import { parseParams } from './_http';
 import { HandoffTileParamSchema, SequenceParamSchema } from './sequences.schema';
 import { videoSequencesGate } from './sequences.gate';
+import { UploadQueueFullError, withUploadSlot } from './uploads-runtime';
 
 interface HandoffTileRow {
   readonly ext: MediaExt;
@@ -44,6 +46,7 @@ export const sequencesRoutes = new Hono<AppEnv>()
   .use('/tiles/:tileId/handoff-frame', videoSequencesGate)
   .use('/sequences/*', videoSequencesGate)
   .post('/tiles/:tileId/handoff-frame', async (c) => {
+    if (c.req.raw.body) return c.json({ error: 'handoff frame requests must have no body' }, 400);
     const params = parseParams(c, HandoffTileParamSchema);
     if (!params.ok) return params.response;
     const tile = c.var.db.query<HandoffTileRow, [string, string]>(
@@ -60,28 +63,32 @@ export const sequencesRoutes = new Hono<AppEnv>()
     if (!tile) return c.body(null, 404);
 
     try {
-      const signal = c.req.raw.signal;
-      const png = await withDecryptedArtifactFiles(
-        c.var.config.DATA_DIR,
-        [{ root: 'images', userId: c.var.userId, artifactId: params.value.tileId, ext: tile.ext }],
-        { signal },
-        ([path]) => {
-          if (path === undefined) throw new Error('decrypted handoff source missing');
-          return extractLastFramePng(path, { signal });
-        },
-      );
-      if (png === null) return c.body(null, 404);
-      const upload = await storeUpload({
-        db: c.var.db,
-        dataDir: c.var.config.DATA_DIR,
-        logger: c.var.logger,
-        userId: c.var.userId,
-        bytes: png,
-        signal: c.req.raw.signal,
-        sourceTileId: params.value.tileId,
-      });
-      return c.json({ uploadId: upload.id });
+      const processHandoff = async (): Promise<Response> => {
+        const signal = c.req.raw.signal;
+        const png = await withDecryptedArtifactFiles(
+          c.var.config.DATA_DIR,
+          [{ root: 'images', userId: c.var.userId, artifactId: params.value.tileId, ext: tile.ext }],
+          { signal },
+          ([path]) => {
+            if (path === undefined) throw new Error('decrypted handoff source missing');
+            return extractLastFramePng(path, { signal });
+          },
+        );
+        if (png === null) return c.body(null, 404);
+        const upload = await storeUpload({
+          db: c.var.db,
+          dataDir: c.var.config.DATA_DIR,
+          logger: c.var.logger,
+          userId: c.var.userId,
+          bytes: png,
+          signal: c.req.raw.signal,
+          sourceTileId: params.value.tileId,
+        });
+        return c.json({ uploadId: upload.id });
+      };
+      return await withUploadSlot(c.var.userId, processHandoff, c.req.raw.signal);
     } catch (error) {
+      if (error instanceof UploadQueueFullError) return c.body(null, 503, { 'Retry-After': '5' });
       if (isAbortError(error) || c.req.raw.signal.aborted) {
         return new Response(null, { status: 499 });
       }
@@ -120,7 +127,7 @@ export const sequencesRoutes = new Hono<AppEnv>()
       `SELECT user_id, master_updated_at FROM video_sequences
         WHERE id = ? AND user_id = ? AND master_status = 'ready'`,
     ).get(params.value.id, c.var.userId)?.master_updated_at === row.master_updated_at;
-    const video = await decryptedVideoFile(
+    const video = await acquireDecryptedVideo(
       c.var.config.DATA_DIR,
       row.user_id,
       params.value.id,
@@ -128,8 +135,11 @@ export const sequencesRoutes = new Hono<AppEnv>()
       String(row.master_updated_at),
       isCurrentPublication,
     );
-    if (!isCurrentPublication()) return c.body(null, 503, { 'Retry-After': '2' });
-    if (video) return new Response(video, { headers: artifactResponseHeaders('video/mp4') });
+    if (!isCurrentPublication()) {
+      video?.release();
+      return c.body(null, 503, { 'Retry-After': '2' });
+    }
+    if (video) return videoResponse(video, c.req.raw);
     if (c.req.header('Range')) return c.body(null, 503, { 'Retry-After': '2' });
     const artifact = await streamArtifact(
       c.var.config.DATA_DIR,

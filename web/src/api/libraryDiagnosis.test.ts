@@ -1,10 +1,13 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { QueryClient } from '@tanstack/react-query';
+import { DIAGNOSIS_VERSION, DIAGNOSIS_VERSION_HEADER } from '@atelier/shared';
 import type { LibraryDiagnosisResponse } from '@atelier/shared';
 import {
   isConflictingPair,
   isLibraryDiagnosisEntry,
   isLibraryDiagnosisResponse,
   libraryDiagnosisKeys,
+  libraryDiagnosisOpts,
 } from './libraryDiagnosis';
 
 describe('libraryDiagnosis client', () => {
@@ -22,6 +25,7 @@ describe('libraryDiagnosis client', () => {
 
   test('isLibraryDiagnosisEntry accepts valid shapes', () => {
     expect(isLibraryDiagnosisEntry({ templateName: 'X', satisfiable: true })).toBe(true);
+    expect(isLibraryDiagnosisEntry({ templateName: 'X', satisfiable: null, reason: 'diagnosis budget exceeded' })).toBe(true);
     expect(isLibraryDiagnosisEntry({
       templateName: 'X', satisfiable: false, reason: 'r',
       conflictingPairs: [{ listA: 'a', listB: 'b', dimensionName: 'D' }],
@@ -42,6 +46,7 @@ describe('libraryDiagnosis client', () => {
       templatesDigest: 'def',
     };
     expect(isLibraryDiagnosisResponse(valid)).toBe(true);
+    expect(isLibraryDiagnosisResponse({ ...valid, incompleteTemplateNames: ['Unknown'] })).toBe(true);
   });
 
   test('isLibraryDiagnosisResponse rejects invalid shapes', () => {
@@ -49,5 +54,24 @@ describe('libraryDiagnosis client', () => {
     expect(isLibraryDiagnosisResponse({})).toBe(false);
     expect(isLibraryDiagnosisResponse({ templates: 'oops' })).toBe(false);
     expect(isLibraryDiagnosisResponse({ templates: [], librarySnapshotHash: 1, templatesDigest: 'x' })).toBe(false);
+    expect(isLibraryDiagnosisResponse({ templates: [], librarySnapshotHash: 'x', templatesDigest: 'x', incompleteTemplateNames: [1] })).toBe(false);
   });
+
+  for (const satisfiable of [true, null]) {
+    test(`requests representation2 and accepts ${satisfiable === null ? 'modern unknown' : 'old API boolean'} payloads`, async () => {
+      const payload = { templates: [{ templateName: 'T', satisfiable }], librarySnapshotHash: 'h', templatesDigest: 'd' };
+      const fetch = spyOn(globalThis, 'fetch').mockImplementation(Object.assign((...args: Parameters<typeof globalThis.fetch>) => {
+        const headers = new Headers(args[1]?.headers);
+        expect(headers.get(DIAGNOSIS_VERSION_HEADER)).toBe(DIAGNOSIS_VERSION);
+        expect(headers.get('Accept')).toBe('application/json');
+        return Promise.resolve(Response.json(payload));
+      }, { preconnect: globalThis.fetch.preconnect }));
+      const client = new QueryClient();
+      try {
+        const options = libraryDiagnosisOpts();
+        if (typeof options.queryFn !== 'function') throw new Error('missing diagnosis query');
+        expect(await options.queryFn({ client, queryKey: options.queryKey, signal: new AbortController().signal, meta: undefined })).toEqual(payload);
+      } finally { fetch.mockRestore(); client.clear(); }
+    });
+  }
 });

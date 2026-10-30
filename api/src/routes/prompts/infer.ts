@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { TaskCancelledError } from 'cockatiel';
 import type { RejectedOp } from '@atelier/shared';
 import type { AppEnv } from '../../server-env';
 import { parseBody, parseJsonText } from '../_http';
@@ -32,6 +33,7 @@ import { withLlmSlot } from '../../lifecycle/withLlmSlot';
 import { promptLibrary } from './_shared';
 import type { InferResult } from '../../providers/cliproxyText';
 import { failedToSseError } from '../../lifecycle/llm-error';
+import { isAbortError } from '../../lifecycle/abort';
 
 export const inferRoutes = new Hono<AppEnv>()
   .post('/prompts/dimensions/infer', async (c) => {
@@ -58,18 +60,15 @@ export const inferRoutes = new Hono<AppEnv>()
       }
     }
 
-    const lib = promptLibrary(c.var.db, c.var.userId);
-    // Server-side recompute: deterministic prior diagnosis from the live DB.
-    // One extra SAT walk (~10-50ms) is negligible vs the upstream LLM cost.
-    const priorDiagnosis = diagnoseLibrary(lib);
-    const systemPrompt = buildInferDimensionsSystemPrompt({ priorDiagnosis });
-    const snap = toLibrarySnapshot(lib);
-    const snapshotJson = JSON.stringify(snap);
-
     const config = c.var.config;
     const logger = c.var.logger;
     const userId = c.var.userId;
     return withLlmSlot(c, inferPool, userId, 5, () => {
+    const lib = promptLibrary(c.var.db, userId);
+    const priorDiagnosis = diagnoseLibrary(lib);
+    const systemPrompt = buildInferDimensionsSystemPrompt({ priorDiagnosis });
+    const snap = toLibrarySnapshot(lib);
+    const snapshotJson = JSON.stringify(snap);
     const provider = imageTextProvider(config, modelId);
     return {
       timeoutMs: config.INFER_TOTAL_BUDGET_MS,
@@ -83,20 +82,34 @@ export const inferRoutes = new Hono<AppEnv>()
           provider.inferTaxonomy(input, inferSignal, systemPrompt);
         const inferDimensionsSingleAttempt = (input: string, inferSignal: AbortSignal): Promise<InferResult> =>
           provider.inferDimensionsSingleAttempt(input, inferSignal, systemPrompt);
-        const collect = async (
-          snapshot: string,
-          infer: (snapshotJson: string, signal: AbortSignal) => Promise<InferResult>,
-        ): Promise<RawInferOp[] | null> => {
-          const result = await infer(snapshot, signal);
-          if (result.type === 'failed') {
-            logger.warn(
-              { event: 'infer_dimensions_upstream', kind: result.kind, detail: result.detail, userId },
-              'infer dimensions upstream error',
-            );
-            recordFailure(result);
+        const collectTaxonomy = async (snapshot: string): Promise<RawInferOp[] | null> => {
+          // Both calls share one taxonomy wall-time envelope, including the
+          // original disconnect/total-budget signal. Recovery cannot double it.
+          const taxonomySignal = AbortSignal.any([signal, AbortSignal.timeout(config.INFER_TAXONOMY_TIMEOUT_MS)]);
+          try {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              taxonomySignal.throwIfAborted();
+              const result = await inferTaxonomy(snapshot, taxonomySignal);
+              signal.throwIfAborted();
+              if (result.type === 'ok') return result.ops;
+              logger.warn(
+                { event: 'infer_dimensions_upstream', kind: result.kind, detail: result.detail, userId },
+                'infer dimensions upstream error',
+              );
+              recordFailure(result);
+              // Preserve explicit provider decisions even if their response
+              // races the local deadline; they must not become timeout errors.
+              if (result.kind !== 'transient' || result.moderation !== undefined) return null;
+              taxonomySignal.throwIfAborted();
+            }
+            return null;
+          } catch (error) {
+            if (!taxonomySignal.aborted || signal.aborted
+              || (error !== taxonomySignal.reason && !isAbortError(error) && !(error instanceof TaskCancelledError))) throw error;
+            logger.warn({ event: 'infer_dimensions_taxonomy_timeout', userId }, 'infer taxonomy timed out');
+            recordFailure({ type: 'failed', kind: 'transient', status: null, detail: 'taxonomy timeout' });
             return null;
           }
-          return result.ops;
         };
 
         // Track the "worst" provider failure seen so terminal errors carry
@@ -138,7 +151,7 @@ export const inferRoutes = new Hono<AppEnv>()
             // Pass 1 (taxonomy): no coverageHints — the sampled snapshot
             // doesn't include enough options for per-option coverage to be
             // meaningful. The hints come back in Pass 2 per-chunk.
-            const taxonomyOps = await collect(JSON.stringify(taxonomySnap), inferTaxonomy);
+            const taxonomyOps = await collectTaxonomy(JSON.stringify(taxonomySnap));
             if (!taxonomyOps) { providerError(); return; }
             const taxonomyResolved = resolveProposalForInference(taxonomyOps, snap);
             ops.push(...orderedOperations(taxonomyResolved.rawBundles));
@@ -237,9 +250,8 @@ export const inferRoutes = new Hono<AppEnv>()
               return;
             }
             const transientFailures = wave1.failedIndexes.filter((index) => failureKind.get(index) === 'transient');
-            // Retry only the transient (timed-out / flapping) chunks. retry-gaps
-            // runs after wave 1 drains, so the upstream contention that caused
-            // the timeouts has cleared and the single retry usually succeeds.
+            // Retry transient transport and malformed-output chunks once after
+            // wave 1 drains, without discarding successful chunks.
             if (transientFailures.length > 0) {
               send('infer-phase', { phase: 'retry-gaps' });
               const retryTotal = transientFailures.length;
@@ -291,9 +303,9 @@ export const inferRoutes = new Hono<AppEnv>()
               return;
             }
             if (stillFailedTransient.length > 0) {
-              // Graceful partial coverage applies ONLY to transient (timed-out /
-              // flapping) chunks that survived retry-gaps — the slow-under-load
-              // case. A few such failures must not discard the dozens that
+              // Graceful partial coverage applies only to transient transport
+              // or malformed-output chunks that survived retry-gaps.
+              // A few such failures must not discard the dozens that
               // succeeded (one slow chunk in a 123-chunk job used to abort the
               // whole 6-min run). Tolerate up to 10% of chunks (floor, so small
               // libraries stay strict — <10 chunks tolerate zero); above that
@@ -314,7 +326,7 @@ export const inferRoutes = new Hono<AppEnv>()
               );
               logger.warn(
                 { event: 'infer_dimensions_partial_coverage', stillFailed: stillFailedTransient, listNames: partialFailedListNames, tolerance, totalChunks, userId },
-                'finalizing with partial coverage - some chunks timed out after retry-gaps',
+                'finalizing with partial coverage - some chunks failed after retry-gaps',
               );
             }
           }
@@ -363,7 +375,7 @@ export const inferRoutes = new Hono<AppEnv>()
           const baseSnapshotHash = snapshotHash(snap);
           const baseTemplateHash = templatesDigest(lib.templates);
           const notices = partialFailedListNames.length > 0
-            ? [`${partialFailedListNames.length} list${partialFailedListNames.length === 1 ? '' : 's'} couldn't be fully analyzed (the model was slow under load): ${partialFailedListNames.join(', ')}. The rest were tagged — re-run to fill the gaps.`]
+            ? [`${partialFailedListNames.length} list${partialFailedListNames.length === 1 ? '' : 's'} couldn't be fully analyzed after retry: ${partialFailedListNames.join(', ')}. The rest were tagged — re-run to fill the gaps.`]
             : [];
           if (display.length === 0) {
             send('done', { proposalId: '', proposal: { bundles: [] }, baseSnapshotHash, warnings: [], coverage: [], rejected, conflicts: [], notices });

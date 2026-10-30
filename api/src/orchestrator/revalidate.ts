@@ -4,7 +4,7 @@ import { isMediaExt } from '@atelier/shared';
 import type { ByokProvider, Model, ModelAvailability, ModelGate, TileErrorCategory } from '@atelier/shared';
 import { isLocalModelGated } from '../providers/registry';
 import { artifactFilePath } from '../storage/files';
-import { failBatchTerminally } from './failBatchTerminally';
+import { failBatchTerminally, type FailBatchTerminallyOptions } from './failBatchTerminally';
 import type { QueueEntry } from './queue';
 import * as bus from './bus';
 
@@ -119,16 +119,18 @@ export function failBatchAtDequeue(
   ctx: DequeueContext,
   entry: QueueEntry,
   reason: TileErrorCategory,
+  options: Pick<FailBatchTerminallyOptions, 'emitDoneOnEmpty'> = {},
 ): void {
   // failLoadingTiles (inside failBatchTerminally) emits the per-tile `failed`
   // frames ordered by tile_index, then `done`. emitDoneOnEmpty:false preserves
   // this path's gate: a batch with no loading tiles (already terminal'd by
   // another writer, or loadPreparedBatch returned null) must not re-emit
-  // `done`. The bus is always closed (idempotent) so a late subscriber that
+  // `done`. An owned retry may still owe done after a partial terminal write.
+  // The bus is always closed (idempotent) so a late subscriber that
   // arrived after a prior terminal path cannot stay subscribed forever.
   failBatchTerminally(ctx.db, ctx.config, ctx.logger, entry.batchId, reason, {
     emitTerminal: (frame) => { bus.broadcastTerminal(entry.batchId, frame); },
     close: () => { bus.closeBatch(entry.batchId); },
-    emitDoneOnEmpty: false,
+    emitDoneOnEmpty: options.emitDoneOnEmpty ?? false,
   });
 }

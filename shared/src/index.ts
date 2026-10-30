@@ -639,15 +639,21 @@ export interface ConflictingPair {
 
 export interface LibraryDiagnosisEntry {
   readonly templateName: string;
-  readonly satisfiable: boolean;
+  /** null means the bounded solver could not establish a verdict. */
+  readonly satisfiable: boolean | null;
   readonly reason?: string;
   readonly conflictingPairs?: readonly ConflictingPair[];
 }
+
+export const DIAGNOSIS_VERSION_HEADER = 'X-Atelier-Diagnosis-Version';
+export const DIAGNOSIS_VERSION = '2';
 
 export interface LibraryDiagnosisResponse {
   readonly templates: readonly LibraryDiagnosisEntry[];
   readonly librarySnapshotHash: string;
   readonly templatesDigest: string;
+  /** Legacy boolean-only responses name every omitted inconclusive template. */
+  readonly incompleteTemplateNames?: readonly string[];
 }
 
 export interface CoverageUntaggedGroup {

@@ -146,10 +146,11 @@ function pickLocal(
 // Advance one FIFO cursor per user. A pending head blocks that user's entire
 // tail, while other users remain eligible for affinity and starvation handling.
 // One `now` for every step projects order without predicting render duration.
-function projectedLocalOrder(now: number): { ready: QueueEntry[]; blocked: QueueEntry[] } {
+function projectedLocalOrder(now: number, excludedUsers?: ReadonlySet<string>): { ready: QueueEntry[]; blocked: QueueEntry[] } {
   interface Candidate { entry: QueueEntry; index: number }
   const byUser = new Map<string, { entries: Candidate[]; cursor: number }>();
   for (const [index, entry] of queues.local.entries()) {
+    if (excludedUsers?.has(entry.userId)) continue;
     let user = byUser.get(entry.userId);
     if (!user) {
       user = { entries: [], cursor: 0 };
@@ -183,9 +184,9 @@ function projectedLocalOrder(now: number): { ready: QueueEntry[]; blocked: Queue
   }
 }
 
-export function peekNext(pool: Pool, now = performance.now()): QueueEntry | undefined {
-  if (pool !== 'local') return queues[pool][0];
-  return projectedLocalOrder(now).ready[0];
+export function peekNext(pool: Pool, now = performance.now(), excludedUsers?: ReadonlySet<string>): QueueEntry | undefined {
+  if (pool !== 'local') return queues[pool].find((entry) => !excludedUsers?.has(entry.userId));
+  return projectedLocalOrder(now, excludedUsers).ready[0];
 }
 
 // Test-only helpers (exposed via __queueTest): the dequeue loop uses peekNext +

@@ -118,6 +118,21 @@ describe('buildInferDimensionsSystemPrompt with priorDiagnosis', () => {
     expect(prompt).not.toContain('DETERMINISTIC PRIOR DIAGNOSIS');
   });
 
+  test('incomplete checks never enter the prior conflict prompt', () => {
+    const priorDiagnosis: LibraryDiagnosisResponse = {
+      templates: [{ templateName: 'Unknown-budget', satisfiable: null, reason: 'diagnosis budget exceeded' }],
+      librarySnapshotHash: 'x', templatesDigest: 'y',
+    };
+    const prompt = buildInferDimensionsSystemPrompt({ priorDiagnosis });
+    expect(prompt).not.toContain('DETERMINISTIC PRIOR DIAGNOSIS');
+    expect(prompt).not.toContain('Unknown-budget');
+    const mixed = buildInferDimensionsSystemPrompt({ priorDiagnosis: {
+      ...priorDiagnosis, templates: [...priorDiagnosis.templates, { templateName: 'Known-broken', satisfiable: false, reason: 'missing list' }],
+    } });
+    expect(mixed).toContain('Template: Known-broken');
+    expect(mixed).not.toContain('Unknown-budget');
+  });
+
   test('failing templates -- bounded section with exact list-pair triples', () => {
     const diag: LibraryDiagnosisResponse = {
       templates: [

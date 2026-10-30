@@ -22,4 +22,10 @@ describe('QueuedTile', () => {
 
     expect(screen.getByText('Queued · head')).toBeTruthy();
   });
+  test('shows an unknown position without claiming the head of the queue', () => {
+    render(<QueuedTile queueLengthAhead={undefined} />);
+    expect(screen.getByText('Queued')).toBeTruthy();
+    expect(screen.getByRole('img').getAttribute('aria-label')).toBe('Queued');
+    expect(screen.queryByText('Queued · head')).toBeNull();
+  });
 });

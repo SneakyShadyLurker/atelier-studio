@@ -1,7 +1,7 @@
 # Keep the production web build on the same exact Bun patch as the API image.
 # Patch-level resolver/runtime differences have affected this repository, so a
 # mixed image pair is not a reproducible deployment. Root engines matches too.
-FROM oven/bun:1.4.3 AS builder
+FROM oven/bun:1.4.4 AS builder
 
 WORKDIR /app
 
@@ -9,6 +9,7 @@ COPY package.json bun.lock ./
 COPY api/package.json ./api/package.json
 COPY web/package.json ./web/package.json
 COPY shared/package.json ./shared/package.json
+COPY patches ./patches
 
 RUN bun install --frozen-lockfile
 

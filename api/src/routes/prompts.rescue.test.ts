@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
 import { type RescueDimensionArgs, type TestCliproxyTextProvider } from '../providers/cliproxyText';
-import { parseInferDone, parseSse, testRuntime } from '../test/helpers';
+import { parseInferDone, parseSse, pickLegacyTextModel, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 import { putProposal, takeProposalForUser } from '../prompts/proposalStore';
 import { snapshotHash, templatesDigest, toLibrarySnapshot } from '../prompts/librarySnapshot';
@@ -297,6 +297,48 @@ describe('POST /api/prompts/dimensions/rescue', () => {
     const seen = req(captured[0]);
     expect(seen.previewSnapshot.dimensions.find((d) => d.name === 'Genre')).toBeTruthy();
     expect(seen.targetListName).toBe('Roles');
+  });
+
+  test("the user's pinned effort reaches the wire on the rescue call", async () => {
+    const efforts: unknown[] = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        if (new URL(request.url).pathname !== '/v1/chat/completions') return new Response('not found', { status: 404 });
+        efforts.push((await request.json() as { reasoning_effort?: unknown }).reasoning_effort);
+        const frames = [
+          JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ ops: [] }) }, finish_reason: 'stop' }] }),
+          '[DONE]',
+        ];
+        return new Response(frames.map((f) => `data: ${f}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } });
+      },
+    });
+    try {
+      let db: ReturnType<typeof testRuntime>['db'] | undefined;
+      const { app, userId, proposalId, conflictTemplate } = await setupUnsatisfiableScene(() => {
+        const runtime = testRuntime({
+          seedLegacyText: true,
+          PROMPT_LIBRARY_USERS: 'alice',
+          CLIPROXY_BASE_URL: `http://127.0.0.1:${server.port}`,
+          CLIPROXY_TOKEN: 'sk-x',
+        });
+        db = runtime.db;
+        return runtime;
+      });
+      // Infer ran on the fake; rescue goes through the real provider.
+      setTextModelProviderForTests(null);
+      pickLegacyTextModel(req(db), userId, 'rescue', 'kimi', 'high');
+      const res = await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
+        method: 'POST',
+        headers: { 'Remote-User': userId, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proposalId, templateName: conflictTemplate }),
+      }));
+      expect(res.status).toBe(200);
+      await parseSse(res);
+      expect(efforts).toEqual(['high']);
+    } finally {
+      await server.stop(true);
+    }
   });
 
   test('409 on repeated call for same template (cap-spent)', async () => {

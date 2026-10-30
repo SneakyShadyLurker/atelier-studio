@@ -241,8 +241,20 @@ describe('testModel', () => {
   test("reasoning 'high' refused → only low", async () => {
     chat = scripted((body, kind) => (kind === 'reasoning' && body.reasoning_effort === 'high' ? { status: 400, body: 'bad effort' } : undefined));
     const report = await run();
+    expect(statusOf(report, 'reasoning')).toBe('pass');
     expect(report.proposed).toMatchObject({ reasoningLevels: ['low'], reasoningDefault: 'low' });
   });
+
+  for (const status of [401, 503]) {
+    test(`reasoning 'high' answered ${status} → no verdict, levels left alone`, async () => {
+      chat = scripted((body, kind) => (kind === 'reasoning' && body.reasoning_effort === 'high' ? { status, body: 'nope' } : undefined));
+      const report = await run();
+      expect(statusOf(report, 'reasoning')).toBe('fail');
+      expect(messageOf(report, 'reasoning')).toContain(String(status));
+      expect(report.proposed).not.toHaveProperty('reasoningLevels');
+      expect(report.proposed).not.toHaveProperty('reasoningDefault');
+    });
+  }
 
   test('a failing plain reply skips the rest and proposes nothing', async () => {
     chat = () => ({ status: 404, body: 'model not found' });

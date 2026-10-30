@@ -7,6 +7,7 @@ import { migrate } from '../../db/migrate';
 import { createTextProviderStore, type TextProviderStore } from '../../db/textProviders';
 import { createTextSecretsForKey } from '../../keystore/instanceSecrets';
 import { testConfig } from '../../test/helpers';
+import { hostPortProbeResponse, isHostPortProbe } from '../../test/hostProbe';
 import { setTextModelProviderForTests, TextModelNotFoundError, textModelProviderFor } from './registry';
 
 // Spec § 5.5: one cached feature provider per model row, rebuilt when the
@@ -21,6 +22,7 @@ beforeAll(() => {
     port: 0,
     hostname: '127.0.0.1',
     async fetch(req) {
+      if (isHostPortProbe(req)) return hostPortProbeResponse();
       seen.push({ authorization: req.headers.get('authorization'), body: await req.json() as Record<string, unknown> });
       const frame = JSON.stringify({ choices: [{ index: 0, delta: { content: '{"kind":"entries","entries":["navy"]}' }, finish_reason: 'stop' }] });
       return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });

@@ -232,6 +232,56 @@ describe('migration 58 - text providers', () => {
     }
   });
 
+  test('two legacy slots naming the same upstream id share one row; pins, default and writers follow it', () => {
+    const { db, dataDir } = openV57WithPins();
+    try {
+      // kimi and grok both point at one upstream id, and so do mimo and gpt.
+      const seed: TextSeed = { ...SEED, modelIds: { ...SEED.modelIds, grok: 'kimi-x', gpt: 'mimo-x' } };
+      const logs = migrateLogged(db, dataDir, { textSeed: seed });
+      expect(schemaVersion(db)).toBe(58);
+      // One row per distinct id in LEGACY_SEED order; the first slot's settings and legacy_key win.
+      expect(db.query('SELECT legacy_key, model_id, display_name, screen_requests, sort_order FROM text_models ORDER BY sort_order').all()).toEqual([
+        { legacy_key: 'kimi', model_id: 'kimi-x', display_name: 'Kimi K3', screen_requests: 0, sort_order: 0 },
+        { legacy_key: 'mimo', model_id: 'mimo-x', display_name: 'MiMo V2.6 Pro', screen_requests: 0, sort_order: 1 },
+        { legacy_key: 'gemini-argon', model_id: 'gemini-x', display_name: 'Gemini 4 Argon', screen_requests: 0, sort_order: 3 },
+        { legacy_key: 'deepseek-abliterated', model_id: 'deepseek-x', display_name: 'DeepSeek V4.1 Flash Abliterated', screen_requests: 0, sort_order: 4 },
+        { legacy_key: 'glm-abliterated', model_id: 'glm-x', display_name: 'GLM 5.3', screen_requests: 0, sort_order: 5 },
+      ]);
+      expect(db.query(`
+        SELECT d.scope, m.legacy_key FROM text_defaults d JOIN text_models m ON m.id = d.text_model_id
+      `).all()).toEqual([{ scope: 'default', legacy_key: 'kimi' }]);
+      // The GPT writer slot collapsed into mimo.
+      expect(db.query(`
+        SELECT w.image_model_id, w.mode, m.legacy_key FROM image_model_writers w
+          JOIN text_models m ON m.id = w.text_model_id ORDER BY w.image_model_id
+      `).all()).toEqual([
+        { image_model_id: 'gpt-image-2', mode: 'prefer', legacy_key: 'mimo' },
+        { image_model_id: 'gpt-image-2.5-sunburst', mode: 'lock', legacy_key: 'mimo' },
+      ]);
+      // The grok pin lands on the shared kimi row; the GPT pin is still dropped.
+      expect(db.query(`
+        SELECT u.user_id, u.task, m.legacy_key, u.effort FROM user_text_models u
+          JOIN text_models m ON m.id = u.text_model_id ORDER BY u.updated_at
+      `).all()).toEqual(CARRIED_PINS.map(([user_id, task, backend, , effort]) => ({
+        user_id, task, legacy_key: backend === 'grok' ? 'kimi' : backend, effort,
+      })));
+      const collapsed = logs.filter((entry) => entry.level === 'warn'
+        && (entry.obj as { event?: string }).event === 'migration_text_models_collapsed');
+      expect(collapsed).toHaveLength(1);
+      expect(collapsed[0]?.obj).toMatchObject({ collapsed: { grok: 'kimi', gpt: 'mimo' } });
+      expect(collapsed[0]?.msg).toContain('grok');
+      expect(collapsed[0]?.msg).toContain('gpt');
+
+      const snapshot = (): unknown[] => NEW_TABLES.map((table) => db.query(`SELECT * FROM ${table} ORDER BY 1`).all());
+      const before = snapshot();
+      db.run('DELETE FROM schema_versions WHERE version = 58');
+      migrate(db, dataDir, { textSeed: seed });
+      expect(snapshot()).toEqual(before);
+    } finally {
+      db.close();
+    }
+  });
+
   test('re-applying migration 58 after a committed seed (fn rerun) changes nothing', () => {
     const { db, dataDir } = openV57WithPins();
     try {

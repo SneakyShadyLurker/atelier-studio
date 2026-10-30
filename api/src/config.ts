@@ -139,8 +139,7 @@ const ConfigSchema = z.object({
   DATA_DIR: nonEmptyString,
 
   // CLIProxyAPI (optional; set both or neither, see `cliproxyIssues`). When set
-  // they register GPT Image and its `/v1/models` inventory poller, and an
-  // upgrade boot seeds the legacy CLIProxyAPI text provider from them
+  // they register GPT Image, and an upgrade boot seeds the legacy CLIProxyAPI text provider from them
   // (migration 58). Text models are otherwise managed in the app.
   CLIPROXY_BASE_URL: optionalUrlString,
   CLIPROXY_TOKEN: optionalSecret,

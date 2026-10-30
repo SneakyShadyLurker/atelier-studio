@@ -3,7 +3,8 @@ import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { DraftTemplateResponse, VariableList } from '@atelier/shared';
 import { type CliproxyTextProvider, type TestCliproxyTextProvider } from '../providers/cliproxyText';
 import type { LibraryOverview } from '../prompts/libraryOverview';
-import { parseSseText, restoreFetch, testRuntime } from '../test/helpers';
+import { parseSseText, pickLegacyTextModel, restoreFetch, testRuntime } from '../test/helpers';
+import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 
 const servers: Bun.Server<unknown>[] = [];
 beforeEach(() => { restoreFetch(); });
@@ -14,7 +15,7 @@ afterEach(async () => {
 });
 
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: handler });
+  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }
@@ -104,6 +105,21 @@ describe('POST /api/prompts/templates/draft', () => {
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
     expect(done).toEqual(expectedPayload);
+  });
+
+  test("the user's pinned effort reaches the wire", async () => {
+    const efforts: unknown[] = [];
+    const up = serve(async (req) => {
+      efforts.push((await req.json() as { reasoning_effort?: unknown }).reasoning_effort);
+      const content = JSON.stringify({ kind: 'body', body: 'a portrait' });
+      return Response.json({ choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
+    });
+    const { app, db } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
+    pickLegacyTextModel(db, 'alice', 'template-draft', 'kimi', 'high');
+    const res = await draftTemplate(app, { name: 'Portrait', existingBody: '' });
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(efforts).toEqual(['high']);
   });
 
   test('unsaved-template flow — works without a stored template id (headline use case)', async () => {

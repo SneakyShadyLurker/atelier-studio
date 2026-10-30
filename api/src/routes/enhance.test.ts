@@ -11,6 +11,7 @@ import {
   KREA_ENHANCE_SYSTEM_PROMPT,
 } from '../prompts/enhanceSystemPrompt';
 import { SUNBURST_ENHANCE_SYSTEM_PROMPT } from '../prompts/gptSystemPrompt';
+import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 
 const TEXT_MODELS = legacyTextUpstreamIds();
 
@@ -31,7 +32,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.stop(true)));
 });
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: handler });
+  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }

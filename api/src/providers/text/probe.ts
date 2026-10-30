@@ -295,14 +295,17 @@ export async function testModel(
       proposed.reasoningLevels = ['low', 'high'];
       proposed.reasoningDefault = 'low';
       checks.push({ id: 'reasoning', status: 'pass', message: "The server accepted reasoning efforts 'low' and 'high'." });
-    } else {
+    } else if (high.kind === 'http' && high.status === 400) {
+      // Only a 400 says 'high' is absent; anything else is no verdict.
       proposed.reasoningLevels = ['low'];
       proposed.reasoningDefault = 'low';
       checks.push({
         id: 'reasoning',
         status: 'pass',
-        message: `The server accepted 'low' but refused 'high': ${failureMessage(high, credential, "reasoning effort 'high'")}`,
+        message: `The server accepted 'low' but refused 'high': ${answered(high.status, credential, high.body)}.`,
       });
+    } else {
+      checks.push({ id: 'reasoning', status: 'fail', message: failureMessage(high, credential, "reasoning effort 'high'") });
     }
   }
 

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { type EnhanceCallOptions } from '../cliproxyText';
 import { restoreFetch } from '../../test/helpers';
 import { genericTextModel, seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
+import { hostPortProbeResponse, isHostPortProbe } from '../../test/hostProbe';
 
 // Sibling api suites mock globalThis.fetch in the shared bun process (and
 // routes/keys.test.ts does not restore it); this suite drives the real
@@ -17,7 +18,7 @@ afterEach(async () => {
 });
 
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: handler });
+  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }
@@ -169,6 +170,33 @@ describe('textModel provider', () => {
     ]));
     expect(await collect(baseUrl)).toEqual([{ type: 'delta', text: 'done text' }, { type: 'done' }]);
   });
+
+  // The SDK only finishes when the body closes; the stream must end at the
+  // terminal frame even when the upstream holds the connection open.
+  for (const [name, frames] of [
+    ['[DONE]', [
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'held open' }, finish_reason: null }] }),
+      '[DONE]',
+    ]],
+    ['a finish_reason frame', [
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'held open' }, finish_reason: 'stop' }] }),
+    ]],
+  ] as const) {
+    test(`ends at ${name} while the upstream keeps the connection open, and releases it`, async () => {
+      let released!: () => void;
+      const upstreamReleased = new Promise<void>((resolve) => { released = resolve; });
+      const baseUrl = serve(() => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(frames.map((f) => `data: ${f}\n\n`).join('')));
+          // Never closed.
+        },
+        cancel() { released(); },
+      }), { headers: { 'Content-Type': 'text/event-stream' } }));
+      const hung = new Promise<'hung'>((resolve) => { setTimeout(() => { resolve('hung'); }, 1500); });
+      expect(await Promise.race([collect(baseUrl), hung])).toEqual([{ type: 'delta', text: 'held open' }, { type: 'done' }]);
+      expect(await Promise.race([upstreamReleased.then(() => 'released' as const), hung])).toBe('released');
+    });
+  }
 
   test('clean EOF with zero content is a failure', async () => {
     const baseUrl = serve(() => chatSse([

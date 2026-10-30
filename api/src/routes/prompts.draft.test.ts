@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { DraftVariableListResponse, VariableList } from '@atelier/shared';
-import { parseSseText, restoreFetch, testRuntime } from '../test/helpers';
+import { parseSseText, pickLegacyTextModel, restoreFetch, testRuntime } from '../test/helpers';
+import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 
 type RT = ReturnType<typeof testRuntime>;
 const servers: Bun.Server<unknown>[] = [];
@@ -10,7 +11,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.stop(true)));
 });
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: handler });
+  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }
@@ -104,6 +105,20 @@ describe('POST /api/prompts/lists/:id/draft', () => {
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
     expect(done).toEqual({ kind: 'entries', entries: ['blue', 'green'] });
+  });
+
+  test("the user's pinned effort reaches the wire", async () => {
+    const efforts: unknown[] = [];
+    const up = serve(async (req) => {
+      efforts.push((await req.json() as { reasoning_effort?: unknown }).reasoning_effort);
+      return modelSse({ kind: 'entries', entries: ['blue'] });
+    });
+    const { app, db } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
+    pickLegacyTextModel(db, 'alice', 'list-draft', 'kimi', 'high');
+    const list = await createList(app, 'Colours');
+    const { done } = await readDraft(await draft(app, list.id, { name: 'Colours', existing: [] }));
+    expect(done).toEqual({ kind: 'entries', entries: ['blue'] });
+    expect(efforts).toEqual(['high']);
   });
 
   test('still drafts up to 20 new entries when the list already has 20+ options', async () => {

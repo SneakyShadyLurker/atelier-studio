@@ -157,6 +157,7 @@ export const rescueRoutes = new Hono<AppEnv>()
               targetListName,
               conflictReason: conflict.reason,
               ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}),
+              ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }),
             },
             signal,
           );

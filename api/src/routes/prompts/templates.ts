@@ -150,6 +150,7 @@ export const templatesRoutes = new Hono<AppEnv>()
               ...(description !== undefined ? { description } : {}),
               library: overview,
               ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}),
+              ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }),
             },
             signal,
           );

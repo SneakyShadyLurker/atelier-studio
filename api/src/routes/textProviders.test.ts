@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import type { AdminModel, AdminProvider, ConnectionReport, ListedModel, TestReport } from '@atelier/shared';
 import { testRuntime } from '../test/helpers';
+import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 import { resetTextProbeAdmissionForTests } from './textProviders';
 
 // Admin API (spec § 10.2) against a scripted local upstream. The upstream
@@ -54,6 +55,7 @@ beforeAll(() => {
     port: 0,
     hostname: '127.0.0.1',
     fetch(req) {
+      if (isHostPortProbe(req)) return hostPortProbeResponse();
       seenAuth.push(req.headers.get('authorization'));
       return req.method === 'GET' ? list(req) : chat(req);
     },
@@ -351,6 +353,16 @@ describe('connection test and model list', () => {
     const rt = admin();
     const report = await json<ConnectionReport>(await draftTest(rt, { apiKey: KEY }), 200);
     expect(report).toMatchObject({ ok: true, listedCount: 2 });
+    expect(seenAuth).toEqual([`Bearer ${KEY}`]);
+  });
+
+  test('a foreign GET / port probe on the upstream is not counted as provider traffic', async () => {
+    const rt = admin();
+    const provider = await createProvider(rt, { apiKey: KEY });
+    // What a desktop port scanner sends to every new localhost listener.
+    await fetch(`http://127.0.0.1:${server.port}/`);
+    const report = await json<ConnectionReport>(await call(rt, 'POST', `/text-providers/${provider.id}/test`), 200);
+    expect(report.ok).toBe(true);
     expect(seenAuth).toEqual([`Bearer ${KEY}`]);
   });
 

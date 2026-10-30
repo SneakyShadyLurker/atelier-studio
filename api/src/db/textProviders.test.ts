@@ -184,6 +184,19 @@ describe('text provider store: providers', () => {
     expect(await store.resolveCredential(removed)).toBeUndefined();
   });
 
+  test('a key update racing another PATCH keeps both changes', async () => {
+    const { store } = setup();
+    const created = await provider(store, 'Cloud', 'sk-old');
+    // The key update awaits encryption; the rename lands meanwhile.
+    const keyUpdate = store.updateProvider(created.id, { apiKey: 'sk-new' });
+    const rename = store.updateProvider(created.id, { name: 'Renamed', enabled: false });
+    await Promise.all([keyUpdate, rename]);
+    const final = present(store.listProviders().find((p) => p.id === created.id));
+    expect(final.name).toBe('Renamed');
+    expect(final.enabled).toBe(false);
+    expect(await store.resolveCredential(final)).toBe('sk-new');
+  });
+
   test('updateProvider rejects key changes on env-auth providers', async () => {
     const { store } = setup({ seed: seed() });
     const seeded = present(store.listProviders()[0]);

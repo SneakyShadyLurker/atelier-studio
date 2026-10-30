@@ -55,6 +55,7 @@ import {
   type EnhanceCallOptions,
   type EnhanceChunk,
   type EnhanceImageInput,
+  type InferCallOptions,
   type InferResult,
   type RescueDimensionArgs,
 } from '../cliproxyText';
@@ -145,6 +146,11 @@ export function effectiveEffort(model: TextModelRecord, userEffort: TextReasonin
   return model.reasoningLevels.length === 0 ? model.reasoningDefault : (userEffort ?? model.reasoningDefault);
 }
 
+/** The `userEffort` field of a request, omitted when the caller has no pin. */
+function withUserEffort(userEffort: TextReasoningEffort | undefined): { userEffort?: TextReasoningEffort } {
+  return userEffort === undefined ? {} : { userEffort };
+}
+
 function mergeProviderOptions(a: SharedV4ProviderOptions, b: SharedV4ProviderOptions): SharedV4ProviderOptions {
   const merged: Record<string, SharedV4ProviderOptions[string]> = { ...a };
   for (const [key, value] of Object.entries(b)) merged[key] = { ...merged[key], ...value };
@@ -190,46 +196,91 @@ export function textCallOptions(
 
 interface WireTap {
   sawDone: boolean;
+  /** A `[DONE]` or a `finish_reason` frame went by; the tap ends the stream after it. */
+  ended: boolean;
   /** Payloads of upstream error frames not yet matched to an SDK error part. */
   readonly errors: unknown[];
 }
 
+function hasFinishReason(parsed: object): boolean {
+  const choices = (parsed as { choices?: unknown }).choices;
+  return Array.isArray(choices) && choices.some((choice: unknown) =>
+    typeof choice === 'object' && choice !== null
+    && typeof (choice as { finish_reason?: unknown }).finish_reason === 'string');
+}
+
 // Same decoding as the legacy `decodeChatFrame`: `[DONE]` ends the stream,
 // non-object data is skipped, an `{ error }` body or an `event: error` frame is
-// an upstream error.
+// an upstream error, and the first `finish_reason` ends the stream as well.
 function observeFrame(tap: WireTap, frame: Parameters<typeof frameDataText>[0]): void {
-  if (tap.sawDone) return;
+  if (tap.ended) return;
   const data = frameDataText(frame).trim();
   if (data === '[DONE]') {
     tap.sawDone = true;
+    tap.ended = true;
     return;
   }
   const parsed = tryParseJson(data);
   if (typeof parsed !== 'object' || parsed === null) return;
   const errObj = (parsed as { error?: unknown }).error;
   if (frame.event === 'error' || errObj != null) tap.errors.push(errObj ?? parsed);
+  if (hasFinishReason(parsed)) tap.ended = true;
 }
 
-/** Pass-through transform: scans each chunk's SSE frames before forwarding the bytes. */
-function tapStream(tap: WireTap): TransformStream<Uint8Array, Uint8Array> {
+/**
+ * Scans SSE frames and returns the text to forward: everything up to and
+ * including the frame that ended the stream, nothing after it.
+ */
+function frameScanner(tap: WireTap): { push(chunk: Uint8Array): string; flush(): string } {
   const decoder = new TextDecoder();
   let buffer = '';
   let searchFrom = 0;
-  return new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      buffer += decoder.decode(chunk, { stream: true });
-      for (;;) {
-        const next = nextSseFrame(buffer, searchFrom);
-        if (!next) {
-          searchFrom = Math.max(0, buffer.length - SSE_TERMINATOR_REWIND);
-          break;
-        }
-        buffer = next.rest;
-        searchFrom = 0;
-        const parsed = parseSseFrame(next.raw);
-        if (parsed) observeFrame(tap, { ...parsed, raw: next.raw });
+  const scan = (text: string): string => {
+    buffer += text;
+    for (;;) {
+      const next = nextSseFrame(buffer, searchFrom);
+      if (!next) {
+        searchFrom = Math.max(0, buffer.length - SSE_TERMINATOR_REWIND);
+        return text;
       }
-      controller.enqueue(chunk);
+      buffer = next.rest;
+      searchFrom = 0;
+      const parsed = parseSseFrame(next.raw);
+      if (parsed) observeFrame(tap, { ...parsed, raw: next.raw });
+      // The rest of the buffer (a suffix of `text`) is past the terminal frame.
+      if (tap.ended) return text.slice(0, Math.max(0, text.length - buffer.length));
+    }
+  };
+  return {
+    push: (chunk) => scan(decoder.decode(chunk, { stream: true })),
+    flush: () => scan(decoder.decode()),
+  };
+}
+
+/**
+ * The upstream body as the SDK reads it: frames are observed on the way, and
+ * the stream closes (cancelling the upstream body) right after the terminal
+ * frame. The SDK only emits `finish` when the body closes, so an upstream that
+ * holds the connection open after `[DONE]` would otherwise hang the call.
+ */
+function tappedBody(body: ReadableStream<Uint8Array>, tap: WireTap): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  const scanner = frameScanner(tap);
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const result = await reader.read();
+      const text = result.done ? scanner.flush() : scanner.push(result.value);
+      if (text.length > 0) controller.enqueue(encoder.encode(text));
+      if (result.done) {
+        controller.close();
+      } else if (tap.ended) {
+        controller.close();
+        await reader.cancel().catch(() => undefined);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
     },
   });
 }
@@ -238,7 +289,7 @@ function tappedFetch(fetch: typeof globalThis.fetch, tap: WireTap): typeof globa
   const tapped = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const response = await fetch(input, init);
     if (!response.ok || response.body === null) return response;
-    return new Response(response.body.pipeThrough(tapStream(tap)), {
+    return new Response(tappedBody(response.body, tap), {
       status: response.status,
       statusText: response.statusText,
       headers: response.headers,
@@ -358,6 +409,9 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
   const logger = init.logger ?? NOOP_PROVIDER_LOGGER;
   const quotaFloorMs = init.quotaMinRetryAfterMs ?? 300_000;
   const inferMaxResponseBytes = init.inferMaxResponseBytes ?? init.maxResponseBytes;
+  /** Response cap for the effort this row actually sends (a user pin or the row default). */
+  const responseCap = (configuredBytes: number, userEffort: TextReasoningEffort | undefined): number =>
+    pinnedEffortMaxResponseBytes(configuredBytes, effectiveEffort(model, userEffort) ?? undefined);
   const {
     enhancePolicy,
     draftListPolicy,
@@ -396,7 +450,7 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
   /** Opens one stream: screen, then `doStream` (headers received). Typed errors for the policy. */
   const open = async (request: TextCallRequest, maxBytes: number, signal: AbortSignal): Promise<OpenedStream> => {
     await moderate(request, signal);
-    const tap: WireTap = { sawDone: false, errors: [] };
+    const tap: WireTap = { sawDone: false, ended: false, errors: [] };
     try {
       const lm = await languageModel(maxBytes, tap);
       const { stream } = await lm.doStream({ ...textCallOptions(adapter, model, request), abortSignal: signal });
@@ -462,6 +516,7 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
     snapshotJson: string,
     signal: AbortSignal,
     systemPrompt: string = INFER_DIMENSIONS_SYSTEM_PROMPT,
+    userEffort?: TextReasoningEffort,
   ): Promise<InferResult> => {
     try {
       const text = await callWithPolicy(policy, signal, {
@@ -469,7 +524,8 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
         systemPrompt,
         user: snapshotJson,
         responseFormat: 'json_object',
-      }, inferMaxResponseBytes);
+        ...withUserEffort(userEffort),
+      }, responseCap(inferMaxResponseBytes, userEffort));
       const ops = parseInferPayload(text);
       // Model output can vary on another attempt; let chunk retry-gaps recover
       // without accepting a proposal with silently discarded operations.
@@ -496,14 +552,14 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
         user: prompt,
         images,
         ...(opts?.responseFormat ? { responseFormat: opts.responseFormat } : {}),
-        ...(opts?.reasoningEffort === undefined ? {} : { userEffort: opts.reasoningEffort }),
+        ...withUserEffort(opts?.reasoningEffort),
       };
       let opened: OpenedStream;
       try {
         opened = await enhancePolicy.execute(
           ({ signal: policySignal }) => openWithTimeout(
             request,
-            pinnedEffortMaxResponseBytes(init.maxResponseBytes, opts?.reasoningEffort),
+            responseCap(init.maxResponseBytes, opts?.reasoningEffort),
             AbortSignal.any([policySignal, signal]),
             init.enhanceOpenTimeoutMs ?? 15_000,
           ),
@@ -562,8 +618,10 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
     },
 
     async *brainstormCharacters(input: BrainstormCharactersInput, signal: AbortSignal): AsyncIterable<BrainstormChunk> {
+      // Budget and cap follow the effort actually sent, which can be the row default.
+      const sentEffort = effectiveEffort(model, input.reasoningEffort) ?? undefined;
       const request: TextCallRequest = {
-        maxOutputTokens: brainstormDefaults(input.count, input.reasoningEffort).max_completion_tokens,
+        maxOutputTokens: brainstormDefaults(input.count, sentEffort).max_completion_tokens,
         systemPrompt: buildBrainstormSystemPrompt({
           count: input.count,
           modelId: input.modelId,
@@ -572,14 +630,14 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
           ...(input.variationSeed === undefined ? {} : { variationSeed: input.variationSeed }),
         }),
         user: buildBrainstormBrief(input.brief),
-        ...(input.reasoningEffort === undefined ? {} : { userEffort: input.reasoningEffort }),
+        ...withUserEffort(input.reasoningEffort),
       };
       let opened: OpenedStream;
       try {
         opened = await enhancePolicy.execute(
           ({ signal: policySignal }) => openWithTimeout(
             request,
-            pinnedEffortMaxResponseBytes(init.brainstormMaxResponseBytes ?? init.maxResponseBytes, input.reasoningEffort),
+            pinnedEffortMaxResponseBytes(init.brainstormMaxResponseBytes ?? init.maxResponseBytes, sentEffort),
             AbortSignal.any([policySignal, signal]),
             init.brainstormOpenTimeoutMs ?? init.enhanceOpenTimeoutMs ?? 15_000,
           ),
@@ -626,16 +684,21 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
             return;
           }
           if (event.type === 'text') {
+            // Once the count is met the rest of the text is not needed.
+            if (records.fulfilled()) continue;
             for (const c of records.push(event.text)) {
               yield c;
               if (c.type === 'failed') return;
             }
-            // The requested count is complete; the rest of the stream is not needed.
-            if (records.fulfilled()) break;
+            // Like the legacy reader, stop at the frame that met the count
+            // unless a terminal frame already went by: then read on to its
+            // finish (the tap closes the stream there), so a refusal in that
+            // frame still fails the call.
+            if (records.fulfilled() && !opened.tap.ended) break;
           } else if (event.type === 'end') {
-            // Preserve the full-count length exception: complete records have
-            // already satisfied the request and no partial tail is needed.
-            if (event.finish?.unified === 'length' && records.fulfilled()) break;
+            // A fulfilled count needs no terminal and keeps the full-count
+            // length exception; any other non-stop finish fails.
+            if (records.fulfilled() && (event.finish === null || event.finish.unified === 'length')) break;
             const failure = endError(event);
             if (failure) throw failure;
           }
@@ -674,7 +737,8 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
           systemPrompt: imageAuthoringSystemPrompt(DRAFT_LIST_SYSTEM_PROMPT, input.modelId),
           user: draftBrief(input),
           responseFormat: 'json_object',
-        }, init.maxResponseBytes);
+          ...withUserEffort(input.reasoningEffort),
+        }, responseCap(init.maxResponseBytes, input.reasoningEffort));
         const payload = parseDraftPayload(text);
         if (!payload) return { type: 'failed', status: null, detail: 'unparseable draft response' };
         return { type: 'ok', payload };
@@ -692,11 +756,12 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
         maxOutputTokens: DRAFT_TEMPLATE_DEFAULTS.max_completion_tokens,
         systemPrompt: imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, input.modelId),
         user: draftTemplateBrief(input),
+        ...withUserEffort(input.reasoningEffort),
       };
       let result: Awaited<ReturnType<LanguageModelV4['doGenerate']>>;
       try {
         await moderate(request, signal);
-        const lm = await languageModel(init.maxResponseBytes);
+        const lm = await languageModel(responseCap(init.maxResponseBytes, input.reasoningEffort));
         result = await lm.doGenerate({ ...textCallOptions(adapter, model, request), abortSignal: signal });
       } catch (err) {
         if (signal.aborted) throw err;
@@ -722,8 +787,8 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
           maxOutputTokens,
           systemPrompt: input.systemPrompt,
           user: input.userContent,
-          ...(input.reasoningEffort === undefined ? {} : { userEffort: input.reasoningEffort }),
-        }, pinnedEffortMaxResponseBytes(inferMaxResponseBytes, input.reasoningEffort));
+          ...withUserEffort(input.reasoningEffort),
+        }, responseCap(inferMaxResponseBytes, input.reasoningEffort));
         return { type: 'ok', text };
       } catch (err) {
         if (signal.aborted) throw err;
@@ -734,16 +799,16 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       }
     },
 
-    inferDimensions(snapshotJson: string, signal: AbortSignal, systemPrompt?: string): Promise<InferResult> {
-      return inferWithPolicy(inferPolicy, snapshotJson, signal, systemPrompt);
+    inferDimensions(snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions): Promise<InferResult> {
+      return inferWithPolicy(inferPolicy, snapshotJson, signal, systemPrompt, opts?.reasoningEffort);
     },
 
-    inferTaxonomy(snapshotJson: string, signal: AbortSignal, systemPrompt?: string): Promise<InferResult> {
-      return inferWithPolicy(taxonomyPolicy, snapshotJson, signal, systemPrompt);
+    inferTaxonomy(snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions): Promise<InferResult> {
+      return inferWithPolicy(taxonomyPolicy, snapshotJson, signal, systemPrompt, opts?.reasoningEffort);
     },
 
-    inferDimensionsSingleAttempt(snapshotJson: string, signal: AbortSignal, systemPrompt?: string): Promise<InferResult> {
-      return inferWithPolicy(inferRetryGapsPolicy, snapshotJson, signal, systemPrompt);
+    inferDimensionsSingleAttempt(snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions): Promise<InferResult> {
+      return inferWithPolicy(inferRetryGapsPolicy, snapshotJson, signal, systemPrompt, opts?.reasoningEffort);
     },
 
     async rescueDimension(args: RescueDimensionArgs, signal: AbortSignal): Promise<InferResult> {
@@ -765,7 +830,8 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
           systemPrompt: imageAuthoringSystemPrompt(RESCUE_DIMENSION_SYSTEM_PROMPT, args.modelId),
           user,
           responseFormat: RESCUE_RESPONSE_FORMAT,
-        }, inferMaxResponseBytes);
+          ...withUserEffort(args.reasoningEffort),
+        }, responseCap(inferMaxResponseBytes, args.reasoningEffort));
         const ops = parseInferPayload(text);
         if (!ops) return { type: 'failed', kind: 'permanent', status: null, detail: 'unparseable rescue response' };
         // The provider boundary does not leak unrelated ops.

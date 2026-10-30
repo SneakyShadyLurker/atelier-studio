@@ -86,8 +86,8 @@ export interface AppDeps {
   textAvailability?: TextAvailabilityHandle;
 }
 
-// Refresh cadence and per-request budget of the CLIProxyAPI inventory and the
-// per-provider text-model listing pollers (spec § 9.1: 60 s / 5 s).
+// Refresh cadence and per-request budget of the per-provider text-model
+// listing pollers (spec § 9.1: 60 s / 5 s).
 const TEXT_AVAILABILITY_INTERVAL_MS = 60_000;
 const TEXT_AVAILABILITY_TIMEOUT_MS = 5_000;
 
@@ -270,7 +270,7 @@ export async function boot(): Promise<{
   db: Database;
   logger: AppLogger;
   healthProbe: HealthProbeHandle;
-  /** GPT Image's CLIProxyAPI `/v1/models` poller; null without CLIPROXY_*. */
+  /** Per-provider text-model listing pollers (spec § 9.1); stopped at shutdown. */
   textAvailability: TextAvailabilityHandle;
   unsealServer: { stop: () => unknown } | null;
 }> {

@@ -200,6 +200,8 @@ export interface DraftListProviderInput {
   existing: readonly string[];
   description?: string;
   target: number;
+  /** User-pinned effort; replaces the backend's default. See ChatStreamRequest. */
+  readonly reasoningEffort?: TextReasoningEffort;
 }
 
 export type DraftResult =
@@ -224,6 +226,8 @@ export type AiFillResult =
 
 export type DraftTemplateProviderInput = DraftTemplateRequest & {
   readonly library: LibraryOverview;
+  /** User-pinned effort; replaces the backend's default. See ChatStreamRequest. */
+  readonly reasoningEffort?: TextReasoningEffort;
 };
 
 export type DraftTemplateResult =
@@ -236,6 +240,14 @@ export interface RescueDimensionArgs {
   readonly templateLists: readonly string[];
   readonly targetListName: string;
   readonly conflictReason: string;
+  /** User-pinned effort; replaces the backend's default. See ChatStreamRequest. */
+  readonly reasoningEffort?: TextReasoningEffort;
+}
+
+/** Per-call options of the infer family. */
+export interface InferCallOptions {
+  /** User-pinned effort; replaces the backend's default. See ChatStreamRequest. */
+  readonly reasoningEffort?: TextReasoningEffort;
 }
 
 export interface CliproxyTextProvider {
@@ -244,13 +256,13 @@ export interface CliproxyTextProvider {
   draftList(input: DraftListProviderInput, signal: AbortSignal): Promise<DraftResult>;
   draftTemplate(input: DraftTemplateProviderInput, signal: AbortSignal): Promise<DraftTemplateResult>;
   aiFill(input: AiFillProviderInput, signal: AbortSignal): Promise<AiFillResult>;
-  inferDimensions(snapshotJson: string, signal: AbortSignal, systemPrompt?: string): Promise<InferResult>;
+  inferDimensions(snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions): Promise<InferResult>;
   // Pass-1 (taxonomy) call on its own longer single-attempt policy. Required
   // (not optional) so a provider that forgot to wire the taxonomy timeout
   // cannot compile — preventing a silent regression to the 70s inferDimensions
   // ceiling that this fix exists to remove. Test fakes implement it explicitly.
-  inferTaxonomy(snapshotJson: string, signal: AbortSignal, systemPrompt?: string): Promise<InferResult>;
-  inferDimensionsSingleAttempt(snapshotJson: string, signal: AbortSignal, systemPrompt?: string): Promise<InferResult>;
+  inferTaxonomy(snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions): Promise<InferResult>;
+  inferDimensionsSingleAttempt(snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions): Promise<InferResult>;
   rescueDimension(args: RescueDimensionArgs, signal: AbortSignal): Promise<InferResult>;
   inferBreakerState?(): 'open' | 'half-open' | 'closed';
 }

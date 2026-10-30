@@ -390,8 +390,8 @@ export const listsRoutes = new Hono<AppEnv>()
         try {
           result = await provider.draftList(
             description === undefined
-              ? { name, existing, target, ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}) }
-              : { name, existing, description, target, ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}) },
+              ? { name, existing, target, ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}), ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }) }
+              : { name, existing, description, target, ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}), ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }) },
             signal,
           );
         } catch (error) {

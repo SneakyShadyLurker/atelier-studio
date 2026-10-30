@@ -13,6 +13,7 @@ import {
 import { namedArtifactDir, writeAtomic } from '../storage/files';
 import { grayCardPng } from '../test/image-fixtures';
 import { parseSseText, testRuntime } from '../test/helpers';
+import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 
 const KEY = 'i'.repeat(48);
 const ORIGIN = 'https://ephemera.example.org';
@@ -52,6 +53,7 @@ function startFake(answer: (id: string) => Response): Fake {
     port: 0,
     hostname: '127.0.0.1',
     async fetch(req) {
+      if (isHostPortProbe(req)) return hostPortProbeResponse();
       req.signal.addEventListener('abort', () => { aborted.value = true; });
       // eslint-disable-next-line @typescript-eslint/no-deprecated -- test server uses Bun's built-in multipart parser.
       const form = await req.formData();

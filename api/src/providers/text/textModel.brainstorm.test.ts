@@ -5,8 +5,10 @@ import {
   BRAINSTORM_FIELD_SEPARATOR,
   BRAINSTORM_CONSTRAINTS_GPT,
 } from '../../prompts/brainstormCharactersSystemPrompt';
+import { brainstormDefaults } from '../cliproxyText.config';
 import { restoreFetch } from '../../test/helpers';
 import { seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
+import { hostPortProbeResponse, isHostPortProbe } from '../../test/hostProbe';
 
 const RS = BRAINSTORM_RECORD_SEPARATOR;
 const FS = BRAINSTORM_FIELD_SEPARATOR;
@@ -31,7 +33,7 @@ afterEach(async () => {
 });
 
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: handler });
+  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }
@@ -68,6 +70,53 @@ describe('brainstormCharacters', () => {
   test('fulfilling the requested full record count succeeds without needing an EOF terminal', async () => {
     const data = JSON.stringify({ choices: [{ delta: { content: `${rec('scene', 'subject', 'details')}\n${RS}\n` } }] });
     const baseUrl = serve(() => new Response(`data: ${data}\n\n`));
+    const chunks: BrainstormChunk[] = [];
+    for await (const chunk of provider(baseUrl).brainstormCharacters(
+      { count: 1, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal,
+    )) chunks.push(chunk);
+    expect(chunks.at(-1)).toEqual({ type: 'done', count: 1 });
+  });
+
+  test('a row default effort above low sizes the budget and the response cap like a pin', async () => {
+    let body: { reasoning_effort?: unknown; max_completion_tokens?: unknown } = {};
+    // Well over the 1 KiB configured cap: only the high-effort cap admits it.
+    const padding = 'x'.repeat(4096);
+    const baseUrl = serve(async (req) => {
+      body = await req.json() as typeof body;
+      return chatSse(`${rec('scene', 'subject', `details ${padding}`)}\n${RS}\n`);
+    });
+    const highDefault = testTextModelProvider({
+      origin: baseUrl,
+      token: 'sk-test',
+      model: seededTextModel('kimi', { modelId: 'kimi-latest', reasoningDefault: 'high' }),
+      maxResponseBytes: 1024,
+      brainstormMaxResponseBytes: 1024,
+    });
+    const chunks: BrainstormChunk[] = [];
+    for await (const chunk of highDefault.brainstormCharacters(
+      { count: 1, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal,
+    )) chunks.push(chunk);
+    expect(body.reasoning_effort).toBe('high');
+    expect(body.max_completion_tokens).toBe(brainstormDefaults(1, 'high').max_completion_tokens);
+    expect(chunks.at(-1)).toEqual({ type: 'done', count: 1 });
+  });
+
+  for (const reason of ['content_filter', 'insufficient_system_resource']) {
+    test(`a ${reason} finish in the frame that fulfils the count still fails`, async () => {
+      const data = JSON.stringify({ choices: [{ delta: { content: `${rec('scene', 'subject', 'details')}\n${RS}\n` }, finish_reason: reason }] });
+      const baseUrl = serve(() => new Response(`data: ${data}\n\ndata: [DONE]\n\n`));
+      const chunks: BrainstormChunk[] = [];
+      for await (const chunk of provider(baseUrl).brainstormCharacters(
+        { count: 1, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal,
+      )) chunks.push(chunk);
+      expect(chunks.at(-1)).toMatchObject({ type: 'failed', ...(reason === 'content_filter' ? { kind: 'content-filter' } : {}) });
+      expect(chunks.some((chunk) => chunk.type === 'done')).toBe(false);
+    });
+  }
+
+  test('a length finish in the frame that fulfils the count is the full-count exception', async () => {
+    const data = JSON.stringify({ choices: [{ delta: { content: `${rec('scene', 'subject', 'details')}\n${RS}\n` }, finish_reason: 'length' }] });
+    const baseUrl = serve(() => new Response(`data: ${data}\n\ndata: [DONE]\n\n`));
     const chunks: BrainstormChunk[] = [];
     for await (const chunk of provider(baseUrl).brainstormCharacters(
       { count: 1, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal,

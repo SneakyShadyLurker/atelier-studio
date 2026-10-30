@@ -24,6 +24,7 @@ import { classifyFinish } from './finish';
 import { openaiCompatibleAdapter } from './openaiCompatible';
 import type { ResolvedProvider } from './protocol';
 import { textCallOptions } from './textModel';
+import { hostPortProbeResponse, isHostPortProbe } from '../../test/hostProbe';
 
 // Spec § 11.2 item 1: for every migrated model and every feature call shape,
 // the AI SDK adapter sends the body the legacy `buildChatBody` sent.
@@ -54,6 +55,7 @@ beforeAll(() => {
     port: 0,
     hostname: '127.0.0.1',
     async fetch(req) {
+      if (isHostPortProbe(req)) return hostPortProbeResponse();
       const body = await req.json() as Record<string, unknown>;
       captured.push({ path: new URL(req.url).pathname, authorization: req.headers.get('authorization'), body });
       if (body.stream === true) {

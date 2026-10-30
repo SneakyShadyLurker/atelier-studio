@@ -3,7 +3,7 @@ import { setTextModelProviderForTests } from '../providers/text/registry';
 import { TaskCancelledError } from 'cockatiel';
 import type { VariableList } from '@atelier/shared';
 import { type InferResult, type TestCliproxyTextProvider } from '../providers/cliproxyText';
-import { parseInferDone, parseSse, testRuntime } from '../test/helpers';
+import { parseInferDone, parseSse, pickLegacyTextModel, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 import { promptLibrary } from './prompts/_shared';
 import { toLibrarySnapshot } from '../prompts/librarySnapshot';
@@ -293,6 +293,38 @@ async function seedInferenceHierarchy(runtime: ReturnType<typeof testRuntime>, m
 }
 
 describe('POST /api/prompts/dimensions/infer', () => {
+  test("the user's pinned effort reaches the wire on every infer call", async () => {
+    const efforts: unknown[] = [];
+    const content = JSON.stringify({ ops: [] });
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        if (new URL(req.url).pathname !== '/v1/chat/completions') return new Response('not found', { status: 404 });
+        efforts.push((await req.json() as { reasoning_effort?: unknown }).reasoning_effort);
+        const frames = [
+          JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: 'stop' }] }),
+          '[DONE]',
+        ];
+        return new Response(frames.map((f) => `data: ${f}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } });
+      },
+    });
+    try {
+      const runtime = testRuntime({
+        seedLegacyText: true,
+        PROMPT_LIBRARY_USERS: 'alice',
+        CLIPROXY_BASE_URL: `http://127.0.0.1:${server.port}`,
+        CLIPROXY_TOKEN: 'sk-x',
+      });
+      await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'L', options: ['option'] }] });
+      pickLegacyTextModel(runtime.db, 'alice', 'infer', 'kimi', 'high');
+      await parseInferDone(await runtime.app.fetch(inferenceRequest('dimensions/infer', {})));
+      expect(efforts.length).toBeGreaterThan(0);
+      expect(efforts.every((effort) => effort === 'high')).toBe(true);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
   test('unsafe assignment keeps an independent applicable proposal and reports rejected operations', async () => {
     const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedInferenceHierarchy(runtime);

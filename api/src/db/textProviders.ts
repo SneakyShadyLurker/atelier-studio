@@ -469,17 +469,27 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
     },
 
     async updateProvider(id, patch) {
-      const current = readProvider(id);
-      if (!current) return null;
+      const rejectEnvKeyChange = (row: ProviderRow): void => {
+        if (patch.apiKey !== undefined && row.auth_mode === 'env') {
+          invalid('This provider reads its key from the server environment; it cannot be changed here.');
+        }
+      };
+      const before = readProvider(id);
+      if (!before) return null;
       if (patch.name !== undefined) checkName(patch.name);
-      const baseUrl = patch.baseUrl === undefined ? current.base_url : normalizeBaseUrl(patch.baseUrl);
-      if (patch.apiKey !== undefined && current.auth_mode === 'env') {
-        invalid('This provider reads its key from the server environment; it cannot be changed here.');
-      }
+      const patchedBaseUrl = patch.baseUrl === undefined ? undefined : normalizeBaseUrl(patch.baseUrl);
+      rejectEnvKeyChange(before);
+      // Encrypt first; the read-modify-write below is one synchronous
+      // transaction, so a PATCH landing during the await is not overwritten.
       const sealed = typeof patch.apiKey === 'string' ? await requireSecrets().seal(id, patch.apiKey) : null;
       const now = Date.now();
+      let found = false;
       try {
-        write(() => {
+        found = write(() => {
+          const current = readProvider(id);
+          if (!current) return false;
+          rejectEnvKeyChange(current);
+          const baseUrl = patchedBaseUrl ?? current.base_url;
           db.run(
             `UPDATE text_providers
                 SET name = ?, protocol = ?, base_url = ?, preset = ?, token_field = ?,
@@ -514,10 +524,12 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
               [id],
             );
           }
+          return true;
         });
       } catch (error) {
         rethrowUnique(error, 'A provider with this name already exists.');
       }
+      if (!found) return null;
       return providerFromRow(mustRead(readProvider(id)));
     },
 

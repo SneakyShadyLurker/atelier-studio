@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import { parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds } from '../test/helpers';
+import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 import {
   type EnhanceChunk,
   type TestCliproxyTextProvider,
@@ -35,6 +36,7 @@ function serveCapture(requests: CapturedRequest[]): string {
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
+      if (isHostPortProbe(request)) return hostPortProbeResponse();
       requests.push((await request.json()) as CapturedRequest);
       const frame = JSON.stringify({
         choices: [{ index: 0, delta: { content: 'enhanced' }, finish_reason: 'stop' }],

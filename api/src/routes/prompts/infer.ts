@@ -66,6 +66,7 @@ export const inferRoutes = new Hono<AppEnv>()
     const resolved = c.var.text.resolve({ userId, task: 'infer', ...imageModelRouting(config, modelId) });
     if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
     const textModel = resolved.model;
+    const inferOptions = resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort };
     return withLlmSlot(c, inferPool, userId, 5, () => {
     const lib = promptLibrary(c.var.db, userId);
     const priorDiagnosis = diagnoseLibrary(lib);
@@ -80,11 +81,11 @@ export const inferRoutes = new Hono<AppEnv>()
         const ops: RawInferOp[] = [];
         let taxonomyRejected: RejectedOp[] = [];
         const inferDimensions = (input: string, inferSignal: AbortSignal): Promise<InferResult> =>
-          provider.inferDimensions(input, inferSignal, systemPrompt);
+          provider.inferDimensions(input, inferSignal, systemPrompt, inferOptions);
         const inferTaxonomy = (input: string, inferSignal: AbortSignal): Promise<InferResult> =>
-          provider.inferTaxonomy(input, inferSignal, systemPrompt);
+          provider.inferTaxonomy(input, inferSignal, systemPrompt, inferOptions);
         const inferDimensionsSingleAttempt = (input: string, inferSignal: AbortSignal): Promise<InferResult> =>
-          provider.inferDimensionsSingleAttempt(input, inferSignal, systemPrompt);
+          provider.inferDimensionsSingleAttempt(input, inferSignal, systemPrompt, inferOptions);
         const collectTaxonomy = async (snapshot: string): Promise<RawInferOp[] | null> => {
           // Both calls share one taxonomy wall-time envelope, including the
           // original disconnect/total-budget signal. Recovery cannot double it.

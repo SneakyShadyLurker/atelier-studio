@@ -33,7 +33,7 @@ describe('provider.inferDimensions', () => {
     expect(body).not.toHaveProperty('verbosity');
   });
 
-  test('rescue sends the Kimi JSON request shape', async () => {
+  test('rescue sends the schema-constrained Kimi JSON request shape', async () => {
     let body: Record<string, unknown> = {};
     globalThis.fetch = ((_url: string, init?: RequestInit) => {
       body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, unknown>;
@@ -50,7 +50,7 @@ describe('provider.inferDimensions', () => {
       model: 'kimi-latest',
       reasoning_effort: 'low',
       max_completion_tokens: 36000,
-      response_format: { type: 'json_object' },
+      response_format: { type: 'json_schema', json_schema: { name: 'dimension_rescue', strict: true } },
     });
     expect(body).not.toHaveProperty('verbosity');
   });
@@ -60,6 +60,27 @@ describe('provider.inferDimensions', () => {
     const p = createCliproxyTextProvider({ ...testTextPolicies(), baseUrl: 'http://x', token: 't', model: 'kimi-latest', backend: 'kimi', maxResponseBytes: 1e6 });
     const r = await p.inferDimensions('S', new AbortController().signal);
     expect(r.type).toBe('failed');
+  });
+
+  test('invalid-only and mixed inference output fail rather than becoming empty or partial success', async () => {
+    for (const ops of [[{ op: 'unknown' }], [{ op: 'unknown' }, { op: 'createDimension', name: 'D', tags: ['x'] }]]) {
+      globalThis.fetch = (() => Promise.resolve(sse(JSON.stringify({ ops })))) as unknown as typeof fetch;
+      const provider = createCliproxyTextProvider({ ...testTextPolicies(), baseUrl: 'http://x', token: 't', model: 'kimi-latest', backend: 'kimi', maxResponseBytes: 1e6 });
+      expect(await provider.inferDimensions('S', new AbortController().signal))
+        .toMatchObject({ type: 'failed', kind: 'transient', detail: 'unparseable infer response' });
+    }
+  });
+
+  test('normalizes string indices and harmless annotations without losing provider operations', async () => {
+    globalThis.fetch = (() => Promise.resolve(sse(JSON.stringify({ ops: [
+      { op: 'createDimension', name: 'D', tags: ['x'], note: 'annotation' },
+      { op: 'assignOptionTags', listIdx: '0', optionIdx: '1', tags: [{ dimName: 'D', label: 'x', note: 'annotation' }] },
+    ] })))) as unknown as typeof fetch;
+    const provider = createCliproxyTextProvider({ ...testTextPolicies(), baseUrl: 'http://x', token: 't', model: 'kimi-latest', backend: 'kimi', maxResponseBytes: 1e6 });
+    expect(await provider.inferDimensions('S', new AbortController().signal)).toEqual({ type: 'ok', ops: [
+      { op: 'createDimension', name: 'D', tags: ['x'] },
+      { op: 'assignOptionTags', listIdx: 0, optionIdx: 1, tags: [{ dimName: 'D', label: 'x' }] },
+    ] });
   });
 });
 

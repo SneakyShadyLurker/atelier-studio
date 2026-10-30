@@ -9,7 +9,8 @@ import { selectDoneTile } from '../db/doneTile';
 import { ThumbQueueFullError } from '../storage/thumbRuntime';
 import { artifactResponseHeaders, artifactStreamResponse } from './_artifact-response';
 import { StorageSealedError } from '../storage/crypto';
-import { decryptedVideoFile } from '../storage/decryptedVideoCache';
+import { acquireDecryptedVideo } from '../storage/decryptedVideoCache';
+import { videoResponse } from './_video-response';
 
 export const imagesRoutes = new Hono<AppEnv>()
   .get('/img/:tileId', async (c) => {
@@ -18,10 +19,10 @@ export const imagesRoutes = new Hono<AppEnv>()
     const row = selectDoneTile(c.var.db, params.value.tileId, c.var.userId);
     if (!row) return c.body(null, 404);
     // Clips need HTTP Range (iOS playback, seeking): serve a short-lived
-    // tmpfs plaintext copy as a BunFile so Bun answers 206 natively.
+    // tmpfs copy through a reader lease, retaining its budget until EOF/cancel.
     if (isVideoMime(row.mime)) {
-      const video = await decryptedVideoFile(c.var.config.DATA_DIR, c.var.userId, params.value.tileId, row.ext);
-      if (video) return new Response(video, { headers: artifactResponseHeaders(row.mime) });
+      const video = await acquireDecryptedVideo(c.var.config.DATA_DIR, c.var.userId, params.value.tileId, row.ext);
+      if (video) return videoResponse(video, c.req.raw);
       // No seekable copy available right now (cache budget full): a Range
       // request must not silently get a full-body 200 (iOS rejects it).
       if (c.req.header('Range')) return c.body(null, 503, { 'Retry-After': '2' });

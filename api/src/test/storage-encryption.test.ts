@@ -19,7 +19,7 @@ import {
 import { writeAtomic } from '../storage/files';
 import {
   VIDEO_CACHE_BUDGET_BYTES,
-  decryptedVideoFile,
+  acquireDecryptedVideo,
   resetDecryptedVideoCacheForTests,
   sweepDecryptedVideoCache,
   videoCacheBudgetForTests,
@@ -181,7 +181,7 @@ describe('encrypted video playback', () => {
     const clip = crypto.getRandomValues(new Uint8Array(250_000));
     await writeAtomic(runtime.config.DATA_DIR, 'images', 'alice', tileId, 'mp4', clip);
 
-    // Range is answered by Bun's HTTP layer, so go through a real listener.
+    // Exercise Range and leased-body completion through a real listener.
     const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: runtime.app.fetch });
     try {
       const url = `http://127.0.0.1:${server.port}/api/img/${tileId}`;
@@ -214,13 +214,17 @@ describe('playback copy versioning', () => {
     const first = crypto.getRandomValues(new Uint8Array(70_000));
     const second = crypto.getRandomValues(new Uint8Array(90_000));
     await writeAtomic(dataDir, 'images', 'alice', 'seq-1', 'mp4', first);
-    const v1 = await decryptedVideoFile(dataDir, 'alice', 'seq-1', 'mp4', '1');
-    expect(new Uint8Array(await (v1 ?? Bun.file('/nonexistent')).arrayBuffer())).toEqual(first);
+    const v1 = await acquireDecryptedVideo(dataDir, 'alice', 'seq-1', 'mp4', '1');
+    if (!v1) throw new Error('missing first lease');
+    expect(new Uint8Array(await v1.file.arrayBuffer())).toEqual(first);
+    v1.release();
 
     await writeAtomic(dataDir, 'images', 'alice', 'seq-1', 'mp4', second);
-    const v2 = await decryptedVideoFile(dataDir, 'alice', 'seq-1', 'mp4', '2');
-    expect(new Uint8Array(await (v2 ?? Bun.file('/nonexistent')).arrayBuffer())).toEqual(second);
-    expect(v1 && existsSync(v1.name ?? '')).toBe(false);
+    const v2 = await acquireDecryptedVideo(dataDir, 'alice', 'seq-1', 'mp4', '2');
+    if (!v2) throw new Error('missing second lease');
+    expect(new Uint8Array(await v2.file.arrayBuffer())).toEqual(second);
+    v2.release();
+    expect(existsSync(v1.file.name ?? '')).toBe(false);
   });
 });
 

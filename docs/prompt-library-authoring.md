@@ -312,7 +312,19 @@ ATELIER_DB_PATH=/path/to/atelier.sqlite ATELIER_USER_ID=alice \
   bun api/scripts/audit-prompt-library.ts
 ```
 
-The script refuses a path that looks like a live database unless `ATELIER_ALLOW_LIVE_DB_AUDIT=1` is set (exit 4); it opens read-only. Other exit codes: 0 = every template structurally satisfiable; 1 = at least one template has a guaranteed conflict; 2 = DB path missing; 3 = user not found.
+The script refuses a path that looks like a live database unless `ATELIER_ALLOW_LIVE_DB_AUDIT=1` is set (exit 4); it opens read-only. Diagnosis output separates `OK`, `BROKEN`, and `INCOMPLETE`: an exhausted solver budget leaves coherence unknown, rather than proving a conflict. The offline default allowance is the HTTP budget of 200,000 work units multiplied by the template count (at least one, capped at JavaScript's maximum safe integer). Set `ATELIER_AUDIT_NODE_BUDGET` to a positive safe integer to override the audit's total allowance. HTTP diagnosis uses a fixed 200,000-unit cap per request. Exit codes: 0 = every template proved structurally satisfiable; 1 = at least one confirmed failure; 2 = DB path missing; 3 = user/configuration error; 4 = live-database guard; 5 = diagnosis incomplete with no confirmed failure. Version 2 of the HTTP response uses `satisfiable: null` for incomplete checks. The interface labels them **Diagnosis incomplete** and lets AI proceed; only a confirmed conflict requires acknowledgement.
+
+The web client requests version 2 with `X-Atelier-Diagnosis-Version: 2`. Requests without that header, or with an older version, receive only proven boolean entries and an `incompleteTemplateNames` array naming omitted unknowns. Omitted templates are not declared healthy or broken. For example, the default response can contain:
+
+```json
+{"templates":[{"templateName":"Healthy","satisfiable":true}],"incompleteTemplateNames":["Hard"],"librarySnapshotHash":"h","templatesDigest":"d"}
+```
+
+Version 2 instead includes `Hard` with `satisfiable: null`. All representations are private/no-store and vary on the version header. During a rolling upgrade, the new client accepts older boolean payloads; the new API gives older clients boolean-only known results so their AI flow remains usable. An older bundle cannot display the new incomplete badge until it reloads.
+
+HTTP and offline diagnosis divide the remaining allowance equally among templates needing solver work. Each template keeps its fixed quota through both SAT and conflict explanation; unused work is not transferred by template order. Missing/empty-list and trivial healthy proofs need no solver quota. The offline default also caps each solver template at 200,000 units, so cheap templates cannot inflate a hard template's allowance; an explicit total override may raise that quota. This keeps per-template verdicts and explanations stable when templates are reordered.
+
+Two-pass AI inference may recover one transient or malformed-output taxonomy result. Both provider calls share a single `INFER_TAXONOMY_TIMEOUT_MS` deadline plus the original request signal; timeout, disconnect, quota, permanent failure or moderation prevents further recovery. An explicit success racing only the local taxonomy deadline is retained; a parent disconnect or total-budget abort remains authoritative. Operation validation strips extra object fields and converts digit-string indices to nonnegative safe integers. A genuinely invalid operation rejects the complete proposal, preserving dependencies between operations instead of silently dropping suggestions.
 
 Beyond satisfiability, the CLI prints two advisory warning sections; keep both at **0 warnings**: `TAG HYGIENE` (sparse or non-universal tags on siloing dimensions) and `FILL BOUNDARIES` (tagged-dimension pairings that straddle an `{{ai-fill}}` context split). The HTTP equivalent is `POST /api/prompts/library-diagnosis`.
 

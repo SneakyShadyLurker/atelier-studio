@@ -6,7 +6,7 @@
   "type": "module",
   "workspaces": ["web", "api", "shared"],
   "engines": {
-    "bun": "1.4.3"
+    "bun": "1.4.4"
   },
   "scripts": {
     "typecheck": "bun run --filter '*' typecheck",
@@ -31,5 +31,8 @@
   },
   "overrides": {
     "ws": "8.21.3"
+  },
+  "patchedDependencies": {
+    "range-parser@1.3.0": "patches/range-parser@1.3.0.patch"
   }
 }

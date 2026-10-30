@@ -107,7 +107,7 @@ describe('diagnoseLibrary', () => {
     expect(branched?.reason).toBe('no satisfying combination across A, B');
   });
 
-  test('branch-aware conflict explanation shares the per-template SAT budget', () => {
+  test('a proved branch conflict remains false when its explanation exhausts the request budget', () => {
     _setDiagnosisNodeBudgetForTests(5);
     try {
       const lib = makeLib({
@@ -148,7 +148,7 @@ describe('diagnoseLibrary', () => {
       expect(result.templates[0]).toMatchObject({
         templateName: 'Budgeted',
         satisfiable: false,
-        reason: 'diagnosis budget exceeded -- culprit set non-local',
+        reason: 'no satisfying combination; conflict explanation incomplete (diagnosis budget exceeded)',
       });
       expect(result.templates[0]?.conflictingPairs).toBeUndefined();
     } finally {
@@ -193,8 +193,10 @@ describe('diagnoseLibrary', () => {
       _setDiagnosisNodeBudgetForTests(budget);
       try {
         expect(diagnoseLibrary(lib).templates[0]).toEqual({
-          templateName: 'Budgeted', satisfiable: false,
-          reason: 'diagnosis budget exceeded -- culprit set non-local',
+          templateName: 'Budgeted', satisfiable: phase === 'SAT comparisons' ? null : false,
+          reason: phase === 'SAT comparisons'
+            ? 'diagnosis budget exceeded'
+            : 'no satisfying combination; conflict explanation incomplete (diagnosis budget exceeded)',
         });
       } finally {
         _setDiagnosisNodeBudgetForTests(null);
@@ -241,12 +243,7 @@ describe('diagnoseLibrary', () => {
     expect(diagnoseLibrary(lib).templates[0]?.satisfiable).toBe(false);
   });
 
-  test('per-template budget: two healthy templates both report satisfiable without cross-contamination', () => {
-    // Behavioural assertion: two templates each using the same two lists with
-    // a compatible option pair. With a shared budget (the old code), a hard
-    // template could spend the budget and cause subsequent templates to be
-    // classified incorrectly. With per-template budget, both should be
-    // satisfiable regardless of order.
+  test('two inexpensive healthy templates fit within the shared request budget', () => {
     const lib = makeLib({
       templates: [
         { id: 't1', name: 'First', body: '{{var::A}} {{var::B}}', sortOrder: 0, createdAt: 0, updatedAt: 0 },
@@ -399,6 +396,117 @@ describe('diagnoseLibrary', () => {
     expect(pairs).toContainEqual({ listA: 'C', listB: 'D', dimensionName: 'Franchise' });
     expect(pairs).not.toContainEqual({ listA: 'A', listB: 'B', dimensionName: 'Franchise' });
   });
+});
+
+test('unrelated library size and prose do not spend the solver comparison budget', () => {
+  const tagIds = Array.from({ length: 50 }, (_, i) => `tag-${i}`);
+  const lib = makeLib({
+    templates: Array.from({ length: 4 }, (_, i) => ({
+      id: `t-${i}`, name: `T-${i}`, body: `${'prose '.repeat(10_000)} {{var::A}} {{var::B}}`,
+      sortOrder: i, createdAt: 0, updatedAt: 0,
+    })),
+    variableLists: [
+      ...['A', 'B'].map((name, i) => ({
+        id: name, name, sortOrder: i, createdAt: 0, updatedAt: 0,
+        options: [{ id: name, listId: name, value: name, sortOrder: 0, weight: 1, tagIds: [] }],
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        id: `unused-${i}`, name: `Unused ${i}`, sortOrder: i + 2, createdAt: 0, updatedAt: 0,
+        options: Array.from({ length: 500 }, (_, j) => ({
+          id: `unused-${i}-${j}`, listId: `unused-${i}`, value: String(j),
+          sortOrder: j, weight: 1, tagIds,
+        })),
+      })),
+    ],
+    dimensions: [0, 1].map((i) => ({
+      id: `d-${i}`, name: `Dimension ${i}`,
+      tags: tagIds.slice(i * 25, (i + 1) * 25).map((id, j) => ({
+        id, dimensionId: `d-${i}`, label: id, sortOrder: j,
+      })),
+    })),
+  });
+  const work = { nodes: 0 };
+  const result = diagnoseLibrary(lib, { nodeBudgetRef: work, totalBudget: 200_000 });
+  expect(result.templates.every((entry) => entry.satisfiable === true)).toBe(true);
+  expect(work.nodes).toBeLessThan(1_000);
+});
+
+test('fixed fair quotas preserve hard, easy and broken verdicts and explanations across permutations', () => {
+  const bodies = ['{{var::H1}} {{var::H2}}', '{{var::E1}} {{var::E2}}', '{{var::B1}} {{var::B2}}', '{{var::E1}}', '{{var::Missing}}'];
+  const templates = ['Hard', 'Easy', 'Broken', 'Trivial', 'Missing'].map((name, i) => ({
+    id: name, name, body: bodies[i] ?? '', sortOrder: i, createdAt: 0, updatedAt: 0,
+  }));
+  const lib = makeLib({
+    templates,
+    variableLists: ['H1', 'H2', 'E1', 'E2', 'B1', 'B2'].map((name, i) => ({
+      id: name, name, sortOrder: i, createdAt: 0, updatedAt: 0,
+      options: Array.from({ length: name.startsWith('H') ? 500 : 1 }, (_, j) => ({
+        id: `${name}-${j}`, listId: name, value: String(j), sortOrder: j, weight: 1,
+        tagIds: name.startsWith('E') ? [] : [`tag-${i % 2}`],
+      })),
+    })),
+    dimensions: [{ id: 'd', name: 'D', tags: [0, 1].map((i) => ({
+      id: `tag-${i}`, dimensionId: 'd', label: String(i), sortOrder: i,
+    })) }],
+  });
+  const byName = (result: ReturnType<typeof diagnoseLibrary>) => Object.fromEntries(result.templates.map((entry) => [entry.templateName, entry]));
+  const expected = byName(diagnoseLibrary(lib, { nodeBudgetRef: { nodes: 137 }, totalBudget: 3000 }));
+  expect(expected.Hard?.satisfiable).toBeNull();
+  expect(expected.Easy?.satisfiable).toBe(true);
+  expect(expected.Broken?.satisfiable).toBe(false);
+  expect(expected.Broken?.conflictingPairs).toHaveLength(1);
+  for (const ordered of [templates, [...templates].reverse(), [...templates.slice(2), ...templates.slice(0, 2)]]) {
+    const work = { nodes: 137 };
+    expect(byName(diagnoseLibrary({ ...lib, templates: ordered }, { nodeBudgetRef: work, totalBudget: 3000 }))).toEqual(expected);
+    expect(work.nodes).toBeLessThanOrEqual(3000);
+  }
+  const tiny = { nodes: 10 };
+  const exhausted = diagnoseLibrary(lib, { nodeBudgetRef: tiny, totalBudget: 13 });
+  expect(exhausted.templates.slice(0, 3).every((entry) => entry.satisfiable === null)).toBe(true);
+  expect(tiny.nodes).toBe(13); // three quotas of one, excluding failed-spend sentinels
+});
+
+test('one request budget bounds diagnosis across fifty hard templates', () => {
+  const lib = makeLib({
+    templates: Array.from({ length: 50 }, (_, i) => ({
+      id: `t-${i}`, name: `T-${i}`, body: '{{var::A}} {{var::B}}', sortOrder: i, createdAt: 0, updatedAt: 0,
+    })),
+    variableLists: ['A', 'B'].map((name, listIdx) => ({
+      id: name, name, sortOrder: listIdx, createdAt: 0, updatedAt: 0,
+      options: Array.from({ length: 500 }, (_, i) => ({
+        id: `${name}-${i}`, listId: name, value: String(i), sortOrder: i, weight: 1, tagIds: [`tag-${listIdx}`],
+      })),
+    })),
+    dimensions: [{ id: 'd', name: 'D', tags: [0, 1].map((i) => ({
+      id: `tag-${i}`, dimensionId: 'd', label: String(i), sortOrder: i,
+    })) }],
+  });
+  const work = { nodes: 0 };
+  const result = diagnoseLibrary(lib, { nodeBudgetRef: work, totalBudget: 200_000 });
+  expect(work.nodes).toBeLessThanOrEqual(200_000);
+  expect(result.templates).toHaveLength(50);
+  expect(result.templates.every((entry) => entry.satisfiable === null && entry.reason === 'diagnosis budget exceeded')).toBe(true);
+  const cheapTemplates = [
+    { id: 'cheap-healthy', name: 'Cheap healthy', body: '{{var::A}}', sortOrder: 0, createdAt: 0, updatedAt: 0 },
+    { id: 'cheap-missing', name: 'Cheap missing', body: '{{var::Missing}}', sortOrder: 0, createdAt: 0, updatedAt: 0 },
+    { id: 'cheap-empty', name: 'Cheap empty', body: '{{var::Empty}}', sortOrder: 0, createdAt: 0, updatedAt: 0 },
+  ];
+  for (const templates of [[...lib.templates, ...cheapTemplates], [...cheapTemplates, ...lib.templates]]) {
+    const bounded = { nodes: 0 };
+    const diagnosis = diagnoseLibrary({
+      ...lib, templates,
+      variableLists: [...lib.variableLists, { id: 'empty', name: 'Empty', sortOrder: 2, createdAt: 0, updatedAt: 0, options: [] }],
+    }, { nodeBudgetRef: bounded, totalBudget: 200_000 });
+    expect(diagnosis.templates.find((entry) => entry.templateName === 'Cheap healthy')?.satisfiable).toBe(true);
+    expect(diagnosis.templates.find((entry) => entry.templateName === 'Cheap missing')).toMatchObject({
+      satisfiable: false, reason: 'missing or empty list(s): Missing',
+    });
+    expect(diagnosis.templates.find((entry) => entry.templateName === 'Cheap empty')).toMatchObject({
+      satisfiable: false, reason: 'missing or empty list(s): Empty',
+    });
+    expect(diagnosis.templates.find((entry) => entry.templateName === 'T-0')?.satisfiable).toBeNull();
+    expect(bounded.nodes).toBeLessThanOrEqual(200_001);
+  }
 });
 
 describe('diagnoseLibrary subject awareness', () => {

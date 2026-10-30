@@ -53,6 +53,7 @@ const MIGRATION_STATEMENT_COUNTS: Readonly<Record<string, number>> = {
   '0054_batches_idempotency_key.sql': 2,
   '0055_proxy_text_backends.sql': 1,
   '0056_user_model_steps.sql': 1,
+  '0057_stories_source_upload_index.sql': 1,
 };
 
 const CORPUS_BOOTSTRAP_SQL = `

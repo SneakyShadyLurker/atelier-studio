@@ -39,7 +39,7 @@ import { DRAFT_TEMPLATE_SYSTEM_PROMPT } from '../prompts/draftTemplateSystemProm
 import { INFER_DIMENSIONS_SYSTEM_PROMPT } from '../prompts/inferDimensionsSystemPrompt';
 import { RESCUE_DIMENSION_SYSTEM_PROMPT } from '../prompts/rescueSystemPrompt';
 import { isLikelyContentFilterFailure, isLikelyModelRefusal } from '../prompts/modelOutput';
-import { parseInferPayload } from '../prompts/inferParse';
+import { parseInferPayload, RESCUE_RESPONSE_FORMAT } from '../prompts/inferParse';
 import type { LibrarySnapshot, RawInferOp } from '../prompts/inferTypes';
 import { findTokens, VAR_TOKEN_ANCHORED } from '@atelier/shared/template-tokens';
 import { imageAuthoringSystemPrompt } from '../prompts/gptSystemPrompt';
@@ -146,10 +146,9 @@ export function cliproxyTextPolicies(
     enhancePolicy: policy(0, knobs.RESILIENT_MAX_ATTEMPTS, true),
     draftListPolicy: policy(knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS, knobs.RESILIENT_MAX_ATTEMPTS),
     inferPolicy: policy(knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS, knobs.RESILIENT_MAX_ATTEMPTS),
-    // Pass 1 (taxonomy): single attempt, long timeout — see
-    // INFER_TAXONOMY_TIMEOUT_MS in config.ts. Retries are pointless when
-    // every attempt is equally output-bound, and the totalEnvelope invariant
-    // budgets exactly one taxonomy attempt.
+    // One attempt per provider call. The route may recover one transient result
+    // under a single shared INFER_TAXONOMY_TIMEOUT_MS signal, so totalEnvelope
+    // still budgets one taxonomy wall-time envelope, not two full timeouts.
     taxonomyPolicy: policy(knobs.INFER_TAXONOMY_TIMEOUT_MS, 1),
     inferRetryGapsPolicy: policy(knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS, 1),
     // ai-fill: one retry on transient errors, retaining the historical
@@ -921,7 +920,9 @@ export function createCliproxyTextProvider(config: CliproxyTextProviderConfig & 
         (body, sig) => accumulateChatStreamOrThrow(body, inferMaxResponseBytes, sig),
       );
       const ops = parseInferPayload(text);
-      if (!ops) return { type: 'failed', kind: 'permanent', status: null, detail: 'unparseable infer response' };
+      // Model output can vary on another attempt; let chunk retry-gaps recover
+      // without accepting a proposal with silently discarded operations.
+      if (!ops) return { type: 'failed', kind: 'transient', status: null, detail: 'unparseable infer response' };
       return { type: 'ok', ops };
     } catch (err) {
       if (signal.aborted) throw err;
@@ -1463,7 +1464,7 @@ export function createCliproxyTextProvider(config: CliproxyTextProviderConfig & 
         const text = await callWithPolicy(
           inferRetryGapsPolicy,
           signal,
-          { defaults: INFER_DIMENSIONS_DEFAULTS, systemPrompt: imageAuthoringSystemPrompt(RESCUE_DIMENSION_SYSTEM_PROMPT, args.modelId), userContent, responseFormat: 'json_object' },
+          { defaults: INFER_DIMENSIONS_DEFAULTS, systemPrompt: imageAuthoringSystemPrompt(RESCUE_DIMENSION_SYSTEM_PROMPT, args.modelId), userContent, responseFormat: RESCUE_RESPONSE_FORMAT },
           config,
           baseUrl,
           (body, sig) => accumulateChatStreamOrThrow(body, inferMaxResponseBytes, sig),

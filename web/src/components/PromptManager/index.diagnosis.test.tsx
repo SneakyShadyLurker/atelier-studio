@@ -143,6 +143,44 @@ describe('PromptManager diagnosis badges', () => {
     expect(okMark).toBeNull();
   });
 
+  test('an inconclusive template gets an incomplete badge and explanation without an unsatisfiable label', async () => {
+    const diagnosis: LibraryDiagnosisResponse = {
+      templates: [{ templateName: 'BrokenA', satisfiable: null, reason: 'diagnosis budget exceeded' }, { templateName: 'OK', satisfiable: true }],
+      librarySnapshotHash: 'h', templatesDigest: 'd',
+    };
+    renderWithDiagnosis(diagnosis);
+    const badge = await screen.findByRole('button', { name: 'BrokenA: diagnosis incomplete' });
+    expect(badge.getAttribute('data-coherence')).toBe('incomplete');
+    expect(screen.queryByRole('button', { name: /unsatisfiable/i })).toBeNull();
+    fireEvent.click(badge);
+    expect(screen.getByRole('heading', { name: 'Diagnosis incomplete' })).toBeTruthy();
+    expect(screen.getByText(/Coherence is unknown/)).toBeTruthy();
+  });
+
+  test('an incomplete check stays labelled without adding an AI confirmation step', async () => {
+    const diagnosis: LibraryDiagnosisResponse = {
+      templates: [{ templateName: 'BrokenA', satisfiable: null, reason: 'diagnosis budget exceeded' }],
+      librarySnapshotHash: 'h', templatesDigest: 'd',
+    };
+    renderWithDiagnosis(diagnosis);
+    let inferred = false;
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('library-diagnosis')) return Promise.resolve(Response.json(diagnosis));
+      if (url.includes('/dimensions/infer')) {
+        inferred = true;
+        return Promise.resolve(new Response('event: done\ndata: {"proposalId":"","proposal":{"bundles":[]},"baseSnapshotHash":"h","warnings":[],"coverage":[],"rejected":[],"conflicts":[]}\n\n', {
+          headers: { 'content-type': 'text/event-stream' },
+        }));
+      }
+      return Promise.resolve(Response.json(library));
+    }) as unknown as typeof fetch;
+    fireEvent.click(await screen.findByRole('tab', { name: /dimensions/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Propose Dimensions/i }));
+    await waitFor(() => { expect(inferred).toBe(true); });
+    expect(screen.queryByRole('heading', { name: 'Diagnosis incomplete' })).toBeNull();
+  });
+
   test('clicking the warn badge opens the template-scoped DiagnosisCard', async () => {
     const diagnosis: LibraryDiagnosisResponse = {
       templates: [

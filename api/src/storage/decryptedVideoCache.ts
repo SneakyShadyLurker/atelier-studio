@@ -12,20 +12,19 @@ import { streamArtifact } from './files';
 // natively for a `Response(BunFile)`, but an age-encrypted artifact can only
 // be served as a decrypted stream. So a video that is being played gets a
 // short-lived plaintext copy in the container's tmpfs (never a disk file),
-// served as a BunFile.
+// served through a reader lease with HTTP Range support.
 //
 // The cache has its OWN byte budget, separate from processing
 // (decryptedTemp.ts), so hot playback can never starve stitching or tail
-// extraction. A copy is dropped only after IDLE_TTL_MS without a request:
-// an unlinked file stays readable (and resident) while a response still
-// holds it, so eviction waits long enough for in-flight downloads to finish.
+// extraction. Eviction retires an entry; its file and reservation remain
+// alive until the last reader closes, regardless of download duration.
 //
 // Callers must authorise the request (owner-scoped DB row) BEFORE calling.
 // `version` distinguishes content that is replaced under the same id
 // (sequence masters are re-stitched in place); immutable tiles pass none.
 
 export const VIDEO_CACHE_BUDGET_BYTES = 1024 ** 3;
-const IDLE_TTL_MS = 5 * 60_000;
+export const VIDEO_CACHE_IDLE_TTL_MS = 5 * 60_000;
 const SWEEP_INTERVAL_MS = 60_000;
 
 const budget = new ByteBudget(VIDEO_CACHE_BUDGET_BYTES);
@@ -34,6 +33,14 @@ interface Entry {
   readonly path: string;
   readonly size: number;
   lastUsed: number;
+  readers: number;
+  retired: boolean;
+}
+
+export interface DecryptedVideoLease {
+  readonly file: BunFile;
+  /** Call only once the underlying reader has closed. Idempotent. */
+  release(): void;
 }
 
 const entries = new Map<string, Entry>();
@@ -41,14 +48,37 @@ const pending = new Map<string, Promise<Entry | null>>();
 let sweeper: ReturnType<typeof setInterval> | null = null;
 
 function drop(key: string, entry: Entry): void {
-  entries.delete(key);
+  if (entries.get(key) === entry) entries.delete(key);
+  entry.retired = true;
+  if (entry.readers > 0) return;
   rmSync(entry.path, { force: true });
   budget.release(entry.size);
 }
 
+function acquire(entry: Entry): DecryptedVideoLease {
+  entry.readers += 1;
+  entry.lastUsed = Date.now();
+  let released = false;
+  return {
+    file: Bun.file(entry.path),
+    release() {
+      if (released) return;
+      released = true;
+      entry.readers -= 1;
+      entry.lastUsed = Date.now();
+      if (entry.retired && entry.readers === 0) {
+        rmSync(entry.path, { force: true });
+        budget.release(entry.size);
+      }
+    },
+  };
+}
+
 export function sweepDecryptedVideoCache(now = Date.now()): void {
   for (const [key, entry] of entries) {
-    if (now - entry.lastUsed >= IDLE_TTL_MS) drop(key, entry);
+    // Active responses enforce their own progress deadline. Keep their cached
+    // copy reusable by seeks instead of materializing a duplicate on age alone.
+    if (entry.readers === 0 && now - entry.lastUsed >= VIDEO_CACHE_IDLE_TTL_MS) drop(key, entry);
   }
 }
 
@@ -84,7 +114,7 @@ async function materialize(
     path = join(cacheDir(), `${randomUUID()}.${ext}`);
     await Bun.write(path, new Response(artifact.stream));
     ensureSweeper();
-    return { path, size: artifact.size, lastUsed: Date.now() };
+    return { path, size: artifact.size, lastUsed: Date.now(), readers: 0, retired: false };
   } catch (error) {
     await artifact.stream.cancel().catch(() => undefined);
     if (path !== null) rmSync(path, { force: true });
@@ -95,20 +125,19 @@ async function materialize(
 
 // A seekable plaintext handle for a stored video in `images/`, or null when
 // the artifact is missing or the cache budget is exhausted.
-export async function decryptedVideoFile(
+export async function acquireDecryptedVideo(
   dataDir: string,
   userId: string,
   artifactId: string,
   ext: MediaExt,
   version = '',
   isCurrent: () => boolean = () => true,
-): Promise<BunFile | null> {
+): Promise<DecryptedVideoLease | null> {
   const key = `${userId}/${artifactId}.${ext}#${version}`;
   const cached = entries.get(key);
   if (cached && existsSync(cached.path)) {
     if (!isCurrent()) return null;
-    cached.lastUsed = Date.now();
-    return Bun.file(cached.path);
+    return acquire(cached);
   }
   if (cached) drop(key, cached);
   // A new version replaces older copies of the same artifact.
@@ -124,15 +153,14 @@ export async function decryptedVideoFile(
     pending.set(key, inFlight);
   }
   const entry = await inFlight;
-  if (!entry) return null;
+  if (!entry || entry.retired) return null;
   // A master may be published while the old artifact is being decrypted.
   // Never retain or hand out that old copy under the caller's snapshot.
   if (!isCurrent()) {
     if (entries.get(key) === entry) drop(key, entry);
     return null;
   }
-  entry.lastUsed = Date.now();
-  return Bun.file(entry.path);
+  return acquire(entry);
 }
 
 // Drops every cached version of an artifact (e.g. a re-stitched master).

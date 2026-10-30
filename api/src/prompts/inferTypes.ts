@@ -1,4 +1,6 @@
 import type { TemplateConflict } from '@atelier/shared';
+import type { RawInferOp } from './inferParse';
+export type { RawInferOp } from './inferParse';
 
 export interface SnapTag { idx: number; id: string; label: string; parentIdx?: number }
 export interface SnapDim { idx: number; id: string; name: string; tags: SnapTag[] }
@@ -16,13 +18,6 @@ export interface SnapList { idx: number; id: string; name: string; options: Snap
 export interface LibrarySnapshot { dimensions: SnapDim[]; lists: SnapList[] }
 
 export interface TagRef { dimName: string; label: string }
-export type RawInferOp =
-  | { op: 'createDimension'; name: string; tags: string[] }
-  | { op: 'addTags'; dimIdx: number; tags: string[] }
-  | { op: 'renameDimension'; dimIdx: number; newName: string }
-  | { op: 'mergeDimensions'; fromIdx: number; intoIdx: number; tagMap: Record<string, string> }
-  | { op: 'assignOptionTags'; listIdx: number; optionIdx: number; tags: TagRef[] }
-  | { op: 'addOption'; listIdx: number; value: string; tags: TagRef[] };
 
 export interface RawBundle {
   key: string;

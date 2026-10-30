@@ -3,6 +3,7 @@ import type {
   LibraryDiagnosisEntry,
   LibraryDiagnosisResponse,
 } from '@atelier/shared';
+import { DIAGNOSIS_VERSION, DIAGNOSIS_VERSION_HEADER } from '@atelier/shared';
 import { queryOptions } from '@tanstack/react-query';
 import { ApiError, apiFetch, extractApiError, responseRequestId } from './client';
 
@@ -26,7 +27,7 @@ export const libraryDiagnosisOpts = (enabled = true) =>
 async function fetchLibraryDiagnosis(signal?: AbortSignal): Promise<LibraryDiagnosisResponse> {
   const init: RequestInit = {
     method: 'POST',
-    headers: { Accept: 'application/json' },
+    headers: { Accept: 'application/json', [DIAGNOSIS_VERSION_HEADER]: DIAGNOSIS_VERSION },
   };
   if (signal) init.signal = signal;
   const res = await apiFetch('/prompts/library-diagnosis', init);
@@ -57,7 +58,7 @@ export function isLibraryDiagnosisEntry(value: unknown): value is LibraryDiagnos
     conflictingPairs?: unknown;
   };
   if (typeof v.templateName !== 'string') return false;
-  if (typeof v.satisfiable !== 'boolean') return false;
+  if (v.satisfiable !== null && typeof v.satisfiable !== 'boolean') return false;
   if (v.reason !== undefined && typeof v.reason !== 'string') return false;
   if (v.conflictingPairs !== undefined) {
     if (!Array.isArray(v.conflictingPairs)) return false;
@@ -72,10 +73,13 @@ export function isLibraryDiagnosisResponse(value: unknown): value is LibraryDiag
     templates?: unknown;
     librarySnapshotHash?: unknown;
     templatesDigest?: unknown;
+    incompleteTemplateNames?: unknown;
   };
   if (!Array.isArray(v.templates)) return false;
   if (!v.templates.every(isLibraryDiagnosisEntry)) return false;
   if (typeof v.librarySnapshotHash !== 'string') return false;
   if (typeof v.templatesDigest !== 'string') return false;
+  if (v.incompleteTemplateNames !== undefined && (!Array.isArray(v.incompleteTemplateNames)
+    || !v.incompleteTemplateNames.every((name: unknown) => typeof name === 'string'))) return false;
   return true;
 }

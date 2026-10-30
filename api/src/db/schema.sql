@@ -338,6 +338,7 @@ CREATE INDEX idx_prompt_templates_user_sort
   ON prompt_templates(user_id, sort_order, name);
 
 CREATE INDEX idx_stories_user ON stories(user_id, created_at DESC);
+CREATE INDEX idx_stories_rendering_source_upload ON stories(source_upload_id) WHERE status = 'rendering';
 
 CREATE INDEX idx_story_segments_batch ON story_segments(batch_id);
 

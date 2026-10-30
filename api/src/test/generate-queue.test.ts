@@ -4,6 +4,7 @@ import { acquireLocalTiles, acquireTiles, releaseLocalTiles, releaseTiles, reset
 import * as queue from '../orchestrator/queue';
 import { queueSlotsFor } from '../providers/registry';
 import { kickQueues, queuedBatchStillRunnable } from '../orchestrator/dispatch';
+import { DEQUEUE_RETRY_MS } from '../orchestrator/dequeue';
 import { jsonRequest, testRuntime } from './helpers';
 
 test('POST /api/generate returns 201 status=running when a slot is available', async () => {
@@ -47,13 +48,24 @@ test('a deferred kick failing on an old over-cap head preserves new accepted IDs
   expect(payload.tiles).toHaveLength(1);
   expect(runtime.db.query('SELECT id FROM batches WHERE id=?').get(payload.batchId)).toEqual({ id: payload.batchId });
   await Bun.sleep(0);
-  expect(runtime.logs.some((line) => line.includes('queue kick failed'))).toBe(true);
+  expect(runtime.logs.some((line) => line.includes('dequeue terminal settlement failed'))).toBe(true);
   expect(tilesInFlight()).toBe(1);
   expect(acquireTiles('extra', 1, 1, 1)).toEqual({ ok: false, reason: 'global' });
   releaseTiles('other-active', 1);
   kickQueues({ ...runtime, healthSnapshot: () => new Map() });
   const events = await runtime.fetch(`/api/batches/${payload.batchId}/events`, { headers: { 'Remote-User': 'test' } });
   expect(await events.text()).toContain('event: done');
+  expect(runtime.db.query('SELECT status FROM tiles WHERE id=?').get('over-cap-tile')).toEqual({ status: 'loading' });
+  runtime.db.run('DROP TRIGGER fail_old_terminal');
+  const settlementDeadline = Date.now() + DEQUEUE_RETRY_MS * 8;
+  while (Date.now() < settlementDeadline
+    && runtime.db.query<{ status: string }, [string]>('SELECT status FROM batches WHERE id=?').get('over-cap')?.status === 'queued') {
+    await Bun.sleep(10);
+  }
+  expect(runtime.db.query('SELECT status FROM tiles WHERE id=?').get('over-cap-tile')).toEqual({ status: 'failed' });
+  expect(runtime.db.query('SELECT status FROM batches WHERE id=?').get('over-cap')).toEqual({ status: 'done' });
+  expect(runtime.db.query("SELECT COUNT(*) AS n FROM batches WHERE user_id='old' AND status='queued'").get()).toEqual({ n: 0 });
+  expect(tilesInFlight()).toBe(0);
 });
 
 test('POST /api/generate returns 201 status=queued when caps are full', async () => {

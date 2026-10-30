@@ -96,4 +96,18 @@ describe('DiagnosisCard', () => {
     );
     expect(container.firstChild).toBeNull();
   });
+
+  test('an inconclusive check is visibly incomplete and can proceed without a claimed conflict', () => {
+    const diagnosis: LibraryDiagnosisResponse = {
+      ...broken, templates: [{ templateName: 'Unchecked', satisfiable: null, reason: 'diagnosis budget exceeded' }],
+    };
+    const onFix = mock();
+    render(<DiagnosisCard mode="library" diagnosis={diagnosis} onFixWithAi={onFix} onCancel={noop} />);
+    expect(screen.getByRole('heading', { name: 'Diagnosis incomplete' })).toBeTruthy();
+    expect(screen.getByText(/Coherence is unknown/)).toBeTruthy();
+    expect(screen.getByText('Unchecked')).toBeTruthy();
+    expect(screen.queryByText(/currently unsatisfiable/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with AI' }));
+    expect(onFix.mock.calls[0]?.[0]).toEqual(diagnosis);
+  });
 });

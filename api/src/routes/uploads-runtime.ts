@@ -15,7 +15,7 @@
 // MAX_PENDING_UPLOADS_PER_USER trips the 503. Both layers are BoundedQueues;
 // the global one owns the process-wide back-pressure.
 
-import { createBoundedQueue, type BoundedQueue } from '../lifecycle/boundedQueue';
+import { createUserBoundedQueue } from '../lifecycle/userBoundedQueue';
 
 export const MAX_CONCURRENT_UPLOADS = 4;
 export const MAX_PENDING_UPLOADS = 20;
@@ -33,48 +33,22 @@ export class UploadQueueFullError extends Error {
   }
 }
 
-const queue = createBoundedQueue({
+const queue = createUserBoundedQueue({
   maxInFlight: MAX_CONCURRENT_UPLOADS,
   maxPending: MAX_PENDING_UPLOADS,
+  maxInFlightPerUser: MAX_CONCURRENT_UPLOADS_PER_USER,
+  maxPendingPerUser: MAX_PENDING_UPLOADS_PER_USER,
   queueFullError: () => new UploadQueueFullError(),
 });
 
-// One bounded queue per user with live work; dropped once idle so the map
-// only holds users with uploads in flight or queued.
-const perUserQueues = new Map<string, BoundedQueue>();
-
-function perUserQueue(userId: string): BoundedQueue {
-  let userQueue = perUserQueues.get(userId);
-  if (!userQueue) {
-    userQueue = createBoundedQueue({
-      maxInFlight: MAX_CONCURRENT_UPLOADS_PER_USER,
-      maxPending: MAX_PENDING_UPLOADS_PER_USER,
-      queueFullError: () => new UploadQueueFullError(),
-    });
-    perUserQueues.set(userId, userQueue);
-  }
-  return userQueue;
-}
-
-export async function withUploadSlot<T>(
+export function withUploadSlot<T>(
   userId: string,
   fn: () => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
-  const userQueue = perUserQueue(userId);
-  try {
-    // The per-user slot is held while waiting for a global one, so one user
-    // can never occupy more than its share of the global queue.
-    return await userQueue.run(() => queue.run(fn, signal), signal);
-  } finally {
-    if (userQueue.inFlightCount === 0 && userQueue.pendingCount === 0 && perUserQueues.get(userId) === userQueue) {
-      perUserQueues.delete(userId);
-    }
-  }
+  return queue.run(userId, fn, signal);
 }
 
 export function resetUploadsRuntimeForTests(): void {
   queue.resetForTests();
-  for (const userQueue of perUserQueues.values()) userQueue.resetForTests();
-  perUserQueues.clear();
 }

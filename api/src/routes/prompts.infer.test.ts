@@ -1,11 +1,13 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { TaskCancelledError } from 'cockatiel';
 import type { VariableList } from '@atelier/shared';
-import { setCliproxyTextProviderForTests, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { setCliproxyTextProviderForTests, type InferResult, type TestCliproxyTextProvider } from '../providers/cliproxyText';
 import { parseInferDone, parseSse, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 import { promptLibrary } from './prompts/_shared';
 import { toLibrarySnapshot } from '../prompts/librarySnapshot';
 import { takeProposalForUser } from '../prompts/proposalStore';
+import { inferPool } from '../orchestrator/llmAdmission';
 
 afterEach(() => { setCliproxyTextProviderForTests(null); });
 
@@ -17,6 +19,12 @@ const FAST_RESILIENCE_ENV = {
   // the config-enforced floor for this knob.
   INFER_TAXONOMY_TIMEOUT_MS: '70000',
 } as const;
+
+function shortenTaxonomyTimeout(ms: number) {
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  return spyOn(AbortSignal, 'timeout').mockImplementation((requestedMs) =>
+    timeout(requestedMs === Number(FAST_RESILIENCE_ENV.INFER_TAXONOMY_TIMEOUT_MS) ? ms : requestedMs));
+}
 
 async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
   await Promise.resolve();
@@ -43,6 +51,183 @@ async function createList(app: ReturnType<typeof testRuntime>['app'], userId: st
   }));
   expect(res.status).toBe(201);
   return await res.json() as VariableList;
+}
+
+for (const detail of ['invalid operation payload', 'transient transport failure']) {
+  test(`taxonomy recovers one ${detail} within the same signal`, async () => {
+    const signals: AbortSignal[] = [];
+    let chunks = 0;
+    setCliproxyTextProviderForTests({
+      ...fakeProvider([]),
+      inferTaxonomy: (_snapshot, signal) => {
+        signals.push(signal);
+        return Promise.resolve(signals.length === 1
+          ? { type: 'failed', kind: 'transient', status: null, detail }
+          : { type: 'ok', ops: [] });
+      },
+      inferDimensions: () => { chunks += 1; return Promise.resolve({ type: 'ok', ops: [] }); },
+    });
+    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
+    await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
+    const frames = await parseSse(await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' } }));
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).toBe(signals[1]);
+    expect(chunks).toBe(1);
+    expect(frames.some((frame) => frame.event === 'done')).toBe(true);
+    expect(frames.some((frame) => frame.event === 'error')).toBe(false);
+  });
+}
+
+for (const kind of ['transient', 'permanent', 'quota', 'moderation-blocked'] as const) {
+  test(`taxonomy ${kind} failure stops after ${kind === 'transient' ? 'two' : 'one'} calls`, async () => {
+    let calls = 0;
+    let chunks = 0;
+    setCliproxyTextProviderForTests({
+      ...fakeProvider([]),
+      inferTaxonomy: () => { calls += 1; return Promise.resolve({ type: 'failed', kind, status: null, detail: 'taxonomy failure' }); },
+      inferDimensions: () => { chunks += 1; return Promise.resolve({ type: 'ok', ops: [] }); },
+    });
+    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
+    await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
+    const frames = await parseSse(await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' } }));
+    expect(calls).toBe(kind === 'transient' ? 2 : 1);
+    expect(chunks).toBe(0);
+    expect(frames.some((frame) => frame.event === 'error')).toBe(true);
+    expect(frames.some((frame) => frame.event === 'done')).toBe(false);
+  });
+}
+
+for (const boundary of ['shared timeout', 'policy cancellation', 'disconnect'] as const) {
+  test(`taxonomy recovery respects ${boundary} without starting another envelope`, async () => {
+    const timeoutSpy = boundary !== 'disconnect' ? shortenTaxonomyTimeout(40) : null;
+    const abort = new AbortController();
+    const signals: AbortSignal[] = [];
+    const beganTaxonomy = Promise.withResolvers<undefined>();
+    setCliproxyTextProviderForTests({
+      ...fakeProvider([]),
+      inferTaxonomy: async (_snapshot, signal): Promise<InferResult> => {
+        signals.push(signal);
+        beganTaxonomy.resolve(undefined);
+        if (boundary !== 'disconnect' && signals.length === 1) {
+          await Bun.sleep(10);
+          return { type: 'failed', kind: 'transient', status: null, detail: 'retryable' };
+        }
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', () => { resolve(); }, { once: true });
+        });
+        if (boundary === 'policy cancellation') throw new TaskCancelledError();
+        return { type: 'failed', kind: 'transient', status: null, detail: 'aborted' };
+      },
+    });
+    try {
+      const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
+      await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
+      timeoutSpy?.mockClear();
+      const response = await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' }, signal: abort.signal });
+      await beganTaxonomy.promise;
+      if (boundary === 'disconnect') abort.abort();
+      const frames = await parseSse(response);
+      expect(signals).toHaveLength(boundary === 'disconnect' ? 1 : 2);
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+      if (boundary !== 'disconnect') {
+        expect(signals[0]).toBe(signals[1]);
+        expect(timeoutSpy).toHaveBeenCalledTimes(1);
+        expect(timeoutSpy).toHaveBeenCalledWith(runtime.config.INFER_TAXONOMY_TIMEOUT_MS);
+        expect(frames.find((frame) => frame.event === 'error')?.data).toMatchObject({ code: 'provider-error' });
+        expect(runtime.logs.some((line) => line.includes('infer_dimensions_taxonomy_timeout'))).toBe(true);
+        expect(runtime.logs.some((line) => line.includes('infer_dimensions_crash'))).toBe(false);
+        expect(runtime.logs.some((line) => line.includes('"level":50'))).toBe(false);
+      }
+      expect(frames.some((frame) => frame.event === 'done')).toBe(false);
+    } finally { abort.abort(); timeoutSpy?.mockRestore(); }
+  });
+}
+
+for (const boundary of ['local deadline', 'parent abort'] as const) {
+  test(`taxonomy success racing ${boundary} respects the authoritative signal`, async () => {
+    const timeoutSpy = shortenTaxonomyTimeout(20);
+    const abort = new AbortController();
+    const began = Promise.withResolvers<undefined>();
+    let calls = 0;
+    setCliproxyTextProviderForTests({
+      ...fakeProvider([]),
+      inferTaxonomy: async (_snapshot, signal): Promise<InferResult> => {
+        calls += 1;
+        began.resolve(undefined);
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', () => { resolve(); }, { once: true });
+        });
+        return { type: 'ok', ops: [] };
+      },
+    });
+    try {
+      const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
+      await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
+      const response = await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' }, signal: abort.signal });
+      await began.promise;
+      if (boundary === 'parent abort') abort.abort();
+      const frames = await parseSse(response);
+      expect(calls).toBe(1);
+      expect(frames.some((frame) => frame.event === 'done')).toBe(boundary === 'local deadline');
+      expect(runtime.logs.some((line) => line.includes('infer_dimensions_taxonomy_timeout'))).toBe(false);
+    } finally { abort.abort(); timeoutSpy.mockRestore(); }
+  });
+}
+
+test('a non-abort taxonomy error still reaches the crash handler even if its deadline elapsed', async () => {
+  const timeoutSpy = shortenTaxonomyTimeout(10);
+  let calls = 0;
+  setCliproxyTextProviderForTests({
+    ...fakeProvider([]),
+    inferTaxonomy: async (_snapshot, signal) => {
+      calls += 1;
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener('abort', () => { resolve(); }, { once: true });
+      });
+      throw new Error('non-abort taxonomy logic failure');
+    },
+  });
+  try {
+    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
+    await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
+    const frames = await parseSse(await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' } }));
+    expect(calls).toBe(1);
+    expect(frames.some((frame) => frame.event === 'done')).toBe(false);
+    expect(runtime.logs.some((line) => line.includes('infer_dimensions_crash'))).toBe(true);
+    expect(runtime.logs.some((line) => line.includes('infer_dimensions_taxonomy_timeout'))).toBe(false);
+  } finally { timeoutSpy.mockRestore(); }
+});
+
+for (const kind of ['quota', 'permanent', 'moderation-blocked'] as const) {
+  test(`an explicit taxonomy ${kind} decision racing its deadline is not reclassified as timeout`, async () => {
+    const timeoutSpy = shortenTaxonomyTimeout(10);
+    let calls = 0;
+    setCliproxyTextProviderForTests({
+      ...fakeProvider([]),
+      inferTaxonomy: async (_snapshot, signal): Promise<InferResult> => {
+        calls += 1;
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', () => { resolve(); }, { once: true });
+        });
+        return { type: 'failed', kind, status: null, detail: 'explicit provider decision' };
+      },
+    });
+    try {
+      const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
+      await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
+      const frames = await parseSse(await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' } }));
+      expect(calls).toBe(1);
+      expect(frames.some((frame) => frame.event === 'done')).toBe(false);
+      if (kind === 'quota') expect(frames.find((frame) => frame.event === 'error')?.data).toMatchObject({ code: 'quota-exhausted' });
+      expect(runtime.logs.some((line) => line.includes('infer_dimensions_taxonomy_timeout'))).toBe(false);
+      expect(runtime.logs.some((line) => line.includes('infer_dimensions_crash'))).toBe(false);
+      expect(runtime.logs.some((line) => line.includes(`"kind":"${kind}"`))).toBe(true);
+    } finally { timeoutSpy.mockRestore(); }
+  });
 }
 
 async function seedPromptUser(
@@ -337,6 +522,21 @@ describe('POST /api/prompts/dimensions/infer', () => {
     expect(res.status).toBe(404);
   });
 
+  test('saturated inference admission rejects before hydrating or diagnosing the library', async () => {
+    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    await runtime.fetch('/api/session', { headers: { 'Remote-User': 'alice' } });
+    const held = inferPool.acquire('alice');
+    if (!held.ok) throw new Error('could not reserve inference slot');
+    try {
+      runtime.db.run('DROP TABLE prompt_templates');
+      const response = await runtime.fetch('/api/prompts/dimensions/infer', {
+        method: 'POST', headers: { 'Remote-User': 'alice' },
+      });
+      expect(response.status).toBe(429);
+      expect(await response.json()).toMatchObject({ code: 'QUEUE_FULL' });
+    } finally { held.release(); }
+  });
+
   test('uses two-pass provider calls when the snapshot exceeds the token budget', async () => {
     let calls = 0;
     setCliproxyTextProviderForTests({
@@ -389,7 +589,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
     expect(frames[3]?.data).toEqual({ phase: 'finalize' });
   });
 
-  test('two-pass retry-gaps emits wave-2 progress and then done', async () => {
+  test.each(['transport', 'malformed output'] as const)('two-pass retry-gaps recovers %s and then emits done', async (failure) => {
     let calls = 0;
     setCliproxyTextProviderForTests({
       enhance: emptyEnhance,
@@ -397,7 +597,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
       inferDimensions: () => {
         calls += 1;
-        if (calls === 3) return Promise.resolve({ type: 'failed', kind: 'transient', status: 503, detail: 'transient' });
+        if (calls === 3) return Promise.resolve({ type: 'failed', kind: 'transient', status: failure === 'transport' ? 503 : null, detail: failure === 'transport' ? 'transient' : 'unparseable infer response' });
         return Promise.resolve({ type: 'ok', ops: [] });
       },
       inferDimensionsSingleAttempt: () => {

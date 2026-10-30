@@ -8,8 +8,7 @@ interface TransitionLogger {
 // The single queued→running transition. Returns the dispatch time when this
 // call claimed the batch, null otherwise; with a logger, a skipped transition
 // (batch no longer queued) warns.
-export function transitionQueuedToRunning(db: Database, batchId: string, logger?: TransitionLogger): number | null {
-  const startedAt = Date.now();
+export function transitionQueuedToRunning(db: Database, batchId: string, logger?: TransitionLogger, startedAt = Date.now()): number | null {
   const result = hotStatements(db).transitionQueuedToRunning.run(startedAt, batchId);
   if (result.changes === 1) return startedAt;
   logger?.warn(

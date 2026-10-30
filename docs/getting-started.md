@@ -10,7 +10,7 @@ signs every request in as `alice`; it is for use on your own computer only.
 
 ## 1. Install the tools
 
-- Install [Bun 1.4.3](https://bun.sh/docs/installation#installing-older-versions), the version
+- Install [Bun 1.4.4](https://bun.sh/docs/installation#installing-older-versions), the version
   pinned in this project's `package.json` and Docker builds.
 - Install [Git](https://git-scm.com/downloads), or download the repository as a
   ZIP from GitHub and extract it.

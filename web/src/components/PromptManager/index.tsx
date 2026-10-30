@@ -151,8 +151,8 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
       );
       return;
     }
-    const hasUnsatisfiable = fresh.templates.some((t) => !t.satisfiable);
-    if (hasUnsatisfiable) {
+    const needsDiagnosisContext = fresh.templates.some((t) => t.satisfiable === false);
+    if (needsDiagnosisContext) {
       setDiagnosisCardOpen({ mode: 'library' });
       return;
     }
@@ -404,16 +404,18 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
                         </button>
                         {(() => {
                           const entry = diagnosisQuery.data?.templates.find((t) => t.templateName === template.name);
-                          if (!entry || entry.satisfiable) return null;
+                          if (!entry || entry.satisfiable === true) return null;
+                          const incomplete = entry.satisfiable === null;
                           return (
                             <button
                               type="button"
-                              data-tip={entry.reason ?? 'Template fails the SAT solver — click to see why'}
-                              data-coherence="unsatisfiable"
+                              data-tip={incomplete ? 'Diagnosis incomplete — the check reached its work limit' : entry.reason ?? 'Template fails the SAT solver — click to see why'}
+                              data-coherence={incomplete ? 'incomplete' : 'unsatisfiable'}
                               className={styles.warnBadge}
-                              aria-label={`${template.name}: unsatisfiable`}
+                              aria-label={`${template.name}: ${incomplete ? 'diagnosis incomplete' : 'unsatisfiable'}`}
                               onClick={() => {
                                 setDiagnosisCardOpen({ mode: 'template', templateName: template.name });
+                                setTab('dimensions');
                               }}
                             >
                               <I.warn />

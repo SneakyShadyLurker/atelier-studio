@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import type { LibraryDiagnosisResponse, PromptLibraryResponse, TagDimension, VariableList } from '@atelier/shared';
-import { auditFillBoundaries, auditManualOnlyOptions, auditTagHygiene, auditUserId, computeExitCodeFromDiagnosis, formatManualOnly, isLikelyLiveDbPath, verifyUserExists } from './audit-prompt-library';
+import { auditFillBoundaries, auditManualOnlyOptions, auditNodeBudgetOverride, auditTagHygiene, auditUserId, computeExitCodeFromDiagnosis, diagnoseLibraryForAudit, format, formatManualOnly, isLikelyLiveDbPath, verifyUserExists } from './audit-prompt-library';
+import { diagnoseLibrary, DIAGNOSIS_NODE_BUDGET } from '../src/prompts/libraryDiagnosis';
 
 describe('audit-prompt-library', () => {
   test('requires ATELIER_USER_ID explicitly, with no default user', () => {
@@ -41,6 +42,80 @@ describe('audit-prompt-library', () => {
       templatesDigest: 'y',
     };
     expect(computeExitCodeFromDiagnosis(diag)).toBe(0);
+  });
+
+  test('separates inconclusive checks from proven failures and returns incomplete exit 5', () => {
+    const diag: LibraryDiagnosisResponse = {
+      templates: [{ templateName: 'Unknown', satisfiable: null, reason: 'diagnosis budget exceeded' }, { templateName: 'OK', satisfiable: true }],
+      librarySnapshotHash: 'x', templatesDigest: 'y',
+    };
+    expect(computeExitCodeFromDiagnosis(diag)).toBe(5);
+    expect(format(diag)).toContain('BROKEN (0/2)');
+    expect(format(diag)).toContain('INCOMPLETE (1/2)\n  - Unknown — diagnosis budget exceeded');
+    const mixed = { ...diag, templates: [...diag.templates, { templateName: 'Broken', satisfiable: false, reason: 'missing list' }] };
+    expect(computeExitCodeFromDiagnosis(mixed)).toBe(1);
+    expect(format(mixed)).toContain('BROKEN (1/3)\n  - Broken — missing list');
+    expect(format(mixed)).toContain('INCOMPLETE (1/3)');
+  });
+
+  test('validates positive safe-integer budget overrides without changing an omitted value', () => {
+    expect(auditNodeBudgetOverride({})).toBeUndefined();
+    for (const value of ['1', '200000', String(Number.MAX_SAFE_INTEGER)]) {
+      expect(auditNodeBudgetOverride({ ATELIER_AUDIT_NODE_BUDGET: value })).toBe(Number(value));
+    }
+    for (const value of ['', ' ', '0', '-1', '1.5', 'NaN', 'Infinity', String(Number.MAX_SAFE_INTEGER + 1), 'nope']) {
+      expect(() => auditNodeBudgetOverride({ ATELIER_AUDIT_NODE_BUDGET: value }))
+        .toThrow('ATELIER_AUDIT_NODE_BUDGET must be a positive safe integer');
+    }
+  });
+
+  test('a bad budget override exits as a configuration error before opening the DB', async () => {
+    const child = Bun.spawn([process.execPath, `${import.meta.dir}/audit-prompt-library.ts`], {
+      env: { ...process.env, ATELIER_USER_ID: 'alice', ATELIER_DB_PATH: '/missing/audit-test.sqlite', ATELIER_AUDIT_NODE_BUDGET: '0' },
+      stdout: 'pipe', stderr: 'pipe',
+    });
+    try {
+      expect(await child.exited).toBe(3);
+      expect(await new Response(child.stderr).text()).toContain('ATELIER_AUDIT_NODE_BUDGET must be a positive safe integer');
+    } finally { child.kill(); }
+  });
+
+  test('offline diagnosis scales the shared default and honors a tiny explicit total budget', () => {
+    const lib: PromptLibraryResponse = {
+      templates: Array.from({ length: 30 }, (_, i) => ({
+        id: `t-${i}`, name: `Template ${i}`, body: '{{var::A}} {{var::B}}', sortOrder: i, createdAt: 0, updatedAt: 0,
+      })),
+      variableLists: ['A', 'B'].map((name, listIdx) => ({
+        id: name, name, sortOrder: listIdx, createdAt: 0, updatedAt: 0,
+        options: Array.from({ length: 100 }, (_, i) => ({
+          id: `${name}-${i}`, listId: name, value: String(i), sortOrder: i, weight: 1, tagIds: [`tag-${listIdx}`],
+        })),
+      })),
+      dimensions: [{ id: 'd', name: 'D', tags: [0, 1].map((i) => ({
+        id: `tag-${i}`, dimensionId: 'd', label: String(i), sortOrder: i,
+      })) }],
+    };
+    const boundedHttp = diagnoseLibrary(lib, { totalBudget: DIAGNOSIS_NODE_BUDGET });
+    expect(boundedHttp.templates.some((entry) => entry.satisfiable === null)).toBe(true);
+    const offline = diagnoseLibraryForAudit(lib);
+    expect(offline.templates.every((entry) => entry.satisfiable === false)).toBe(true);
+    expect(computeExitCodeFromDiagnosis(offline)).toBe(1);
+    const tiny = diagnoseLibraryForAudit(lib, auditNodeBudgetOverride({ ATELIER_AUDIT_NODE_BUDGET: '1' }));
+    expect(tiny.templates.every((entry) => entry.satisfiable === null)).toBe(true);
+    expect(computeExitCodeFromDiagnosis(tiny)).toBe(5);
+    // Cheap templates must not donate their default offline allowance to a
+    // pathological solver template. An explicit total override may raise it.
+    const mixed = {
+      ...lib,
+      templates: lib.templates.map((template, i) => i === 0 ? template : { ...template, body: '{{var::A}}' }),
+      variableLists: lib.variableLists.map((list, listIdx) => ({
+        ...list, options: Array.from({ length: 500 }, (_, i) => ({
+          id: `${list.name}-${i}`, listId: list.id, value: String(i), sortOrder: i, weight: 1, tagIds: [`tag-${listIdx}`],
+        })),
+      })),
+    };
+    expect(diagnoseLibraryForAudit(mixed).templates[0]?.satisfiable).toBeNull();
+    expect(diagnoseLibraryForAudit(mixed, DIAGNOSIS_NODE_BUDGET * mixed.templates.length).templates[0]?.satisfiable).toBe(false);
   });
 });
 

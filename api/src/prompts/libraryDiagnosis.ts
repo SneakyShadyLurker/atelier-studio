@@ -12,12 +12,13 @@ import {
   type OptionTagIndex,
   templateSatisfiableByOccurrences,
   templateSatisfiableBranchAware,
+  type BudgetOptions,
 } from './dimensionCoherence';
 import { extractDistinctListNames } from './templateRefs';
 import { extractOccurrences } from './varOccurrences';
 import { enumerateRandomBranches } from '@atelier/shared/template-tokens';
 
-const DIAGNOSIS_NODE_BUDGET = 200_000;
+export const DIAGNOSIS_NODE_BUDGET = 200_000;
 let DIAGNOSIS_NODE_BUDGET_OVERRIDE: number | null = null;
 
 export function _setDiagnosisNodeBudgetForTests(n: number | null): void {
@@ -38,82 +39,81 @@ function diagnosisNodeBudget(): number {
 // Single source of truth shared by the HTTP endpoint and the CI script.
 // Reuses the existing SAT engine — does not re-implement the walk.
 
-export function diagnoseLibrary(lib: PromptLibraryResponse): LibraryDiagnosisResponse {
+export function diagnoseLibrary(lib: PromptLibraryResponse, options?: BudgetOptions & { maxTemplateBudget?: number }): LibraryDiagnosisResponse {
   const snap = toLibrarySnapshot(lib);
   const templateRefs = lib.templates.map((t) => ({
     name: t.name,
     body: t.body,
     lists: extractDistinctListNames(t.body),
   }));
-  const budgetByTemplate = new Map<string, { budgetRef: { nodes: number }; totalBudget: number }>();
+  // One request budget covers every template and its pair explanations. A
+  // large library must not multiply the solver ceiling by its template count.
+  const totalBudget = options?.totalBudget ?? diagnosisNodeBudget();
+  const budgetRef = options?.nodeBudgetRef ?? { nodes: 0 };
+  const automaticListNames = new Set(snap.lists
+    .filter((list) => list.options.some((option) => option.weight > 0))
+    .map((list) => list.name));
 
-  // First-pass: pass/fail per template, with per-template budget.
-  const entries: LibraryDiagnosisEntry[] = templateRefs.map((t) => {
+  const prepared = templateRefs.map((t) => ({ ...t, missingLists: t.lists.filter((name) => !automaticListNames.has(name)) }));
+  const solverCount = prepared.filter((t) => t.missingLists.length === 0 && t.lists.length >= 2).length;
+  // Fixed equal quotas make both verdicts and explanations independent of order.
+  // Cheap proofs need no quota; unused solver work stays with its template.
+  const quota = solverCount === 0 ? 0 : Math.min(options?.maxTemplateBudget ?? Number.MAX_SAFE_INTEGER,
+    Math.floor(Math.max(0, totalBudget - budgetRef.nodes) / solverCount));
+  const tagDim = tagDimOf(snap);
+  const entries: LibraryDiagnosisEntry[] = prepared.map((t) => {
     // Dangling-list check FIRST — templates referencing missing or empty
     // lists can never resolve, regardless of slot count. Use the flat list
     // (all var-names across all branches) for the missing-list check so that
     // a template with a branch referencing a deleted list still gets flagged.
-    const missingLists = t.lists.filter((listName) => {
-      const list = snap.lists.find((l) => l.name === listName);
-      return !list || list.options.every((option) => option.weight === 0);
-    });
-    if (missingLists.length > 0) {
+    if (t.missingLists.length > 0) {
       return {
         templateName: t.name,
         satisfiable: false,
-        reason: `missing or empty list(s): ${missingLists.join(', ')}`,
+        reason: `missing or empty list(s): ${t.missingLists.join(', ')}`,
       };
     }
     if (t.lists.length < 2) {
       return { templateName: t.name, satisfiable: true };
     }
-    // Per-template budget: one hard template can't pollute later ones.
-    // Branch-aware: each {{random::}} alternative is checked independently
-    // so templates with branch-disjoint tag schemes are not false-positived.
-    const localBudget = diagnosisNodeBudget();
-    const localBudgetRef = { nodes: 0 };
-    budgetByTemplate.set(t.name, { budgetRef: localBudgetRef, totalBudget: localBudget });
-    const ok = templateSatisfiableBranchAware(t.body, snap, { nodeBudgetRef: localBudgetRef, totalBudget: localBudget });
-    if (ok) return { templateName: t.name, satisfiable: true };
-    if (localBudgetRef.nodes >= localBudget) {
-      return {
-        templateName: t.name,
-        satisfiable: false,
-        reason: `${DIAGNOSIS_BUDGET_EXCEEDED_REASON} -- culprit set non-local`,
-      };
-    }
-    return { templateName: t.name, satisfiable: false };
-  });
-
-  // Second-pass: for every unsatisfiable template that DOESN'T already have a
-  // reason set (i.e. only the SAT failures, not the missing-list or
-  // budget-exceeded ones), compute conflicting pairs from only the failing
-  // branch shapes.
-  const tagDim = tagDimOf(snap);
-  for (const entry of entries) {
-    if (entry.satisfiable) continue;
-    if (entry.reason) continue; // already classified (missing-list or budget-exceeded)
-    const t = templateRefs.find((r) => r.name === entry.templateName);
-    if (!t) continue;
-    const budget = budgetByTemplate.get(t.name) ?? { budgetRef: { nodes: 0 }, totalBudget: diagnosisNodeBudget() };
-    const { lists, pairs, budgetExceeded } = branchAwareConflictPairs(t.body, snap, tagDim, budget);
-    if (budgetExceeded) {
-      Object.assign(entry, {
-        reason: `${DIAGNOSIS_BUDGET_EXCEEDED_REASON} -- culprit set non-local`,
-      });
-      continue;
-    }
-    if (pairs.length > 0) {
-      Object.assign(entry, {
-        conflictingPairs: pairs,
-        reason: `no satisfying combination across ${lists.join(', ')}`,
-      });
-    } else {
-      Object.assign(entry, {
+    if (quota === 0) return {
+      templateName: t.name, satisfiable: null,
+      reason: DIAGNOSIS_BUDGET_EXCEEDED_REASON,
+    };
+    // The solver's final failed spend is an exhaustion sentinel, not actual
+    // work. Debit only executed work when aggregating the request counter.
+    const localRef = { nodes: 0 };
+    const localLimit = quota;
+    const budget = { budgetRef: localRef, totalBudget: localLimit };
+    try {
+      // Branch-aware: each {{random::}} alternative is checked independently
+      // so templates with branch-disjoint tag schemes are not false-positived.
+      const ok = templateSatisfiableBranchAware(t.body, snap, { nodeBudgetRef: localRef, totalBudget: localLimit });
+      if (ok) return { templateName: t.name, satisfiable: true };
+      if (localRef.nodes >= localLimit) {
+        return {
+          templateName: t.name,
+          satisfiable: null,
+          reason: DIAGNOSIS_BUDGET_EXCEEDED_REASON,
+        };
+      }
+      const { lists, pairs, budgetExceeded } = branchAwareConflictPairs(t.body, snap, tagDim, budget);
+      if (budgetExceeded) {
+        return { templateName: t.name, satisfiable: false,
+          reason: `no satisfying combination; conflict explanation incomplete (${DIAGNOSIS_BUDGET_EXCEEDED_REASON})`,
+        };
+      }
+      if (pairs.length > 0) {
+        return { templateName: t.name, satisfiable: false,
+          conflictingPairs: pairs,
+          reason: `no satisfying combination across ${lists.join(', ')}`,
+        };
+      }
+      return { templateName: t.name, satisfiable: false,
         reason: `no satisfying combination across ${lists.join(', ')} -- culprit set non-local`,
-      });
-    }
-  }
+      };
+    } finally { budgetRef.nodes += Math.min(localRef.nodes, localLimit); }
+  });
 
   return {
     templates: entries,

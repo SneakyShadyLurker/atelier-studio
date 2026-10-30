@@ -10,6 +10,7 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 import ctypes
+import re
 
 SCRIPT = Path(__file__).resolve().parent / 'private-worker.py'
 
@@ -125,6 +126,22 @@ class World:
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_launcher_readiness_covers_api_capabilities_and_limits(self):
+        root = SCRIPT.parent
+        launcher = (root / 'start-private-worker.ps1').read_text()
+        api = (root.parent.parent / 'api/src/providers/comfyui/privacy.ts').read_text()
+        api_caps = re.search(r"for \(const key of \[(.*?)\]\)", api, re.S)
+        launcher_caps = re.search(r"all\(caps.get\(key\) is True for key in \((.*?)\)\)", launcher, re.S)
+        self.assertIsNotNone(api_caps)
+        self.assertIsNotNone(launcher_caps)
+        required_caps = set(re.findall(r"'([^']+)'", api_caps.group(1)))
+        ready_caps = set(re.findall(r"'([^']+)'", launcher_caps.group(1)))
+        self.assertTrue(required_caps <= ready_caps)
+        api_limits = set(re.findall(r"positive\('([^']+)'\)", api))
+        launcher_limits = re.search(r"type\(limits.get\(key\)\).*?for key in \((.*?)\)\)", launcher, re.S)
+        self.assertIsNotNone(launcher_limits)
+        self.assertTrue(api_limits <= set(re.findall(r"'([^']+)'", launcher_limits.group(1))))
+
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         shutil.copyfile(SCRIPT, self.root / 'private-worker.py')

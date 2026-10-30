@@ -9,6 +9,7 @@ import { sessionScopeGuard } from './auth/sessionScope';
 import { logAppliedPragmas, openDb } from './db/client';
 import { logDbIntegrity, reportIfCorruption } from './db/integrity';
 import { migrate, MigrationError } from './db/migrate';
+import { legacyTextModelEnvVars, legacyTextSeed } from './db/textSeed';
 import { importMasterKey } from './crypto/aes-gcm';
 import { importHmacKey } from './crypto/fingerprint';
 import { createKeyStore, type KeyStore } from './keystore';
@@ -270,7 +271,17 @@ export async function boot(): Promise<{
   setupSharpDefaults();
   const db = openDb({ dataDir: config.DATA_DIR });
   logAppliedPragmas(db, logger);
-  migrate(db, config.DATA_DIR, { log: logger });
+  // Migration 58 seeds the legacy CLIProxyAPI text provider from this, but only
+  // on an upgrade: migrate() ignores it when the database is new.
+  const textSeed = legacyTextSeed(config, registryForConfig(config).map((entry) => entry.model.id));
+  migrate(db, config.DATA_DIR, { log: logger, ...(textSeed ? { textSeed } : {}) });
+  const staleTextModelVars = legacyTextModelEnvVars(process.env);
+  if (staleTextModelVars.length > 0) {
+    logger.warn(
+      { event: 'legacy_text_model_env', vars: staleTextModelVars },
+      'CLIPROXY_TEXT_MODEL_* is no longer read; manage text models in the app (Text models view)',
+    );
+  }
   // Runs after migrate so a schema upgrade can't be mistaken for damage, and
   // before startupReconcile so the log records the state the DB arrived in
   // rather than the state our own boot writes left it in.

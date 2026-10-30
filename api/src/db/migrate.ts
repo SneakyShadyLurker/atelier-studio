@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
+import { TEXT_TASKS } from '@atelier/shared';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,8 +8,9 @@ import { USER_ID_PATTERN } from '../user-id';
 import { applyPragmas } from './client';
 import { namedArtifactDir, namedArtifactRoot } from '../storage/files';
 import type { AppLogger } from '../observability/logger';
+import { LEGACY_SEED, type TextSeed } from './textSeed';
 
-export const BINARY_SCHEMA_VERSION = 57;
+export const BINARY_SCHEMA_VERSION = 58;
 
 export class MigrationError extends Error {
   constructor(message: string) {
@@ -599,6 +601,7 @@ const migration55Sql = loadMigration('0055_proxy_text_backends.sql');
 // overrides are stored; an absent row means the model's `defaultSteps`.
 const migration56Sql = loadMigration('0056_user_model_steps.sql');
 const migration57Sql = loadMigration('0057_stories_source_upload_index.sql');
+const migration58Sql = loadMigration('0058_text_providers.sql');
 
 // Wraps migration 19 with a conditional `tile_ref_images` rebuild and the
 // SQLite-recommended foreign-key dance for ALTER-table-style rebuilds.
@@ -859,6 +862,10 @@ interface MigrationContext {
   // Optional so tests and ad-hoc scripts can run migrate() without one; the
   // server always passes it so prod migration events are JSON, not raw stderr.
   log?: Pick<AppLogger, 'info' | 'warn'>;
+  // Legacy CLIProxyAPI text provider for migration 58 to seed. Present only on
+  // an upgrade (schema > 0 when migrate() started) whose boot set
+  // CLIPROXY_BASE_URL.
+  textSeed?: TextSeed;
 }
 
 interface SqlMigration {
@@ -1457,6 +1464,131 @@ function migration55Run(db: Database): void {
   });
 }
 
+// Admin-managed text providers and models replace the seven fixed backends.
+// Creates the five tables, then in ONE inner transaction seeds the legacy
+// CLIProxyAPI provider (when boot offered a seed and none exists yet), moves
+// every pin whose key has a seeded row into user_text_models with its effort,
+// and drops user_text_backends. A crash leaves either the old table or the
+// full new state; a rerun finds the seed present and the old table gone.
+// Pins whose key has no seeded row (seedless install) or whose workload is not
+// a task are dropped and counted in the log. Legacy GPT pins are dropped too:
+// the old resolver ignored them (routed as Auto), so carrying one would start
+// pinning GPT where it never was.
+function migration58Run(db: Database, ctx: MigrationContext): void {
+  db.transaction(() => {
+    runEach(db, migration58Sql);
+  })();
+  const seed = ctx.textSeed;
+  const hasLegacyPins = tableColumns(db, 'user_text_backends').size > 0;
+  db.transaction(() => {
+    const seeded = db
+      .query<{ id: string }, [string]>('SELECT id FROM text_providers WHERE preset = ?')
+      .get(LEGACY_SEED.provider.preset) !== null;
+    if (seed !== undefined && !seeded) seedLegacyTextProvider(db, seed);
+    if (!hasLegacyPins) return;
+    const taskList = TEXT_TASKS.map(() => '?').join(', ');
+    const carriedPins = `
+      FROM user_text_backends u
+      JOIN text_models m ON m.legacy_key = u.backend
+     WHERE u.workload IN (${taskList})
+       AND u.backend <> 'gpt'`;
+    const total = db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM user_text_backends').get()?.count ?? 0;
+    const carried = db
+      .query<{ count: number }, string[]>(`SELECT COUNT(*) AS count ${carriedPins}`)
+      .get(...TEXT_TASKS)?.count ?? 0;
+    db.query<unknown, string[]>(`
+      INSERT INTO user_text_models (user_id, task, text_model_id, effort, updated_at)
+      SELECT u.user_id, u.workload, m.id, u.effort, u.updated_at ${carriedPins}
+    `).run(...TEXT_TASKS);
+    db.run('DROP TABLE user_text_backends');
+    const dropped = total - carried;
+    if (dropped > 0) {
+      ctx.log?.warn(
+        { event: 'migration_text_pins_dropped', version: 58, carried, dropped },
+        `migration v58: dropped ${dropped} text-backend pins with no migrated model`,
+      );
+    } else {
+      ctx.log?.info(
+        { event: 'migration_text_pins_carried', version: 58, carried },
+        `migration v58: carried ${carried} text-backend pins`,
+      );
+    }
+  })();
+}
+
+function seedLegacyTextProvider(db: Database, seed: TextSeed): void {
+  const now = Date.now();
+  const { provider } = LEGACY_SEED;
+  const providerId = randomUUID();
+  db.query(`
+    INSERT INTO text_providers (
+      id, name, protocol, base_url, preset, auth_mode, credential_env,
+      token_field, list_models, enabled, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `).run(
+    providerId,
+    provider.name,
+    provider.protocol,
+    `${seed.baseUrl.replace(/\/+$/, '')}${provider.basePath}`,
+    provider.preset,
+    provider.authMode,
+    provider.credentialEnv,
+    provider.tokenField,
+    provider.listModels ? 1 : 0,
+    now,
+    now,
+  );
+  const modelRowIds = new Map<string, string>();
+  const insertModel = db.query(`
+    INSERT INTO text_models (
+      id, provider_id, model_id, display_name, legacy_key, enabled, vision, max_images,
+      structured_output, reasoning_levels, reasoning_default, temperature, top_p,
+      fixed_output_tokens, latency_profile, prompt_variant, screen_requests, sort_order,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  LEGACY_SEED.models.forEach((model, index) => {
+    const id = randomUUID();
+    const caps = model.capabilities;
+    modelRowIds.set(model.legacyKey, id);
+    insertModel.run(
+      id,
+      providerId,
+      seed.modelIds[model.legacyKey],
+      model.displayName,
+      model.legacyKey,
+      caps.vision ? 1 : 0,
+      caps.maxImages,
+      caps.structuredOutput,
+      JSON.stringify(caps.reasoningLevels),
+      caps.reasoningDefault,
+      caps.temperature,
+      caps.topP,
+      caps.fixedOutputTokens,
+      caps.latencyProfile,
+      caps.promptVariant,
+      model.screenRequests ? 1 : 0,
+      index,
+      now,
+      now,
+    );
+  });
+  const rowFor = (key: string): string => {
+    const id = modelRowIds.get(key);
+    if (id === undefined) throw new MigrationError(`migration v58: no seeded text model for '${key}'`);
+    return id;
+  };
+  db.query("INSERT INTO text_defaults (scope, text_model_id, updated_at) VALUES ('default', ?, ?)")
+    .run(rowFor(LEGACY_SEED.defaultKey), now);
+  const writer = rowFor(LEGACY_SEED.imageWriterKey);
+  const insertWriter = db.query(
+    'INSERT OR IGNORE INTO image_model_writers (image_model_id, text_model_id, mode, updated_at) VALUES (?, ?, ?, ?)',
+  );
+  // Sunburst first: an id in both lists keeps the stricter lock.
+  for (const imageModelId of seed.sunburstImageModelIds) insertWriter.run(imageModelId, writer, 'lock', now);
+  for (const imageModelId of seed.gptImageModelIds) insertWriter.run(imageModelId, writer, 'prefer', now);
+}
+
 // Partial index behind every "is this upload still referenced" probe. No-op
 // when batches is absent (reduced test fixtures); IF NOT EXISTS makes it
 // idempotent.
@@ -1606,6 +1738,7 @@ const migrations: readonly Migration[] = [
   { version: 55, fn: migration55Run },
   { version: 56, sql: migration56Sql },
   { version: 57, sql: migration57Sql },
+  { version: 58, fn: migration58Run },
 ];
 
 export function migrate(
@@ -1614,6 +1747,12 @@ export function migrate(
   options: {
     onFileMigrationEvent?: (event: FileMigrationEvent) => void;
     log?: Pick<AppLogger, 'info' | 'warn'>;
+    // Offered by boot when CLIPROXY_BASE_URL is set; applied only when the
+    // database existed before this run (schema > 0), so a fresh install never
+    // gets the legacy CLIProxyAPI text provider.
+    textSeed?: TextSeed;
+    // Historical-fixture tests only: stop after this version.
+    targetVersion?: number;
   } = {},
 ): void {
   // Defense in depth: tests open `new Database(':memory:')` and pass it
@@ -1654,8 +1793,11 @@ export function migrate(
     );
   }
 
+  const textSeed = current > 0 ? options.textSeed : undefined;
+  const target = options.targetVersion ?? BINARY_SCHEMA_VERSION;
   for (const migration of migrations) {
     if (migration.version <= current) continue;
+    if (migration.version > target) break;
     if ('sql' in migration) {
       db.transaction(() => {
         runEach(db, migration.sql);
@@ -1672,6 +1814,7 @@ export function migrate(
         dataDir,
         ...(options.onFileMigrationEvent ? { onFileMigrationEvent: options.onFileMigrationEvent } : {}),
         ...(options.log ? { log: options.log } : {}),
+        ...(textSeed ? { textSeed } : {}),
       };
       migration.fn(db, ctx);
       db.query('INSERT INTO schema_versions (version, applied_at) VALUES (?, ?)')

@@ -5,6 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BINARY_SCHEMA_VERSION, migrate } from './migrate';
 
+// Migration 58 moves the text-backend pins into user_text_models and drops
+// user_text_backends; the historical text-backend tests stop at 57 so they
+// can still read and constrain that table.
+const LEGACY_TEXT_TABLE = { targetVersion: 57 } as const;
+
 function dropVariableOptionWeightForMigrationReplay(db: Database): void {
   const cols = db
     .query<{ name: string }, []>("PRAGMA table_info('variable_options')")
@@ -1130,7 +1135,7 @@ describe('migration 38 - text backend key rename', () => {
   function openV37Db(): { dataDir: string; db: InstanceType<typeof Database> } {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-mig38-'));
     const db = new Database(':memory:');
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
     expect(BINARY_SCHEMA_VERSION).toBeGreaterThanOrEqual(38);
     // Recreate the exact v37 shape: the legacy CHECK and a pre-rename row.
     db.run('DROP TABLE user_text_backends');
@@ -1156,11 +1161,11 @@ describe('migration 38 - text backend key rename', () => {
     db.run("INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u1', 'condense', 'flash', 1)");
     db.run("INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u1', 'ai-fill', 'kimi', 2)");
 
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
 
     expect(
       db.query<{ version: number }, []>('SELECT MAX(version) AS version FROM schema_versions').get()?.version,
-    ).toBe(BINARY_SCHEMA_VERSION);
+    ).toBe(LEGACY_TEXT_TABLE.targetVersion);
     expect(db.query<{ workload: string; backend: string }, []>(
       'SELECT workload, backend FROM user_text_backends ORDER BY workload',
     ).all()).toEqual([
@@ -1176,7 +1181,7 @@ describe('migration 38 - text backend key rename', () => {
   test('the widened CHECK accepts the current values and rejects flash and garbage', () => {
     const { dataDir, db } = openV37Db();
     db.run("INSERT INTO users (id, created_at) VALUES ('u1', 1)");
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
 
     for (const backend of ['kimi', 'mimo']) {
       db.query(
@@ -1199,8 +1204,8 @@ describe('migration 38 - text backend key rename', () => {
     db.run("INSERT INTO users (id, created_at) VALUES ('u1', 1)");
     db.run("INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u1', 'condense', 'flash', 1)");
 
-    migrate(db, dataDir);
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
 
     expect(db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM schema_versions WHERE version = 38').get()?.count).toBe(1);
     // Migration 55 retired the DeepSeek pin the rename produced.
@@ -1215,7 +1220,7 @@ describe('migration 39 - Qwen text backend', () => {
   function openV38Db(): { dataDir: string; db: InstanceType<typeof Database> } {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-mig39-'));
     const db = new Database(':memory:');
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
     db.run('DROP TABLE user_text_backends');
     db.run(`
       CREATE TABLE user_text_backends (
@@ -1239,11 +1244,11 @@ describe('migration 39 - Qwen text backend', () => {
     db.run("INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u1', 'ai-fill', 'kimi', 1)");
     db.run("INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u1', 'condense', 'deepseek-flash', 2)");
 
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
 
     expect(
       db.query<{ version: number }, []>('SELECT MAX(version) AS version FROM schema_versions').get()?.version,
-    ).toBe(BINARY_SCHEMA_VERSION);
+    ).toBe(LEGACY_TEXT_TABLE.targetVersion);
     expect(db.query<{ workload: string; backend: string }, []>(
       'SELECT workload, backend FROM user_text_backends ORDER BY workload',
     ).all()).toEqual([
@@ -1266,8 +1271,8 @@ describe('migration 39 - Qwen text backend', () => {
 
   test('is idempotent when the runner is called twice', () => {
     const { dataDir, db } = openV38Db();
-    migrate(db, dataDir);
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
     expect(db.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM schema_versions WHERE version = 39',
     ).get()?.count).toBe(1);
@@ -1280,7 +1285,7 @@ describe('migration 40 - GLM 5.3 Flash text backend', () => {
   function openV39Db(): { dataDir: string; db: InstanceType<typeof Database> } {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-mig40-'));
     const db = new Database(':memory:');
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
     db.run('DROP TABLE user_text_backends');
     db.run(`
       CREATE TABLE user_text_backends (
@@ -1304,11 +1309,11 @@ describe('migration 40 - GLM 5.3 Flash text backend', () => {
     db.run("INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u1', 'ai-fill', 'kimi', 1)");
     db.run("INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u1', 'condense', 'qwen', 2)");
 
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
 
     expect(
       db.query<{ version: number }, []>('SELECT MAX(version) AS version FROM schema_versions').get()?.version,
-    ).toBe(BINARY_SCHEMA_VERSION);
+    ).toBe(LEGACY_TEXT_TABLE.targetVersion);
     expect(db.query<{ workload: string; backend: string }, []>(
       'SELECT workload, backend FROM user_text_backends ORDER BY workload',
     ).all()).toEqual([
@@ -1331,8 +1336,8 @@ describe('migration 40 - GLM 5.3 Flash text backend', () => {
 
   test('is idempotent when the runner is called twice', () => {
     const { dataDir, db } = openV39Db();
-    migrate(db, dataDir);
-    migrate(db, dataDir);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
+    migrate(db, dataDir, LEGACY_TEXT_TABLE);
     expect(db.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM schema_versions WHERE version = 40',
     ).get()?.count).toBe(1);
@@ -1346,18 +1351,18 @@ describe('migration 49 - text backend effort', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-migration49-'));
     const db = new Database(':memory:');
     try {
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       db.run('ALTER TABLE user_text_backends DROP COLUMN effort');
       db.run('DELETE FROM schema_versions WHERE version >= 49');
       db.run("INSERT INTO users (id, created_at) VALUES ('u1', 1)");
       db.run("INSERT INTO user_text_backends VALUES ('u1', 'enhance', 'kimi', 456)");
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       expect(db.query('SELECT workload, backend, updated_at, effort FROM user_text_backends').all()).toEqual([
         { workload: 'enhance', backend: 'kimi', updated_at: 456, effort: null },
       ]);
       db.run("UPDATE user_text_backends SET effort = 'high'");
       expect(() => db.run("UPDATE user_text_backends SET effort = 'extreme'")).toThrow(/CHECK constraint failed/i);
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       expect(db.query('SELECT effort FROM user_text_backends').get()).toEqual({ effort: 'high' });
     } finally {
       db.close();
@@ -1370,7 +1375,7 @@ describe('migration 50 - split GLM by host', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-migration50-'));
     const db = new Database(':memory:');
     try {
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       db.run('DROP TABLE user_text_backends');
       db.run(readFileSync(new URL('./migrations/0044_drop_deepseek_pro_text_backend.sql', import.meta.url), 'utf8'));
       db.run(readFileSync(new URL('./migrations/0049_text_backend_effort.sql', import.meta.url), 'utf8'));
@@ -1383,7 +1388,7 @@ describe('migration 50 - split GLM by host', () => {
       expect(() => db.run("INSERT INTO user_text_backends VALUES ('u1', 'condense', 'glm-abliterated', 5, NULL)"))
         .toThrow(/CHECK constraint failed/i);
 
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
 
       expect(db.query('SELECT workload, backend, updated_at, effort FROM user_text_backends ORDER BY workload').all()).toEqual([
         { workload: 'ai-fill', backend: 'glm-abliterated', updated_at: 1, effort: 'low' },
@@ -1391,7 +1396,7 @@ describe('migration 50 - split GLM by host', () => {
         { workload: 'enhance', backend: 'glm-abliterated', updated_at: 3, effort: null },
         { workload: 'storytelling', backend: 'glm-abliterated', updated_at: 2, effort: 'high' },
       ]);
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       expect(db.query('SELECT COUNT(*) AS count FROM schema_versions WHERE version = 50').get()).toEqual({ count: 1 });
       expect(db.query('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
@@ -1405,7 +1410,7 @@ describe('migration 55 - proxy text backends', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-migration55-'));
     const db = new Database(':memory:');
     try {
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       db.run('DROP TABLE user_text_backends');
       db.run(readFileSync(new URL('./migrations/0050_glm_abliterated_text_backend.sql', import.meta.url), 'utf8'));
       db.run('DELETE FROM schema_versions WHERE version >= 55');
@@ -1420,7 +1425,7 @@ describe('migration 55 - proxy text backends', () => {
       db.run("INSERT INTO user_text_backends VALUES ('u2', 'enhance', 'glm-abliterated', 7, 'high')");
       db.run("INSERT INTO user_text_backends VALUES ('u2', 'condense', 'gpt', 8, NULL)");
 
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
 
       expect(db.query('SELECT user_id, workload, backend, updated_at, effort FROM user_text_backends ORDER BY user_id, workload').all()).toEqual([
         { user_id: 'u1', workload: 'enhance', backend: 'kimi', updated_at: 4, effort: null },
@@ -1438,7 +1443,7 @@ describe('migration 55 - proxy text backends', () => {
       }
       db.run("INSERT INTO user_text_backends VALUES ('u2', 'brainstorm', 'deepseek-abliterated', 9, 'xhigh')");
 
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       expect(db.query('SELECT COUNT(*) AS count FROM schema_versions WHERE version = 55').get()).toEqual({ count: 1 });
       expect(db.query('SELECT COUNT(*) AS count FROM user_text_backends').get()).toEqual({ count: 9 });
       // The FK to users survived the rebuild.
@@ -1484,20 +1489,20 @@ describe('migration 44 - retire Pro text backend', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-migration44-'));
     const db = new Database(':memory:');
     try {
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       db.run('DROP TABLE user_text_backends');
       db.run(readFileSync(new URL('./migrations/0043_gpt_text_backend.sql', import.meta.url), 'utf8'));
       db.run('DELETE FROM schema_versions WHERE version >= 44');
       db.run("INSERT INTO users (id, created_at) VALUES ('u1', 1)");
       db.run(`INSERT INTO user_text_backends VALUES ('u1', 'condense', 'deepseek-pro', 123)`);
       db.run("INSERT INTO user_text_backends VALUES ('u1', 'enhance', 'gpt', 456)");
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       expect(db.query('SELECT workload, backend, updated_at FROM user_text_backends ORDER BY workload').all()).toEqual([
         { workload: 'enhance', backend: 'gpt', updated_at: 456 },
       ]);
       expect(() => db.run(`INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u1', 'brainstorm', 'deepseek-pro', 789)`)).toThrow(/CHECK constraint failed/i);
       expect(db.query('PRAGMA foreign_key_check').all()).toEqual([]);
-      migrate(db, dataDir);
+      migrate(db, dataDir, LEGACY_TEXT_TABLE);
       expect(db.query('SELECT COUNT(*) AS count FROM user_text_backends').get()).toEqual({ count: 1 });
     } finally {
       db.close();

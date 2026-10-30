@@ -1,4 +1,4 @@
--- Atelier database schema — cumulative state after migrations 1-56.
+-- Atelier database schema — cumulative state after migrations 1-58.
 -- Reference only (migrate.ts is the runtime source of truth); the version
 -- in this header must track BINARY_SCHEMA_VERSION when migrations are added.
 --
@@ -224,16 +224,91 @@ CREATE TABLE user_storage_keys (
   created_at       INTEGER NOT NULL
 );
 
-CREATE TABLE user_text_backends (
-  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  workload   TEXT NOT NULL,
-  backend    TEXT NOT NULL CHECK(backend IN ('kimi','mimo','grok','gemini-argon','deepseek-abliterated','glm-abliterated','gpt')),
-  updated_at INTEGER NOT NULL,
-  effort     TEXT CHECK (
-    effort IS NULL OR effort IN ('none','minimal','low','medium','high','xhigh','max')
-  ),
-  PRIMARY KEY (user_id, workload)
+-- Admin-managed text providers and models (v58; replaced user_text_backends).
+-- Ids are UUIDs minted in the API; timestamps are epoch ms. The task lists
+-- mirror TEXT_TASKS (@atelier/shared).
+CREATE TABLE text_providers (
+  id                 TEXT PRIMARY KEY,
+  name               TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  protocol           TEXT NOT NULL CHECK (protocol IN ('openai-compatible', 'anthropic')),
+  base_url           TEXT NOT NULL,
+  preset             TEXT,
+  auth_mode          TEXT NOT NULL CHECK (auth_mode IN ('none', 'stored', 'env')),
+  credential_env     TEXT,
+  secret_ciphertext  BLOB,
+  secret_nonce       BLOB,
+  secret_key_version INTEGER,
+  secret_fingerprint TEXT,
+  token_field        TEXT NOT NULL DEFAULT 'max_completion_tokens'
+    CHECK (token_field IN ('max_completion_tokens', 'max_tokens')),
+  list_models        INTEGER NOT NULL DEFAULT 1 CHECK (list_models IN (0, 1)),
+  enabled            INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL,
+  CHECK ((auth_mode = 'stored') = (secret_ciphertext IS NOT NULL)),
+  CHECK ((auth_mode = 'env') = (credential_env IS NOT NULL))
 );
+
+CREATE TABLE text_models (
+  id                  TEXT PRIMARY KEY,
+  provider_id         TEXT NOT NULL REFERENCES text_providers(id) ON DELETE CASCADE,
+  model_id            TEXT NOT NULL,
+  display_name        TEXT NOT NULL,
+  legacy_key          TEXT UNIQUE,
+  enabled             INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  vision              INTEGER NOT NULL DEFAULT 0 CHECK (vision IN (0, 1)),
+  max_images          INTEGER CHECK (max_images > 0),
+  structured_output   TEXT NOT NULL DEFAULT 'json_object'
+    CHECK (structured_output IN ('json_schema', 'json_object', 'none')),
+  reasoning_levels    TEXT NOT NULL DEFAULT '[]' CHECK (json_type(reasoning_levels) = 'array'),
+  reasoning_default   TEXT
+    CHECK (reasoning_default IN ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')),
+  temperature         REAL CHECK (temperature BETWEEN 0 AND 2),
+  top_p               REAL CHECK (top_p BETWEEN 0 AND 1),
+  fixed_output_tokens INTEGER CHECK (fixed_output_tokens > 0),
+  latency_profile     TEXT NOT NULL DEFAULT 'standard' CHECK (latency_profile IN ('standard', 'slow')),
+  prompt_variant      TEXT NOT NULL DEFAULT 'generic' CHECK (prompt_variant IN ('generic', 'kimi')),
+  screen_requests     INTEGER NOT NULL DEFAULT 0 CHECK (screen_requests IN (0, 1)),
+  verified_at         INTEGER,
+  probe_json          TEXT,
+  sort_order          INTEGER NOT NULL DEFAULT 0,
+  created_at          INTEGER NOT NULL,
+  updated_at          INTEGER NOT NULL,
+  UNIQUE (provider_id, model_id)
+);
+
+CREATE INDEX idx_text_models_provider ON text_models(provider_id);
+
+CREATE TABLE text_defaults (
+  scope         TEXT PRIMARY KEY CHECK (scope IN (
+    'default', 'enhance', 'motion', 'ai-fill', 'brainstorm', 'condense', 'storytelling',
+    'story-segments', 'infer', 'rescue', 'list-draft', 'template-draft'
+  )),
+  text_model_id TEXT NOT NULL REFERENCES text_models(id) ON DELETE CASCADE,
+  updated_at    INTEGER NOT NULL
+);
+
+-- image_model_id is a registry id (code, not a table), so it carries no FK.
+CREATE TABLE image_model_writers (
+  image_model_id TEXT PRIMARY KEY,
+  text_model_id  TEXT NOT NULL REFERENCES text_models(id) ON DELETE CASCADE,
+  mode           TEXT NOT NULL CHECK (mode IN ('lock', 'prefer')),
+  updated_at     INTEGER NOT NULL
+);
+
+CREATE TABLE user_text_models (
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  task          TEXT NOT NULL CHECK (task IN (
+    'enhance', 'motion', 'ai-fill', 'brainstorm', 'condense', 'storytelling',
+    'story-segments', 'infer', 'rescue', 'list-draft', 'template-draft'
+  )),
+  text_model_id TEXT NOT NULL REFERENCES text_models(id) ON DELETE CASCADE,
+  effort        TEXT CHECK (effort IN ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')),
+  updated_at    INTEGER NOT NULL,
+  PRIMARY KEY (user_id, task)
+);
+
+CREATE INDEX idx_user_text_models_model ON user_text_models(text_model_id);
 
 -- Per-user base-sampler step overrides for local models (v56). Only overrides
 -- are stored; an absent row means the model's `defaultSteps`. updated_at is

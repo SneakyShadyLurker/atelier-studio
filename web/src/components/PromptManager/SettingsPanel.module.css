@@ -77,6 +77,23 @@
   line-height: 1.5;
 }
 
+.rowNote {
+  max-width: 70ch;
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/* Sits where the effort chip would, on the chip's vertical rhythm. */
+.effortFixed {
+  margin: 0;
+  padding: 6px 0;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
 .rowControl {
   flex-shrink: 0;
   display: flex;

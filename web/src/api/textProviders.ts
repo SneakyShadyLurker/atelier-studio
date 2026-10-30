@@ -24,6 +24,12 @@ export const textAdminKeys = {
   all: () => ['text-admin'] as const,
   providers: () => ['text-admin', 'providers'] as const,
   routing: () => ['text-admin', 'routing'] as const,
+  /**
+   * A provider's live upstream model list. Outside the `all()` family on
+   * purpose: admin writes invalidate that family, and refetching this list
+   * would hold every write on a slow upstream call and the probe limiter.
+   */
+  available: (providerId: string) => ['text-admin-available', providerId] as const,
 };
 
 const adminRetry = (failureCount: number, error: Error): boolean => {

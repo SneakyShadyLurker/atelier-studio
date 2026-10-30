@@ -26,10 +26,12 @@ function textModelsResponse(text: TextServices, userId: string): TextModelsRespo
   const tasks: TaskRow[] = TEXT_TASKS.map((task) => {
     const pick = picks[task];
     const resolved = resolveTextModel(deps, { userId, task });
+    // A stored effort counts only while the picked model still offers it.
+    const offered = pick?.effort ? config.models.get(pick.modelId)?.reasoningLevels.includes(pick.effort) === true : false;
     return {
       task,
       ...(pick ? { pick: pick.modelId } : {}),
-      ...(pick?.effort ? { effort: pick.effort } : {}),
+      ...(pick?.effort && offered ? { effort: pick.effort } : {}),
       ...(resolved.ok ? { effectiveModelId: resolved.model.id } : {}),
       ...(resolved.pickState ? { pickState: resolved.pickState } : {}),
     };
@@ -79,7 +81,10 @@ export const textModelsRoutes = new Hono<AppEnv>()
       if (effort !== undefined && effort !== null && !model.reasoningLevels.includes(effort)) {
         return c.json({ error: 'This text model does not offer that reasoning level' }, 400);
       }
-      text.store.writeUserPick(c.var.userId, params.value.task, { modelId, effort: effort ?? null });
+      // An omitted effort keeps the stored one while the new model still offers it.
+      const stored = effort === undefined ? text.store.readUserPicks(c.var.userId)[params.value.task]?.effort : null;
+      const nextEffort = effort ?? (stored && model.reasoningLevels.includes(stored) ? stored : null);
+      text.store.writeUserPick(c.var.userId, params.value.task, { modelId, effort: nextEffort });
     }
     c.header('Cache-Control', 'private, no-store');
     return c.json(textModelsResponse(text, c.var.userId));

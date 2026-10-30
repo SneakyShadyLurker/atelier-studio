@@ -104,6 +104,22 @@ describe('GET /api/text-models', () => {
       pickState: 'offline',
     });
   });
+
+  test('reports a stored effort only while the picked model still offers it', async () => {
+    const rt = testRuntime({ seedLegacyText: true });
+    const kimi = rowId(rt, 'kimi');
+    rt.db.query("INSERT INTO users (id, created_at) VALUES ('alice', 1)").run();
+    rt.db.query("INSERT INTO user_text_models (user_id, task, text_model_id, effort, updated_at) VALUES ('alice', 'enhance', ?, 'max', 1)")
+      .run(kimi);
+    expect(taskRow(await getModels(rt), 'enhance')?.effort).toBe('max');
+
+    // An admin removes the level from the model.
+    rt.db.query('UPDATE text_models SET reasoning_levels = ? WHERE id = ?').run(JSON.stringify(['low', 'high']), kimi);
+    bumpTextConfigRevision();
+    expect(taskRow(await getModels(rt), 'enhance')).toEqual({
+      task: 'enhance', pick: kimi, effectiveModelId: kimi, pickState: 'active',
+    });
+  });
 });
 
 describe('PUT /api/text-models/tasks/:task', () => {
@@ -126,12 +142,48 @@ describe('PUT /api/text-models/tasks/:task', () => {
     expect(rt.db.query('SELECT COUNT(*) AS count FROM user_text_models').get()).toEqual({ count: 0 });
   });
 
-  test('a pick without an effort stores none', async () => {
+  test('a first pick without an effort stores none', async () => {
     const rt = testRuntime({ seedLegacyText: true });
-    await put(rt, 'motion', { modelId: rowId(rt, 'kimi'), effort: 'max' });
     const res = await put(rt, 'motion', { modelId: rowId(rt, 'grok') });
     expect(taskRow(await res.json() as TextModelsResponse, 'motion')).toEqual({
       task: 'motion', pick: rowId(rt, 'grok'), effectiveModelId: rowId(rt, 'grok'), pickState: 'active',
+    });
+  });
+
+  test('an omitted effort keeps the stored one while the new model offers it, and drops it otherwise', async () => {
+    const rt = testRuntime({ seedLegacyText: true });
+    const levels = (id: string) => rt.db.query<{ reasoning_levels: string }, [string]>(
+      'SELECT reasoning_levels FROM text_models WHERE id = ?',
+    ).get(id)?.reasoning_levels;
+    const kimi = rowId(rt, 'kimi');
+    const mimo = rowId(rt, 'mimo');
+    // Mimo offers 'high' but not 'max' (Kimi offers both).
+    expect(JSON.parse(levels(mimo) ?? '[]')).toContain('high');
+    expect(JSON.parse(levels(mimo) ?? '[]')).not.toContain('max');
+
+    await put(rt, 'motion', { modelId: kimi, effort: 'high' });
+    const kept = await put(rt, 'motion', { modelId: mimo });
+    expect(taskRow(await kept.json() as TextModelsResponse, 'motion')).toEqual({
+      task: 'motion', pick: mimo, effort: 'high', effectiveModelId: mimo, pickState: 'active',
+    });
+
+    await put(rt, 'motion', { modelId: kimi, effort: 'max' });
+    const dropped = await put(rt, 'motion', { modelId: mimo });
+    expect(taskRow(await dropped.json() as TextModelsResponse, 'motion')).toEqual({
+      task: 'motion', pick: mimo, effectiveModelId: mimo, pickState: 'active',
+    });
+    // Dropped for good: switching back does not revive it.
+    const back = await put(rt, 'motion', { modelId: kimi });
+    expect(taskRow(await back.json() as TextModelsResponse, 'motion')?.effort).toBeUndefined();
+  });
+
+  test('an explicit null effort clears the stored one', async () => {
+    const rt = testRuntime({ seedLegacyText: true });
+    const kimi = rowId(rt, 'kimi');
+    await put(rt, 'motion', { modelId: kimi, effort: 'high' });
+    const res = await put(rt, 'motion', { modelId: kimi, effort: null });
+    expect(taskRow(await res.json() as TextModelsResponse, 'motion')).toEqual({
+      task: 'motion', pick: kimi, effectiveModelId: kimi, pickState: 'active',
     });
   });
 

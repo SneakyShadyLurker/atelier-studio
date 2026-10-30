@@ -101,6 +101,24 @@ describe('useSetTaskPick', () => {
     await waitFor(() => { expect(hook.result.current.pending.size).toBe(0); });
   });
 
+  test('a model change without an effort keeps the stored effort while the new model offers it', async () => {
+    let resolvePut: ((response: Response) => void) | undefined;
+    const { client, hook } = setup(() => new Promise<Response>((resolve) => { resolvePut = resolve; }));
+    await waitFor(() => { expect(hook.result.current.settings.isSuccess).toBe(true); });
+    // Kimi at 'low'; Grok offers 'low' too.
+    client.setQueryData<TextModelsResponse>(textModelKeys.all(), {
+      ...SETTINGS,
+      tasks: SETTINGS.tasks.map((row) => (row.task === 'enhance' ? { ...row, effort: 'low' } : row)),
+    });
+
+    act(() => { void hook.result.current.setPick.mutateAsync({ task: 'enhance', modelId: 'grok' }); });
+    await waitFor(() => {
+      expect(enhanceRow(client)).toEqual({ task: 'enhance', pick: 'grok', effort: 'low', effectiveModelId: 'grok', pickState: 'active' });
+    });
+    resolvePut?.(Response.json(SETTINGS));
+    await waitFor(() => { expect(hook.result.current.pending.size).toBe(0); });
+  });
+
   test('keeps an effort the new model accepts and clears the pick back to the default', async () => {
     const pending: (() => void)[] = [];
     const { client, hook } = setup(() => new Promise<Response>((resolve) => {

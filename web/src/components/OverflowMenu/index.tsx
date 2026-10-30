@@ -1,6 +1,6 @@
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from 'react';
 import { useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { focusableInside, useFocusTrap } from '../../hooks/useFocusTrap';
 import { useIsPhone } from '../../hooks/useIsPhone';
 import { useModalChrome } from '../../hooks/useModalChrome';
@@ -35,6 +35,7 @@ interface OverflowMenuProps<TAction extends string> {
   readonly open: boolean;
   /** Non-empty groups, in display order. */
   readonly groups: readonly OverflowMenuGroup<TAction>[];
+  /** Runs after the menu has closed (via `onClose`) and focus is back on the trigger. */
   readonly onSelect: (action: TAction) => void;
   readonly onClose: () => void;
 }
@@ -115,6 +116,12 @@ export default function OverflowMenu<TAction extends string>({
                 // A dismissed menu keeps focus on its row through the exit
                 // fade; Escape then Enter must not fire the action.
                 if (closing) return;
+                // Close first and synchronously: the teardown lifts the
+                // background inert and puts focus back on the trigger, so a
+                // dialog the action opens records the trigger as its opener
+                // and returns focus there. onSelect stays inside the click,
+                // keeping the user activation (clipboard, playback).
+                flushSync(onClose);
                 onSelect(item.action);
               }}
             >

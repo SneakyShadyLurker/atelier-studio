@@ -44,7 +44,7 @@ export default function AddModelsDialog({ provider, onClose }: AddModelsDialogPr
   // A live upstream call under the shared limiter: once per open, no retry,
   // no refetch on focus.
   const listing = useQuery({
-    queryKey: [...textAdminKeys.all(), 'available', provider.id],
+    queryKey: textAdminKeys.available(provider.id),
     queryFn: () => listAvailableModels(provider.id),
     enabled: provider.listModels,
     retry: false,
@@ -56,7 +56,7 @@ export default function AddModelsDialog({ provider, onClose }: AddModelsDialogPr
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   /** Ids typed by hand, in the order entered. */
-  const [manual, setManual] = useState<readonly string[]>([]);
+  const [typed, setTyped] = useState<readonly string[]>([]);
   const [manualText, setManualText] = useState('');
   const [manualError, setManualError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -65,6 +65,8 @@ export default function AddModelsDialog({ provider, onClose }: AddModelsDialogPr
   const added = new Set(provider.models.map((model) => model.modelId));
   const listed: readonly ListedModel[] = listing.data?.models ?? [];
   const listedIds = new Set(listed.map((model) => model.id));
+  // A typed id the list later names (after a slow load or "Try again") shows once, as listed.
+  const manual = typed.filter((id) => !listedIds.has(id));
   const manualOnly = !provider.listModels || listing.data?.listUnsupported === true;
   const query = search.trim().toLowerCase();
   const shown = query === '' ? listed : listed.filter((model) => model.id.toLowerCase().includes(query));
@@ -91,7 +93,7 @@ export default function AddModelsDialog({ provider, onClose }: AddModelsDialogPr
       setManualError(`${id} is already added.`);
       return;
     }
-    if (!listedIds.has(id) && !manual.includes(id)) setManual((previous) => [...previous, id]);
+    if (!listedIds.has(id) && !typed.includes(id)) setTyped((previous) => [...previous, id]);
     toggle(id, true);
     setManualText('');
     setManualError(null);
@@ -107,7 +109,7 @@ export default function AddModelsDialog({ provider, onClose }: AddModelsDialogPr
     if (busy || closing || count === 0) return;
     const hintsById = new Map(listed.map((model) => [model.id, model.hints] as const));
     // Listed order first, then the typed ids; the hints let rows start with them.
-    const ids = [...listed.map((model) => model.id), ...manual].filter((id) => selected.has(id));
+    const ids = [...new Set([...listed.map((model) => model.id), ...manual])].filter((id) => selected.has(id));
     const models: NewModelBody[] = ids.map((modelId) => {
       const hints = hintsById.get(modelId);
       return hints === undefined ? { modelId } : { modelId, hints };

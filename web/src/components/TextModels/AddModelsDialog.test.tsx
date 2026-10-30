@@ -104,6 +104,16 @@ describe('Add models: the listed models', () => {
     expect(toastTexts()).toContain('Added 2 models');
   });
 
+  test('a submit calls the model list once: the add does not refetch it', async () => {
+    const { calls, onClose } = setup();
+    fireEvent.click(await screen.findByRole('checkbox', { name: /qwen3:32b/ }));
+    fireEvent.click(button('Add 1 model'));
+    await waitFor(() => { expect(onClose).toHaveBeenCalled(); });
+    // Let any invalidation refetch land before counting.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls.filter((call) => call.url.endsWith('/models/available'))).toHaveLength(1);
+  });
+
   test('a refused add keeps the dialog open with the server’s words', async () => {
     const { onClose } = setup({ add: () => Response.json({ error: 'qwen3:32b is already added.' }, { status: 409 }) });
     fireEvent.click(await screen.findByRole('checkbox', { name: /qwen3:32b/ }));
@@ -139,6 +149,35 @@ describe('Add models: entering an id', () => {
     fireEvent.click(button('Add'));
     expect(screen.getByText('llama4:scout is already added.')).toBeTruthy();
     expect(input.getAttribute('aria-invalid')).toBe('true');
+  });
+
+  test('an id typed before the list arrives is not duplicated once the list lists it', async () => {
+    let attempt = 0;
+    const { calls } = setup({
+      list: () => (++attempt === 1
+        ? Response.json({ error: 'busy' }, { status: 429 })
+        : Response.json({ models: LISTED, listUnsupported: false })),
+    });
+    const alert = await screen.findByRole('alert');
+    const input = screen.getByLabelText('Not listed? Enter a model id');
+    fireEvent.change(input, { target: { value: 'qwen3:32b' } });
+    fireEvent.click(button('Add'));
+    fireEvent.change(input, { target: { value: 'my-finetune:7b' } });
+    fireEvent.click(button('Add'));
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    await screen.findByText('4 listed, 2 selected');
+    expect(screen.getAllByRole('checkbox', { name: /qwen3:32b/ })).toHaveLength(1);
+    expect(checkbox(/qwen3:32b/).checked).toBe(true);
+
+    fireEvent.click(button('Add 2 models'));
+    await waitFor(() => { expect(posts(calls)).toHaveLength(1); });
+    expect(posts(calls)[0]?.body).toEqual({
+      models: [
+        { modelId: 'qwen3:32b', hints: { structuredOutput: 'json_schema', reasoningLevels: ['low', 'high'] } },
+        { modelId: 'my-finetune:7b' },
+      ],
+    });
   });
 
   test('a provider without a model list switches to manual entry and explains why', async () => {

@@ -115,6 +115,16 @@ describe('SettingsPanel text models', () => {
     expect(screen.getByRole('option', { name: 'Use default · Grok 4.7' })).toBeTruthy();
   });
 
+  test('the default label skips an offline task assignment, as the resolver does', async () => {
+    renderPanel({
+      ...settings({ enhance: { pick: 'grok', effectiveModelId: 'grok', pickState: 'active' } }),
+      defaults: { default: 'kimi', byTask: { enhance: 'glm' } },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Text model for Enhance/ }));
+    expect(screen.getByRole('option', { name: 'Use default · Kimi K3' })).toBeTruthy();
+  });
+
   test('selecting a model saves the pick for that task', async () => {
     renderPanel();
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof mock>;
@@ -223,6 +233,12 @@ describe('SettingsPanel reasoning effort', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort for Enhance, currently Max effort' }));
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Default', 'Low', 'High', 'Max']);
+  });
+
+  test('an effort the picked model no longer offers shows as the default', async () => {
+    renderPanel(settings({ enhance: { pick: 'kimi', effort: 'medium', effectiveModelId: 'kimi', pickState: 'active' } }));
+
+    expect(await screen.findByRole('button', { name: 'Reasoning effort for Enhance, currently Default effort' })).toBeTruthy();
   });
 
   test('each model offers its own levels', async () => {

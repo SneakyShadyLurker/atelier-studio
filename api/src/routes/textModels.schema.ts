@@ -6,7 +6,8 @@ export const TextModelTaskParam = z.object({
 });
 
 // `modelId` is a text model row id; null clears the pick and its effort. An
-// omitted effort stores none (the model's default applies).
+// omitted effort keeps the stored one while the new model offers it, otherwise
+// none (the model's default applies); null clears it.
 export const TextModelTaskPutBody = z.object({
   modelId: z.string().min(1).max(64).nullable(),
   effort: z.enum(TEXT_REASONING_EFFORT_VALUES).nullable().optional(),

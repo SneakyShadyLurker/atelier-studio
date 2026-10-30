@@ -37,9 +37,13 @@ function effortOptions(levels: readonly TextReasoningEffort[]): readonly ChipSel
 }
 
 // The model "Use default" resolves to. Without a usable pick the server's
-// effective model already is the default (after its own fallbacks).
-function defaultModelId(data: TextModelsResponse, row: TaskRow): string | undefined {
-  const configured = data.defaults.byTask[row.task] ?? data.defaults.default;
+// effective model already is the default (after its own fallbacks); otherwise
+// the first listed fallback that is not offline, as the resolver skips those.
+function defaultModelId(data: TextModelsResponse, row: TaskRow, byId: ReadonlyMap<string, PublicTextModel>): string | undefined {
+  const configured = [data.defaults.byTask[row.task], data.defaults.default].find((id) => {
+    const model = id === undefined ? undefined : byId.get(id);
+    return model !== undefined && model.status !== 'offline';
+  });
   return row.pick === undefined || row.pickState === 'offline' ? row.effectiveModelId ?? configured : configured;
 }
 
@@ -79,7 +83,7 @@ function TextModelsSection() {
         {TEXT_TASKS.map((task) => {
           const row: TaskRow = rowByTask.get(task) ?? { task };
           const label = TEXT_TASK_LABELS[row.task];
-          const defaultId = defaultModelId(data, row);
+          const defaultId = defaultModelId(data, row, byId);
           const defaultName = defaultId === undefined ? undefined : byId.get(defaultId)?.displayName;
           // A pick the response does not list shows as the default instead of breaking the panel.
           const picked = row.pick === undefined ? undefined : byId.get(row.pick);
@@ -89,7 +93,10 @@ function TextModelsSection() {
           const display = picked !== undefined
             ? picked.displayName
             : defaultName === undefined ? 'Default' : `Default · ${defaultName}`;
-          const effort: EffortValue = activePick === undefined ? 'default' : row.effort ?? 'default';
+          // Only an effort the picked model still offers is in use.
+          const effort: EffortValue = activePick !== undefined && row.effort !== undefined && activePick.reasoningLevels.includes(row.effort)
+            ? row.effort
+            : 'default';
           const effortDisplay = effort === 'default'
             ? 'Default effort'
             : `${TEXT_REASONING_EFFORT_LABELS[effort]} effort`;

@@ -47,13 +47,12 @@ that your account can write to, such as `/Users/yourname/atelier-data` on macOS
 or `/home/yourname/atelier-data` on Linux or WSL. Do not use a literal `~`.
 
 ```dotenv
-CLIPROXY_BASE_URL=http://127.0.0.1:8317
-CLIPROXY_TOKEN=local-unused
 DATA_DIR=/absolute/path/to/atelier-data
 API_HOST=127.0.0.1
 API_PORT=8786
 ENABLE_MOCK_PROVIDER=true
 PROMPT_LIBRARY_USERS=alice
+TEXT_PROVIDER_ADMINS=alice
 ```
 
 Create the directory you chose, substituting the same path:
@@ -63,9 +62,8 @@ mkdir -p /absolute/path/to/atelier-data
 chmod 600 api/.env
 ```
 
-The two `CLIPROXY_*` fields are required by the configuration loader even for
-this mock test. No service needs to be listening at that URL, and `local-unused`
-is a development placeholder, not a real credential. Leave ComfyUI and
+`PROMPT_LIBRARY_USERS` and `TEXT_PROVIDER_ADMINS` give the local user `alice`
+the Prompt Library and the Text models view. Leave CLIProxyAPI, ComfyUI and
 `STORAGE_ROOT_RECIPIENT` unset for now. Use a fresh data directory, separate
 from any production data.
 
@@ -133,8 +131,8 @@ Open **[http://localhost:5173](http://localhost:5173)**. Then:
 
 The result is a **32 × 32 solid-colour PNG**, regardless of the prompt. That
 checks the app, API, identity forwarding, storage and download path. It is not
-an AI-generated picture. Avoid Enhance and other text-model actions until you
-have connected a real text backend.
+an AI-generated picture. Enhance and the other text actions answer "No text
+model is set up" until you [connect a text model](connect-a-text-model.md).
 
 Continue with [Using Atelier](user-guide.md) for the normal workflow.
 
@@ -155,13 +153,15 @@ the identity or your data directory.
 
 Atelier is an interface and server, not a model-hosting service. Provider access
 may cost money, and local generation needs suitable hardware and model weights.
-Choose one path; you do not need every provider.
+Choose one image path, and add a text model if you want the text features. You
+do not need every provider.
 
 | Path | What you supply | What to configure |
 |---|---|---|
 | Google Gemini, with your own key | A Google AI Studio key with access and quota for a supported image model | Server BYOK encryption key, then your Google key in the app |
 | GPT Image through an upstream proxy | A service supporting Atelier's GPT image adapter and model ID, plus an OpenRouter key for the GPT input check | `CLIPROXY_BASE_URL`, `CLIPROXY_TOKEN`, `OPENROUTER_API_KEY` |
 | Local ComfyUI | GPU host, required weights and the included authenticated worker | Worker URL, token, certificate and `LOCAL_MODELS_USERS` |
+| Any text model, for Enhance, AI fill, Brainstorm and the other text features | A local Ollama or LM Studio, or a key for OpenAI, Anthropic, OpenRouter or another OpenAI-compatible service | `TEXT_PROVIDER_ADMINS`, then the provider in the app's Text models view. See [Connect a text model](connect-a-text-model.md) |
 
 ### Google Gemini
 
@@ -174,12 +174,11 @@ Choose one path; you do not need every provider.
    and save it. The server verifies it before saving.
 5. Choose a Gemini image model and generate a single image to check access.
 
-The Google key belongs to the current user. You do not need a working CLIProxyAPI
-service for direct Gemini image generation; keep the syntactically required
-`CLIPROXY_*` fields in the configuration. Text-assisted features have their own
-provider requirements, described in [Providers](providers.md).
+The Google key belongs to the current user. Direct Gemini image generation does
+not need CLIProxyAPI. Text-assisted features need a text model of their own,
+described in [Connect a text model](connect-a-text-model.md).
 
-### GPT Image and text features
+### GPT Image
 
 Configure your own [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
 or compatible service first. Atelier's cloud image adapter requests
@@ -188,14 +187,14 @@ contracts. A generic OpenAI-compatible chat endpoint alone is insufficient.
 The [provider reference](providers.md#cliproxyapi-cloud) describes the contract.
 
 Set the service's bare origin, without `/v1`, as `CLIPROXY_BASE_URL`, and use a
-token that service already accepts. Set `OPENROUTER_API_KEY` for Atelier's GPT
-input-moderation check; GPT requests fail closed when that check is unavailable.
-Restart the API, select GPT Image and generate a test image.
+token that service already accepts. Set both or neither. Set `OPENROUTER_API_KEY`
+for Atelier's GPT input-moderation check. GPT requests fail closed when that
+check is unavailable. Restart the API, select GPT Image and generate a test image.
 
-Enhance, Brainstorm and other text actions also need the corresponding text
-models served by your configured upstream. Check its model IDs against
-`CLIPROXY_TEXT_MODEL_*` in the [text backend reference](providers.md#text-backends-via-cliproxyapi).
-Image generation access does not automatically provide those text models.
+These settings serve only GPT Image. Text features use the text models you
+connect in the app. If your CLIProxyAPI also serves chat models, add it there as
+a **Custom OpenAI-compatible** provider with the base URL ending in `/v1`. See
+[Connect a text model](connect-a-text-model.md#other-servers).
 
 ### Local ComfyUI
 
@@ -224,6 +223,7 @@ host before enabling. See [bundled rows](local-models.md#bundled-rows).
 | Proxy or API cannot bind | Another process owns 8787 or 8786; do not stop processes you do not own |
 | Mock Fast is missing | Check `ENABLE_MOCK_PROVIDER=true`, ensure `NODE_ENV` is not `production`, and restart the API |
 | Google key dialog says BYOK is not configured | Set a valid `BYOK_ENCRYPTION_KEY` and restart the API |
+| Enhance or AI fill says "No text model is set up" | Connect a text model and set a default. See [its troubleshooting table](connect-a-text-model.md#troubleshooting) |
 | No local model appears | Check the worker configuration and exact username in `LOCAL_MODELS_USERS` |
 | A real provider returns an error | Check the API log, provider credentials, model access and quota; the mock test does not verify upstream access |
 

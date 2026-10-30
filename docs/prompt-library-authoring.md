@@ -183,18 +183,18 @@ Atelier's word budgets, positive-phrasing rules and texture exclusions are local
 
 ## Prompting guidance for the text LLMs (metaprompts + ai-fill)
 
-The metaprompts live in `api/src/prompts/*.ts` (`aiFillSystemPrompt`, `brainstormCharactersSystemPrompt`, enhance/draft/infer/rescue). They follow the Moonshot Kimi K3 contract (the generic ai-fill body serves every other backend). When editing them or authoring fill instructions:
+The metaprompts live in `api/src/prompts/*.ts` (`aiFillSystemPrompt`, `brainstormCharactersSystemPrompt`, enhance/draft/infer/rescue). Which text model runs them is an admin setting (default model, task assignments and prompt writers) plus each user's own pick per task (see [Connect a text model](connect-a-text-model.md#choose-which-model-writes-what)). When editing them or authoring fill instructions:
 
-- **Kimi K3** is the automatic writer for every non-Sunburst target. K3 always reasons. Infer, draft-list, draft-template, rescue, generic and gpt-image enhance, ai-fill, Brainstorm Characters, Krea condense and MiniMax H3 motion enhancement use low effort. Reasoning counts against `max_completion_tokens`, so each bounded answer budget includes reasoning headroom.
-- **Pin-only backends** (MiMo, Grok, Gemini Argon, DeepSeek V4.1 Flash Abliterated, GLM 5.3) take the generic ai-fill body. MiMo and DeepSeek Abliterated run at `reasoning_effort: 'none'` unless pinned, so write instructions that stand on their own and never rely on the model reasoning its way to the format. Favor a few sharp format rules plus a shape example over stacked constraints. Routing selection remains code-owned.
-- **Sampling is not a diversity knob**: no body sends sampling parameters except Grok's fixed `temperature: 0.7, top_p: 0.95`. Diversity is engineered in the prompt (the three-tier section), never in the request body.
+- **The ai-fill prompt body is a per-model setting.** Each text model's **Prompt style** (Edit model → Advanced) chooses it. **Standard** sends the generic `buildAiFillSystemPrompt`, **Kimi-tuned** sends `buildKimiAiFillSystemPrompt`, written for Kimi models. Other metaprompts are the same for every model.
+- **Reasoning is per model too.** A model sends its **Default effort** unless the user picked an effort for that task, and a model without one sends none. Write instructions that stand on their own and never rely on the model reasoning its way to the format. Favor a few sharp format rules plus a shape example over stacked constraints. Reasoning counts against the output budget, so each bounded answer budget includes reasoning headroom.
+- **Sampling is not a diversity knob**: a request carries `temperature` or `top_p` only when the admin set them on the model. Diversity is engineered in the prompt (the three-tier section), never in the request body.
 - **Fill instructions are intent, outcome-first**: name what the fill must achieve and what it derives from ("fits her job, archetype and outfit"), not the phrasing to echo. The system prompt's RENDER DON'T RESTATE and OPEN CHOICES rules do the rest.
 
 ---
 
 ## `{{ai-fill: <instruction>}}`: LLM-resolved blanks
 
-This token replaces a prompt blank with output from a configured text LLM instead of resolving synchronously. Generate and Simulate preserve the same fill and splice contract. Provider selection remains code-owned. Drop any number into a template body or a hand-typed composer prompt, alongside normal text and other grammar:
+This token replaces a prompt blank with output from a configured text LLM instead of resolving synchronously. Generate and Simulate preserve the same fill and splice contract. The model follows the [routing order](connect-a-text-model.md#choose-which-model-writes-what). That is a locked prompt writer for the target image model, then the user's **AI fill** pick in Settings, a preferred prompt writer, the **AI fill** task assignment and finally the default model. Drop any number into a template body or a hand-typed composer prompt, alongside normal text and other grammar:
 
 ```
 A woman on a beach, {{ai-fill: describe a daring swimsuit}}, golden hour, {{ai-fill: her pose}}

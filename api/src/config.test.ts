@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BRAINSTORM_MAX_COUNT_CEILING } from '@atelier/shared';
@@ -704,5 +704,29 @@ describe('Ephemera integration config', () => {
     expect(issuesOf({ ...ephemeraEnv(), EPHEMERA_CARD_TIMEOUT_MS: '540001' }).map((issue) => issue.var))
       .toContain('EPHEMERA_CARD_TIMEOUT_MS');
     expect(loadConfig({ ...ephemeraEnv(), EPHEMERA_CARD_TIMEOUT_MS: '540000' }).EPHEMERA_CARD_TIMEOUT_MS).toBe(540_000);
+  });
+});
+
+describe('.env.example', () => {
+  // The committed local template must boot as shipped (with a real DATA_DIR):
+  // no CLIProxy values, and no text-model variables to fill in.
+  const parseEnvFile = (path: string): NodeJS.ProcessEnv => {
+    const env: NodeJS.ProcessEnv = {};
+    for (const raw of readFileSync(path, 'utf8').split('\n')) {
+      const line = raw.trim();
+      if (line === '' || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq <= 0) throw new Error(`.env.example: not a KEY=value line: ${line}`);
+      env[line.slice(0, eq)] = line.slice(eq + 1);
+    }
+    return env;
+  };
+
+  test('loads without CLIProxy values once DATA_DIR is set', () => {
+    const example = parseEnvFile(join(import.meta.dir, '..', '..', '.env.example'));
+    expect(Object.keys(example).some((key) => key.startsWith('CLIPROXY_TEXT_MODEL_'))).toBe(false);
+    const cfg = loadConfig({ ...example, DATA_DIR: '/tmp/atelier-env-example' });
+    expect(cliproxyEnabled(cfg)).toBe(false);
+    expect(cfg.TEXT_PROVIDER_ADMINS.size).toBe(0);
   });
 });

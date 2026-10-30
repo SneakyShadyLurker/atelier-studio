@@ -314,6 +314,14 @@
   margin-top: 4px;
 }
 
+/* The phone sheet lifts the right-hand group to the top; adding a provider
+   tests before it saves, so the test button leads there. */
+@media (width < 768px) {
+  .testButton {
+    order: -2;
+  }
+}
+
 @media (hover: none) {
   .preset,
   .choice,

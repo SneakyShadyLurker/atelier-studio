@@ -226,7 +226,7 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
         {saveError !== null && <p role="alert" className={styles.fieldError}>{saveError}</p>}
 
         <div className={`${dialogStyles.actions} ${styles.actions}`}>
-          <button type="button" className={btn.secondary} onClick={runTest} disabled={busy || testing}>
+          <button type="button" className={`${btn.secondary} ${styles.testButton}`} onClick={runTest} disabled={busy || testing}>
             {testing ? 'Testing…' : 'Test connection'}
           </button>
           <div className={dialogStyles.actionsRight}>

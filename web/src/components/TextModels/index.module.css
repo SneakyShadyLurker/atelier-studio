@@ -124,6 +124,8 @@
   display: grid;
   grid-template-columns: minmax(140px, 12rem) minmax(0, 1fr);
   align-items: center;
+  /* Pickers size to their label like the default-model picker, not the column. */
+  justify-items: start;
   column-gap: 16px;
   row-gap: 6px;
   padding: 4px 0;

@@ -1,8 +1,10 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModelV4 } from '@ai-sdk/provider';
-import type { ConnectionReport, ListedModel, TextTokenField } from '@atelier/shared';
+import type { TextReasoningEffort, TextTokenField } from '@atelier/shared';
 import type { TextModelRecord } from '../../db/textProviders';
-import type { ResolvedProvider, TextProtocolAdapter } from './protocol';
+import { listModels } from './listModels';
+import { runConnectionProbe } from './probe';
+import type { ReasoningOptions, ResolvedProvider, TextProtocolAdapter } from './protocol';
 
 // OpenAI-compatible chat adapter over `@ai-sdk/openai-compatible`.
 //
@@ -75,6 +77,14 @@ export function normaliseRequestBody(tokenField: TextTokenField) {
   };
 }
 
+/** Every level is sent as `reasoning_effort` unchanged; servers that do not know one answer 400. */
+function reasoningOptions(level: TextReasoningEffort | null): ReasoningOptions {
+  return {
+    providerOptions: level === null ? {} : { [OPENAI_COMPATIBLE_OPTIONS_KEY]: { reasoningEffort: level } },
+    wireNote: null,
+  };
+}
+
 function languageModel(
   provider: ResolvedProvider,
   model: TextModelRecord,
@@ -93,11 +103,7 @@ function languageModel(
 export const openaiCompatibleAdapter: TextProtocolAdapter = {
   protocol: 'openai-compatible',
   languageModel,
-  // Task 5 fills listing and the connection probe.
-  listModels(): Promise<ListedModel[]> {
-    return Promise.reject(new Error('openai-compatible listModels is not implemented yet'));
-  },
-  probeConnection(): Promise<ConnectionReport> {
-    return Promise.reject(new Error('openai-compatible probeConnection is not implemented yet'));
-  },
+  reasoningOptions,
+  listModels,
+  probeConnection: (provider, signal, options) => runConnectionProbe(openaiCompatibleAdapter, provider, signal, options),
 };

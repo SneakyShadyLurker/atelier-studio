@@ -21,6 +21,7 @@
   <a href="#set-up-with-your-ai-agent">Set up with AI</a> ·
   <a href="docs/deployment.md">Deploy a server</a> ·
   <a href="docs/user-guide.md">User guide</a> ·
+  <a href="docs/admin-guide.md">Admin guide</a> ·
   <a href="#sister-project-ephemera">Sister project: Ephemera</a>
 </p>
 
@@ -43,6 +44,7 @@ each user's work separate, down to the encryption of every stored file.
 | Try the interface without API keys or a GPU | [Getting started](docs/getting-started.md): download, install and generate a test image |
 | Run a server with real models and authenticated users | [Deployment](docs/deployment.md): prerequisites, encryption, first launch and maintenance |
 | Learn the everyday workflow | [Using Atelier](docs/user-guide.md): models, references, collections and templates |
+| Become an admin and finish the setup | [Admin guide](docs/admin-guide.md): where the admin panel is, what you must configure and what is optional |
 | Turn on Enhance, AI fill and Brainstorm | [Connect a text model](docs/connect-a-text-model.md): Ollama, LM Studio, OpenAI, Anthropic, OpenRouter and other compatible servers |
 
 The public repository contains the application, Docker builds, proxy examples
@@ -55,6 +57,10 @@ The local walkthrough uses **Mock Fast**, which produces small coloured test
 images so you can check the installation without spending provider credits.
 It then explains how to connect real generation. For a shared or public
 installation, follow the production guide before exposing the app.
+
+Image generation works as soon as a backend is connected. The text features
+need one more step in the app: an admin connects a text model and picks a
+default. The [Admin guide](docs/admin-guide.md) covers it in five steps.
 
 ## Set up with your AI agent
 
@@ -95,7 +101,8 @@ at generate time while your own text stays byte for byte, and Brainstorm
 streams fresh character concepts into the roll queue. Enhance rewrites a prompt
 for the selected model in one click. These features run on text models an
 admin connects in the app, such as a local Ollama or LM Studio, OpenAI,
-Anthropic or OpenRouter. Each person can pick their own model per task.
+Anthropic or OpenRouter ([Admin guide](docs/admin-guide.md)). Each person can
+pick their own model per task.
 
 ### ✦ Local models as data
 Each local model is a manifest and its ComfyUI graphs, validated at startup and
@@ -150,7 +157,7 @@ Neither app needs the other.
 ## Documentation
 
 [Getting started](docs/getting-started.md) · [Using Atelier](docs/user-guide.md) ·
-[Connect a text model](docs/connect-a-text-model.md) ·
+[Admin guide](docs/admin-guide.md) · [Connect a text model](docs/connect-a-text-model.md) ·
 [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) ·
 [Providers](docs/providers.md) · [Local models](docs/local-models.md) ·
 [Prompt Library authoring](docs/prompt-library-authoring.md) ·

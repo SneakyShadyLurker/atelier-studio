@@ -174,7 +174,7 @@ describe('POST /api/enhance-prompt', () => {
       seedLegacyText: true,
       CLIPROXY_BASE_URL: upstream,
       CLIPROXY_TOKEN: 'sk-x',
-      CLIPROXY_TEXT_MAX_RESPONSE_BYTES: '256',
+      TEXT_MAX_RESPONSE_BYTES: '256',
     });
     const events = await parseSse(await post(app, 'cat'));
     expect(events.some((e) => e.event === 'error')).toBe(true);

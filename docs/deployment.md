@@ -449,7 +449,7 @@ v57 is recorded, a v56 image refuses the database, so retain a forward-fix path
 instead of relying on the previous image alone.
 
 Schema v58 replaces the fixed text backends with text providers and models
-managed in the app's Text models view. **Upgrade note:** the `CLIPROXY_TEXT_MODEL_*` variables are removed in schema 58, and the migration reads them once on the first boot after upgrading. Keep your existing `CLIPROXY_*` values set for that boot so the migration can move your text models, and your users' saved picks, into a provider named CLIProxyAPI. Afterwards manage them in the Text models view and delete those per-model variables, which only cause a boot warning from then on.
+managed in the app's Text models view. **Upgrade note:** the `CLIPROXY_TEXT_MODEL_*` variables are removed in schema 58, and the migration reads them once on the first boot after upgrading. Keep your existing `CLIPROXY_*` values set for that boot so the migration can move your text models, and your users' saved picks, into a provider named CLIProxyAPI. Afterwards manage them in the Text models view and delete those per-model variables, which only cause a boot warning from then on. The text reply caps were renamed too: `CLIPROXY_TEXT_MAX_RESPONSE_BYTES` is now `TEXT_MAX_RESPONSE_BYTES` and `CLIPROXY_TEXT_INFER_MAX_RESPONSE_BYTES` is now `TEXT_INFER_MAX_RESPONSE_BYTES`. The old names keep working while the new ones are unset, with a warning at boot.
 
 Without `CLIPROXY_BASE_URL` and `CLIPROXY_TOKEN` on that boot nothing is moved,
 and saved text-model picks are dropped. The moved provider reads its key from

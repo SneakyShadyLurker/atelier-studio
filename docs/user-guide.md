@@ -24,6 +24,11 @@ Google key first. If the dialog reports that BYOK is not configured, the server
 operator needs to set `BYOK_ENCRYPTION_KEY`. Provider credits and quotas belong
 to the configured service or your own key.
 
+Text features such as **Enhance** need a text model, which an admin connects
+in the **Text models** view. If they answer "No text model is set up", ask
+your operator, or follow [Connect a text model](connect-a-text-model.md) if
+you run the server yourself.
+
 ## Open, download and reuse results
 
 Click a finished tile to open the lightbox. Use the arrows to move between
@@ -75,7 +80,8 @@ New installations do not include the operator's personal prompt library.
 - **Templates** hold reusable prompt text.
 - **Variable lists** provide alternatives for parts of a template.
 - **Dimensions** group tags that keep related choices coherent.
-- **Settings** controls supported text-model preferences.
+- **Settings** picks which text model writes for each task, and its reasoning
+  effort where the model offers one.
 
 Start with a simple reusable template, then add variables as you need them.
 The **Templates** control in the composer opens the picker. A roll queue lets
@@ -83,8 +89,17 @@ you prepare multiple prompts before generating them.
 
 **Enhance** asks a text model to rewrite a prompt. **Brainstorm** produces ideas
 for the queue, and `{{ai-fill: instruction}}` asks a text model to fill a part
-of a template at generation time. These actions require configured text-model
-access; a working image provider or local GPU alone does not guarantee it.
+of a template at generation time. These actions need a text model connected by
+an admin. A working image provider or local GPU alone does not provide one.
+
+In **Settings**, each task (Enhance, AI fill, Brainstorm and the rest) shows a
+model menu. **Use default** follows what the admin chose and names that model.
+Pick another model to use it for that task, and choose a reasoning effort if
+the model offers levels. A model that is offline right now cannot be picked,
+and if your pick goes offline, the task uses the default until it is back. The
+admin can set one text model to write every prompt for a particular image
+model. Your pick does not apply there, so the result can come from a different
+model than the one you chose.
 Read [Prompt Library authoring](prompt-library-authoring.md) for syntax,
 weights, dimensions and worked examples.
 

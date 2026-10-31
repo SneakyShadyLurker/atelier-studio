@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { act, renderHook } from '@testing-library/react';
 import type {
-  AiFillBackend,
   AiFillBatchRequest,
   AiFillRequest,
   GenerateRequest,
@@ -10,6 +9,7 @@ import type {
   TagDimension,
   VariableList,
 } from '@atelier/shared';
+import type { AiFillModel } from '../api/aiFill';
 import { ApiError } from '../api/client';
 import {
   APP_VIEW_PROMPTS,
@@ -36,12 +36,12 @@ const filled = (req: Pick<AiFillRequest, 'staticSegments' | 'instructions'>): Fi
 const resolveAiFillMock = mock((
   req: AiFillRequest,
   _signal?: AbortSignal,
-  _onBackend?: (backend: AiFillBackend) => void,
+  _onBackend?: (model: AiFillModel) => void,
 ): Promise<FillResult> => Promise.resolve(filled(req)));
 const resolveAiFillBatchMock = mock((
   req: AiFillBatchRequest,
   _signal?: AbortSignal,
-  _onBackend?: (backend: AiFillBackend) => void,
+  _onBackend?: (model: AiFillModel) => void,
 ): Promise<BatchMockResult> => Promise.resolve({ items: req.items.map((item) => ({ ok: true as const, ...filled(item) })) }));
 void mock.module('../api/aiFill', () => ({
   resolveAiFill: resolveAiFillMock,

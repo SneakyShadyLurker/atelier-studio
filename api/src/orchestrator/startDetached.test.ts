@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import pino from 'pino';
 import type { Config } from '../config';
 import { migrate } from '../db/migrate';
+import { testTextServices } from '../test/helpers';
 import { runBatchPipeline, type PreparedBatch } from '../orchestrator';
 import type { Pool } from '@atelier/shared';
 import type { RegistryEntry } from '../providers/registry';
@@ -104,6 +105,7 @@ function ctx(overrides: Partial<StartDetachedContext> = {}): StartDetachedContex
     logger: pino({ level: 'silent' }),
     runBatchPipeline: () => Promise.resolve(),
     config: {} as Config,
+    text: testTextServices(db),
     userId: 'u1',
     request: { prompt: 'p', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 },
     registryEntry,

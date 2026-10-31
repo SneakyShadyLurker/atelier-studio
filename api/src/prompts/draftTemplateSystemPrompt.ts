@@ -1,4 +1,4 @@
-import { MAX_DRAFT_RAW_BODY_CHARS } from '../providers/cliproxyText.config';
+import { MAX_DRAFT_RAW_BODY_CHARS } from '../providers/text/textBudgets';
 
 /**
  * Model-neutral template grammar and output contract. Inner output follows

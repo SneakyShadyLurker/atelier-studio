@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import type { TextServices } from './routing/textServices';
 import type {
   DoneEvent,
   GptModerationNotice,
@@ -80,6 +81,8 @@ export interface GenerationContext {
   db: Database;
   config: Config;
   logger: AppLogger;
+  /** Text-model routing for the fallback prompt condensation. */
+  text: TextServices;
   userId: string;
   request: ResolvedGenerateRequest;
   registryEntry: RegistryEntry;
@@ -174,8 +177,8 @@ export async function runBatchPipeline(prepared: PreparedBatch, ctx: GenerationC
     // Production queued requests were already prepared before GPU admission.
     // Keep the fail-open fallback for direct/legacy pipeline callers only.
     const condensed = ctx.promptPrepared ? request.prompt : await condenseBatchPrompt(request.prompt, request.modelId, {
-      db: ctx.db,
       config: ctx.config,
+      text: ctx.text,
       logger,
       userId: ctx.userId,
       signal: activeBatchController.signal,

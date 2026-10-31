@@ -153,6 +153,7 @@ describe('encrypted artifact serving', () => {
       logger: runtime.logger,
       keyStore: runtime.keyStore,
       healthSnapshot: () => new Map(),
+      text: runtime.text,
     });
     const deadline = Date.now() + 5_000;
     let status = '';

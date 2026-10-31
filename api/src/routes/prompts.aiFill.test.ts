@@ -1,22 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import { allowJevForProviderTests, resetJevForProviderTests } from '../test/jev-fixture';
 import { MAX_PROMPT_CHARS } from '@atelier/shared';
 import {
   AI_FILL_FIELD_SEPARATOR,
   AI_FILL_RECORD_SEPARATOR,
 } from '@atelier/shared/ai-fill';
-import { setCliproxyTextProviderForTests, type AiFillResult, type TestCliproxyTextProvider } from '../providers/cliproxyText';
-import type { AiFillProviderInput } from '../providers/cliproxyText';
-import { parseSseText, testRuntime } from '../test/helpers';
+import { type AiFillResult, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
+import type { AiFillProviderInput } from '../providers/text/featureHelpers';
+import { addTestTextModel, parseSseText, testRuntime, pickLegacyTextModel, legacyTextModelId } from '../test/helpers';
 import { enhancePool, resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { KREA_PROMPT_WORD_BUDGET } from '../prompts/promptBudget';
-import { writeTextBackendOverride } from '../routing/textBackendPreference';
 
 
 beforeEach(allowJevForProviderTests);
 afterEach(() => {
   resetJevForProviderTests();
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   resetLlmAdmissionForTests();
 });
 
@@ -25,7 +25,7 @@ async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
   if (Date.now() < 0) yield undefined as never;
 }
 
-function fakeProvider(aiFill: (input: AiFillProviderInput) => Promise<AiFillResult>): TestCliproxyTextProvider {
+function fakeProvider(aiFill: (input: AiFillProviderInput) => Promise<AiFillResult>): TestTextFeatureProvider {
   return {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
@@ -50,7 +50,7 @@ function frameData(frames: { event: string; data: unknown }[], event: string): R
 }
 
 function postAiFill(body: unknown, userId = 'alice') {
-  const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   return app.fetch(new Request('http://local/api/prompts/ai-fill', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': userId },
@@ -59,7 +59,7 @@ function postAiFill(body: unknown, userId = 'alice') {
 }
 
 function postAiFillBatch(body: unknown, userId = 'alice') {
-  const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   return app.fetch(new Request('http://local/api/prompts/ai-fill/batch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': userId },
@@ -70,7 +70,7 @@ function postAiFillBatch(body: unknown, userId = 'alice') {
 describe('POST /api/prompts/ai-fill', () => {
   test('routes Krea and MOSS to Kimi and gpt-image to GPT without classification', async () => {
     const seen: AiFillProviderInput[] = [];
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       return Promise.resolve({ type: 'ok', text: 'a red high-cut bikini' });
     }));
@@ -83,7 +83,7 @@ describe('POST /api/prompts/ai-fill', () => {
     const flashBackendIndex = flashFrames.findIndex((frame) => frame.event === 'backend');
     const flashResultIndex = flashFrames.findIndex((frame) => frame.event === 'result');
     expect(flashFrames[0]?.event).toBe('backend');
-    expect(frameData(flashFrames, 'backend').backend).toBe('kimi');
+    expect(frameData(flashFrames, 'backend').label).toBe('Kimi K3');
     expect(flashBackendIndex).toBeGreaterThanOrEqual(0);
     expect(flashResultIndex).toBeGreaterThan(flashBackendIndex);
 
@@ -94,7 +94,7 @@ describe('POST /api/prompts/ai-fill', () => {
     const gptBackendIndex = gptFrames.findIndex((frame) => frame.event === 'backend');
     const gptResultIndex = gptFrames.findIndex((frame) => frame.event === 'result');
     expect(gptFrames[0]?.event).toBe('backend');
-    expect(frameData(gptFrames, 'backend').backend).toBe('gpt');
+    expect(frameData(gptFrames, 'backend').label).toBe('GPT-6.1 Sol');
     expect(gptBackendIndex).toBeGreaterThanOrEqual(0);
     expect(gptResultIndex).toBeGreaterThan(gptBackendIndex);
 
@@ -103,7 +103,7 @@ describe('POST /api/prompts/ai-fill', () => {
       modelId: 'moss-image-sft',
       staticSegments: ['A lone figure, ', ', golden hour.'],
     })).text());
-    expect(frameData(mossFrames, 'backend').backend).toBe('kimi');
+    expect(frameData(mossFrames, 'backend').label).toBe('Kimi K3');
     // Kimi takes the Kimi-tuned body on Krea and MOSS too.
     expect(seen[0]?.systemPrompt).toContain("Atelier's Kimi K3 image-prompt compiler");
     expect(seen[2]?.systemPrompt).toContain("Atelier's Kimi K3 image-prompt compiler");
@@ -111,32 +111,32 @@ describe('POST /api/prompts/ai-fill', () => {
 
   test('a grok override selects the Grok backend frame', async () => {
     const seen: AiFillProviderInput[] = [];
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       return Promise.resolve({ type: 'ok', text: 'a red high-cut bikini' });
     }));
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
-    writeTextBackendOverride(runtime.db, 'alice', 'ai-fill', 'grok');
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    pickLegacyTextModel(runtime.db, 'alice', 'ai-fill', 'grok');
     const frames = parseSseText(await (await runtime.app.fetch(new Request('http://local/api/prompts/ai-fill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': 'alice' },
       body: JSON.stringify({ ...BODY, modelId: 'gemini-3-pro-image-preview' }),
     }))).text());
-    expect(frameData(frames, 'backend').backend).toBe('grok');
+    expect(frameData(frames, 'backend')).toEqual({ modelId: legacyTextModelId(runtime.db, 'grok'), label: 'Grok 4.7' });
     expect(seen).toHaveLength(1);
   });
 
   test('a pinned effort reaches every ai-fill call of its pin, including the format retry and batch', async () => {
     const seen: AiFillProviderInput[] = [];
     let call = 0;
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       call += 1;
       // An empty first answer forces the single route's format retry.
       return Promise.resolve({ type: 'ok', text: call === 1 ? '' : 'a red high-cut bikini' });
     }));
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
-    writeTextBackendOverride(runtime.db, 'alice', 'ai-fill', 'mimo', 'high');
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    pickLegacyTextModel(runtime.db, 'alice', 'ai-fill', 'mimo', 'high');
     const post = (path: string, body: unknown) => runtime.app.fetch(new Request(`http://local/api/prompts/${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': 'alice' },
@@ -155,37 +155,38 @@ describe('POST /api/prompts/ai-fill', () => {
 
   test('a mimo override selects the generic prompt variant', async () => {
     const seen: AiFillProviderInput[] = [];
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       return Promise.resolve({ type: 'ok', text: 'a red high-cut bikini' });
     }));
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
-    writeTextBackendOverride(runtime.db, 'alice', 'ai-fill', 'mimo');
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    pickLegacyTextModel(runtime.db, 'alice', 'ai-fill', 'mimo');
     const frames = parseSseText(await (await runtime.app.fetch(new Request('http://local/api/prompts/ai-fill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': 'alice' },
       body: JSON.stringify({ ...BODY, modelId: 'gemini-3-pro-image-preview' }),
     }))).text());
 
-    expect(frameData(frames, 'backend').backend).toBe('mimo');
+    expect(frameData(frames, 'backend').label).toBe('MiMo V2.6 Pro');
     expect(seen[0]?.systemPrompt).not.toContain('<root_authority priority="absolute">');
     expect(seen[0]?.systemPrompt).toContain("Atelier's image-prompt blank-filling engine");
     expect(seen[0]?.systemPrompt).not.toContain("Atelier's Kimi K3 image-prompt compiler");
   });
 
   test('happy path: splices the fill verbatim into the static segments', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: 'a red high-cut bikini' })));
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: 'a red high-cut bikini' })));
     const frames = parseSseText(await (await postAiFill(BODY)).text());
     expect(frames.some((f) => f.event === 'result')).toBe(true);
     expect(frameData(frames, 'result').prompt).toBe('A woman, a red high-cut bikini, golden hour.');
   });
 
   test('uses the ai-fill policy envelope instead of the cloud image timeout', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(async () => {
+    setTextModelProviderForTests(fakeProvider(async () => {
       await Bun.sleep(25);
       return { type: 'ok', text: 'a red high-cut bikini' };
     }));
     const runtime = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       CLOUD_TIMEOUT_MS: '5',
     });
@@ -200,7 +201,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
   test('uses the storage-derived budget unchanged off Krea and the smaller model budget on Krea', async () => {
     const seen: AiFillProviderInput[] = [];
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       return Promise.resolve({ type: 'ok', text: 'a red high-cut bikini' });
     }));
@@ -220,7 +221,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
   test('preserves the legacy prompt bytes, retry behavior, and result shape', async () => {
     const seen: AiFillProviderInput[] = [];
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       if (seen.length === 1) {
         return Promise.resolve({ type: 'ok', text: `first${AI_FILL_FIELD_SEPARATOR}second` });
@@ -239,14 +240,14 @@ describe('POST /api/prompts/ai-fill', () => {
   });
 
   test('count mismatch (too many fills) → error event, no result', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: `one${AI_FILL_FIELD_SEPARATOR}two` })));
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: `one${AI_FILL_FIELD_SEPARATOR}two` })));
     const frames = parseSseText(await (await postAiFill(BODY)).text());
     expect(frames.some((f) => f.event === 'result')).toBe(false);
     expect(frameData(frames, 'error').code).toBe('count-mismatch');
   });
 
   test('provider failure → error event with provider-error code', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(() => Promise.resolve({ type: 'failed', kind: 'permanent', status: 400, detail: 'x' })));
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({ type: 'failed', kind: 'permanent', status: 400, detail: 'x' })));
     const frames = parseSseText(await (await postAiFill(BODY)).text());
     expect(frames.find((f) => f.event === 'error')).toBeDefined();
     expect(frames.some((f) => f.event === 'result')).toBe(false);
@@ -254,7 +255,7 @@ describe('POST /api/prompts/ai-fill', () => {
   });
 
   test('quota failure → error event with quota-exhausted code and retryAfterSeconds', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(() => Promise.resolve({ type: 'failed', kind: 'quota', status: 429, detail: 'x', retryAfterSeconds: 900 })));
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({ type: 'failed', kind: 'quota', status: 429, detail: 'x', retryAfterSeconds: 900 })));
     const frames = parseSseText(await (await postAiFill(BODY)).text());
     const errorFrame = frameData(frames, 'error');
     expect(errorFrame.code).toBe('quota-exhausted');
@@ -265,7 +266,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
   test('over-length assembled prompt → error event', async () => {
     const huge = 'x'.repeat(MAX_PROMPT_CHARS + 1);
-    setCliproxyTextProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: huge })));
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: huge })));
     const frames = parseSseText(await (await postAiFill(BODY)).text());
     expect(frameData(frames, 'error').code).toBe('over-length');
   });
@@ -277,7 +278,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
   test('a refused fill → refusal error, no result, and no retry call', async () => {
     let calls = 0;
-    setCliproxyTextProviderForTests(fakeProvider(() => {
+    setTextModelProviderForTests(fakeProvider(() => {
       calls += 1;
       return Promise.resolve({ type: 'ok', text: PROD_REFUSAL });
     }));
@@ -288,8 +289,8 @@ describe('POST /api/prompts/ai-fill', () => {
   });
 
   test('a refusal logs only operational counts without the prompt or instructions', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: PROD_REFUSAL })));
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'info' });
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: PROD_REFUSAL })));
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'info' });
     const response = await runtime.app.fetch(new Request('http://local/api/prompts/ai-fill', {
       method: 'POST',
       headers: {
@@ -305,7 +306,7 @@ describe('POST /api/prompts/ai-fill', () => {
       .find((entry) => entry.event === 'ai_fill_refusal');
     expect(record).toMatchObject({
       userId: 'alice',
-      backend: 'gpt',
+      textModelId: legacyTextModelId(runtime.db, 'gpt'),
       modelId: 'gpt-image-2.5-sunburst',
       slot: 0,
       instructionCount: BODY.instructions.length,
@@ -317,7 +318,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
   test('a refusal that only appears on the format retry is still withheld', async () => {
     let calls = 0;
-    setCliproxyTextProviderForTests(fakeProvider(() => {
+    setTextModelProviderForTests(fakeProvider(() => {
       calls += 1;
       return Promise.resolve({
         type: 'ok',
@@ -335,11 +336,11 @@ describe('POST /api/prompts/ai-fill', () => {
     // a count miss, and the mismatch return would swallow the moderation record.
     const twoSlotBody = { ...BODY, staticSegments: ['A woman, ', ' in ', '.'], instructions: ['her swimsuit', 'the setting'] };
     let calls = 0;
-    setCliproxyTextProviderForTests(fakeProvider(() => {
+    setTextModelProviderForTests(fakeProvider(() => {
       calls += 1;
       return Promise.resolve({ type: 'ok', text: calls === 1 ? 'only one field' : PROD_REFUSAL });
     }));
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'info' });
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'info' });
     const response = await runtime.app.fetch(new Request('http://local/api/prompts/ai-fill', {
       method: 'POST',
       headers: {
@@ -356,7 +357,7 @@ describe('POST /api/prompts/ai-fill', () => {
   });
 
   test('non-library user → 404, no stream', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: 'unused' })));
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({ type: 'ok', text: 'unused' })));
     const res = await postAiFill(BODY, 'not-a-library-user');
     expect(res.status).toBe(404);
   });
@@ -488,7 +489,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
     test('simulate retries on the selected backend and splices recovered fills', async () => {
       let calls = 0;
-      setCliproxyTextProviderForTests(fakeProvider(() => {
+      setTextModelProviderForTests(fakeProvider(() => {
         calls += 1;
         // 1st: a single blob — 1 fill, want 2 → mismatch triggers retry.
         if (calls === 1) return Promise.resolve({ type: 'ok', text: 'one-blob-no-separator' });
@@ -502,7 +503,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
     test('Generate path retries once on mismatch', async () => {
       let calls = 0;
-      setCliproxyTextProviderForTests(fakeProvider(() => {
+      setTextModelProviderForTests(fakeProvider(() => {
         calls += 1;
         // 1st: a single blob — 1 fill, want 2 → mismatch (e.g. a truncated answer).
         if (calls === 1) return Promise.resolve({ type: 'ok', text: 'one-blob-no-separator' });
@@ -516,7 +517,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
     test('Generate path: a retry that also mismatches surfaces count-mismatch', async () => {
       let calls = 0;
-      setCliproxyTextProviderForTests(fakeProvider(() => {
+      setTextModelProviderForTests(fakeProvider(() => {
         calls += 1;
         return Promise.resolve({ type: 'ok', text: 'still-one-blob' });
       }));
@@ -528,7 +529,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
     test('simulate: a retry that also mismatches surfaces count-mismatch', async () => {
       let calls = 0;
-      setCliproxyTextProviderForTests(fakeProvider(() => {
+      setTextModelProviderForTests(fakeProvider(() => {
         calls += 1;
         return Promise.resolve({ type: 'ok', text: 'still-one-blob' });
       }));
@@ -537,6 +538,71 @@ describe('POST /api/prompts/ai-fill', () => {
       expect(frames.some((f) => f.event === 'result')).toBe(false);
       expect(frameData(frames, 'error').code).toBe('count-mismatch');
     });
+  });
+});
+
+describe('ai-fill text model routing', () => {
+  function post(app: ReturnType<typeof testRuntime>['app'], path: string, body: unknown) {
+    return app.fetch(new Request(`http://local/api/prompts/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': 'alice' },
+      body: JSON.stringify(body),
+    }));
+  }
+  const BATCH = { items: [{ staticSegments: ['First ', '.'], instructions: ['wardrobe'] }], modelId: 'krea-2-gonzalomo' };
+
+  test('the prompt body variant comes from the serving row, which the backend frame names', async () => {
+    const seen: AiFillProviderInput[] = [];
+    setTextModelProviderForTests(fakeProvider((input) => {
+      seen.push(input);
+      return Promise.resolve({ type: 'ok', text: 'a red high-cut bikini' });
+    }));
+    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const store = runtime.text.store;
+    const model = await addTestTextModel(store, { modelId: 'local-writer', displayName: 'Local Writer', promptVariant: 'kimi' });
+    store.setDefault('default', model.id);
+
+    const kimiFrames = parseSseText(await (await post(runtime.app, 'ai-fill', { ...BODY, modelId: 'krea-2-gonzalomo' })).text());
+    expect(frameData(kimiFrames, 'backend')).toEqual({ modelId: model.id, label: 'Local Writer' });
+    expect(seen[0]?.systemPrompt).toContain("Atelier's Kimi K3 image-prompt compiler");
+
+    store.updateModel(model.id, { promptVariant: 'generic' });
+    await (await post(runtime.app, 'ai-fill', { ...BODY, modelId: 'krea-2-gonzalomo' })).text();
+    await (await post(runtime.app, 'ai-fill/batch', BATCH)).text();
+    expect(seen[1]?.systemPrompt).toContain("Atelier's image-prompt blank-filling engine");
+    expect(seen[2]?.systemPrompt).not.toContain('Kimi K3 multi-item');
+  });
+
+  test('no text model → 409 TEXT_MODEL_NOT_CONFIGURED before any stream, single and batch', async () => {
+    let calls = 0;
+    setTextModelProviderForTests(fakeProvider(() => {
+      calls += 1;
+      return Promise.resolve({ type: 'ok', text: 'x' });
+    }));
+    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    for (const [path, body] of [['ai-fill', BODY], ['ai-fill/batch', BATCH]] as const) {
+      const res = await post(runtime.app, path, body);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: 'No text model is set up. An admin can add one under Text models.',
+        code: 'TEXT_MODEL_NOT_CONFIGURED',
+      });
+    }
+    expect(calls).toBe(0);
+  });
+
+  test('a locked writer that is turned off → 409 TEXT_MODEL_UNAVAILABLE, never another model', async () => {
+    let calls = 0;
+    setTextModelProviderForTests(fakeProvider(() => {
+      calls += 1;
+      return Promise.resolve({ type: 'ok', text: 'x' });
+    }));
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    runtime.text.store.updateModel(legacyTextModelId(runtime.db, 'gpt'), { enabled: false });
+    const res = await post(runtime.app, 'ai-fill', BODY);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe('TEXT_MODEL_UNAVAILABLE');
+    expect(calls).toBe(0);
   });
 });
 
@@ -553,7 +619,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
 
   test('uses the target-aware budget for every batched item', async () => {
     const seen: AiFillProviderInput[] = [];
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       return Promise.resolve({ type: 'ok', text: 'red dress' });
     }));
@@ -569,11 +635,12 @@ describe('POST /api/prompts/ai-fill/batch', () => {
   });
 
   test('uses the batch policy envelope instead of the cloud image timeout', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(async () => {
+    setTextModelProviderForTests(fakeProvider(async () => {
       await Bun.sleep(25);
       return { type: 'ok', text: 'red dress' };
     }));
     const runtime = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       CLOUD_TIMEOUT_MS: '5',
     });
@@ -590,7 +657,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
 
   test('splits records, salvages valid items, and preserves request order', async () => {
     let calls = 0;
-    setCliproxyTextProviderForTests(fakeProvider(() => {
+    setTextModelProviderForTests(fakeProvider(() => {
       calls += 1;
       return Promise.resolve({
         type: 'ok',
@@ -611,7 +678,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
 
   test('salvages complete leading records from a truncated four-item response without retrying', async () => {
     let calls = 0;
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       calls += 1;
       expect(input.batchSize).toBe(4);
       return Promise.resolve({
@@ -634,7 +701,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
 
   test('a refused record is dropped while its healthy siblings still ship', async () => {
     let calls = 0;
-    setCliproxyTextProviderForTests(fakeProvider(() => {
+    setTextModelProviderForTests(fakeProvider(() => {
       calls += 1;
       return Promise.resolve({
         type: 'ok',
@@ -663,11 +730,11 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     // too. It must still be recognised as a refusal: no group retry, and a
     // moderation record rather than a silent mismatched drop.
     let calls = 0;
-    setCliproxyTextProviderForTests(fakeProvider(() => {
+    setTextModelProviderForTests(fakeProvider(() => {
       calls += 1;
       return Promise.resolve({ type: 'ok', text: 'Cannot comply with this request. The character is sixteen.' });
     }));
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'info' });
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'info' });
     const response = await runtime.app.fetch(new Request('http://local/api/prompts/ai-fill/batch', {
       method: 'POST',
       headers: {
@@ -688,7 +755,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
   });
 
   test('an all-refused batch reports the refusal code rather than a provider error', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(() => Promise.resolve({
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({
       type: 'ok',
       text: [
         'I cannot and will not write image prompts depicting minors.',
@@ -705,13 +772,14 @@ describe('POST /api/prompts/ai-fill/batch', () => {
 
   test('retries the entire backend group once with byte-identical prompts after an extra-record protocol violation', async () => {
     const seen: AiFillProviderInput[] = [];
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       return Promise.resolve(seen.length === 1
         ? { type: 'ok', text: ['red dress', 'blue coat', 'extra coat'].join(AI_FILL_RECORD_SEPARATOR) }
         : { type: 'ok', text: `red dress${AI_FILL_RECORD_SEPARATOR}blue coat` });
     }));
     const runtime = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       LOG_LEVEL: 'info',
     });
@@ -735,7 +803,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
 
   test('batch routes Krea to Kimi and gpt-image to GPT with one group each and no classification', async () => {
     const seen: AiFillProviderInput[] = [];
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       const groupSize = input.userContent.match(/<item number=/g)?.length ?? 0;
       const fill = 'adult fill';
@@ -760,11 +828,11 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     expect(seen).toHaveLength(2);
     expect(seen[0]?.systemPrompt).toContain('Kimi K3 multi-item');
     expect(seen[1]?.systemPrompt).not.toContain('Kimi K3 multi-item');
-    expect(flashFrames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toEqual([
-      { backend: 'kimi' },
+    expect(flashFrames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toMatchObject([
+      { label: 'Kimi K3' },
     ]);
-    expect(gptFrames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toEqual([
-      { backend: 'gpt' },
+    expect(gptFrames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toMatchObject([
+      { label: 'GPT-6.1 Sol' },
     ]);
     expect(frameData(gptFrames, 'result').items).toEqual([
       { ok: true, prompt: 'A 25-year-old woman adult fill.', fills: ['adult fill'] },
@@ -775,7 +843,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
 
   test('batch keeps a single group for its shared target model', async () => {
     const seen: AiFillProviderInput[] = [];
-    setCliproxyTextProviderForTests(fakeProvider((input) => {
+    setTextModelProviderForTests(fakeProvider((input) => {
       seen.push(input);
       const groupSize = input.userContent.match(/<item number=/g)?.length ?? 0;
       return Promise.resolve({
@@ -792,8 +860,8 @@ describe('POST /api/prompts/ai-fill/batch', () => {
       modelId: 'gpt-image-2.5-sunburst',
     })).text());
     expect(seen).toHaveLength(1);
-    expect(frames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toEqual([
-      { backend: 'gpt' },
+    expect(frames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toMatchObject([
+      { label: 'GPT-6.1 Sol' },
     ]);
     expect(frameData(frames, 'result').items).toEqual([
       { ok: true, prompt: 'A 25-year-old woman adult fill.', fills: ['adult fill'] },
@@ -808,11 +876,12 @@ describe('POST /api/prompts/ai-fill/batch', () => {
       release?: (result: AiFillResult) => void;
     } = {};
     const started = new Promise<void>((resolve) => { state.started = resolve; });
-    setCliproxyTextProviderForTests(fakeProvider(() => {
+    setTextModelProviderForTests(fakeProvider(() => {
       state.started?.();
       return new Promise<AiFillResult>((resolve) => { state.release = resolve; });
     }));
     const runtime = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       MAX_CONCURRENT_LLM_ENHANCE_PER_USER: '2',
       MAX_CONCURRENT_LLM_TOTAL: '2',

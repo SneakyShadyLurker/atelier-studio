@@ -9,6 +9,7 @@ import { sessionScopeGuard } from './auth/sessionScope';
 import { logAppliedPragmas, openDb } from './db/client';
 import { logDbIntegrity, reportIfCorruption } from './db/integrity';
 import { migrate, MigrationError } from './db/migrate';
+import { legacyTextSeed, staleLegacyTextModelEnvVars } from './db/textSeed';
 import { importMasterKey } from './crypto/aes-gcm';
 import { importHmacKey } from './crypto/fingerprint';
 import { createKeyStore, type KeyStore } from './keystore';
@@ -23,9 +24,8 @@ import {
 } from './storage/encryptionBoot';
 import { startupReconcile } from './lifecycle/startup-reconcile';
 import { startHealthProbe, type HealthProbeHandle } from './lifecycle/health-probe';
-import { startModelInventory, type ModelInventoryHandle } from './lifecycle/model-inventory';
-import { configureTextBackendAvailability } from './routing/textBackendAvailability';
-import { textBackendModels } from './providers/cliproxyText.config';
+import { startTextAvailability, type TextAvailabilityHandle } from './lifecycle/text-availability';
+import { createTextServices, textProviderStoreFor, UNKNOWN_TEXT_AVAILABILITY, type TextServices } from './routing/textServices';
 import { drainComfyUi } from './providers/comfyui';
 import { catalogForConfig } from './providers/comfyui/catalog';
 import { queueSlotsFor, registryForConfig } from './providers/registry';
@@ -57,6 +57,9 @@ import { MAX_UPLOAD_REQUEST_BYTES, uploadsRoutes } from './routes/uploads';
 import { jsonBodyLimit } from './routes/_json-body-limit';
 import { sequencesRoutes } from './routes/sequences';
 import { storiesRoutes } from './routes/stories';
+import { textModelsRoutes } from './routes/textModels';
+import { textProvidersRoutes } from './routes/textProviders';
+import { textRoutingRoutes } from './routes/textRouting';
 import { ephemeraRoutes } from './routes/ephemera';
 import { configureStitchQueue } from './orchestrator/stitchQueue';
 import { configureStoryDriver, recoverStories, stopStoryDriver } from './orchestrator/storyDriver';
@@ -74,16 +77,19 @@ export interface AppDeps {
    * as available (empty snapshot) — matching v0 behavior pre-probe.
    */
   healthProbe?: HealthProbeHandle;
+  /** The process's text-model services (boot builds them); built from `db` and `config` when omitted. */
+  text?: TextServices;
   /**
-   * CLIProxyAPI `/v1/models` poller. When omitted, the inventory is unknown and
-   * every text backend counts as available (fail-open).
+   * Per-provider text-model listing poller, used only when `text` is omitted.
+   * When both are omitted, every model is 'unknown' (fail-open); tests inject fakes here.
    */
-  modelInventory?: ModelInventoryHandle;
+  textAvailability?: TextAvailabilityHandle;
 }
 
-// CLIProxyAPI inventory refresh cadence and per-request budget.
-const MODEL_INVENTORY_INTERVAL_MS = 60_000;
-const MODEL_INVENTORY_TIMEOUT_MS = 5_000;
+// Refresh cadence and per-request budget of the per-provider text-model
+// listing pollers (spec § 9.1: 60 s / 5 s).
+const TEXT_AVAILABILITY_INTERVAL_MS = 60_000;
+const TEXT_AVAILABILITY_TIMEOUT_MS = 5_000;
 
 const EMPTY_SNAPSHOT: ReadonlyMap<string, ModelAvailability> = new Map();
 const ALWAYS_AVAILABLE: HealthProbeHandle = {
@@ -132,7 +138,10 @@ export function createKeyStoreForConfig(config: Config, db: Database): KeyStore 
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const probe = deps.healthProbe ?? ALWAYS_AVAILABLE;
-  configureTextBackendAvailability(deps.modelInventory, textBackendModels(deps.config));
+  const text = deps.text ?? createTextServices({
+    store: textProviderStoreFor(deps.config, deps.db),
+    availability: deps.textAvailability ?? UNKNOWN_TEXT_AVAILABILITY,
+  });
   configureStitchQueue({ db: deps.db, config: deps.config, logger: deps.logger });
   // Once per app, before any route or queue worker can acquire an LLM slot.
   configureLlmAdmissionPools(deps.config);
@@ -142,10 +151,11 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     logger: deps.logger,
     keyStore: deps.keyStore,
     healthSnapshot: () => probe.snapshot(),
+    text,
   };
   const kickLocalQueue = (): void => { kickQueues(dispatchDeps); };
-  configureQueuedPromptPreparation({ db: deps.db, config: deps.config, logger: deps.logger, kickLocalQueue });
-  configureStoryDriver({ db: deps.db, config: deps.config, logger: deps.logger, kickLocalQueue });
+  configureQueuedPromptPreparation({ db: deps.db, config: deps.config, logger: deps.logger, text, kickLocalQueue });
+  configureStoryDriver({ db: deps.db, config: deps.config, logger: deps.logger, text, kickLocalQueue });
   // Owned here (not only in boot) so the test runtime exercises the production
   // scheduling wiring; boot builds the app before its first queue kick.
   configureQueueScheduling({
@@ -203,6 +213,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     c.set('keyStore', deps.keyStore);
     c.set('healthSnapshot', healthSnapshot);
     c.set('probeModelNow', (modelId) => probe.probeNow(modelId));
+    c.set('text', text);
     await next();
   });
   app.route('/api', modelsRoutes);
@@ -221,6 +232,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.route('/api', ephemeraRoutes);
   app.route('/api', sequencesRoutes);
   app.route('/api', storiesRoutes);
+  app.route('/api', textModelsRoutes);
+  app.route('/api', textProvidersRoutes);
+  app.route('/api', textRoutingRoutes);
   app.notFound((c) => c.json({ error: 'not found' }, 404));
   app.onError((err, c) => {
     // HTTPException is the recommended Hono 4 escape hatch for typed
@@ -256,7 +270,8 @@ export async function boot(): Promise<{
   db: Database;
   logger: AppLogger;
   healthProbe: HealthProbeHandle;
-  modelInventory: ModelInventoryHandle;
+  /** Per-provider text-model listing pollers (spec § 9.1); stopped at shutdown. */
+  textAvailability: TextAvailabilityHandle;
   unsealServer: { stop: () => unknown } | null;
 }> {
   const config = loadConfig();
@@ -270,7 +285,22 @@ export async function boot(): Promise<{
   setupSharpDefaults();
   const db = openDb({ dataDir: config.DATA_DIR });
   logAppliedPragmas(db, logger);
-  migrate(db, config.DATA_DIR, { log: logger });
+  // Migration 58 seeds the legacy CLIProxyAPI text provider from this, but only
+  // on an upgrade: migrate() ignores it when the database is new.
+  const textSeed = legacyTextSeed(config, registryForConfig(config).map((entry) => entry.model.id));
+  const { startVersion } = migrate(db, config.DATA_DIR, { log: logger, ...(textSeed ? { textSeed } : {}) });
+  // Once per boot, and only when the variables did nothing on this boot (the
+  // seed already ran, or nothing seeds from them).
+  const staleTextModelVars = staleLegacyTextModelEnvVars(process.env, {
+    startVersion,
+    seedOffered: textSeed !== undefined,
+  });
+  if (staleTextModelVars.length > 0) {
+    logger.warn(
+      { event: 'legacy_text_model_env', vars: staleTextModelVars },
+      'CLIPROXY_TEXT_MODEL_* is no longer read; manage text models in the app (Text models view)',
+    );
+  }
   // Runs after migrate so a schema upgrade can't be mistaken for damage, and
   // before startupReconcile so the log records the state the DB arrived in
   // rather than the state our own boot writes left it in.
@@ -284,16 +314,9 @@ export async function boot(): Promise<{
   const unsealServer = unsealSocketPath
     ? startUnsealSocket({ path: unsealSocketPath, keyring: storage, dataDir: config.DATA_DIR, db, logger })
     : null;
-  let bootDeps: DispatchDeps | null = null;
   configureStitchQueue({ db, config, logger });
-  configureStoryDriver({
-    db,
-    config,
-    logger,
-    kickLocalQueue: () => {
-      if (bootDeps) kickQueues(bootDeps);
-    },
-  });
+  // The story driver is configured by createApp below (it needs the text
+  // services), before recoverStories or the first queue kick.
   startupReconcile(db, config.DATA_DIR, logger, {
     uploadTtlMs: config.UPLOAD_TTL_MS,
     orphanThreshold: config.RECONCILE_ORPHAN_THRESHOLD,
@@ -318,28 +341,29 @@ export async function boot(): Promise<{
     intervalMs: config.HEALTH_PROBE_INTERVAL_MS,
     probeTimeoutMs: config.HEALTH_PROBE_TIMEOUT_MS,
   });
-  const modelInventory = startModelInventory({
-    baseUrl: config.CLIPROXY_BASE_URL,
-    token: config.CLIPROXY_TOKEN,
+  const textStore = textProviderStoreFor(config, db);
+  const textAvailability = startTextAvailability({
+    store: textStore,
     logger,
-    intervalMs: MODEL_INVENTORY_INTERVAL_MS,
-    timeoutMs: MODEL_INVENTORY_TIMEOUT_MS,
+    intervalMs: TEXT_AVAILABILITY_INTERVAL_MS,
+    timeoutMs: TEXT_AVAILABILITY_TIMEOUT_MS,
   });
-  bootDeps = {
+  const text = createTextServices({ store: textStore, availability: textAvailability });
+  const bootDeps: DispatchDeps = {
     db,
     config,
     logger,
     keyStore,
     healthSnapshot: () => healthProbe.snapshot(),
+    text,
   };
   // createApp configures queue scheduling; it must precede the first kick so a
   // recovered local queue is dequeued under the production residency mapping.
-  const app = createApp({ config, db, logger, keyStore, healthProbe, modelInventory });
+  const app = createApp({ config, db, logger, keyStore, healthProbe, text });
   configureUpstreamGateWiring(bootDeps);
   // Queued work that reads stored artifacts waits while storage is sealed
   // (dequeue gate); resume it the moment the root arrives.
-  const unsealedDeps = bootDeps;
-  storage.onUnsealed(() => { kickQueues(unsealedDeps); });
+  storage.onUnsealed(() => { kickQueues(bootDeps); });
   kickQueues(bootDeps);
   recoverStories();
   return {
@@ -348,14 +372,14 @@ export async function boot(): Promise<{
     db,
     logger,
     healthProbe,
-    modelInventory,
+    textAvailability,
     unsealServer,
   };
 }
 
 if (import.meta.main) {
   try {
-    const { app, config, db, logger, healthProbe, modelInventory, unsealServer } = await boot();
+    const { app, config, db, logger, healthProbe, textAvailability, unsealServer } = await boot();
     // Process-level safety net so unexpected throws in async paths
     // (orchestrator pipeline, etc.) emit JSON pino logs instead of Bun's
     // default freeform stack — operators grep level:60 / level:50.
@@ -407,7 +431,7 @@ if (import.meta.main) {
       const storyDriverDrain = stopStoryDriver();
       logger.info({ signal }, 'shutdown: stopping accept');
       healthProbe.stop();
-      modelInventory.stop();
+      textAvailability.stop();
       unsealServer?.stop();
       // Abort in-flight batches with the typed reason so the orchestrator's
       // cancel path emits a terminal SSE event before tearing down. Without
@@ -444,14 +468,17 @@ if (import.meta.main) {
       // queue-delete before process.exit. Bounded by the same deadline as
       // the rest of the drain so a wedged ComfyUI host can't pin shutdown.
       const comfyCancelDrain = drainComfyUi();
-      // healthProbe.stop() and modelInventory.stop() above aborted any
+      // healthProbe/textAvailability.stop() above aborted any
       // in-flight fetch; drain() waits for that round's settle so a probe
       // can't outlive process.exit with an open socket. Same deadline cap as
       // the orchestrator drain.
       const probeDrain = healthProbe.drain();
-      const inventoryDrain = modelInventory.drain();
+      const textAvailabilityDrain = textAvailability.drain();
       const drained = await Promise.race([
-        Promise.all([drain, orchestratorDrain, preparationDrain, storyDriverDrain, probeDrain, inventoryDrain, comfyCancelDrain]).then(() => true),
+        Promise.all([
+          drain, orchestratorDrain, preparationDrain, storyDriverDrain, probeDrain,
+          textAvailabilityDrain, comfyCancelDrain,
+        ]).then(() => true),
         deadline,
       ]).catch((err: unknown) => {
         logger.error({ err }, 'shutdown: drain failed');

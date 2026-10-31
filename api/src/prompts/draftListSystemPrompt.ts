@@ -1,5 +1,5 @@
 // System prompt for the variable-list drafter (single exported const string,
-// consumed verbatim by providers/cliproxyText.ts as the `system` message).
+// consumed verbatim by providers/text/textModel.ts as the `system` message).
 // Product-owned content — edit the text directly here to retune behaviour.
 export const DRAFT_LIST_SYSTEM_PROMPT = `You generate option values for a "variable list" used inside image-generation prompt templates. A variable list has a short name and a set of option values that a template randomly picks from.
 

@@ -42,6 +42,7 @@ each user's work separate, down to the encryption of every stored file.
 | Try the interface without API keys or a GPU | [Getting started](docs/getting-started.md): download, install and generate a test image |
 | Run a server with real models and authenticated users | [Deployment](docs/deployment.md): prerequisites, encryption, first launch and maintenance |
 | Learn the everyday workflow | [Using Atelier](docs/user-guide.md): models, references, collections and templates |
+| Turn on Enhance, AI fill and Brainstorm | [Connect a text model](docs/connect-a-text-model.md): Ollama, LM Studio, OpenAI, Anthropic, OpenRouter and other compatible servers |
 
 The public repository contains the application, Docker builds, proxy examples
 and the ComfyUI worker. No private repository or operator-specific overlay is
@@ -80,9 +81,9 @@ For a manual walkthrough, open [Getting started](docs/getting-started.md).
 ## Highlights
 
 ### ✦ One prompt box, every backend
-Cloud generation through CLIProxyAPI or another OpenAI-compatible upstream,
-Google Gemini with each user's own key, and local Krea 2 and MOSS models on
-ComfyUI share one composer, one model menu and one history. Partial previews
+GPT Image through a CLIProxyAPI-compatible upstream, Google Gemini with each
+user's own key, and local Krea 2 and MOSS models on ComfyUI share one composer,
+one model menu and one history. Partial previews
 stream over SSE, batches queue when a pool is busy, and in-flight tiles can be
 canceled.
 
@@ -91,7 +92,9 @@ Reusable templates, weighted variable lists and tag dimensions that keep random
 picks coherent. `{{ai-fill: …}}` blanks let a text model fill parts of a prompt
 at generate time while your own text stays byte for byte, and Brainstorm
 streams fresh character concepts into the roll queue. Enhance rewrites a prompt
-for the selected model in one click.
+for the selected model in one click. These features run on text models an
+admin connects in the app, such as a local Ollama or LM Studio, OpenAI,
+Anthropic or OpenRouter. Each person can pick their own model per task.
 
 ### ✦ Local models as data
 Each local model is a manifest and its ComfyUI graphs, validated at startup and
@@ -127,6 +130,7 @@ volume they live on.
 ## Documentation
 
 [Getting started](docs/getting-started.md) · [Using Atelier](docs/user-guide.md) ·
+[Connect a text model](docs/connect-a-text-model.md) ·
 [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) ·
 [Providers](docs/providers.md) · [Local models](docs/local-models.md) ·
 [Prompt Library authoring](docs/prompt-library-authoring.md) ·

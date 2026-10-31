@@ -5,7 +5,7 @@ import * as queue from '../orchestrator/queue';
 import { queueSlotsFor } from '../providers/registry';
 import { kickQueues, queuedBatchStillRunnable } from '../orchestrator/dispatch';
 import { DEQUEUE_RETRY_MS } from '../orchestrator/dequeue';
-import { jsonRequest, testRuntime } from './helpers';
+import { jsonRequest, testRuntime, testTextServices } from './helpers';
 
 test('POST /api/generate returns 201 status=running when a slot is available', async () => {
   resetConcurrencyForTests();
@@ -288,7 +288,7 @@ test('recovered queued batch is kicked after startup reconciliation', async () =
     force: config.RECONCILE_FORCE,
     dbIntegrityOk: true,
   });
-  kickQueues({ db, config, logger, keyStore, healthSnapshot: () => new Map() });
+  kickQueues({ db, config, logger, keyStore, healthSnapshot: () => new Map(), text: testTextServices(db, config) });
 
   await waitFor(() => db.query<{ status: string }, [string]>('SELECT status FROM batches WHERE id = ?').get(batchId)?.status === 'done' ? true : null);
   expect(queue.__queueTest.lengthOf('shared')).toBe(0);

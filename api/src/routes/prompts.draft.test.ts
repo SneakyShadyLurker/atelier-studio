@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { DraftVariableListResponse, VariableList } from '@atelier/shared';
-import { parseSseText, restoreFetch, testRuntime } from '../test/helpers';
+import { parseSseText, pickLegacyTextModel, restoreFetch, testRuntime } from '../test/helpers';
+import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 
 type RT = ReturnType<typeof testRuntime>;
 const servers: Bun.Server<unknown>[] = [];
@@ -10,7 +11,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.stop(true)));
 });
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: handler });
+  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }
@@ -77,20 +78,20 @@ function draft(app: RT['app'], listId: string, body: unknown, userId = 'alice') 
 
 describe('POST /api/prompts/lists/:id/draft', () => {
   test('404 for a non-allowlisted user (gate, leak-safe)', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await draft(app, crypto.randomUUID(), { name: 'x', existing: [] }, 'mallory');
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'not found' });
   });
 
   test('404 when the list is not owned by the user', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await draft(app, crypto.randomUUID(), { name: 'x', existing: [] }, 'alice');
     expect(res.status).toBe(404);
   });
 
   test('400 on an invalid body', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const list = await createList(app, 'Colours');
     const res = await draft(app, list.id, { existing: [] });
     expect(res.status).toBe(400);
@@ -98,7 +99,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
 
   test('returns entries, deduped vs existing + capped to target', async () => {
     const up = serve(() => modelSse({ kind: 'entries', entries: ['Red', 'blue', 'green', 'green'] }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
     const list = await createList(app, 'Colours');
     const res = await draft(app, list.id, { name: 'Colours', existing: ['red'] });
     expect(res.status).toBe(200);
@@ -106,9 +107,23 @@ describe('POST /api/prompts/lists/:id/draft', () => {
     expect(done).toEqual({ kind: 'entries', entries: ['blue', 'green'] });
   });
 
+  test("the user's pinned effort reaches the wire", async () => {
+    const efforts: unknown[] = [];
+    const up = serve(async (req) => {
+      efforts.push((await req.json() as { reasoning_effort?: unknown }).reasoning_effort);
+      return modelSse({ kind: 'entries', entries: ['blue'] });
+    });
+    const { app, db } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
+    pickLegacyTextModel(db, 'alice', 'list-draft', 'kimi', 'high');
+    const list = await createList(app, 'Colours');
+    const { done } = await readDraft(await draft(app, list.id, { name: 'Colours', existing: [] }));
+    expect(done).toEqual({ kind: 'entries', entries: ['blue'] });
+    expect(efforts).toEqual(['high']);
+  });
+
   test('still drafts up to 20 new entries when the list already has 20+ options', async () => {
     const up = serve(() => modelSse({ kind: 'entries', entries: ['Crimson', 'Cobalt', 'Olive'] }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
     const list = await createList(app, 'Colours');
     const existing = Array.from({ length: 25 }, (_, i) => `colour ${i}`);
     const res = await draft(app, list.id, { name: 'Colours', existing });
@@ -120,7 +135,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('clamps target so the list never exceeds the 200-option cap', async () => {
     const twenty = Array.from({ length: 20 }, (_, i) => `n${i}`);
     const up = serve(() => modelSse({ kind: 'entries', entries: twenty }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', MAX_OPTIONS_PER_LIST: '200' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', MAX_OPTIONS_PER_LIST: '200' });
     const list = await createList(app, 'Colours');
     const existing = Array.from({ length: 198 }, (_, i) => `e${i}`);
     const res = await draft(app, list.id, { name: 'Colours', existing });
@@ -133,7 +148,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('drafts exactly the remaining slots one below the cap (199 -> 1)', async () => {
     const twenty = Array.from({ length: 20 }, (_, i) => `n${i}`);
     const up = serve(() => modelSse({ kind: 'entries', entries: twenty }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', MAX_OPTIONS_PER_LIST: '200' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', MAX_OPTIONS_PER_LIST: '200' });
     const list = await createList(app, 'Colours');
     const existing = Array.from({ length: 199 }, (_, i) => `e${i}`);
     const res = await draft(app, list.id, { name: 'Colours', existing });
@@ -144,7 +159,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
 
   test('returns no entries when the list is at the cap', async () => {
     const up = serve(() => modelSse({ kind: 'entries', entries: ['x', 'y'] }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', MAX_OPTIONS_PER_LIST: '200' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', MAX_OPTIONS_PER_LIST: '200' });
     const list = await createList(app, 'Colours');
     const existing = Array.from({ length: 200 }, (_, i) => `e${i}`);
     const res = await draft(app, list.id, { name: 'Colours', existing });
@@ -160,6 +175,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
     // the save endpoint enforces, so a 50-item list can only gain 10 more
     // (60 - 50) — never 20, which would produce an unsaveable 70-option list.
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x',
       MAX_OPTIONS_PER_LIST: '60',
     });
@@ -174,6 +190,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('seed drafts with an empty existing list and description target 10 entries', async () => {
     const upstream = draftServer({ kind: 'entries', entries: ['Siamese'] });
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: upstream.url, CLIPROXY_TOKEN: 'sk-x',
     });
     const list = await createList(app, 'Cat breeds');
@@ -186,6 +203,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('described non-empty drafts keep the expand target of 20 entries', async () => {
     const upstream = draftServer({ kind: 'entries', entries: ['Siamese'] });
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: upstream.url, CLIPROXY_TOKEN: 'sk-x',
     });
     const list = await createList(app, 'Cat breeds');
@@ -202,6 +220,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('described non-empty drafts clamp the expand target to the remaining cap', async () => {
     const upstream = draftServer({ kind: 'entries', entries: ['Siamese'] });
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: upstream.url, CLIPROXY_TOKEN: 'sk-x',
       MAX_OPTIONS_PER_LIST: '5',
     });
@@ -219,6 +238,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('empty drafts without a description keep the expand target of 20 entries', async () => {
     const upstream = draftServer({ kind: 'entries', entries: ['Siamese'] });
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: upstream.url, CLIPROXY_TOKEN: 'sk-x',
     });
     const list = await createList(app, 'Cat breeds');
@@ -231,6 +251,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('seed drafts clamp the 10-entry target to a lower save cap', async () => {
     const upstream = draftServer({ kind: 'entries', entries: ['Siamese'] });
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: upstream.url, CLIPROXY_TOKEN: 'sk-x',
       MAX_OPTIONS_PER_LIST: '5',
     });
@@ -243,7 +264,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
 
   test('passes the clarify question through', async () => {
     const up = serve(() => modelSse({ kind: 'clarify', question: 'What domain is "X"?' }));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
     const list = await createList(app, 'X');
     const res = await draft(app, list.id, { name: 'X', existing: [] });
     expect(res.status).toBe(200);
@@ -254,6 +275,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('a clarify returned despite a description is a sanitized failure (no loop)', async () => {
     const up = serve(() => modelSse({ kind: 'clarify', question: 'still vague?' }));
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', LOG_LEVEL: 'info',
     });
     const list = await createList(app, 'X');
@@ -267,6 +289,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('upstream failure -> sanitized error frame, detail logged not leaked', async () => {
     const up = serve(() => new Response(JSON.stringify({ error: { message: 'leaky detail' } }), { status: 500 }));
     const { app, logs } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', LOG_LEVEL: 'info',
     });
     const list = await createList(app, 'Colours');
@@ -281,6 +304,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
   test('stalled upstream is bounded by CLOUD_TIMEOUT_MS', async () => {
     const up = serve(async () => { await Bun.sleep(5000); return modelSse({ kind: 'entries', entries: ['x'] }); });
     const { app, logs } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', CLOUD_TIMEOUT_MS: '250',
       LOG_LEVEL: 'info',
     });

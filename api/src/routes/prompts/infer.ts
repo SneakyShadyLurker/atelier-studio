@@ -6,7 +6,7 @@ import { parseBody, parseJsonText } from '../_http';
 import { ApplyDimensions, InferRequestBody } from '../prompts.schema';
 import { diagnoseLibrary } from '../../prompts/libraryDiagnosis';
 import { buildInferDimensionsSystemPrompt } from '../../prompts/inferDimensionsSystemPrompt';
-import { imageTextProvider } from '../../routing/imageTextProvider';
+import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
 import { toLibrarySnapshot, snapshotHash, templatesDigest } from '../../prompts/librarySnapshot';
 import { resolveProposalForInference } from '../../prompts/dimensionResolver';
 import { orderedOperations } from '../../prompts/bundleOperations';
@@ -31,7 +31,7 @@ import type { RawInferOp } from '../../prompts/inferTypes';
 import { inferPool } from '../../orchestrator/llmAdmission';
 import { withLlmSlot } from '../../lifecycle/withLlmSlot';
 import { promptLibrary } from './_shared';
-import type { InferResult } from '../../providers/cliproxyText';
+import type { InferResult } from '../../providers/text/featureHelpers';
 import { failedToSseError } from '../../lifecycle/llm-error';
 import { isAbortError } from '../../lifecycle/abort';
 
@@ -63,13 +63,17 @@ export const inferRoutes = new Hono<AppEnv>()
     const config = c.var.config;
     const logger = c.var.logger;
     const userId = c.var.userId;
+    const resolved = c.var.text.resolve({ userId, task: 'infer', ...imageModelRouting(config, modelId) });
+    if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
+    const textModel = resolved.model;
+    const inferOptions = resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort };
     return withLlmSlot(c, inferPool, userId, 5, () => {
     const lib = promptLibrary(c.var.db, userId);
     const priorDiagnosis = diagnoseLibrary(lib);
     const systemPrompt = buildInferDimensionsSystemPrompt({ priorDiagnosis });
     const snap = toLibrarySnapshot(lib);
     const snapshotJson = JSON.stringify(snap);
-    const provider = imageTextProvider(config, modelId);
+    const provider = textProviderForResolved(config, c.var.text, textModel);
     return {
       timeoutMs: config.INFER_TOTAL_BUDGET_MS,
       disconnect: c.req.raw.signal,
@@ -77,11 +81,11 @@ export const inferRoutes = new Hono<AppEnv>()
         const ops: RawInferOp[] = [];
         let taxonomyRejected: RejectedOp[] = [];
         const inferDimensions = (input: string, inferSignal: AbortSignal): Promise<InferResult> =>
-          provider.inferDimensions(input, inferSignal, systemPrompt);
+          provider.inferDimensions(input, inferSignal, systemPrompt, inferOptions);
         const inferTaxonomy = (input: string, inferSignal: AbortSignal): Promise<InferResult> =>
-          provider.inferTaxonomy(input, inferSignal, systemPrompt);
+          provider.inferTaxonomy(input, inferSignal, systemPrompt, inferOptions);
         const inferDimensionsSingleAttempt = (input: string, inferSignal: AbortSignal): Promise<InferResult> =>
-          provider.inferDimensionsSingleAttempt(input, inferSignal, systemPrompt);
+          provider.inferDimensionsSingleAttempt(input, inferSignal, systemPrompt, inferOptions);
         const collectTaxonomy = async (snapshot: string): Promise<RawInferOp[] | null> => {
           // Both calls share one taxonomy wall-time envelope, including the
           // original disconnect/total-budget signal. Recovery cannot double it.

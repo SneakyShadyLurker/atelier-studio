@@ -31,6 +31,9 @@ The checked-in `patches/` directory is required input to Bun installs, including
 - At least one real generation path from the [provider setup guide](getting-started.md#connect-a-real-model):
   Google BYOK, a compatible GPT image upstream, or your own ComfyUI worker.
   Model weights, provider credentials and credits are not supplied.
+- For Enhance, AI fill, Brainstorm and the other text features, a text model
+  you connect in the app after launch, local or cloud. See
+  [Connect a text model](connect-a-text-model.md).
 
 For GPT, the upstream must support Atelier's configured image model and adapter
 contract; a chat-only OpenAI-compatible endpoint will not work. GPT also needs
@@ -100,27 +103,26 @@ secret store, and do not paste them into an issue or commit them.
 | `DATA_DIR` | The absolute host path created in step 2 |
 | `SWAG_EXTERNAL_NETWORK` | The existing network shared with your proxy, as shown by `docker network ls` |
 | `TRUSTED_PROXY_KEY` | The generated base64 value; the same value goes into the proxy configuration |
-| `BYOK_ENCRYPTION_KEY` | The generated 64-character hex value; required in production even if you do not use Gemini |
+| `BYOK_ENCRYPTION_KEY` | The generated 64-character hex value; required in production even if you do not use Gemini. It also encrypts the API keys of text providers |
 | `STORAGE_ROOT_RECIPIENT` | The public recipient generated in step 5; leave its placeholder only until then |
-| `CLIPROXY_BASE_URL` / `CLIPROXY_TOKEN` | Your upstream's bare origin and an accepted API token; both fields are required to boot |
-| `OPENROUTER_API_KEY` | Your OpenRouter key if using GPT; missing or unavailable input checks block GPT requests |
-
-For Gemini-only or local-only installations, `CLIPROXY_BASE_URL` must still be
-a valid bare HTTP(S) origin and `CLIPROXY_TOKEN` must be nonempty. They can point
-at an unused private endpoint if you do not use the proxy-backed features.
-Do not expect those features to work without a real upstream.
+| `TEXT_PROVIDER_ADMINS` | Comma-separated signed-in usernames who manage text providers, models and routing in the Text models view; empty means nobody |
+| `CLIPROXY_BASE_URL` / `CLIPROXY_TOKEN` | Optional, and used only for GPT Image: your upstream's bare origin and an accepted API token. Set both or neither |
+| `OPENROUTER_API_KEY` | Your OpenRouter key if you use GPT Image or text models with "Screen requests first"; without it those requests are refused |
 
 Inside a container, `127.0.0.1` means that container. Use a reachable private
 address or a service name on a shared network for your upstream. Docker Desktop
 offers `host.docker.internal` for host services; check their bind address and
 firewall. A newly invented token will not work unless the upstream accepts it.
-The URL must not include `/v1`, a query or credentials.
+The URL must not include `/v1`, a query or credentials. The same container rule
+applies to a text model served from the host, such as Ollama. See
+[When Atelier runs in Docker](connect-a-text-model.md#when-atelier-runs-in-docker).
 
 Keep ComfyUI fields empty unless you have provisioned the worker. If you use
 it, set its URL, token and pinned certificate, then list exact signed-in
 usernames in `LOCAL_MODELS_USERS`. Set `PROMPT_LIBRARY_USERS` for users who
 should have the Prompt Library. These lists default to nobody. Text actions
-also need the appropriate upstream [text model IDs](providers.md#text-backends-via-cliproxyapi).
+need a text model, which a `TEXT_PROVIDER_ADMINS` user connects in the app
+after the first start ([Connect a text model](connect-a-text-model.md)).
 Keep `ENABLE_MOCK_PROVIDER=false` and `VIDEO_MODELS_ENABLED=false` for the
 first deployment. [Architecture](architecture.md#configuration) describes the
 configuration reference.
@@ -395,9 +397,11 @@ sqlite3 -readonly /srv/atelier/atelier.sqlite \
 
 ## BYOK keys
 
-`BYOK_ENCRYPTION_KEY` (64 hex characters) encrypts user-supplied provider keys at
-rest with AES-256-GCM. Preserve it across updates and restores. Changing an
-existing key without re-encrypting its stored data makes those keys unreadable.
+`BYOK_ENCRYPTION_KEY` (64 hex characters) encrypts user-supplied provider keys
+and the API keys of text providers at rest with AES-256-GCM. Preserve it across
+updates and restores. Changing an existing key without re-encrypting its stored
+data makes those keys unreadable. Text-provider keys are recovered by an admin
+choosing **Replace key** under **Edit provider** in the Text models view.
 
 ### BYOK master-key loss
 
@@ -443,6 +447,14 @@ Schema v57 adds a partial index for upload references held by rendering stories;
 it leaves existing rows intact. Rehearse this migration before promotion. Once
 v57 is recorded, a v56 image refuses the database, so retain a forward-fix path
 instead of relying on the previous image alone.
+
+Schema v58 replaces the fixed text backends with text providers and models
+managed in the app's Text models view. **Upgrade note:** the `CLIPROXY_TEXT_MODEL_*` variables are removed in schema 58, and the migration reads them once on the first boot after upgrading. Keep your existing `CLIPROXY_*` values set for that boot so the migration can move your text models, and your users' saved picks, into a provider named CLIProxyAPI. Afterwards manage them in the Text models view and delete those per-model variables, which only cause a boot warning from then on.
+
+Without `CLIPROXY_BASE_URL` and `CLIPROXY_TOKEN` on that boot nothing is moved,
+and saved text-model picks are dropped. The moved provider reads its key from
+`CLIPROXY_TOKEN` on every request, so leave that set while you use it. Set
+`TEXT_PROVIDER_ADMINS` before the upgrade so someone can open the view.
 
 Follow these steps for a release:
 
@@ -758,9 +770,9 @@ The text-call resilience layer wraps every upstream call in Cockatiel retry, cir
 | `RESILIENT_BREAKER_THRESHOLD` | 8 | 3-32 | Consecutive transient failures before the breaker opens, per capability. |
 | `RESILIENT_HALF_OPEN_AFTER_MS` | 30000 | 5000-120000 | Cooldown before the breaker tries half-open. |
 | `ENHANCE_OPEN_TIMEOUT_MS` | 15000 | 5000-60000 | Per-attempt cap for the `/enhance` open phase. The stream drain stays outside the policy. |
-| `BRAINSTORM_OPEN_TIMEOUT_MS` | 45000 | 5000-120000 | Per-attempt open-phase cap for character brainstorming. A transient failure of a non-Kimi backend fails over once to Kimi before any prompt was emitted (`brainstorm_backend_fallback`). |
-| `AI_FILL_PER_ATTEMPT_TIMEOUT_MS` | 120000 | 30000-180000 | Per-attempt timeout for ai-fill (`maxAttempts: 2`). `glm-abliterated` uses at least 360000. |
-| `KREA_CONDENSE_TIMEOUT_MS` | 150000 | 1000-300000 | Per-call Krea condensation cap; condensation fails open. `glm-abliterated` uses at least 420000. |
+| `BRAINSTORM_OPEN_TIMEOUT_MS` | 45000 | 5000-120000 | Per-attempt open-phase cap for character brainstorming. A transient failure before any prompt was emitted fails over once to the next model in routing order (`brainstorm_backend_fallback`). |
+| `AI_FILL_PER_ATTEMPT_TIMEOUT_MS` | 120000 | 30000-180000 | Per-attempt timeout for ai-fill (`maxAttempts: 2`). Models marked Slow model use at least 360000. |
+| `KREA_CONDENSE_TIMEOUT_MS` | 150000 | 1000-300000 | Per-call Krea condensation cap; condensation fails open. Models marked Slow model use at least 420000. |
 | `QUOTA_MIN_RETRY_AFTER_MS` | 300000 | 30000-3600000 | A `429` counts as budget exhaustion (non-retriable, breaker-exempt) only when its `Retry-After` is at least this floor or the body names a token budget. |
 | `SWAG_PROXY_READ_TIMEOUT_MS` | 600000 | 60000-3600000 | Mirrors the proxy's `proxy_read_timeout`. |
 | `INFER_DIMENSIONS_BATCH_CONCURRENCY` | 12 | 1-16 | Concurrent per-list calls during two-pass infer. |

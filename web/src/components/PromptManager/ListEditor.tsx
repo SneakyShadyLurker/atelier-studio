@@ -334,7 +334,7 @@ export default function ListEditor({ list, dimensions }: ListEditorProps) {
               !trimmedName ? 'Name the list first'
                 : drafts.length >= MAX_OPTIONS_PER_LIST ? `List is at the ${MAX_OPTIONS_PER_LIST}-option limit`
                 : currentValues.length === 0 ? 'Describe the list and generate up to 10 starter entries'
-                : 'Generate ~20 more entries with Kimi K3'
+                : 'Generate ~20 more entries with the text model assigned to this task'
             }
             disabled={!trimmedName || busy || drafts.length >= MAX_OPTIONS_PER_LIST}
             onClick={() => { draftList.draft(); }}

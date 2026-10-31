@@ -1,4 +1,4 @@
-import { MAX_PROMPT_CHARS, type AiFillBackend, type AiFillBatchItem } from '@atelier/shared';
+import { MAX_PROMPT_CHARS, type AiFillBatchItem } from '@atelier/shared';
 import { resolveAiFillBatch } from '../../api/aiFill';
 import { QueueFullError } from '../../api/queueFullRetry';
 import { QuotaExhaustedError } from '../../api/sse';
@@ -108,7 +108,7 @@ export async function runCoalescedFlush(
     }
   };
   const resolveFastBatch = async (entries: readonly FastBatchReadyItem[]) => {
-    const announced = new Set<AiFillBackend>();
+    const announced = new Set<string>();
     const [first] = entries;
     try {
       const requestItems: AiFillBatchItem[] = entries.map(({ build }) => ({
@@ -118,14 +118,14 @@ export async function runCoalescedFlush(
       return await resolveAiFillBatch(
         { items: requestItems, modelId: first ? itemModelId(flushCtx, first.buffered.item) : flushCtx.effectiveModelId },
         flushSignal,
-        (backend) => {
-          if (announced.has(backend)) return;
-          announced.add(backend);
-          useAtelierStore.getState().beginAiFill(backend);
+        ({ modelId, label }) => {
+          if (announced.has(modelId)) return;
+          announced.add(modelId);
+          useAtelierStore.getState().beginAiFill(modelId, label);
         },
       );
     } finally {
-      for (const backend of announced) useAtelierStore.getState().endAiFill(backend);
+      for (const modelId of announced) useAtelierStore.getState().endAiFill(modelId);
     }
   };
 

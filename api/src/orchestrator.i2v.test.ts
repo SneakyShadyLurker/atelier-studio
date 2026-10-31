@@ -3,7 +3,7 @@ import type { Database } from 'bun:sqlite';
 import type { Provider, ProviderGenerateOptions, ProviderRequest, ProviderResult } from './providers/types';
 import type { RegistryEntry } from './providers/registry';
 import { createGenerationStream } from './test/streamHarness';
-import { parseSseText, testRuntime } from './test/helpers';
+import { parseSseText, testRuntime, testTextServices } from './test/helpers';
 import { grayCardPng, pngBytes } from './test/image-fixtures';
 import { readArtifactBytes, writeAtomic } from './storage/files';
 import * as artifactFiles from './storage/files';
@@ -206,7 +206,7 @@ describe('orchestrator i2v', () => {
       const reservation = createReservationReleaser(1, (count) => { released += count; }, () => undefined);
       try {
         await startOrchestratorDetached(accepted, {
-          db, config, logger, userId: 'alice', request, registryEntry: entry, boundProvider: provider,
+          db, config, logger, text: testTextServices(db, config), userId: 'alice', request, registryEntry: entry, boundProvider: provider,
           disconnectSignal: new AbortController().signal,
           onSyncFailure: reservation.releaseRemaining, onTileSettled: reservation.releaseOne,
           runBatchPipeline,
@@ -286,7 +286,7 @@ describe('orchestrator i2v', () => {
         return Promise.resolve(mp4Bytes);
       });
       await runBatchPipeline(prepared, {
-        db, config, logger, userId: 'alice', request, registryEntry, boundProvider: provider,
+        db, config, logger, text: testTextServices(db, config), userId: 'alice', request, registryEntry, boundProvider: provider,
         disconnectSignal: new AbortController().signal,
         onTileSettled: () => undefined, onSyncFailure: () => undefined,
       });
@@ -353,7 +353,7 @@ describe('orchestrator i2v', () => {
       // Simulate a pre-existing intent so explicit fallback 0 must overwrite it.
       db.query('UPDATE batches SET context_frames = 22 WHERE id = ?').run(prepared.batch.id);
       await runBatchPipeline(prepared, {
-        db, config, logger, userId: 'alice', request, registryEntry, boundProvider: provider,
+        db, config, logger, text: testTextServices(db, config), userId: 'alice', request, registryEntry, boundProvider: provider,
         disconnectSignal: new AbortController().signal,
         onTileSettled: () => undefined, onSyncFailure: () => undefined,
       });
@@ -396,7 +396,7 @@ describe('orchestrator i2v', () => {
       const prepared = createBatch(db, 'alice', request, registryEntry);
       try {
         const running = runBatchPipeline(prepared, {
-          db, config, logger, userId: 'alice', request, registryEntry, boundProvider: provider,
+          db, config, logger, text: testTextServices(db, config), userId: 'alice', request, registryEntry, boundProvider: provider,
           disconnectSignal: new AbortController().signal,
           onTileSettled: () => undefined, onSyncFailure: () => undefined,
         });
@@ -433,7 +433,7 @@ describe('orchestrator i2v', () => {
       const prepared = createBatch(db, 'alice', request, registryEntry);
       db.query('UPDATE batches SET context_frames = 7 WHERE id = ?').run(prepared.batch.id);
       await runBatchPipeline(prepared, {
-        db, config, logger, userId: 'alice', request, registryEntry, boundProvider: provider,
+        db, config, logger, text: testTextServices(db, config), userId: 'alice', request, registryEntry, boundProvider: provider,
         disconnectSignal: new AbortController().signal,
         onTileSettled: () => undefined, onSyncFailure: () => undefined,
       });
@@ -463,7 +463,7 @@ describe('orchestrator i2v', () => {
       const request = { prompt: 'continue', modelId: 'minimax-h3-i2v', ratio: '16:9' as const, count: 1 };
       const prepared = createBatch(db, 'alice', request, registryEntry);
       await runBatchPipeline(prepared, {
-        db, config, logger, userId: 'alice', request, registryEntry, boundProvider: provider,
+        db, config, logger, text: testTextServices(db, config), userId: 'alice', request, registryEntry, boundProvider: provider,
         disconnectSignal: new AbortController().signal,
         onTileSettled: () => undefined, onSyncFailure: () => undefined,
       });

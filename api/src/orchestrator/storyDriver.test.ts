@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { Database } from 'bun:sqlite';
 import { abortReason } from '../lifecycle/abort';
 import sharp from 'sharp';
-import type { EnhanceChunk, TestCliproxyTextProvider } from '../providers/cliproxyText';
-import { setCliproxyTextProviderForTests } from '../providers/cliproxyText';
+import type { EnhanceChunk, TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import { generateHybridIdentity, identityToRecipient } from 'age-encryption';
 import { DbUserKeyStore, StorageKeyring, configureStorageKeyring } from '../storage/crypto';
 import { deleteArtifact, readArtifactBytes, writeAtomic } from '../storage/files';
@@ -15,7 +15,7 @@ import { startOrchestratorDetached } from './startDetached';
 import { createReservationReleaser } from './concurrency';
 import { findModel } from '../providers/registry';
 import { buildQueuedRequestForBatch } from './dispatch';
-import { testRuntime } from '../test/helpers';
+import { pickLegacyTextModel, testRuntime } from '../test/helpers';
 import * as queue from './queue';
 import { draftPool, enhancePool, resetLlmAdmissionForTests } from './llmAdmission';
 import {
@@ -29,6 +29,7 @@ import {
 } from './storyDriver';
 
 const VIDEO_ON = {
+  seedLegacyText: true,
   VIDEO_MODELS_ENABLED: 'true',
   LOCAL_MODELS_USERS: 'alice',
 };
@@ -43,8 +44,8 @@ const PNG = new Uint8Array(await sharp({
 const MP4 = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]);
 
 function providerWith(
-  enhance: TestCliproxyTextProvider['enhance'],
-): TestCliproxyTextProvider {
+  enhance: TestTextFeatureProvider['enhance'],
+): TestTextFeatureProvider {
   return {
     enhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'unused' }),
@@ -55,7 +56,7 @@ function providerWith(
   };
 }
 
-function successfulProvider(text = 'enhanced motion'): TestCliproxyTextProvider {
+function successfulProvider(text = 'enhanced motion'): TestTextFeatureProvider {
   return providerWith(async function* () {
     await Promise.resolve();
     yield { type: 'delta', text: text.slice(0, 8) } satisfies EnhanceChunk;
@@ -94,6 +95,7 @@ function configure(
     db: runtime.db,
     config: runtime.config,
     logger: runtime.logger,
+    text: runtime.text,
     kickLocalQueue: () => undefined,
     extractLastFrame: () => Promise.resolve(PNG),
   });
@@ -161,7 +163,7 @@ async function within<T>(promise: Promise<T>): Promise<T> {
 afterEach(async () => {
   await waitForStoryDriverIdle();
   resetStoryDriverForTests();
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   queue.resetQueueForTests();
   resetLlmAdmissionForTests();
 });
@@ -170,7 +172,7 @@ describe('story driver', () => {
   for (const pressure of ['per-user', 'total'] as const) {
     test(`${pressure} LLM saturation submits the raw beat without another provider call`, async () => {
       let calls = 0;
-      setCliproxyTextProviderForTests(providerWith(async function* () {
+      setTextModelProviderForTests(providerWith(async function* () {
         await Promise.resolve(); calls += 1;
         yield { type: 'done' };
       }));
@@ -201,7 +203,7 @@ describe('story driver', () => {
       const runtime = testRuntime({ ...VIDEO_ON,
         MAX_CONCURRENT_LLM_ENHANCE_PER_USER: '1', MAX_CONCURRENT_LLM_TOTAL: '1' });
       configure(runtime);
-      setCliproxyTextProviderForTests(providerWith(async function* () {
+      setTextModelProviderForTests(providerWith(async function* () {
         await Promise.resolve();
         expect(enhancePool.acquire('alice')).toEqual({ ok: false, reason: 'per-user' });
         expect(draftPool.acquire('bob')).toEqual({ ok: false, reason: 'global' });
@@ -234,7 +236,7 @@ describe('story driver', () => {
       const started = new Promise<void>((resolve) => { markStarted = resolve; });
       const id = seedStory(runtime.db, ['stalled']);
       const next = seedStory(runtime.db, ['next']);
-      setCliproxyTextProviderForTests(providerWith(async function* (prompt, _images, signal) {
+      setTextModelProviderForTests(providerWith(async function* (prompt, _images, signal) {
         if (prompt === 'stalled') {
           upstream = signal;
           markStarted?.();
@@ -289,7 +291,7 @@ describe('story driver', () => {
   test('route cancellation during continuation enhancement releases its handoff without a retry', async () => {
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
-    setCliproxyTextProviderForTests(successfulProvider());
+    setTextModelProviderForTests(successfulProvider());
     const id = seedStory(runtime.db, ['first', 'continuation']);
     kickStory(id);
     await within(waitForStoryDriverIdle());
@@ -300,7 +302,7 @@ describe('story driver', () => {
     let markStarted: (() => void) | undefined;
     const started = new Promise<void>((resolve) => { markStarted = resolve; });
     let upstream: AbortSignal | undefined;
-    setCliproxyTextProviderForTests(providerWith(async function* (_prompt, _images, signal) {
+    setTextModelProviderForTests(providerWith(async function* (_prompt, _images, signal) {
       upstream = signal;
       handoff = runtime.db.query<{ id: string }, []>('SELECT id FROM uploads').get()?.id;
       markStarted?.();
@@ -334,7 +336,7 @@ describe('story driver', () => {
   });
 
   test('its own rendering reservation at video cap one still submits the first segment', async () => {
-    setCliproxyTextProviderForTests(successfulProvider());
+    setTextModelProviderForTests(successfulProvider());
     const runtime = testRuntime({ ...VIDEO_ON, MAX_INFLIGHT_VIDEO_PER_USER: '1' });
     configure(runtime);
     const id = seedStory(runtime.db, ['beat']);
@@ -347,7 +349,7 @@ describe('story driver', () => {
 
   test('queue pressure in another pool defers before enhancement and wakes once capacity clears', async () => {
     let enhancements = 0;
-    setCliproxyTextProviderForTests(providerWith(async function* () {
+    setTextModelProviderForTests(providerWith(async function* () {
       await Promise.resolve();
       enhancements += 1;
       yield { type: 'delta', text: 'enhanced' };
@@ -371,7 +373,7 @@ describe('story driver', () => {
 
   for (const pool of ['shared', 'byok', 'local'] as const) {
     test(`${pool} queue capacity changes wake deferred stories before the one-second fallback`, async () => {
-      setCliproxyTextProviderForTests(successfulProvider());
+      setTextModelProviderForTests(successfulProvider());
       const runtime = testRuntime({ ...VIDEO_ON, MAX_QUEUED_BATCHES_PER_USER: '1' });
       configure(runtime);
       const id = seedStory(runtime.db, ['beat']);
@@ -393,7 +395,7 @@ describe('story driver', () => {
 
   for (const ending of ['deferred', 'canceled', 'superseded', 'shutdown'] as const) {
     test(`late ${ending} releases only the generated handoff without spending an attempt`, async () => {
-      setCliproxyTextProviderForTests(successfulProvider());
+      setTextModelProviderForTests(successfulProvider());
       const runtime = testRuntime({ ...VIDEO_ON, MAX_QUEUED_BATCHES_PER_USER: '1' });
       configure(runtime);
       const id = seedStory(runtime.db, ['first', 'second']);
@@ -406,7 +408,7 @@ describe('story driver', () => {
         logger: runtime.logger, userId: 'alice', bytes: PNG, signal: new AbortController().signal });
       runtime.db.query('UPDATE stories SET source_upload_id=? WHERE id=?').run(source.id, id);
       let handoff = '';
-      setCliproxyTextProviderForTests(providerWith(async function* () {
+      setTextModelProviderForTests(providerWith(async function* () {
         await Promise.resolve();
         handoff = runtime.db.query<{ id: string }, [string]>(
           'SELECT id FROM uploads WHERE id != ?',
@@ -434,7 +436,7 @@ describe('story driver', () => {
   for (const ending of ['cancel', 'reset', 'shutdown'] as const) {
     test(`${ending} prevents a deferred timer from submitting or accessing a closed DB`, async () => {
       let enhancements = 0;
-      setCliproxyTextProviderForTests(providerWith(async function* () {
+      setTextModelProviderForTests(providerWith(async function* () {
         await Promise.resolve();
         enhancements += 1; yield { type: 'done' };
       }));
@@ -465,7 +467,7 @@ describe('story driver', () => {
   }
 
   test('restart recovers a deferred zero-batch reservation after queue pressure drains', async () => {
-    setCliproxyTextProviderForTests(successfulProvider());
+    setTextModelProviderForTests(successfulProvider());
     const runtime = testRuntime({ ...VIDEO_ON, MAX_QUEUED_BATCHES_PER_USER: '1' });
     configure(runtime);
     const id = seedStory(runtime.db, ['beat']);
@@ -484,7 +486,7 @@ describe('story driver', () => {
   });
 
   test('accepted extension setup failure retains the failed batch and retries the story instead of canceling', async () => {
-    setCliproxyTextProviderForTests(successfulProvider());
+    setTextModelProviderForTests(successfulProvider());
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
     const id = seedStory(runtime.db, ['first', 'second']);
@@ -505,7 +507,7 @@ describe('story driver', () => {
     let released = 0;
     const reservation = createReservationReleaser(1, (count) => { released += count; }, () => undefined);
     await startOrchestratorDetached({ batch, tiles }, {
-      db: runtime.db, config: runtime.config, logger: runtime.logger, userId: 'alice',
+      db: runtime.db, config: runtime.config, logger: runtime.logger, text: runtime.text, userId: 'alice',
       request: buildQueuedRequestForBatch(runtime.db, { batch, tiles }, entry.model), registryEntry: entry,
       boundProvider: { id: 'unused', backend: 'local', generate: () => { throw new Error('provider must not run'); } },
       disconnectSignal: new AbortController().signal,
@@ -522,7 +524,7 @@ describe('story driver', () => {
   });
 
   test('submits the first t2v segment through the queued local path', async () => {
-    setCliproxyTextProviderForTests(successfulProvider('enhanced t2v prompt'));
+    setTextModelProviderForTests(successfulProvider('enhanced t2v prompt'));
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
     const storyId = seedStory(runtime.db, ['opening beat']);
@@ -545,8 +547,37 @@ describe('story driver', () => {
     });
   });
 
+  test('segment beats resolve through the story-segments task, and no model leaves the raw beat', async () => {
+    const efforts: unknown[] = [];
+    setTextModelProviderForTests(providerWith(async function* (_prompt, _images, _signal, _system, opts) {
+      await Promise.resolve();
+      efforts.push(opts?.reasoningEffort);
+      yield { type: 'delta', text: 'enhanced t2v prompt' } satisfies EnhanceChunk;
+      yield { type: 'done' } satisfies EnhanceChunk;
+    }));
+    const runtime = testRuntime(VIDEO_ON);
+    configure(runtime);
+    // A pick for another task does not apply; the story-segments pick (and its effort) does.
+    pickLegacyTextModel(runtime.db, 'alice', 'motion', 'grok', 'xhigh');
+    pickLegacyTextModel(runtime.db, 'alice', 'story-segments', 'mimo', 'high');
+    const storyId = seedStory(runtime.db, ['opening beat']);
+    kickStory(storyId);
+    await waitForStoryDriverIdle();
+    expect(efforts).toEqual(['high']);
+
+    const bare = testRuntime({ ...VIDEO_ON, seedLegacyText: false });
+    configure(bare);
+    const bareStory = seedStory(bare.db, ['opening beat']);
+    kickStory(bareStory);
+    await waitForStoryDriverIdle();
+    expect(efforts).toHaveLength(1);
+    const segment = currentSegment(bare.db, bareStory, 0);
+    expect(bare.db.query<{ prompt: string }, [string]>('SELECT prompt FROM batches WHERE id = ?')
+      .get(segment.batch_id ?? '')?.prompt).toBe('opening beat');
+  });
+
   test('waits for sealed storage without spending a segment attempt, then proceeds on unseal', async () => {
-    setCliproxyTextProviderForTests(successfulProvider('enhanced t2v prompt'));
+    setTextModelProviderForTests(successfulProvider('enhanced t2v prompt'));
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
     const rootIdentity = await generateHybridIdentity();
@@ -570,7 +601,7 @@ describe('story driver', () => {
   });
 
   test('advances a done first segment as a provenance-bound native extension', async () => {
-    setCliproxyTextProviderForTests(successfulProvider('enhanced motion'));
+    setTextModelProviderForTests(successfulProvider('enhanced motion'));
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
     const storyId = seedStory(runtime.db, ['opening beat', 'second beat']);
@@ -606,7 +637,7 @@ describe('story driver', () => {
   });
 
   test('falls back to the raw beat when enhancement emits partial text then an error chunk', async () => {
-    setCliproxyTextProviderForTests(providerWith(async function* () {
+    setTextModelProviderForTests(providerWith(async function* () {
       await Promise.resolve();
       yield { type: 'delta', text: 'partial motion that must not be submitted' } satisfies EnhanceChunk;
       yield { type: 'failed', status: 503, detail: 'offline' } satisfies EnhanceChunk;
@@ -623,7 +654,7 @@ describe('story driver', () => {
   });
 
   test('retries one failed segment once and fails the story after the retry fails', async () => {
-    setCliproxyTextProviderForTests(successfulProvider());
+    setTextModelProviderForTests(successfulProvider());
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
     const storyId = seedStory(runtime.db, ['opening beat']);
@@ -647,7 +678,7 @@ describe('story driver', () => {
   });
 
   test('does not advance a canceled story', async () => {
-    setCliproxyTextProviderForTests(successfulProvider());
+    setTextModelProviderForTests(successfulProvider());
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
     const storyId = seedStory(runtime.db, ['opening beat'], 'canceled');
@@ -660,7 +691,7 @@ describe('story driver', () => {
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
     const storyId = seedStory(runtime.db, ['opening beat']);
-    setCliproxyTextProviderForTests(providerWith(async function* () {
+    setTextModelProviderForTests(providerWith(async function* () {
       await Promise.resolve();
       yield { type: 'delta', text: 'enhanced prompt' } satisfies EnhanceChunk;
       runtime.db.query(
@@ -681,7 +712,7 @@ describe('story driver', () => {
   });
 
   test('marks a story canceled when its submitted batch row is missing', async () => {
-    setCliproxyTextProviderForTests(successfulProvider());
+    setTextModelProviderForTests(successfulProvider());
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
     const storyId = seedStory(runtime.db, ['opening beat']);
@@ -699,7 +730,7 @@ describe('story driver', () => {
   });
 
   test('completed-story bookkeeping releases its reservation even while unrelated queue pressure is full', async () => {
-    setCliproxyTextProviderForTests(successfulProvider());
+    setTextModelProviderForTests(successfulProvider());
     const runtime = testRuntime({ ...VIDEO_ON, MAX_QUEUED_BATCHES_PER_USER: '1' });
     configure(runtime);
     const id = seedStory(runtime.db, ['beat']);
@@ -714,7 +745,7 @@ describe('story driver', () => {
   });
 
   test('recovery re-kicks rendering stories', async () => {
-    setCliproxyTextProviderForTests(successfulProvider());
+    setTextModelProviderForTests(successfulProvider());
     const runtime = testRuntime(VIDEO_ON);
     configure(runtime);
     const storyId = seedStory(runtime.db, ['opening beat']);

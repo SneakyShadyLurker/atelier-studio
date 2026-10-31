@@ -405,7 +405,7 @@ describe('ListEditor — AI Draft List', () => {
     fireEvent.click(screen.getByRole('button', { name: /\+ add option/i }));
     fireEvent.change(screen.getByRole('textbox', { name: /option 1/i }), { target: { value: 'red' } });
     expect(screen.getByRole('button', { name: /draft list/i }).getAttribute('data-tip'))
-      .toBe('Generate ~20 more entries with Kimi K3');
+      .toBe('Generate ~20 more entries with the text model assigned to this task');
   });
 
   test('blank option rows still trigger the seed dialog', () => {

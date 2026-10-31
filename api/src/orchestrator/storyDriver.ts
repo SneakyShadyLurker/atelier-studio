@@ -9,10 +9,11 @@ import type { AppLogger } from '../observability/logger';
 import { motionEnhanceSystemPrompt } from '../prompts/motionEnhanceSystemPrompt';
 import { motionExtendEnhanceSystemPrompt } from '../prompts/motionExtendEnhanceSystemPrompt';
 import { storyT2vSystemPrompt } from '../prompts/storyT2vSystemPrompt';
-import { MOTION_ENHANCE_DEFAULTS } from '../providers/cliproxyText.config';
-import type { EnhanceImageInput } from '../providers/cliproxyText';
+import { MOTION_ENHANCE_DEFAULTS } from '../providers/text/textBudgets';
+import type { EnhanceImageInput } from '../providers/text/featureHelpers';
 import { findModel, isLocalModelGated } from '../providers/registry';
-import { aiFillTextProviderForConfig } from '../providers/textRouting';
+import { textProviderForResolved } from '../providers/textRouting';
+import type { TextServices } from '../routing/textServices';
 import { downscaleForVision } from '../storage/downscaleForVision';
 import { storageKeyring } from '../storage/crypto';
 import { withDecryptedArtifactFiles } from '../storage/decryptedTemp';
@@ -27,6 +28,7 @@ export interface StoryDriverRuntime {
   readonly db: Database;
   readonly config: Config;
   readonly logger: AppLogger;
+  readonly text: TextServices;
   readonly kickLocalQueue: () => void;
   readonly extractLastFrame?: (
     inputPath: string,
@@ -552,7 +554,15 @@ async function enhanceSegment(
     const slot = enhancePool.acquire(story.user_id);
     if (!slot.ok) return segment.beat;
     release = () => { slot.release(); };
-    const provider = aiFillTextProviderForConfig(configured.config, 'kimi');
+    // The beat writer runs on the `story-segments` task's model; a handoff
+    // frame requires one that accepts images. No model → the raw beat (below).
+    const resolved = configured.text.resolve({
+      userId: story.user_id,
+      task: 'story-segments',
+      visionRequired: images.length > 0,
+    });
+    if (!resolved.ok) throw new Error(`no text model for story segments: ${resolved.reason}`);
+    const provider = textProviderForResolved(configured.config, configured.text, resolved.model);
     let text = '';
     let done = false;
     for await (const chunk of provider.enhance(
@@ -560,7 +570,7 @@ async function enhanceSegment(
       images,
       signal,
       systemPrompt,
-      { defaults: MOTION_ENHANCE_DEFAULTS },
+      { defaults: MOTION_ENHANCE_DEFAULTS, ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }) },
     )) {
       lifetime.throwIfAborted();
       if (chunk.type === 'delta') text += chunk.text;

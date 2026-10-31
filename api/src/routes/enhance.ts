@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
-import type { AiFillBackend, ApiErrorCode } from '@atelier/shared';
+import type { ApiErrorCode, TextTask } from '@atelier/shared';
 import type { AppEnv } from '../server-env';
 import { withLlmSlot } from '../lifecycle/withLlmSlot';
 import { enhancePool } from '../orchestrator/llmAdmission';
-import type { CliproxyTextProvider, EnhanceCallOptions, EnhanceImageInput } from '../providers/cliproxyText';
-import { aiFillTextProviderForConfig, motionEnhanceTextProviderForConfig } from '../providers/textRouting';
-import { AI_FILL_DEFAULTS, MOTION_ENHANCE_DEFAULTS, textStreamDrainMs } from '../providers/cliproxyText.config';
+import type { EnhanceCallOptions, EnhanceImageInput } from '../providers/text/featureHelpers';
+import { textModelFailureBody, textProviderForResolved } from '../providers/textRouting';
+import { AI_FILL_DEFAULTS, MOTION_ENHANCE_DEFAULTS, textStreamDrainMs } from '../providers/text/textBudgets';
 import { videoDurationSeconds } from '@atelier/shared';
 import { motionEnhanceSystemPrompt } from '../prompts/motionEnhanceSystemPrompt';
 import { motionExtendEnhanceSystemPrompt } from '../prompts/motionExtendEnhanceSystemPrompt';
@@ -18,7 +18,6 @@ import { findModel, localModelsAllowed } from '../providers/registry';
 import { KREA_ENHANCE_SYSTEM_PROMPT, MOSS_ENHANCE_SYSTEM_PROMPT } from '../prompts/enhanceSystemPrompt';
 import { isSunburstModel, SUNBURST_ENHANCE_SYSTEM_PROMPT } from '../prompts/gptSystemPrompt';
 import { classifyImageModelTarget, isLocalOpenWeightsTarget } from '../prompts/gptImagePhrasing';
-import { resolveTextBackend, resolveTextBackendEffort } from '../routing/textBackendPreference';
 import { StorageSealedError } from '../storage/crypto';
 
 const SAFE_ERROR_MESSAGE = 'Couldn’t enhance the prompt. Please try again.';
@@ -43,30 +42,22 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
   const wantsMotion = promptFormat === 'h3-motion';
 
   let systemPrompt: string | undefined;
-  let provider: CliproxyTextProvider;
-  let enhanceOpts: EnhanceCallOptions | undefined;
+  let enhanceOpts: EnhanceCallOptions;
   let handoffUploadIdForVision: string | undefined;
-  let textBackend: AiFillBackend;
+  let task: TextTask;
+  let visionRequired: boolean;
 
   if (wantsMotion) {
-    // MiniMax H3 motion-prompt enhancement uses the same AI router as ai-fill.
-    // A null provider means the kill-switch is off; return an
-    // explicit 409 the client treats as "submit the raw motion prompt".
+    // MiniMax H3 motion-prompt enhancement runs on the `motion` task's model.
+    // The kill switch returns an explicit 409 the client treats as "submit
+    // the raw motion prompt".
     if (!c.var.config.I2V_MOTION_ENHANCE) {
       return c.json(
         { error: 'motion enhancement unavailable', code: 'MOTION_ENHANCE_UNAVAILABLE' satisfies ApiErrorCode },
         409,
       );
     }
-    // Motion enhancement always runs on Kimi, with or without a handoff frame.
-    const backend = 'kimi';
-    textBackend = backend;
-    const motion = motionEnhanceTextProviderForConfig(c.var.config, backend);
-    if (!motion)
-      return c.json(
-        { error: 'motion enhancement unavailable', code: 'MOTION_ENHANCE_UNAVAILABLE' satisfies ApiErrorCode },
-        409,
-      );
+    task = 'motion';
     const motionPromptOpts = {
       ...(parsed.value.sourcePrompt !== undefined ? { sourcePrompt: parsed.value.sourcePrompt } : {}),
       ...(parsed.value.durationFrames !== undefined
@@ -80,37 +71,33 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
           previousMotionPrompt: extendContext.previousMotionPrompt,
         });
     systemPrompt = motionSystemPrompt;
-    provider = motion;
     enhanceOpts = { defaults: MOTION_ENHANCE_DEFAULTS };
     handoffUploadIdForVision = extendContext?.handoffUploadId;
+    // The handoff frame is sent to the writer, so it needs a vision model.
+    visionRequired = handoffUploadIdForVision !== undefined;
   } else {
     const rawTarget = modelId === undefined ? null : classifyImageModelTarget(modelId);
     const target = isLocalOpenWeightsTarget(rawTarget) && !localModelsEnabledForUser ? null : rawTarget;
-    const visionRequired = refImageIds !== undefined && refImageIds.length > 0;
-    const targetOptions = entry
-      ? { targetModelId: entry.model.id, targetPool: entry.model.pool === 'local' ? 'local' as const : 'cloud' as const }
-      : {};
-    if (isLocalOpenWeightsTarget(target)) {
-      // Krea and MOSS keep their own enhance prompts; Auto is Kimi with or without images.
-      const backend = resolveTextBackend(c.var.db, userId, 'enhance',
-        'kimi', { visionRequired, ...targetOptions });
-      textBackend = backend;
-      systemPrompt = target === 'moss' ? MOSS_ENHANCE_SYSTEM_PROMPT : KREA_ENHANCE_SYSTEM_PROMPT;
-      provider = aiFillTextProviderForConfig(c.var.config, backend);
-      const reasoningEffort = resolveTextBackendEffort(c.var.db, userId, 'enhance', backend);
-      enhanceOpts = { defaults: AI_FILL_DEFAULTS, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) };
-    } else {
-      const backend = resolveTextBackend(c.var.db, userId, 'enhance',
-        target === 'gpt' ? 'gpt' : 'kimi', { visionRequired, ...targetOptions });
-      textBackend = backend;
-      const base = isSunburstModel(entry?.model.id) ? SUNBURST_ENHANCE_SYSTEM_PROMPT : undefined;
-      // Other image targets use the provider's model-neutral default.
-      systemPrompt = base;
-      provider = aiFillTextProviderForConfig(c.var.config, backend);
-      const reasoningEffort = resolveTextBackendEffort(c.var.db, userId, 'enhance', backend);
-      enhanceOpts = { defaults: AI_FILL_DEFAULTS, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) };
-    }
+    task = 'enhance';
+    visionRequired = refImageIds !== undefined && refImageIds.length > 0;
+    // Krea and MOSS keep their own enhance prompts; Sunburst gets its
+    // dedicated contract; other image targets use the provider's
+    // model-neutral default.
+    systemPrompt = isLocalOpenWeightsTarget(target)
+      ? target === 'moss' ? MOSS_ENHANCE_SYSTEM_PROMPT : KREA_ENHANCE_SYSTEM_PROMPT
+      : isSunburstModel(entry?.model.id) ? SUNBURST_ENHANCE_SYSTEM_PROMPT : undefined;
+    enhanceOpts = { defaults: AI_FILL_DEFAULTS };
   }
+  // The image model selects its prompt writer, if one is set.
+  const resolved = c.var.text.resolve({
+    userId,
+    task,
+    ...(entry ? { imageModelId: entry.model.id } : {}),
+    visionRequired,
+  });
+  if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
+  const provider = textProviderForResolved(c.var.config, c.var.text, resolved.model);
+  if (resolved.effort !== undefined) enhanceOpts = { ...enhanceOpts, reasoningEffort: resolved.effort };
   if (refImageIds && refImageIds.length > 0) {
     const totalBytes = refImageByteTotal(c.var.db, userId, refImageIds);
     if (totalBytes === null) {
@@ -128,7 +115,7 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
   }
   // Server-owned hard ceiling on one enhance stream (the cloud upstream timeout,
   // longer for GLM). Admission control + slot lifecycle live in withLlmSlot.
-  const timeoutMs = textStreamDrainMs(textBackend, c.var.config.CLOUD_TIMEOUT_MS);
+  const timeoutMs = textStreamDrainMs(resolved.model.latencyProfile, c.var.config.CLOUD_TIMEOUT_MS);
 
   return withLlmSlot(c, enhancePool, userId, 5, () => ({
     timeoutMs,

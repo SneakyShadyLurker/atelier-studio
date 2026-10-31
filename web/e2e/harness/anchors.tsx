@@ -21,7 +21,7 @@
  *                   and a native modal dialog. No Composer, so the toast stack
  *                   shows its nonanchored fallback.
  *   ?case=editor    the production TemplateEditor with its inline name field.
- *   ?case=settings  the production text-backend settings near the window top.
+ *   ?case=settings  the production text-model settings near the window top.
  *   &theme=dark     dark tokens.
  *
  * window.atelierHarness.toast(text) raises an actionable toast with an Undo
@@ -32,14 +32,15 @@
  * the More menu (with or without its trigger). Dev-server only, like
  * index.html: nothing here reaches dist.
  */
-import type { Batch, Collection, CollectionsResponse, Model } from '@atelier/shared';
+import type { Batch, Collection, CollectionsResponse, Model, TextModelsResponse } from '@atelier/shared';
+import { TEXT_TASKS } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { collectionKeys } from '../../src/api/collections';
 import { promptKeys } from '../../src/api/prompts';
-import { textBackendKeys } from '../../src/api/textBackends';
+import { textModelKeys } from '../../src/api/textModels';
 import BatchPrompt from '../../src/components/Batch/BatchPrompt';
 import BatchOverflowMenu from '../../src/components/BatchOverflowMenu';
 import Canvas from '../../src/components/Canvas';
@@ -413,6 +414,27 @@ function EditorCase() {
   );
 }
 
+// Two providers, one offline model and one fixed-effort model: every state
+// the settings rows and their grouped menus can show.
+const TEXT_MODELS: TextModelsResponse = {
+  models: [
+    { id: 'kimi', displayName: 'Kimi K3', providerName: 'CLIProxyAPI', vision: true, reasoningLevels: ['low', 'high', 'max'], status: 'available' },
+    { id: 'mimo', displayName: 'MiMo V2.6 Pro', providerName: 'CLIProxyAPI', vision: true, reasoningLevels: ['none', 'high'], status: 'available' },
+    { id: 'grok', displayName: 'Grok 4.7', providerName: 'CLIProxyAPI', vision: true, reasoningLevels: ['low', 'medium', 'high', 'xhigh'], status: 'available' },
+    { id: 'gemini', displayName: 'Gemini 4 Argon', providerName: 'CLIProxyAPI', vision: true, reasoningLevels: ['low', 'medium', 'high'], status: 'available' },
+    { id: 'glm', displayName: 'GLM 5.3', providerName: 'CLIProxyAPI', vision: false, reasoningLevels: ['low', 'high', 'max'], status: 'offline' },
+    { id: 'scout', displayName: 'Llama 4 Scout', providerName: 'Ollama on this Mac', vision: true, reasoningLevels: [], status: 'available' },
+  ],
+  tasks: TEXT_TASKS.map((task) => {
+    if (task === 'ai-fill') return { task, pick: 'grok', effort: 'high', effectiveModelId: 'grok', pickState: 'active' };
+    if (task === 'storytelling') return { task, pick: 'glm', effectiveModelId: 'kimi', pickState: 'offline' };
+    if (task === 'list-draft') return { task, pick: 'scout', effectiveModelId: 'scout', pickState: 'active' };
+    return { task, effectiveModelId: 'kimi' };
+  }),
+  defaults: { default: 'kimi', byTask: {} },
+  writers: {},
+};
+
 function SettingsCase() {
   return (
     <main style={{ padding: '80px 24px', maxWidth: 1000, margin: 'auto' }}>
@@ -449,6 +471,6 @@ if (root) {
     },
   });
   queryClient.setQueryData(promptKeys.library(), PROMPT_LIBRARY);
-  queryClient.setQueryData(textBackendKeys.all(), { overrides: {}, efforts: {}, unavailable: [] });
+  queryClient.setQueryData(textModelKeys.all(), TEXT_MODELS);
   createRoot(root).render(<StrictMode><QueryClientProvider client={queryClient}><Case /></QueryClientProvider></StrictMode>);
 }

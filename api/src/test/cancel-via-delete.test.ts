@@ -5,7 +5,7 @@ import * as bus from '../orchestrator/bus';
 import * as queue from '../orchestrator/queue';
 import { acquireTiles, byokTilesInFlight, tilesInFlight } from '../orchestrator/concurrency';
 import { kickQueues } from '../orchestrator/dispatch';
-import { openBatchEvents, parseSseText, submitGenerate, testRuntime } from './helpers';
+import { openBatchEvents, parseSseText, submitGenerate, testRuntime, testTextServices } from './helpers';
 import { pngBytes } from './image-fixtures';
 
 const pngBase64 = Buffer.from(pngBytes()).toString('base64');
@@ -208,7 +208,7 @@ describe('DELETE cancel behavior', () => {
       return Promise.resolve(new Response('unexpected upstream call', { status: 599 }));
     }) as unknown as typeof fetch;
 
-    kickQueues({ db, config, logger, keyStore, healthSnapshot: () => new Map() });
+    kickQueues({ db, config, logger, keyStore, healthSnapshot: () => new Map(), text: testTextServices(db, config) });
     await waitFor(() => loadStarted ? true : null);
     const entry = await waitFor(() => getBatchForUser(batchId, 'alice') ?? null);
 
@@ -283,7 +283,7 @@ describe('DELETE cancel behavior', () => {
       ));
     }) as typeof fetch;
 
-    kickQueues({ db, config, logger, keyStore, healthSnapshot: () => new Map() });
+    kickQueues({ db, config, logger, keyStore, healthSnapshot: () => new Map(), text: testTextServices(db, config) });
     await waitFor(() => loadStarted ? true : null);
     const entry = await waitFor(() => getBatchForUser(batchId, 'alice') ?? null);
     expect(byokTilesInFlight('alice')).toBe(2);

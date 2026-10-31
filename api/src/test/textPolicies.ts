@@ -1,5 +1,5 @@
 import { loadConfig } from '../config';
-import { cliproxyTextPolicies, type CliproxyTextPolicies } from '../providers/cliproxyText';
+import { textCallPolicies, type TextCallPolicies } from '../providers/text/featureHelpers';
 
 const defaults = loadConfig({
   CLIPROXY_BASE_URL: 'http://127.0.0.1:1',
@@ -9,9 +9,9 @@ const defaults = loadConfig({
 
 // The production text policies (attempt counts, timeouts, one breaker each)
 // with millisecond backoff, so retry paths stay fast. Fresh breakers per call.
-export function testTextPolicies(overrides: Partial<CliproxyTextPolicies> = {}): CliproxyTextPolicies {
+export function testTextPolicies(overrides: Partial<TextCallPolicies> = {}): TextCallPolicies {
   return {
-    ...cliproxyTextPolicies({ ...defaults, RESILIENT_INITIAL_BACKOFF_MS: 1, RESILIENT_MAX_BACKOFF_MS: 1 }, null),
+    ...textCallPolicies({ ...defaults, RESILIENT_INITIAL_BACKOFF_MS: 1, RESILIENT_MAX_BACKOFF_MS: 1 }, 'standard'),
     ...overrides,
   };
 }

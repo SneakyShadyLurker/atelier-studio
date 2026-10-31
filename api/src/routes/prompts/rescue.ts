@@ -3,7 +3,7 @@ import type { GptModerationNotice, RescueBundle } from '@atelier/shared';
 import type { AppEnv } from '../../server-env';
 import { parseBody } from '../_http';
 import { RescueDimensions } from '../prompts.schema';
-import { imageTextProvider } from '../../routing/imageTextProvider';
+import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
 import { snapshotHash, templatesDigest, toLibrarySnapshot } from '../../prompts/librarySnapshot';
 import { applyBundlesToSnapshot } from '../../prompts/dimensionResolver';
 import { dependenciesForTagReferences, tagReferenceDependencies } from '../../prompts/bundleOperations';
@@ -36,6 +36,10 @@ export const rescueRoutes = new Hono<AppEnv>()
     const logger = c.var.logger;
     const { proposalId, templateName } = parsed.value;
     const config = c.var.config;
+    // Resolved before the slot and the rescue cap, so a call no model can serve spends neither.
+    const resolved = c.var.text.resolve({ userId, task: 'rescue', ...imageModelRouting(config, parsed.value.modelId) });
+    if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
+    const textModel = resolved.model;
     return withLlmSlot(c, rescuePool, userId, 5, () => {
       const begin = beginRescueAttempt(proposalId, userId, templateName);
       if (!begin.ok) {
@@ -101,7 +105,7 @@ export const rescueRoutes = new Hono<AppEnv>()
       }
       const targetPick = pickRescueTargetList(preview, templateOccs);
 
-      const provider = imageTextProvider(config, parsed.value.modelId);
+      const provider = textProviderForResolved(config, c.var.text, textModel);
 
       // Fix 3: rescue-failed paths must propagate the spent-cap state. The
       // cap is already consumed (beginRescueAttempt set rescueAttempted),
@@ -153,6 +157,7 @@ export const rescueRoutes = new Hono<AppEnv>()
               targetListName,
               conflictReason: conflict.reason,
               ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}),
+              ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }),
             },
             signal,
           );

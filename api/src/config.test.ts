@@ -1,9 +1,9 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BRAINSTORM_MAX_COUNT_CEILING } from '@atelier/shared';
-import { ConfigError, ephemeraEnabled, loadConfig } from './config';
+import { ConfigError, cliproxyEnabled, ephemeraEnabled, loadConfig } from './config';
 
 const validEnv = (): NodeJS.ProcessEnv => ({
   CLIPROXY_BASE_URL: 'http://127.0.0.1:8317',
@@ -120,6 +120,13 @@ describe('loadConfig', () => {
     expect(c.PROMPT_LIBRARY_USERS.size).toBe(0);
   });
 
+  test('TEXT_PROVIDER_ADMINS defaults to nobody, splits, trims and dedupes', () => {
+    expect(loadConfig(validEnv()).TEXT_PROVIDER_ADMINS.size).toBe(0);
+    expect(loadConfig({ ...validEnv(), TEXT_PROVIDER_ADMINS: '' }).TEXT_PROVIDER_ADMINS.size).toBe(0);
+    const c = loadConfig({ ...validEnv(), TEXT_PROVIDER_ADMINS: ' bob , alice ,bob ' });
+    expect([...c.TEXT_PROVIDER_ADMINS].sort()).toEqual(['alice', 'bob']);
+  });
+
   test('LOCAL_MODELS_USERS splits, trims, dedupes', () => {
     const c = loadConfig({ ...validEnv(), LOCAL_MODELS_USERS: ' bob , alice ,bob ' });
     expect([...c.LOCAL_MODELS_USERS].sort()).toEqual(['alice', 'bob']);
@@ -142,8 +149,6 @@ describe('loadConfig', () => {
   });
 
   test.each([
-    ['CLIPROXY_BASE_URL'],
-    ['CLIPROXY_TOKEN'],
     ['DATA_DIR'],
   ] as const)('missing required %s throws ConfigError naming the var', (varName) => {
     const env = validEnv();
@@ -190,6 +195,34 @@ describe('loadConfig', () => {
     expect(caught).toBeInstanceOf(ConfigError);
     const issue = (caught as ConfigError).issues.find((i) => i.var === 'API_PORT');
     expect(issue?.message).toBe('must be a positive integer');
+  });
+
+  test('only DATA_DIR is required: CLIProxy is optional', () => {
+    const cfg = loadConfig({ DATA_DIR: '/tmp/atelier-test' });
+    expect(cfg.CLIPROXY_BASE_URL).toBeUndefined();
+    expect(cfg.CLIPROXY_TOKEN).toBeUndefined();
+    expect(cliproxyEnabled(cfg)).toBe(false);
+  });
+
+  test('CLIPROXY_BASE_URL and CLIPROXY_TOKEN together enable CLIProxy', () => {
+    expect(cliproxyEnabled(loadConfig(validEnv()))).toBe(true);
+  });
+
+  test.each([
+    ['CLIPROXY_BASE_URL', 'CLIPROXY_TOKEN'],
+    ['CLIPROXY_TOKEN', 'CLIPROXY_BASE_URL'],
+  ] as const)('%s without %s fails naming the missing var', (_present, missing) => {
+    const env = validEnv();
+    Reflect.deleteProperty(env, missing);
+    let caught: unknown = null;
+    try {
+      loadConfig(env);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ConfigError);
+    const issue = (caught as ConfigError).issues.find((i) => i.var === missing);
+    expect(issue?.message).toBe('CLIPROXY_BASE_URL and CLIPROXY_TOKEN must be set together (or both left unset)');
   });
 
   test('empty CLIPROXY_TOKEN is rejected', () => {
@@ -451,8 +484,8 @@ describe('loadConfig', () => {
     expect(caught).toBeInstanceOf(ConfigError);
     const err = caught as ConfigError;
     const names = err.issues.map((i) => i.var);
-    expect(names).toContain('CLIPROXY_BASE_URL');
-    expect(names).toContain('CLIPROXY_TOKEN');
+    expect(names).not.toContain('CLIPROXY_BASE_URL');
+    expect(names).not.toContain('CLIPROXY_TOKEN');
     expect(names).toContain('DATA_DIR');
   });
 
@@ -671,5 +704,29 @@ describe('Ephemera integration config', () => {
     expect(issuesOf({ ...ephemeraEnv(), EPHEMERA_CARD_TIMEOUT_MS: '540001' }).map((issue) => issue.var))
       .toContain('EPHEMERA_CARD_TIMEOUT_MS');
     expect(loadConfig({ ...ephemeraEnv(), EPHEMERA_CARD_TIMEOUT_MS: '540000' }).EPHEMERA_CARD_TIMEOUT_MS).toBe(540_000);
+  });
+});
+
+describe('.env.example', () => {
+  // The committed local template must boot as shipped (with a real DATA_DIR):
+  // no CLIProxy values, and no text-model variables to fill in.
+  const parseEnvFile = (path: string): NodeJS.ProcessEnv => {
+    const env: NodeJS.ProcessEnv = {};
+    for (const raw of readFileSync(path, 'utf8').split('\n')) {
+      const line = raw.trim();
+      if (line === '' || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq <= 0) throw new Error(`.env.example: not a KEY=value line: ${line}`);
+      env[line.slice(0, eq)] = line.slice(eq + 1);
+    }
+    return env;
+  };
+
+  test('loads without CLIProxy values once DATA_DIR is set', () => {
+    const example = parseEnvFile(join(import.meta.dir, '..', '..', '.env.example'));
+    expect(Object.keys(example).some((key) => key.startsWith('CLIPROXY_TEXT_MODEL_'))).toBe(false);
+    const cfg = loadConfig({ ...example, DATA_DIR: '/tmp/atelier-env-example' });
+    expect(cliproxyEnabled(cfg)).toBe(false);
+    expect(cfg.TEXT_PROVIDER_ADMINS.size).toBe(0);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Provider, ProviderRequest, ProviderResult } from './providers/types';
 import type { RegistryEntry } from './providers/registry';
-import { testRuntime } from './test/helpers';
+import { testRuntime, testTextServices } from './test/helpers';
 import { pngBytes } from './test/image-fixtures';
 import { runBatchPipeline } from './orchestrator';
 import { createBatch } from './orchestrator/createBatch';
@@ -40,7 +40,7 @@ async function runOne(
   db.query("UPDATE batches SET status = 'running' WHERE id = ?").run(prepared.batch.id);
   beforeDispatch();
   await runBatchPipeline(prepared, {
-    db, config, logger, userId: 'alice', request, registryEntry, boundProvider: provider,
+    db, config, logger, text: testTextServices(db, config), userId: 'alice', request, registryEntry, boundProvider: provider,
     disconnectSignal: new AbortController().signal,
     onTileSettled: () => undefined, onSyncFailure: () => undefined,
     promptPrepared: true,

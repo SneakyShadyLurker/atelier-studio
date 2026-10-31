@@ -61,7 +61,7 @@ function ModerationCase() {
       <label htmlFor="moderation-input">Your brief</label>
       <textarea id="moderation-input" value={input} onChange={(event) => { setInput(event.target.value); }} style={{ display: 'block', width: '100%', boxSizing: 'border-box', marginBlock: 16 }} />
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
-        <button type="button" onClick={() => { void announce({ reason: 'sexual-age', categories: ['nudity'], target: 'text' }); }}>Preview nudity block</button>
+        <button type="button" onClick={() => { void announce({ reason: 'sexual-age', categories: ['nudity'], target: 'text', modelLabel: 'GPT-6.1 Sol' }); }}>Preview nudity block</button>
         <button type="button" onClick={() => { void announce({ reason: 'sexual-age', categories: ['sexual-age'], target: 'text' }); }}>Preview age block</button>
         <button type="button" onClick={() => { void announce({ reason: 'graphic-violence', target: 'image' }); }}>Preview violence block</button>
         <button type="button" onClick={() => { void announce({ reason: 'sexual-age-and-violence', categories: ['nudity', 'sexual-age', 'graphic-violence'], target: 'text' }); }}>Preview all reasons</button>

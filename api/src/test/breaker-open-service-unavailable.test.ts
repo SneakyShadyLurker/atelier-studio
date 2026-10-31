@@ -23,7 +23,7 @@ import type { Provider, ProviderResult } from '../providers/types';
 import { runBatchPipeline } from '../orchestrator';
 import { createBatch } from '../orchestrator/createBatch';
 import { transitionQueuedToRunning } from '../db/queueOps';
-import { testConfig } from './helpers';
+import { testConfig, testTextServices } from './helpers';
 import { openDb } from '../db/client';
 import { migrate } from '../db/migrate';
 
@@ -84,6 +84,7 @@ test('BrokenCircuitError thrown by boundProvider persists service-unavailable, n
     db,
     config,
     logger,
+    text: testTextServices(db, config),
     userId: 'u1',
     request,
     registryEntry,

@@ -1,23 +1,21 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { restoreFetch, testRuntime } from '../test/helpers';
+import { setTextModelProviderForTests } from '../providers/text/registry';
+import { pickLegacyTextModel, restoreFetch, testRuntime } from '../test/helpers';
 import {
   configureLlmAdmissionPools,
   enhancePool,
   resetLlmAdmissionForTests,
 } from './llmAdmission';
 import {
-  setCliproxyTextProviderForTests,
-  createCliproxyTextProvider,
   type EnhanceChunk,
-  type TestCliproxyTextProvider,
-} from '../providers/cliproxyText';
+  type TestTextFeatureProvider,
+} from '../providers/text/featureHelpers';
 import {
   KREA_PROMPT_CONDENSE_TRIGGER_WORDS,
   KREA_PROMPT_WORD_BUDGET,
 } from '../prompts/promptBudget';
-import { writeTextBackendOverride } from '../routing/textBackendPreference';
 import { condenseBatchPrompt } from './condenseBatchPrompt';
-import { testTextPolicies } from '../test/textPolicies';
+import { seededTextModel, testTextModelProvider } from '../test/textModelProvider';
 
 // These cover the pass itself. It runs in the batch worker, off the
 // POST /api/generate request path (see condenseBatchPrompt's own doc), so
@@ -32,13 +30,13 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreFetch();
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   resetLlmAdmissionForTests();
 });
 
 function fakeCondenseProvider(
-  enhance: TestCliproxyTextProvider['enhance'],
-): TestCliproxyTextProvider {
+  enhance: TestTextFeatureProvider['enhance'],
+): TestTextFeatureProvider {
   return {
     enhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -77,8 +75,8 @@ function condense(
   signal = new AbortController().signal,
 ): Promise<string> {
   return condenseBatchPrompt(prompt, modelId, {
-    db: runtime.db,
     config: runtime.config,
+    text: runtime.text,
     logger: runtime.logger,
     userId: 'alice',
     signal,
@@ -89,7 +87,7 @@ test('condenses a Krea prompt without classifying', async () => {
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
   const condensed = `An adult woman ${wordPrompt(120, 'short')}`;
   const seen: { prompt: string; systemPrompt?: string; optionKeys: string[] }[] = [];
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* (prompt, _images, _signal, systemPrompt, opts) {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* (prompt, _images, _signal, systemPrompt, opts) {
     await Promise.resolve();
     seen.push({
       prompt,
@@ -101,7 +99,7 @@ test('condenses a Krea prompt without classifying', async () => {
     yield { type: 'delta', text: condensed.slice(50) } satisfies EnhanceChunk;
     yield { type: 'done' } satisfies EnhanceChunk;
   }));
-  const runtime = testRuntime({ LOG_LEVEL: 'info' });
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
 
   expect(await condense(runtime, original)).toBe(condensed);
   expect(seen).toHaveLength(1);
@@ -122,7 +120,7 @@ test('Auto condense runs on Kimi, and a gemini-argon override moves the same con
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
   const sentModels: string[] = [];
   const seen: { systemPrompt?: string }[] = [];
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, unknown>;
@@ -136,11 +134,11 @@ test('Auto condense runs on Kimi, and a gemini-argon override moves the same con
     }));
   }) as unknown as typeof fetch;
   try {
-    const runtime = testRuntime();
+    const runtime = testRuntime({ seedLegacyText: true });
     // The real provider stream ends without a done frame, so the pass fails
     // open and returns the original — the assertions are about the request.
     await condense(runtime, original);
-    writeTextBackendOverride(runtime.db, 'alice', 'condense', 'gemini-argon');
+    pickLegacyTextModel(runtime.db, 'alice', 'condense', 'gemini-argon');
     await condense(runtime, original);
     expect(sentModels).toEqual(['kimi-latest', 'gemini-4-argon']);
     // Positively pin the condense body this test's title names — an absence
@@ -159,16 +157,16 @@ test('Auto condense runs on Kimi, and a gemini-argon override moves the same con
 test('a pinned effort reaches the condense call only while its pin serves it', async () => {
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
   const efforts: unknown[] = [];
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* (_prompt, _images, _signal, _systemPrompt, opts) {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* (_prompt, _images, _signal, _systemPrompt, opts) {
     await Promise.resolve();
     efforts.push(opts?.reasoningEffort);
     yield { type: 'done' } satisfies EnhanceChunk;
   }));
-  const runtime = testRuntime();
+  const runtime = testRuntime({ seedLegacyText: true });
 
-  writeTextBackendOverride(runtime.db, 'alice', 'condense', 'grok', 'high');
+  pickLegacyTextModel(runtime.db, 'alice', 'condense', 'grok', 'high');
   await condense(runtime, original);
-  writeTextBackendOverride(runtime.db, 'alice', 'condense', null);
+  runtime.text.store.writeUserPick('alice', 'condense', null);
   await condense(runtime, original);
 
   expect(efforts).toEqual(['high', undefined]);
@@ -176,12 +174,12 @@ test('a pinned effort reaches the condense call only while its pin serves it', a
 
 test('leaves a Krea prompt at the trigger and every non-Krea prompt untouched', async () => {
   let calls = 0;
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* () {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
     await Promise.resolve();
     calls += 1;
     yield { type: 'done' } satisfies EnhanceChunk;
   }));
-  const runtime = testRuntime();
+  const runtime = testRuntime({ seedLegacyText: true });
   // Exactly at the trigger: the guard is `<=`, so this must NOT condense.
   const kreaPrompt = wordPrompt(KREA_PROMPT_CONDENSE_TRIGGER_WORDS);
   const gptPrompt = wordPrompt(OVER_TRIGGER_WORDS + 30);
@@ -193,12 +191,12 @@ test('leaves a Krea prompt at the trigger and every non-Krea prompt untouched', 
 
 test('fails open on a result that is not strictly shorter', async () => {
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* () {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
     await Promise.resolve();
     yield { type: 'delta', text: `${original} extra` } satisfies EnhanceChunk;
     yield { type: 'done' } satisfies EnhanceChunk;
   }));
-  const runtime = testRuntime({ LOG_LEVEL: 'info' });
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
 
   expect(await condense(runtime, original)).toBe(original);
   const log = logRecords(runtime.logs)
@@ -208,7 +206,7 @@ test('fails open on a result that is not strictly shorter', async () => {
 
 test('gives up on its own timeout knob and keeps the original prompt', async () => {
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* (_prompt, _images, signal) {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* (_prompt, _images, signal) {
     // Mirrors the real provider: nothing is emitted, and the stream ends only
     // once its signal aborts mid-flight — never with a terminal chunk.
     await new Promise<void>((resolve) => {
@@ -217,7 +215,7 @@ test('gives up on its own timeout knob and keeps the original prompt', async () 
     });
     if (!signal.aborted) yield { type: 'done' } satisfies EnhanceChunk;
   }));
-  const runtime = testRuntime({ LOG_LEVEL: 'info', KREA_CONDENSE_TIMEOUT_MS: '1000' });
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info', KREA_CONDENSE_TIMEOUT_MS: '1000' });
 
   expect(await condense(runtime, original)).toBe(original);
   const log = logRecords(runtime.logs)
@@ -231,7 +229,7 @@ test('gives up on its own timeout knob and keeps the original prompt', async () 
 test('gives up when the batch is canceled underneath it', async () => {
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
   const canceled = new AbortController();
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* (_prompt, _images, signal) {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* (_prompt, _images, signal) {
     canceled.abort();
     await new Promise<void>((resolve) => {
       if (signal.aborted) resolve();
@@ -239,7 +237,7 @@ test('gives up when the batch is canceled underneath it', async () => {
     });
     if (!signal.aborted) yield { type: 'done' } satisfies EnhanceChunk;
   }));
-  const runtime = testRuntime({ LOG_LEVEL: 'info' });
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
 
   expect(await condense(runtime, original, 'krea-2-gonzalomo', canceled.signal)).toBe(original);
   const log = logRecords(runtime.logs)
@@ -253,8 +251,8 @@ test('an actual enhancer incomplete EOF cannot replace the prompt with partial c
     calls++;
     return Promise.resolve(new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: 'partial condensation' } }] })}\n\n`));
   }, { preconnect: globalThis.fetch.preconnect });
-  setCliproxyTextProviderForTests(createCliproxyTextProvider({ ...testTextPolicies(), baseUrl: 'http://fake', token: 't', model: 'kimi-k3', backend: 'kimi', maxResponseBytes: 10000 }));
-  const runtime = testRuntime();
+  setTextModelProviderForTests(testTextModelProvider({ origin: 'http://fake', token: 't', model: seededTextModel('kimi', { modelId: 'kimi-k3' }), maxResponseBytes: 10000 }));
+  const runtime = testRuntime({ seedLegacyText: true });
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
   expect(await condense(runtime, original)).toBe(original);
   expect(calls).toBe(1);
@@ -263,7 +261,7 @@ test('an actual enhancer incomplete EOF cannot replace the prompt with partial c
 test('fails open when the provider reports a failure or throws', async () => {
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
   let attempt = 0;
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* () {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
     await Promise.resolve();
     attempt += 1;
     if (attempt === 1) {
@@ -272,7 +270,7 @@ test('fails open when the provider reports a failure or throws', async () => {
     }
     throw new Error('upstream crashed');
   }));
-  const runtime = testRuntime({ LOG_LEVEL: 'info' });
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
 
   expect(await condense(runtime, original)).toBe(original);
   expect(await condense(runtime, original)).toBe(original);
@@ -284,7 +282,7 @@ test('fails open when the provider reports a failure or throws', async () => {
 
 test('fails open when the model returns refusal prose as successful content', async () => {
   const original = `A 15-year-old fictional character ${wordPrompt(OVER_TRIGGER_WORDS)}`;
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* () {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
     await Promise.resolve();
     yield {
       type: 'delta',
@@ -292,7 +290,7 @@ test('fails open when the model returns refusal prose as successful content', as
     } satisfies EnhanceChunk;
     yield { type: 'done' } satisfies EnhanceChunk;
   }));
-  const runtime = testRuntime({ LOG_LEVEL: 'info' });
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
 
   expect(await condense(runtime, original)).toBe(original);
   const log = logRecords(runtime.logs)
@@ -303,12 +301,13 @@ test('fails open when the model returns refusal prose as successful content', as
 test('fails open when the enhance admission pool is full', async () => {
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
   let calls = 0;
-  setCliproxyTextProviderForTests(fakeCondenseProvider(async function* () {
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
     await Promise.resolve();
     calls += 1;
     yield { type: 'done' } satisfies EnhanceChunk;
   }));
   const runtime = testRuntime({
+    seedLegacyText: true,
     LOG_LEVEL: 'info',
     MAX_CONCURRENT_LLM_ENHANCE_PER_USER: '1',
   });
@@ -325,4 +324,22 @@ test('fails open when the enhance admission pool is full', async () => {
   } finally {
     held.release();
   }
+});
+
+test('fails open, logging the reason, when no text model can serve the condense task', async () => {
+  const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
+  let calls = 0;
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
+    await Promise.resolve();
+    calls += 1;
+    yield { type: 'done' } satisfies EnhanceChunk;
+  }));
+  // No migrated provider: the resolver reports not-configured.
+  const runtime = testRuntime({ LOG_LEVEL: 'info' });
+
+  expect(await condense(runtime, original)).toBe(original);
+  expect(calls).toBe(0);
+  const log = logRecords(runtime.logs)
+    .find((entry) => entry.event === 'krea_prompt_condense_skipped');
+  expect(log).toMatchObject({ reason: 'text-model-not-configured' });
 });

@@ -1,9 +1,8 @@
 import { Hono, type Context } from 'hono';
 import {
   MAX_PROMPT_CHARS,
-  type AiFillBackend,
+  type AiFillBackendFrame,
   type AiFillBatchSseEvent,
-  usesGenericPromptVariant,
 } from '@atelier/shared';
 import {
   AI_FILL_FIELD_SEPARATOR,
@@ -16,13 +15,13 @@ import type { AppLogger } from '../../observability/logger';
 import type { AppEnv } from '../../server-env';
 import { withLlmSlot } from '../../lifecycle/withLlmSlot';
 import { enhancePool } from '../../orchestrator/llmAdmission';
-import { aiFillTextProviderForConfig } from '../../providers/textRouting';
-import { findModel } from '../../providers/registry';
+import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
+import type { ResolvedTextModel } from '../../routing/textModelResolver';
 import {
   aiFillBatchRouteTimeoutMs,
   aiFillPerAttemptTimeoutMs,
   aiFillRouteTimeoutMs,
-} from '../../providers/cliproxyText.config';
+} from '../../providers/text/textBudgets';
 import { parseBody } from '../_http';
 import { AiFillBatchRequestSchema, AiFillRequestSchema } from './aiFill.schema';
 import {
@@ -36,8 +35,7 @@ import {
 import { isLikelyModelRefusal } from '../../prompts/modelOutput';
 import { failedToSseError } from '../../lifecycle/llm-error';
 import { promptCharBudgetForModel, promptMinPerSlotWordsForModel } from '../../prompts/promptBudget';
-import { classifyImageModelTarget } from '../../prompts/gptImagePhrasing';
-import { resolveTextBackend, resolveTextBackendEffort } from '../../routing/textBackendPreference';
+import type { TextModelRecord } from '../../db/textProviders';
 
 const SAFE_ERROR_MESSAGE = "Couldn't fill the prompt. Please try again.";
 const REFUSAL_ERROR_MESSAGE = 'The writer refused this prompt. Nothing was sent to the image model.';
@@ -62,7 +60,7 @@ function logRefusal(
   input: {
     readonly event: 'ai_fill_refusal' | 'ai_fill_batch_refusal';
     readonly userId: string;
-    readonly backend: AiFillBackend;
+    readonly textModelId: string;
     readonly modelId: string;
     readonly slot: number;
     readonly itemIndex?: number;
@@ -112,16 +110,15 @@ function parseBatchResponse(
 
 type BatchItemResult = Extract<AiFillBatchSseEvent, { event: 'result' }>['data']['items'][number];
 
-// The ai-fill text backend for an image-model target: Sunburst → GPT, anything
-// else (Krea and MOSS included) → Kimi, subject to the user's stored preference.
-function resolveAiFillBackend(c: Context<AppEnv>, modelId: string): AiFillBackend {
-  const entry = findModel(modelId, c.var.config);
-  const target = classifyImageModelTarget(modelId);
-  return resolveTextBackend(
-    c.var.db, c.var.userId, 'ai-fill',
-    target === 'gpt' ? 'gpt' : 'kimi',
-    entry ? { targetModelId: entry.model.id, targetPool: entry.model.pool === 'local' ? 'local' : 'cloud' } : {},
-  );
+// The ai-fill text model for an image-model target: its prompt writer when
+// one is set, else the user's pick, the task assignment or the default.
+function resolveAiFillModel(c: Context<AppEnv>, modelId: string): ResolvedTextModel {
+  return c.var.text.resolve({ userId: c.var.userId, task: 'ai-fill', ...imageModelRouting(c.var.config, modelId) });
+}
+
+/** The advisory `backend` frame naming the serving row. */
+function backendFrame(model: TextModelRecord): AiFillBackendFrame {
+  return { modelId: model.id, label: model.displayName };
 }
 
 // Words each slot may use: the model's prompt budget left after the static
@@ -143,13 +140,15 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
   const logger = c.var.logger;
   const userId = c.var.userId;
   const skeleton = buildAiFillSkeleton(staticSegments);
-  const backend = resolveAiFillBackend(c, modelId);
-  const reasoningEffort = resolveTextBackendEffort(c.var.db, userId, 'ai-fill', backend);
-  const usesGenericPrompt = usesGenericPromptVariant(backend);
+  const resolved = resolveAiFillModel(c, modelId);
+  if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
+  const textModel = resolved.model;
+  const reasoningEffort = resolved.effort;
+  const usesGenericPrompt = textModel.promptVariant === 'generic';
   // Generate and Simulate use the same centralized route. One provider owns
-  // the full fill request and its format retry; neither backend falls through
-  // to the other one.
-  const provider = aiFillTextProviderForConfig(config, backend);
+  // the full fill request and its format retry; it never falls through to
+  // another model.
+  const provider = textProviderForResolved(config, c.var.text, textModel);
   const perSlotWordBudget = perSlotWordBudgetFor(modelId, staticSegments, instructions.length);
   const buildSystemPrompt = usesGenericPrompt
     ? buildAiFillSystemPrompt
@@ -160,7 +159,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
     perSlotWordBudget,
   });
   const userContent = buildAiFillUserContent({ skeleton, instructions });
-  const perAttemptTimeoutMs = aiFillPerAttemptTimeoutMs(backend, config.AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
+  const perAttemptTimeoutMs = aiFillPerAttemptTimeoutMs(textModel.latencyProfile, config.AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
   const timeoutMs = aiFillRouteTimeoutMs(
     [perAttemptTimeoutMs, perAttemptTimeoutMs],
     config.RESILIENT_MAX_BACKOFF_MS,
@@ -174,14 +173,14 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
     disconnect: c.req.raw.signal,
     run: async ({ send, signal, timedOut, clientDisconnected }) => {
         try {
-          send('backend', { backend });
+          send('backend', backendFrame(textModel));
           // Either path can come back malformed — wrong field count or an empty
           // blank — most often when a reasoning run truncated the answer before
           // the field separator (finish_reason:'length' → got:1).
           // A successful-but-malformed response is NOT a transient error, so the
           // resilience policy never retries it; we retry once HERE instead so a
           // single bad roll self-heals rather than being silently dropped.
-          // Both attempts stay on the selected backend with the same prompt and
+          // Both attempts stay on the selected model with the same prompt and
           // request knobs. Bounded to one extra call either way.
           const mismatched = (fills: readonly string[]): boolean =>
             fills.length !== instructions.length || fills.some((f) => f.length === 0);
@@ -210,7 +209,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
             logRefusal(logger, {
               event: 'ai_fill_refusal',
               userId,
-              backend,
+              textModelId: textModel.id,
               modelId,
               slot,
               skeleton,
@@ -297,9 +296,12 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
     skeleton: buildAiFillSkeleton(item.staticSegments),
     perSlotWordBudget: perSlotWordBudgetFor(modelId, item.staticSegments, item.instructions.length),
   }));
-  // The whole batch shares one image-model target, so one backend serves it.
-  const backend = resolveAiFillBackend(c, modelId);
-  const timeoutMs = aiFillBatchRouteTimeoutMs(backend, config.RESILIENT_MAX_BACKOFF_MS);
+  // The whole batch shares one image-model target, so one model serves it.
+  const resolved = resolveAiFillModel(c, modelId);
+  if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
+  const textModel = resolved.model;
+  const reasoningEffort = resolved.effort;
+  const timeoutMs = aiFillBatchRouteTimeoutMs(textModel.latencyProfile, config.RESILIENT_MAX_BACKOFF_MS);
 
   return withLlmSlot(c, enhancePool, userId, 2, () => ({
     timeoutMs,
@@ -311,8 +313,8 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
         let refusals = 0;
 
         if (aborted()) return;
-        const usesGenericPrompt = usesGenericPromptVariant(backend);
-        const provider = aiFillTextProviderForConfig(config, backend);
+        const usesGenericPrompt = textModel.promptVariant === 'generic';
+        const provider = textProviderForResolved(config, c.var.text, textModel);
         const systemPrompt = (usesGenericPrompt
           ? buildAiFillBatchSystemPrompt
           : buildKimiAiFillBatchSystemPrompt)({
@@ -325,7 +327,6 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
         const userContent = buildAiFillBatchUserContent({
           items: prepared.map(({ item, skeleton }) => ({ skeleton, instructions: item.instructions })),
         });
-        const reasoningEffort = resolveTextBackendEffort(c.var.db, userId, 'ai-fill', backend);
         const providerInput = {
           systemPrompt,
           userContent,
@@ -333,7 +334,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
           ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
         };
 
-        send('backend', { backend });
+        send('backend', backendFrame(textModel));
         let result = await provider.aiFill(providerInput, signal);
         if (aborted()) return;
         let parsedResponse = result.type === 'ok'
@@ -352,7 +353,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
           logger.info(
             {
               event: 'ai_fill_batch_mismatch_retry',
-              backend,
+              textModelId: textModel.id,
               reason: parsedResponse === null ? 'record-count-mismatch' : 'every-item-mismatch',
               ...(parsedResponse === null
                 ? { got: result.text.split(AI_FILL_RECORD_SEPARATOR).length, want: prepared.length }
@@ -372,7 +373,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
           logger.warn(
             {
               event: 'ai_fill_batch_upstream',
-              backend,
+              textModelId: textModel.id,
               kind: result.kind,
               status: result.status,
               userId,
@@ -397,7 +398,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
             logRefusal(logger, {
               event: 'ai_fill_batch_refusal',
               userId,
-              backend,
+              textModelId: textModel.id,
               modelId,
               slot: batchItem.refusedSlot,
               itemIndex: source.index,

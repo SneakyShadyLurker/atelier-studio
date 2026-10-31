@@ -28,8 +28,8 @@ import {
   storyPlannerUserContent,
   type StorySourceMode,
 } from '../prompts/storyPlannerSystemPrompt';
-import { STORY_PLANNER_DEFAULTS, textStreamDrainMs } from '../providers/cliproxyText.config';
-import type { EnhanceImageInput } from '../providers/cliproxyText';
+import { STORY_PLANNER_DEFAULTS, textStreamDrainMs } from '../providers/text/textBudgets';
+import type { EnhanceImageInput } from '../providers/text/featureHelpers';
 import {
   findModel,
   isLocalModelGated,
@@ -37,8 +37,7 @@ import {
   registryForConfig,
   type RegistryEntry,
 } from '../providers/registry';
-import { aiFillTextProviderForConfig } from '../providers/textRouting';
-import { resolveTextBackend, resolveTextBackendEffort } from '../routing/textBackendPreference';
+import { textModelFailureBody, textProviderForResolved } from '../providers/textRouting';
 import { downscaleForVision } from '../storage/downscaleForVision';
 import { uploadArtifactExists } from '../storage/uploadStore';
 import { extensionErrorResponse, invalidFieldResponse, parseBody, parseParams } from './_http';
@@ -189,24 +188,24 @@ export const storiesRoutes = new Hono<AppEnv>()
       );
     }
 
-    // Resolved before the slot so the deadline can follow the planner backend.
-    const backend = resolveTextBackend(
-      c.var.db,
-      c.var.userId,
-      'storytelling',
-      'kimi',
-      { visionRequired: source.mode !== 't2v', targetPool: 'local' },
-    );
-    const reasoningEffort = resolveTextBackendEffort(c.var.db, c.var.userId, 'storytelling', backend);
+    // Resolved before the slot so the deadline can follow the planner model.
+    // The planner sees the source frame, so a source requires vision.
+    const resolved = c.var.text.resolve({
+      userId: c.var.userId,
+      task: 'storytelling',
+      visionRequired: source.sourceUploadId !== null,
+    });
+    if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
+    const reasoningEffort = resolved.effort;
 
     return withLlmSlot(c, enhancePool, c.var.userId, 5, () => ({
-      timeoutMs: textStreamDrainMs(backend, c.var.config.CLOUD_TIMEOUT_MS),
+      timeoutMs: textStreamDrainMs(resolved.model.latencyProfile, c.var.config.CLOUD_TIMEOUT_MS),
       disconnect: c.req.raw.signal,
       run: async ({ send, signal, clientDisconnected }) => {
         const emit = (frame: StoryPlanSseEvent): void => { send(frame.event, frame.data); };
         emit({ event: 'status', data: { phase: 'planning' } });
         try {
-          const provider = aiFillTextProviderForConfig(c.var.config, backend);
+          const provider = textProviderForResolved(c.var.config, c.var.text, resolved.model);
           let images: EnhanceImageInput[] = [];
           if (source.sourceUploadId !== null) {
             const loaded = await loadRefImages(

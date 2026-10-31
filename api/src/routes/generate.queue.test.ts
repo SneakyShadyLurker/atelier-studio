@@ -9,7 +9,7 @@ import { beginShutdownDrain, resetShutdownDrainForTests } from '../orchestrator/
 import { stopQueuedPromptPreparation } from '../orchestrator/queuedPromptPreparation';
 import * as queue from '../orchestrator/queue';
 import { resetRegistryForTests, snapshotBatchDonePromises } from '../orchestrator/registry';
-import { jsonRequest, testConfig, tempDir, testRuntime } from '../test/helpers';
+import { jsonRequest, testConfig, tempDir, testRuntime, testTextServices } from '../test/helpers';
 import { kickQueues } from '../orchestrator/dispatch';
 import { capsForPool, findModel } from '../providers/registry';
 
@@ -149,6 +149,7 @@ describe('queued generation startup', () => {
       logger: createLogger(config),
       keyStore,
       healthSnapshot: () => new Map(),
+      text: testTextServices(db, config),
     });
     await Promise.resolve();
 

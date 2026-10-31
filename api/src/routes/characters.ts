@@ -1,18 +1,15 @@
 import { Hono } from 'hono';
-import type { AiFillBackend } from '@atelier/shared';
-import { TEXT_BACKEND_LABELS } from '@atelier/shared';
 import type { AppEnv } from '../server-env';
 import { draftPool } from '../orchestrator/llmAdmission';
 import { withLlmSlot } from '../lifecycle/withLlmSlot';
-import { aiFillTextProviderForConfig } from '../providers/textRouting';
+import { textModelFailureBody, textProviderForResolved } from '../providers/textRouting';
 import { findModel } from '../providers/registry';
 import { parseBody } from './_http';
 import { BrainstormCharactersRequestSchema } from './characters.schema';
 import { failedToSseError } from '../lifecycle/llm-error';
-import { classifyImageModelTarget } from '../prompts/gptImagePhrasing';
-import { resolveTextBackend, resolveTextBackendEffort } from '../routing/textBackendPreference';
-import { isSunburstModel } from '../prompts/gptSystemPrompt';
-import { brainstormRouteTimeoutMs, textStreamDrainMs } from '../providers/cliproxyText.config';
+import type { ResolveTextModelInput } from '../routing/textModelResolver';
+import type { TextModelRecord } from '../db/textProviders';
+import { brainstormRouteTimeoutMs, textStreamDrainMs } from '../providers/text/textBudgets';
 
 const SAFE_ERROR_MESSAGE = "Couldn't brainstorm characters. Please try again.";
 
@@ -22,25 +19,31 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
 
   const logger = c.var.logger;
   const userId = c.var.userId;
+  const text = c.var.text;
   const entry = findModel(parsed.value.modelId, c.var.config);
-  const target = classifyImageModelTarget(parsed.value.modelId);
-  const targetPool = entry ? entry.model.pool === 'local' ? 'local' : 'cloud' : undefined;
-  if (parsed.value.textBackend === 'gpt' && targetPool !== 'cloud') {
-    return c.json({ error: `${TEXT_BACKEND_LABELS.gpt} supports cloud image models only; local or unknown targets cannot pin gpt` }, 400);
+  const { textModelId } = parsed.value;
+  // The request pin must name an enabled model.
+  if (textModelId !== undefined && !text.snapshot.current().models.has(textModelId)) {
+    return c.json({ error: 'This text model is not available', issues: [{ path: ['textModelId'], message: 'unknown or turned off' }] }, 400);
   }
-  // Sunburst is fixed. Other targets retain explicit pins, preferences and Auto.
-  const sunburst = isSunburstModel(entry?.model.id);
-  const backend = (sunburst ? 'gpt' as const : parsed.value.textBackend)
-    ?? resolveTextBackend(
-         c.var.db, userId, 'brainstorm',
-         target === 'gpt' ? 'gpt' : 'kimi',
-         entry && targetPool !== undefined ? { targetModelId: entry.model.id, targetPool } : {},
-       );
-  // A pinned effort applies only when the pin serves the selected backend.
-  const initialEffort = resolveTextBackendEffort(c.var.db, userId, 'brainstorm', backend);
-  // One-shot transient failover partner: every non-Kimi backend hands over to
-  // Kimi; Kimi has no partner and fails on its own terms.
-  const otherBackend: AiFillBackend | null = backend === 'kimi' ? null : 'kimi';
+  const route: ResolveTextModelInput = {
+    userId,
+    task: 'brainstorm',
+    ...(entry ? { imageModelId: entry.model.id } : {}),
+    ...(textModelId === undefined ? {} : { requestPin: textModelId }),
+  };
+  const resolved = text.resolve(route);
+  if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
+  // One-shot transient failover partner (spec § 2.3): the resolver's next
+  // choice with the selected model excluded. A locked writer has none (the
+  // resolver fails rather than cross it), and a screened model never hands
+  // its request to an unscreened one.
+  const next = text.resolve({ ...route, excludeModelIds: [resolved.model.id] });
+  const partner: TextModelRecord | null = next.ok
+    && next.model.id !== resolved.model.id
+    && (!resolved.model.screenRequests || next.model.screenRequests)
+    ? next.model
+    : null;
   const count = Math.min(parsed.value.count, c.var.config.BRAINSTORM_MAX_COUNT);
   const input = {
     count,
@@ -51,12 +54,15 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
     ...(parsed.value.variationSeed === undefined ? {} : { variationSeed: parsed.value.variationSeed }),
   };
 
-  // The selected backend's stream drain (CLOUD_TIMEOUT_MS, longer for GLM) is
-  // the budget once a backend has opened; the open envelope of both sequential
-  // backend groups is added on top so a failover that finally opens is not cut
-  // off mid-stream by the route deadline. The failover partner is never GLM.
+  // The longer stream drain of the two models that may serve (CLOUD_TIMEOUT_MS,
+  // longer for slow models) is the budget once one has opened; the open
+  // envelope of both sequential attempts is added on top so a failover that
+  // finally opens is not cut off mid-stream by the route deadline.
   const timeoutMs = brainstormRouteTimeoutMs(
-    textStreamDrainMs(backend, c.var.config.CLOUD_TIMEOUT_MS),
+    Math.max(
+      textStreamDrainMs(resolved.model.latencyProfile, c.var.config.CLOUD_TIMEOUT_MS),
+      partner === null ? 0 : textStreamDrainMs(partner.latencyProfile, c.var.config.CLOUD_TIMEOUT_MS),
+    ),
     c.var.config.BRAINSTORM_OPEN_TIMEOUT_MS,
     c.var.config.RESILIENT_MAX_ATTEMPTS,
     c.var.config.RESILIENT_MAX_BACKOFF_MS,
@@ -66,16 +72,16 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
     timeoutMs,
     disconnect: c.req.raw.signal,
     run: async ({ send, signal, timedOut, clientDisconnected }) => {
-        // Brainstorm carries no image, so every selectable backend can write it. When the
-        // selected backend fails transiently (timeout / 5xx after its own retry
-        // policy) before a single prompt was emitted, hand the run to Kimi
-        // once instead of failing the caller; Kimi itself has no partner. Refusals, quota, and
-        // permanent failures stay on the selected backend. Resolves to whether
-        // a terminal event was sent.
-        const run = async (current: AiFillBackend, fallback: AiFillBackend | null): Promise<boolean> => {
-          const provider = aiFillTextProviderForConfig(c.var.config, current);
-          // The failover partner always differs from `backend`, so it keeps its default effort.
-          const reasoningEffort = current === backend ? initialEffort : undefined;
+        // Brainstorm carries no image, so every model can write it. When the
+        // selected model fails transiently (timeout / 5xx after its own retry
+        // policy) before a single prompt was emitted, hand the run to the
+        // partner once instead of failing the caller; the partner has none.
+        // Refusals, quota, and permanent failures stay on the selected model.
+        // Resolves to whether a terminal event was sent.
+        const run = async (current: TextModelRecord, fallback: TextModelRecord | null): Promise<boolean> => {
+          const provider = textProviderForResolved(c.var.config, text, current);
+          // A user's effort stays with the selected model; the partner keeps its row default.
+          const reasoningEffort = current.id === resolved.model.id ? resolved.effort : undefined;
           let emitted = 0;
           for await (const chunk of provider.brainstormCharacters(
             reasoningEffort === undefined ? input : { ...input, reasoningEffort },
@@ -90,13 +96,13 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
               return true;
             } else if (fallback !== null && emitted === 0 && chunk.kind === 'transient') {
               logger.warn(
-                { event: 'brainstorm_backend_fallback', from: current, to: fallback, status: chunk.status, detail: chunk.detail, userId },
-                'brainstorm failing over to the other backend',
+                { event: 'brainstorm_backend_fallback', from: current.id, to: fallback.id, status: chunk.status, detail: chunk.detail, userId },
+                'brainstorm failing over to the partner model',
               );
               return run(fallback, null);
             } else {
               logger.warn(
-                { event: 'brainstorm_upstream_error', backend: current, status: chunk.status, detail: chunk.detail, userId },
+                { event: 'brainstorm_upstream_error', textModelId: current.id, status: chunk.status, detail: chunk.detail, userId },
                 'brainstorm characters failed',
               );
               send('error', failedToSseError(chunk));
@@ -106,7 +112,7 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
           return false;
         };
         try {
-          const settled = await run(backend, sunburst ? null : otherBackend);
+          const settled = await run(resolved.model, partner);
           if (!settled && !clientDisconnected()) {
             logger.error(
               { event: timedOut() ? 'brainstorm_timeout' : 'brainstorm_truncated', timeoutMs, userId },

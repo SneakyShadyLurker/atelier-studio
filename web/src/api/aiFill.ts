@@ -1,11 +1,10 @@
 import type {
-  AiFillBackend,
+  AiFillBackendFrame,
   AiFillBatchRequest,
   AiFillBatchSseEvent,
   AiFillRequest,
   AiFillSseEvent,
 } from '@atelier/shared';
-import { AI_FILL_BACKEND_VALUES } from '@atelier/shared';
 import { ApiError, apiFetch, extractApiError, responseRequestId } from './client';
 import { consumeSseResult, parseTerminalSseErrorFromData } from './sse';
 import { classifyQueueFull, delay, jitterRetryDelayMs, MAX_QUEUE_FULL_RETRIES, QueueFullError } from './queueFullRetry';
@@ -31,8 +30,16 @@ function isAiFillBatchResult(value: unknown): value is AiFillBatchResolved {
   });
 }
 
-function isBackendFrame(value: unknown): value is AiFillBackend {
-  return typeof value === 'string' && (AI_FILL_BACKEND_VALUES as readonly string[]).includes(value);
+/** The text model a fill announced: its row id and display name. */
+export type AiFillModel = Pick<AiFillBackendFrame, 'modelId' | 'label'>;
+
+// Advisory frame: a malformed one is dropped, never thrown. Any model id is
+// accepted.
+function backendFrameModel(data: unknown): AiFillModel | null {
+  if (!isRecord(data) || typeof data.modelId !== 'string' || data.modelId === '' || typeof data.label !== 'string') {
+    return null;
+  }
+  return { modelId: data.modelId, label: data.label };
 }
 
 // Resolves {{ai-fill}} blanks via the SSE endpoint. The server streams 15s
@@ -49,7 +56,7 @@ function isBackendFrame(value: unknown): value is AiFillBackend {
 export async function resolveAiFill(
   req: AiFillRequest,
   signal?: AbortSignal,
-  onBackend?: (backend: AiFillBackend) => void,
+  onBackend?: (model: AiFillModel) => void,
 ): Promise<AiFillResolved> {
   const init: RequestInit = {
     method: 'POST',
@@ -94,8 +101,8 @@ export async function resolveAiFill(
       },
     }, 'ai-fill stream ended without a terminal event', {
       backend: (data) => {
-        if (!isRecord(data) || !isBackendFrame(data.backend)) return;
-        onBackend?.(data.backend);
+        const model = backendFrameModel(data);
+        if (model) onBackend?.(model);
       },
     });
   }
@@ -104,7 +111,7 @@ export async function resolveAiFill(
 export async function resolveAiFillBatch(
   req: AiFillBatchRequest,
   signal?: AbortSignal,
-  onBackend?: (backend: AiFillBackend) => void,
+  onBackend?: (model: AiFillModel) => void,
 ): Promise<AiFillBatchResolved> {
   const init: RequestInit = {
     method: 'POST',
@@ -145,8 +152,8 @@ export async function resolveAiFillBatch(
       },
     }, 'ai-fill batch stream ended without a terminal event', {
       backend: (data) => {
-        if (!isRecord(data) || !isBackendFrame(data.backend)) return;
-        onBackend?.(data.backend);
+        const model = backendFrameModel(data);
+        if (model) onBackend?.(model);
       },
     });
   }

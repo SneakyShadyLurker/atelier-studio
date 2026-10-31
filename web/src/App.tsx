@@ -28,6 +28,7 @@ import { PromptDraftProvider } from './components/PromptManager/draftStore';
 import { LazyFallback } from './components/LazyFallback';
 import { I } from './components/icons/I';
 import { usePromptLibrary } from './hooks/usePromptLibrary';
+import { useTextProviders } from './hooks/useTextProviders';
 import { useArchiveQuery } from './hooks/useArchiveQuery';
 import { useClearAll, clearAllConfirmCopy } from './hooks/useClearAll';
 import { useCollections } from './hooks/useCollections';
@@ -107,6 +108,7 @@ function buildArchiveLightboxBatch(
 
 const Archive = lazy(() => import('./components/Archive'));
 const PromptManager = lazy(() => import('./components/PromptManager'));
+const TextModels = lazy(() => import('./components/TextModels'));
 const Lightbox = lazy(() => import('./components/Lightbox'));
 const LazyByokDialog = lazy(() =>
   import('./components/ByokDialog').then((m) => ({ default: m.ByokDialog })),
@@ -118,7 +120,8 @@ function AppContent() {
   const hamburgerRef = useRef<HTMLButtonElement | null>(null);
   const promptLibrary = usePromptLibrary();
   const promptsEnabled = promptLibrary.enabled;
-  useUrlState(promptLibrary.gated);
+  const textAdmin = useTextProviders();
+  useUrlState(promptLibrary.gated, textAdmin.gated);
   const draft = useAtelierStore((state) => state.draft);
   const activeBatchId = useAtelierStore((state) => state.activeBatchId);
   const lightbox = useAtelierStore((state) => state.lightbox);
@@ -614,6 +617,7 @@ function AppContent() {
   // Archive deliberately opts out (irreversible actions, see archiveOpts).
   const isFeedStale = view.kind !== 'archive'
     && view.kind !== 'prompts'
+    && view.kind !== 'text-models'
     && historyQuery.isPlaceholderData;
   const mainInert = effectiveSidebarOpen || lightbox !== null || confirmOpen || clearConfirmOpen || discardTailBatch !== null || storySource !== null;
   const sidebarInert = (isPhone && !effectiveSidebarOpen) || lightbox !== null || confirmOpen || clearConfirmOpen || discardTailBatch !== null || storySource !== null || (!isPhone && sidebarCollapsed);
@@ -696,6 +700,7 @@ function AppContent() {
         historyQ={debouncedQ}
         archivedCount={archivedCount}
         promptsEnabled={promptsEnabled}
+        textModelsEnabled={textAdmin.enabled}
         theme={theme}
         error={historyError}
         historyReadOnly={isFeedStale || isViewPending}
@@ -766,6 +771,10 @@ function AppContent() {
           ) : view.kind === 'prompts' && !promptLibrary.gated ? (
             <ErrorBoundary fallback={viewErrorFallback}>
                 <PromptManager onBack={onManagedViewBack} />
+            </ErrorBoundary>
+          ) : view.kind === 'text-models' && !textAdmin.gated ? (
+            <ErrorBoundary fallback={viewErrorFallback}>
+              <TextModels onBack={onManagedViewBack} />
             </ErrorBoundary>
           ) : (
             <>

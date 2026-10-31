@@ -69,6 +69,7 @@ function makeCtx(
     db: runtime.db,
     config: runtime.config,
     logger: runtime.logger,
+    text: runtime.text,
     userId: 'alice',
     request,
     registryEntry: registryEntry(),

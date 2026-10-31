@@ -3,6 +3,7 @@ import {
   APP_VIEW_ARCHIVE,
   APP_VIEW_PINNED,
   APP_VIEW_PROMPTS,
+  APP_VIEW_TEXT_MODELS,
   APP_VIEW_UNSORTED,
   appViewEquals,
   archiveCollectionView,
@@ -34,6 +35,7 @@ export function parseUrlState(params: URLSearchParams): { view: AppView; q: stri
   if (collectionId) return { view: collectionView(collectionId), q };
   if (view === 'pinned') return { view: APP_VIEW_PINNED, q };
   if (view === 'prompts') return { view: APP_VIEW_PROMPTS, q };
+  if (view === 'text-models') return { view: APP_VIEW_TEXT_MODELS, q };
   // ?view=history is a removed vestigial global feed — fall through to the
   // default Unsorted view rather than reviving an unscoped, no-UI variant.
   return { view: APP_VIEW_UNSORTED, q };
@@ -49,6 +51,7 @@ export function serializeUrlState(view: AppView, q: string): string {
   }
   if (view.kind === 'pinned') params.set('view', 'pinned');
   if (view.kind === 'prompts') params.set('view', 'prompts');
+  if (view.kind === 'text-models') params.set('view', 'text-models');
   if (view.kind === 'collection') params.set('c', view.id);
   const normalizedQ = normalizeQ(q).trim();
   if (normalizedQ) params.set('q', normalizedQ);
@@ -81,7 +84,11 @@ function viewCollectionId(view: AppView): string | null {
   return null;
 }
 
-export function useUrlState(promptsGated = false): void {
+/**
+ * `promptsGated` / `textModelsGated`: the server answered 404 for that
+ * surface, so its URL falls back to Unsorted.
+ */
+export function useUrlState(promptsGated = false, textModelsGated = false): void {
   const view = useAtelierStore((state) => state.view);
   const referencedCollectionId = viewCollectionId(view);
   const collectionsQuery = useCollections({ enabled: referencedCollectionId !== null });
@@ -120,7 +127,8 @@ export function useUrlState(promptsGated = false): void {
 
   useEffect(() => {
     if (view.kind === 'prompts' && promptsGated) replaceUrlState(APP_VIEW_UNSORTED, '');
-  }, [promptsGated, view.kind]);
+    if (view.kind === 'text-models' && textModelsGated) replaceUrlState(APP_VIEW_UNSORTED, '');
+  }, [promptsGated, textModelsGated, view.kind]);
 
   useEffect(() => {
     if (referencedCollectionId === null || !collectionsLoaded) return;

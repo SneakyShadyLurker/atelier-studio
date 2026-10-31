@@ -10,6 +10,7 @@ access and, if you use local models, model weights.
 |---|---|
 | [Getting started](getting-started.md) | Download Atelier, run a local test without credentials, then connect a real model |
 | [Using Atelier](user-guide.md) | Generate and edit images, organise work, use templates and understand optional features |
+| [Connect a text model](connect-a-text-model.md) | Connect Ollama, LM Studio, OpenAI, Anthropic or OpenRouter for Enhance, AI fill and Brainstorm, and choose which model writes what |
 | [Deployment](deployment.md) | Set up authentication and encryption; launch, operate, back up and restore a server |
 | [ComfyUI worker](../infra/comfyui/README.md) | Provision the included worker on a Windows portable ComfyUI install |
 | [Local models](local-models.md) | Inspect model requirements, enable verified graphs and mount custom manifests |
@@ -23,8 +24,8 @@ access and, if you use local models, model weights.
   artifact encryption, the models directory, the deploy checklist with
   migration rehearsal, and recovery recipes.
 - [`providers.md`](./providers.md): `Provider` interface, CLIProxyAPI,
-  Gemini and ComfyUI wire shapes, text routing, error mapping, abort
-  semantics. Read before touching `api/src/providers/*`.
+  Gemini and ComfyUI wire shapes, text providers, models and routing,
+  error mapping, abort semantics. Read before touching `api/src/providers/*`.
 - [`local-models.md`](./local-models.md): local model manifests, the
   external models directory, overrides, `COMFYUI_ENABLE_MODELS` and
   `validate-models`.

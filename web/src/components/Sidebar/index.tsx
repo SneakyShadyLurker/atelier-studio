@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import {
   APP_VIEW_ARCHIVE,
   APP_VIEW_PROMPTS,
+  APP_VIEW_TEXT_MODELS,
   type AppView,
   appViewEquals,
   useAtelierStore,
@@ -50,6 +51,8 @@ interface SidebarProps {
   historyQ: string;
   archivedCount: number;
   promptsEnabled?: boolean;
+  /** The signed-in user administers text providers (`GET /api/text-providers` is not 404). */
+  textModelsEnabled?: boolean;
   theme?: Theme;
   error?: string | null;
   historyReadOnly?: boolean;
@@ -223,6 +226,7 @@ function Sidebar({
   historyQ,
   archivedCount,
   promptsEnabled = false,
+  textModelsEnabled = false,
   theme = 'light',
   error = null,
   historyReadOnly = false,
@@ -295,10 +299,10 @@ function Sidebar({
   }, [collectionsData?.summary]);
   const isArchive = view.kind === 'archive';
   // The recent-generations feed is a Canvas concept. Full-screen management
-  // views (Archive, Prompt Library) suppress it but keep the Library rail
+  // views (Archive, Prompt Library, Text models) suppress it but keep the Library rail
   // byte-identical to the normal view — only the contextually-irrelevant
   // feed list is dropped.
-  const hideFeed = isArchive || view.kind === 'prompts';
+  const hideFeed = isArchive || view.kind === 'prompts' || view.kind === 'text-models';
   useLayoutEffect(() => {
     const scroller = feedRef.current;
     const list = virtualListRef.current;
@@ -847,6 +851,19 @@ function Sidebar({
         >
           <I.settings />
         </button>
+        {textModelsEnabled && (
+          <button
+            className={styles.settingsBtn}
+            type="button"
+            aria-label="Text models"
+            aria-current={view.kind === 'text-models' ? 'page' : undefined}
+            data-tip="Text models"
+            data-tip-place="above-end"
+            onClick={() => { onSelectView(APP_VIEW_TEXT_MODELS); }}
+          >
+            <I.chip />
+          </button>
+        )}
         {onToggleTheme && (
           <button
             className={styles.themeBtn}

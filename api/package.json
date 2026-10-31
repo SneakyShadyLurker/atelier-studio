@@ -5,8 +5,12 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.92",
+    "@ai-sdk/openai-compatible": "3.0.81",
+    "@ai-sdk/provider": "4.0.34",
     "@atelier/shared": "workspace:*",
     "age-encryption": "0.3.1",
+    "ai": "7.0.157",
     "cockatiel": "4.0.0",
     "hono": "4.13.7",
     "pino": "10.3.1",

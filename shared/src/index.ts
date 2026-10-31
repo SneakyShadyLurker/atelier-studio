@@ -280,6 +280,12 @@ export const API_ERROR_CODES = [
   // The request carried the previous account's session scope (account switch
   // behind the edge). The web locks the session and reloads.
   'SESSION_CHANGED',
+  // Text-model routing (409): no model is set up for the call, none that is
+  // available accepts its images, or the image model's locked prompt writer
+  // cannot serve it. The envelope's `error` carries the plain-English copy.
+  'TEXT_MODEL_NOT_CONFIGURED',
+  'TEXT_MODEL_NO_VISION',
+  'TEXT_MODEL_UNAVAILABLE',
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -968,93 +974,6 @@ export interface AiFillBatchRequest {
   readonly modelId: string;
 }
 
-/**
- * Text-backend wire keys. Keys name the VENDOR + TIER, never a version, so a
- * future swap within a tier does not require another rename. Every key is
- * served through the configured OpenAI-compatible upstream, each with a
- * configurable model id: 'kimi' = Kimi K3, 'mimo' = MiMo V2.6 Pro,
- * 'grok' = Grok 4.7, 'gemini-argon' = Gemini 4 Argon, 'deepseek-abliterated'
- * = DeepSeek V4.1 Flash Abliterated and 'glm-abliterated' = GLM 5.3, a
- * text-only model (the key predates its move off an abliterated build); 'gpt' = GPT-6.1 Sol for cloud image
- * targets. Only 'kimi' and 'gpt' are automatic targets; every
- * other backend is user-selectable only.
- * Purely advisory leading frame naming which backend holds the fill: a client
- * that ignores it gets the same terminal outcome.
- */
-export const AI_FILL_BACKEND_VALUES = [
-  'kimi',
-  'mimo',
-  'grok',
-  'gemini-argon',
-  'deepseek-abliterated',
-  'glm-abliterated',
-  'gpt',
-] as const;
-export type AiFillBackend = (typeof AI_FILL_BACKEND_VALUES)[number];
-
-/**
- * Backends Atelier will hand an image to. Per the model-capability policy every
- * natively multimodal backend belongs here, and each was verified end to end
- * through the upstream before being added — a backend listed without that check
- * would silently drop the image rather than fail. Kimi K3, MiMo V2.6 Pro,
- * Grok 4.7 and Gemini 4 Argon each read a base64 PNG image part under strict
- * `json_schema` (streaming) and `json_object` (non-streaming). GPT-6.1 Sol
- * read image parts with strict schema, medium reasoning and both streaming and
- * non-streaming responses.
- * GLM 5.3 ('glm-abliterated') is text-only: the upstream publishes
- * no image input for it and answers an image part with HTTP 400
- * `image_input_not_supported`.
- * 'deepseek-abliterated' is documented with text plus up to 4 images, but its
- * vision path is unverified, so it stays out until a live check passes; when
- * it is added, cap its images at 4.
- */
-export function isVisionTextBackend(
-  backend: string,
-): backend is Extract<AiFillBackend, 'kimi' | 'mimo' | 'grok' | 'gemini-argon' | 'gpt'> {
-  return backend === 'kimi'
-    || backend === 'mimo'
-    || backend === 'grok'
-    || backend === 'gemini-argon'
-    || backend === 'gpt';
-}
-
-/**
- * Does this backend take the generic ai-fill prompt body rather than the
- * Kimi-tuned one? True for every non-Kimi backend. This is INDEPENDENT of
- * vision — whether the call carries an image is `isVisionTextBackend` — and it
- * selects wording only: no backend receives instructions to disregard its own
- * safety judgement.
- */
-export function usesGenericPromptVariant(
-  backend: string,
-): backend is Exclude<AiFillBackend, 'kimi'> {
-  return backend !== 'kimi' && (AI_FILL_BACKEND_VALUES as readonly string[]).includes(backend);
-}
-
-/** Canonical display labels for the text-backend union. Single source of truth for web copy. */
-export const TEXT_BACKEND_LABELS = {
-  kimi: 'Kimi K3',
-  mimo: 'MiMo V2.6 Pro',
-  grok: 'Grok 4.7',
-  'gemini-argon': 'Gemini 4 Argon',
-  'deepseek-abliterated': 'DeepSeek V4.1 Flash Abliterated',
-  'glm-abliterated': 'GLM 5.3',
-  gpt: 'GPT-6.1 Sol',
-} as const satisfies Record<AiFillBackend, string>;
-
-/** Workloads a user may pin to a fixed text backend. Absent override = automatic routing. */
-export const TEXT_BACKEND_WORKLOADS = [
-  'ai-fill',
-  'brainstorm',
-  'enhance',
-  'condense',
-  'storytelling',
-] as const;
-export type TextBackendWorkload = (typeof TEXT_BACKEND_WORKLOADS)[number];
-
-/** Absent key = automatic routing (the shipped default). */
-export type TextBackendOverrides = Partial<Record<TextBackendWorkload, AiFillBackend>>;
-
 /** Wire values of the OpenAI-compatible `reasoning_effort` ladder, lowest first. */
 export const TEXT_REASONING_EFFORT_VALUES = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type TextReasoningEffort = (typeof TEXT_REASONING_EFFORT_VALUES)[number];
@@ -1069,45 +988,247 @@ export const TEXT_REASONING_EFFORT_LABELS = {
   max: 'Max',
 } as const satisfies Record<TextReasoningEffort, string>;
 
-const TEXT_BACKEND_REASONING_EFFORTS = {
-  // Catalog `reasoning_efforts` the upstream forwards.
-  // The proxy silently remaps an unlisted level (MiMo 'low' -> 'high'), so only
-  // listed levels are offered.
-  kimi: ['low', 'high', 'max'],
-  mimo: ['none', 'high'],
-  grok: ['low', 'medium', 'high', 'xhigh'],
-  'gemini-argon': ['low', 'medium', 'high'],
-  'deepseek-abliterated': TEXT_REASONING_EFFORT_VALUES,
-  // GLM 5.3 always thinks and publishes exactly low/high/max; 'none' still
-  // reasons, so it is not offered.
-  'glm-abliterated': ['low', 'high', 'max'],
-  // GPT's effort stays pinned for its fixed cloud-image text work.
-  gpt: [],
-} as const satisfies Record<AiFillBackend, readonly TextReasoningEffort[]>;
+// ─── Admin-managed text providers and models ────────────────────────────
+// Wire contract: spec
+// docs/specs/byo-text-providers.md § 10. Credentials never appear here: the
+// browser sees only the auth mode, a fingerprint and an env var name.
+
+export { TEXT_PRESETS } from './textPresets';
+export type { TextPreset, TextPresetId } from './textPresets';
+export { validateTextProviderBaseUrl } from './textProviderUrl';
+export type { TextProviderBaseUrlResult } from './textProviderUrl';
 
 /**
- * Efforts a user may pin on each backend's settings row: the levels each
- * model lists in its catalog and the upstream forwards. Single source for the route validator, the stored-value
- * reader and the Settings options.
+ * Features that call a text model. Single source for the routing DB CHECK, the
+ * per-task user picks and the admin task assignments.
  */
-export function textBackendReasoningEfforts(backend: AiFillBackend): readonly TextReasoningEffort[] {
-  return TEXT_BACKEND_REASONING_EFFORTS[backend];
+export const TEXT_TASKS = [
+  'enhance',
+  'motion',
+  'ai-fill',
+  'brainstorm',
+  'condense',
+  'storytelling',
+  'story-segments',
+  'infer',
+  'rescue',
+  'list-draft',
+  'template-draft',
+] as const;
+export type TextTask = (typeof TEXT_TASKS)[number];
+
+export const TEXT_TASK_LABELS = {
+  enhance: 'Enhance',
+  motion: 'Motion writer',
+  'ai-fill': 'AI fill',
+  brainstorm: 'Brainstorm',
+  condense: 'Krea condense',
+  storytelling: 'Story planner',
+  'story-segments': 'Story segments',
+  infer: 'Dimension inference',
+  rescue: 'Dimension rescue',
+  'list-draft': 'List drafts',
+  'template-draft': 'Template drafts',
+} as const satisfies Record<TextTask, string>;
+
+/** How Atelier talks to a provider. */
+export const TEXT_PROTOCOLS = ['openai-compatible', 'anthropic'] as const;
+export type TextProtocol = (typeof TEXT_PROTOCOLS)[number];
+
+/** Request field carrying the output budget; OpenAI-compatible providers only. */
+export const TEXT_TOKEN_FIELDS = ['max_completion_tokens', 'max_tokens'] as const;
+export type TextTokenField = (typeof TEXT_TOKEN_FIELDS)[number];
+
+/** Where a provider's credential comes from. 'env' is set only by the migration/seed. */
+export const TEXT_PROVIDER_AUTH_MODES = ['none', 'stored', 'env'] as const;
+export type TextProviderAuthMode = (typeof TEXT_PROVIDER_AUTH_MODES)[number];
+
+/** JSON output mode a model supports, strongest first. */
+export const TEXT_STRUCTURED_OUTPUT_MODES = ['json_schema', 'json_object', 'none'] as const;
+export type TextStructuredOutputMode = (typeof TEXT_STRUCTURED_OUTPUT_MODES)[number];
+
+/** 'slow' applies the long timeout and response-size floors. */
+export const TEXT_LATENCY_PROFILES = ['standard', 'slow'] as const;
+export type TextLatencyProfile = (typeof TEXT_LATENCY_PROFILES)[number];
+
+/** Which ai-fill prompt body a model receives. Wording only. */
+export const TEXT_PROMPT_VARIANTS = ['generic', 'kimi'] as const;
+export type TextPromptVariant = (typeof TEXT_PROMPT_VARIANTS)[number];
+
+/** Whether the provider currently lists the model. 'unknown' passes routing. */
+export type TextModelStatus = 'available' | 'offline' | 'unknown';
+
+/** Admin-editable capability settings of one model. */
+export interface TextModelCapabilities {
+  readonly vision: boolean;
+  /** Cap on image parts per call; null = no cap. Only meaningful with vision. */
+  readonly maxImages: number | null;
+  readonly structuredOutput: TextStructuredOutputMode;
+  /** Levels users may pick. Empty = users cannot pick one. */
+  readonly reasoningLevels: readonly TextReasoningEffort[];
+  /** Sent when the user picked nothing; null = no effort field. */
+  readonly reasoningDefault: TextReasoningEffort | null;
+  readonly temperature: number | null;
+  readonly topP: number | null;
+  /** Replaces every per-task output budget when set. */
+  readonly fixedOutputTokens: number | null;
+  readonly latencyProfile: TextLatencyProfile;
+  readonly promptVariant: TextPromptVariant;
 }
 
-/**
- * Pinned reasoning effort per workload. Absent key = the backend's own default.
- * An effort belongs to its workload's pinned backend and is only present with one.
- */
-export type TextBackendEfforts = Partial<Record<TextBackendWorkload, TextReasoningEffort>>;
+/** A model as every signed-in user sees it. */
+export interface PublicTextModel {
+  readonly id: string;
+  readonly displayName: string;
+  readonly providerName: string;
+  readonly vision: boolean;
+  readonly reasoningLevels: readonly TextReasoningEffort[];
+  readonly status: TextModelStatus;
+}
 
-export interface TextBackendSettingsResponse {
-  readonly overrides: TextBackendOverrides;
-  readonly efforts: TextBackendEfforts;
-  /**
-   * Backends whose model CLIProxyAPI's live inventory does not currently serve;
-   * a stored pin to one routes as Auto. Empty when the proxy inventory is unknown.
-   */
-  readonly unavailable: readonly AiFillBackend[];
+/** One task row of the user's text-model settings. */
+export interface TaskRow {
+  readonly task: TextTask;
+  /** The user's own pick (model id). */
+  readonly pick?: string;
+  readonly effort?: TextReasoningEffort;
+  /** Model the task would use right now, after every fallback. */
+  readonly effectiveModelId?: string;
+  /** 'offline' = the pick is skipped and the task falls back. */
+  readonly pickState?: 'active' | 'offline';
+}
+
+/** `GET /api/text-models` and `PUT /api/text-models/tasks/:task`. */
+export interface TextModelsResponse {
+  readonly models: readonly PublicTextModel[];
+  readonly tasks: readonly TaskRow[];
+  readonly defaults: {
+    readonly default?: string;
+    readonly byTask: Partial<Record<TextTask, string>>;
+  };
+  /** Image model id → prompt-writer model id. */
+  readonly writers: Readonly<Record<string, string>>;
+}
+
+/** How a prompt writer applies: 'lock' always, 'prefer' unless the person picked their own. */
+export type TextWriterMode = 'lock' | 'prefer';
+
+/** Admin `GET /api/text-routing` and the answer to every routing PUT. */
+export interface TextRoutingResponse {
+  readonly defaults: TextModelsResponse['defaults'];
+  /** Image model id → prompt writer. */
+  readonly writers: Readonly<Record<string, { readonly modelId: string; readonly mode: TextWriterMode }>>;
+  /** Registered image models a writer can be set for. */
+  readonly imageModels: readonly { readonly id: string; readonly label: string }[];
+}
+
+/** Where a model is referenced; shown before a delete is confirmed. */
+export interface TextModelUsage {
+  readonly isDefault: boolean;
+  readonly tasks: readonly TextTask[];
+  /** Image model ids whose prompts this model writes. */
+  readonly writers: readonly string[];
+  /** Number of users who picked this model for at least one task. */
+  readonly userPicks: number;
+}
+
+export interface AdminModel extends TextModelCapabilities {
+  readonly id: string;
+  readonly providerId: string;
+  /** Upstream model id. */
+  readonly modelId: string;
+  readonly displayName: string;
+  readonly enabled: boolean;
+  /** Run the content pre-check before every request to this model. */
+  readonly screenRequests: boolean;
+  readonly sortOrder: number;
+  readonly status: TextModelStatus;
+  /** Epoch ms of the last passing "Test model"; null = untested. */
+  readonly verifiedAt: number | null;
+  readonly lastTest: TestReport | null;
+  readonly usage: TextModelUsage;
+}
+
+export type TextProviderWarning =
+  /** A model screens requests but OPENROUTER_API_KEY is unset. */
+  | 'screen-requests-without-key'
+  /** Stored keys cannot be read or written without BYOK_ENCRYPTION_KEY. */
+  | 'byok-not-configured';
+
+export interface AdminProvider {
+  readonly id: string;
+  readonly name: string;
+  readonly protocol: TextProtocol;
+  readonly baseUrl: string;
+  /** Preset used at creation; informational. */
+  readonly preset: string | null;
+  readonly auth: TextProviderAuthMode;
+  /** Present when auth is 'stored'. */
+  readonly fingerprint?: string;
+  /** Present when auth is 'env'. */
+  readonly envVar?: string;
+  readonly tokenField: TextTokenField;
+  readonly listModels: boolean;
+  readonly enabled: boolean;
+  /** Models the last list call returned; null = unknown (not listed, failed or empty). */
+  readonly listedCount: number | null;
+  readonly warnings: readonly TextProviderWarning[];
+  readonly models: readonly AdminModel[];
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+/** Capability hints a provider's model list reported. Unverified. */
+export interface TextModelHints {
+  readonly vision?: boolean;
+  readonly structuredOutput?: TextStructuredOutputMode;
+  readonly reasoningLevels?: readonly TextReasoningEffort[];
+  readonly contextLength?: number;
+  readonly maxOutputTokens?: number;
+}
+
+/** One entry of `GET /api/text-providers/:id/models/available`. */
+export interface ListedModel {
+  readonly id: string;
+  readonly hints?: TextModelHints;
+  readonly source: 'provider';
+}
+
+export interface TextProbeCheck {
+  readonly id: string;
+  readonly status: 'pass' | 'fail' | 'skip';
+  /** Plain-English result, already redacted. */
+  readonly message: string;
+}
+
+/** `POST /api/text-providers/test`. */
+export interface TextProviderConnectionTestRequest {
+  readonly protocol: TextProtocol;
+  readonly baseUrl: string;
+  readonly apiKey?: string;
+  /** Output-limit field the provider will use; defaults to max_completion_tokens. */
+  readonly tokenField?: TextTokenField;
+  readonly listModels?: boolean;
+  /** Model to send the probe to; required when `listModels` is false. */
+  readonly probeModelId?: string;
+}
+
+/** Verdict of a provider connection test. */
+export interface ConnectionReport {
+  readonly ok: boolean;
+  readonly checks: readonly TextProbeCheck[];
+  readonly listedCount?: number;
+  readonly listUnsupported?: boolean;
+}
+
+/** Result of "Test model". */
+export interface TestReport {
+  readonly checks: readonly TextProbeCheck[];
+  /** Values the probe confirmed. */
+  readonly proposed: Partial<TextModelCapabilities>;
+  /** Values the provider's list reported that the probe did not exercise. */
+  readonly advertised: Partial<TextModelCapabilities>;
+  readonly wireNotes: readonly string[];
 }
 
 /** Inclusive bounds for a per-model base-sampler step override (API, DB CHECK, UI). */
@@ -1134,13 +1255,19 @@ export interface ModelStepsPutRequest {
   readonly steps: number | null;
 }
 
+/** Advisory leading ai-fill frame naming the text model serving the fill. */
+export interface AiFillBackendFrame {
+  readonly modelId: string;
+  readonly label: string;
+}
+
 export type AiFillSseEvent =
-  | { event: 'backend'; data: { backend: AiFillBackend } }
+  | { event: 'backend'; data: AiFillBackendFrame }
   | { event: 'result'; data: { prompt: string; fills: readonly string[] } }
   | { event: 'error'; data: { message: string; code?: string } };
 
 export type AiFillBatchSseEvent =
-  | { event: 'backend'; data: { backend: AiFillBackend } }
+  | { event: 'backend'; data: AiFillBackendFrame }
   | {
       event: 'result';
       data: {
@@ -1168,10 +1295,6 @@ export type BrainstormLayout = (typeof BRAINSTORM_LAYOUTS)[number];
 export const BRAINSTORM_MEDIA = ['photograph'] as const;
 export type BrainstormMedium = (typeof BRAINSTORM_MEDIA)[number];
 
-/** Text backends a brainstorm caller may pin. Omitted = routed by image-model family. */
-export const BRAINSTORM_TEXT_BACKENDS = AI_FILL_BACKEND_VALUES satisfies readonly AiFillBackend[];
-export type BrainstormTextBackend = (typeof BRAINSTORM_TEXT_BACKENDS)[number];
-
 export interface BrainstormCharactersRequest {
   /** Optional steering brief (theme / era / setting). Empty = max variety. */
   readonly brief?: string;
@@ -1183,8 +1306,11 @@ export interface BrainstormCharactersRequest {
   readonly medium?: BrainstormMedium;
   /** Target image model id — tunes phrasing; the composer renders against it. */
   readonly modelId: string;
-  /** Pin the writing LLM. Default: kimi (GPT-6.1 Sol for Sunburst); every other backend is pin-only. */
-  readonly textBackend?: BrainstormTextBackend;
+  /**
+   * Pin the writing model by text model row id (an enabled model). A locked
+   * prompt writer for the image model still wins. Omitted = routed.
+   */
+  readonly textModelId?: string;
   /** Optional 32-bit entropy source for a meaningfully different take of the same brief. */
   readonly variationSeed?: number;
 }
@@ -1402,7 +1528,7 @@ type _NoUserIdOnAiFillSseEvent = _Assert<_NoUserIdOn<AiFillSseEvent>>;
 type _NoUserIdOnAiFillBatchItem = _Assert<_NoUserIdOn<AiFillBatchItem>>;
 type _NoUserIdOnAiFillBatchRequest = _Assert<_NoUserIdOn<AiFillBatchRequest>>;
 type _NoUserIdOnAiFillBatchSseEvent = _Assert<_NoUserIdOn<AiFillBatchSseEvent>>;
-type _NoUserIdOnTextBackendSettings = _Assert<_NoUserIdOn<TextBackendSettingsResponse>>;
+type _NoUserIdOnTextRouting = _Assert<_NoUserIdOn<TextRoutingResponse>>;
 type _NoUserIdOnModelStepsSettings = _Assert<_NoUserIdOn<ModelStepsSettingsResponse>>;
 type _NoUserIdOnModelStepsSetting = _Assert<_NoUserIdOn<ModelStepsSetting>>;
 type _NoUserIdOnBrainstormCharactersRequest = _Assert<_NoUserIdOn<BrainstormCharactersRequest>>;

@@ -20,4 +20,13 @@ describe('failedToSseError', () => {
     expect(e.code).toBe('provider-error');
     expect(e.retryAfterSeconds).toBeUndefined();
   });
+
+  test('a blocked text request names no vendor; a blocked image request keeps the GPT policy wording', () => {
+    const blocked = (target: 'text' | 'image') => failedToSseError({
+      type: 'failed', kind: 'moderation-blocked', status: 422, detail: 'x',
+      moderation: { reason: 'graphic-violence', target, categories: ['graphic-violence'] },
+    }).message;
+    expect(blocked('text')).toBe('Atelier blocked this request under its content policy.');
+    expect(blocked('image')).toBe('Atelier blocked this request under its GPT content policy.');
+  });
 });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { resolveAiFill, resolveAiFillBatch } from './aiFill';
+import { resolveAiFill, resolveAiFillBatch, type AiFillModel } from './aiFill';
 import { QuotaExhaustedError } from './sse';
 
 const originalFetch = globalThis.fetch;
@@ -22,26 +22,36 @@ const REQ = { staticSegments: ['A woman, ', ', golden hour.'], instructions: ['h
 const BATCH_REQ = { items: [{ staticSegments: REQ.staticSegments, instructions: REQ.instructions }], modelId: REQ.modelId };
 
 describe('resolveAiFill', () => {
-  test('reports a valid backend and still resolves the result', async () => {
+  test('reports the announced model, including one outside the migrated set', async () => {
     globalThis.fetch = (() =>
       Promise.resolve(sseResponse(
-        'event: backend\ndata: {"backend":"kimi"}\n\nevent: result\ndata: {"prompt":"A woman, a red bikini, golden hour.","fills":["a red bikini"]}\n\n',
+        'event: backend\ndata: {"modelId":"ollama-llama-4-scout","label":"Llama 4 Scout"}\n\nevent: result\ndata: {"prompt":"A woman, a red bikini, golden hour.","fills":["a red bikini"]}\n\n',
       ))) as unknown as typeof fetch;
-    const backends: string[] = [];
-    const out = await resolveAiFill(REQ, undefined, (backend) => { backends.push(backend); });
-    expect(backends).toEqual(['kimi']);
+    const announced: AiFillModel[] = [];
+    const out = await resolveAiFill(REQ, undefined, (model) => { announced.push(model); });
+    expect(announced).toEqual([{ modelId: 'ollama-llama-4-scout', label: 'Llama 4 Scout' }]);
     expect(out.prompt).toBe('A woman, a red bikini, golden hour.');
     expect(out.fills).toEqual(['a red bikini']);
   });
 
-  test('drops an invalid backend frame and still resolves the result', async () => {
+  test('reports only id and label from a frame that also carries a legacy backend key', async () => {
     globalThis.fetch = (() =>
       Promise.resolve(sseResponse(
-        'event: backend\ndata: {"backend":"unknown"}\n\nevent: result\ndata: {"prompt":"A woman, a red bikini, golden hour.","fills":["a red bikini"]}\n\n',
+        'event: backend\ndata: {"modelId":"kimi","label":"Kimi K3","backend":"kimi"}\n\nevent: result\ndata: {"prompt":"p","fills":["f"]}\n\n',
       ))) as unknown as typeof fetch;
-    const backends: string[] = [];
-    const out = await resolveAiFill(REQ, undefined, (backend) => { backends.push(backend); });
-    expect(backends).toEqual([]);
+    const announced: AiFillModel[] = [];
+    await resolveAiFill(REQ, undefined, (model) => { announced.push(model); });
+    expect(announced).toEqual([{ modelId: 'kimi', label: 'Kimi K3' }]);
+  });
+
+  test('drops a malformed backend frame and still resolves the result', async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve(sseResponse(
+        'event: backend\ndata: {"backend":"kimi"}\n\nevent: backend\ndata: {"modelId":"","label":"x"}\n\nevent: backend\ndata: {"modelId":"kimi","label":7}\n\nevent: result\ndata: {"prompt":"A woman, a red bikini, golden hour.","fills":["a red bikini"]}\n\n',
+      ))) as unknown as typeof fetch;
+    const announced: AiFillModel[] = [];
+    const out = await resolveAiFill(REQ, undefined, (model) => { announced.push(model); });
+    expect(announced).toEqual([]);
     expect(out.prompt).toBe('A woman, a red bikini, golden hour.');
     expect(out.fills).toEqual(['a red bikini']);
   });
@@ -127,14 +137,14 @@ describe('resolveAiFill', () => {
 });
 
 describe('resolveAiFillBatch', () => {
-  test('reports every valid backend group and returns guarded ordered items', async () => {
+  test('reports every valid model group and returns guarded ordered items', async () => {
     globalThis.fetch = (() => Promise.resolve(sseResponse(
-      'event: backend\ndata: {"backend":"kimi"}\n\nevent: backend\ndata: {"backend":"grok"}\n\nevent: backend\ndata: {"backend":"bogus"}\n\nevent: result\ndata: {"items":[{"ok":true,"prompt":"filled","fills":["fill"]}]}\n\n',
+      'event: backend\ndata: {"modelId":"kimi","label":"Kimi K3"}\n\nevent: backend\ndata: {"modelId":"grok","label":"Grok 4.7"}\n\nevent: backend\ndata: {"backend":"bogus"}\n\nevent: result\ndata: {"items":[{"ok":true,"prompt":"filled","fills":["fill"]}]}\n\n',
     ))) as unknown as typeof fetch;
-    const backends: string[] = [];
-    const result = await resolveAiFillBatch(BATCH_REQ, undefined, (backend) => { backends.push(backend); });
-    // An unrecognised backend value is dropped, never thrown.
-    expect(backends).toEqual(['kimi', 'grok']);
+    const announced: AiFillModel[] = [];
+    const result = await resolveAiFillBatch(BATCH_REQ, undefined, (model) => { announced.push(model); });
+    // A malformed backend frame is dropped, never thrown.
+    expect(announced).toEqual([{ modelId: 'kimi', label: 'Kimi K3' }, { modelId: 'grok', label: 'Grok 4.7' }]);
     expect(result.items).toEqual([{ ok: true, prompt: 'filled', fills: ['fill'] }]);
   });
 

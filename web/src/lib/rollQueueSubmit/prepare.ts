@@ -1,4 +1,4 @@
-import { MAX_PROMPT_CHARS, type AiFillBackend, type AiFillBatchItem } from '@atelier/shared';
+import { MAX_PROMPT_CHARS, type AiFillBatchItem } from '@atelier/shared';
 import {
   AI_FILL_BATCH_MAX,
   AI_FILL_MAX_INPUT_CHARS,
@@ -112,13 +112,13 @@ export async function fillItem(
   const build = buildAiFillRequest(item.text, ctx.library, nextSeed(), ctx.effectiveModelId);
   if (!build) return strippedItem;
   if (build.warnings.length > 0) ctx.addToast(build.warnings[0] ?? 'Some prompt tokens could not be resolved', 'soft');
-  let announced: AiFillBackend | null = null;
-  const announcedBackend = (): AiFillBackend | null => announced;
+  let announced: string | null = null;
+  const announcedModelId = (): string | null => announced;
   try {
-    const filled = await resolveAiFill(build.request, ctx.signal, (backend) => {
+    const filled = await resolveAiFill(build.request, ctx.signal, ({ modelId, label }) => {
       if (announced !== null) return;
-      announced = backend;
-      useAtelierStore.getState().beginAiFill(backend);
+      announced = modelId;
+      useAtelierStore.getState().beginAiFill(modelId, label);
     });
     return { ...item, text: filled.prompt };
   } catch (err) {
@@ -139,8 +139,8 @@ export async function fillItem(
     if (sourceRoll === null && err instanceof Error && err.message) ctx.recordHeadError(err.message);
     return null;
   } finally {
-    const backend = announcedBackend();
-    if (backend !== null) useAtelierStore.getState().endAiFill(backend);
+    const modelId = announcedModelId();
+    if (modelId !== null) useAtelierStore.getState().endAiFill(modelId);
   }
 }
 
@@ -202,7 +202,7 @@ function deferOrPrepareSingle(ctx: PrepareContext, passItem: PassItem): Promise<
 
 /** Fills one batch unit, whose entries share one model; outcomes keep the order of `entries`. */
 export async function prepareBatch(ctx: PrepareContext, entries: readonly BatchReadyItem[]): Promise<FillOutcome[]> {
-  const announced = new Set<AiFillBackend>();
+  const announced = new Set<string>();
   const [first] = entries;
   try {
     const requestItems: AiFillBatchItem[] = entries.map(({ build }) => ({
@@ -212,10 +212,10 @@ export async function prepareBatch(ctx: PrepareContext, entries: readonly BatchR
     const resolved = await resolveAiFillBatch(
       { items: requestItems, modelId: first ? itemModelId(ctx, first.passItem.item) : ctx.effectiveModelId },
       ctx.signal,
-      (backend) => {
-        if (announced.has(backend)) return;
-        announced.add(backend);
-        useAtelierStore.getState().beginAiFill(backend);
+      ({ modelId, label }) => {
+        if (announced.has(modelId)) return;
+        announced.add(modelId);
+        useAtelierStore.getState().beginAiFill(modelId, label);
       },
     );
     return await Promise.all(resolved.items.map((outcome, index) => {
@@ -241,7 +241,7 @@ export async function prepareBatch(ctx: PrepareContext, entries: readonly BatchR
     }
     return await Promise.all(entries.map(({ passItem }) => deferOrPrepareSingle(ctx, passItem)));
   } finally {
-    for (const backend of announced) useAtelierStore.getState().endAiFill(backend);
+    for (const modelId of announced) useAtelierStore.getState().endAiFill(modelId);
   }
 }
 

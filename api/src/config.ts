@@ -136,9 +136,13 @@ const optionalOriginString = z
 
 const ConfigSchema = z.object({
   // Required.
-  CLIPROXY_BASE_URL: urlString,
-  CLIPROXY_TOKEN: nonEmptyString,
   DATA_DIR: nonEmptyString,
+
+  // CLIProxyAPI (optional; set both or neither, see `cliproxyIssues`). When set
+  // they register GPT Image, and an upgrade boot seeds the legacy CLIProxyAPI text provider from them
+  // (migration 58). Text models are otherwise managed in the app.
+  CLIPROXY_BASE_URL: optionalUrlString,
+  CLIPROXY_TOKEN: optionalSecret,
 
   // Required for GPT requests, not for boot or local/BYOK generation.
   // Missing key makes the GPT moderation gate fail closed.
@@ -246,8 +250,9 @@ const ConfigSchema = z.object({
   // AbortController bounds a malformed or runaway Kimi stream independently of
   // its completion-token ceiling. 1 MB is far above any sane rewritten prompt.
   CLIPROXY_TEXT_MAX_RESPONSE_BYTES: numericString(1 * 1024 * 1024),
-  // CLIProxyAPI model id each text backend sends (providers/cliproxyText.config.ts
-  // maps backend keys to these). Wire shapes follow the backend key, not the id.
+  // Deprecated: read only by migration 58's one-time seed (`legacyTextSeed`),
+  // which names the upstream id of each migrated text model. Once the seed has
+  // run they do nothing (boot warns); text models are managed in the app.
   CLIPROXY_TEXT_MODEL_KIMI: stringWithDefault('kimi-latest'),
   CLIPROXY_TEXT_MODEL_MIMO: stringWithDefault('mimo-v2.6-pro'),
   CLIPROXY_TEXT_MODEL_GROK: stringWithDefault('grok-latest'),
@@ -349,6 +354,9 @@ const ConfigSchema = z.object({
   ),
   PROMPT_LIBRARY_USERS: csvAllowlist(''),
   LOCAL_MODELS_USERS: csvAllowlist(''),
+  // Users who manage text providers, models and routing (admin API). Unset or
+  // empty = nobody; every admin route answers 404 to everyone else.
+  TEXT_PROVIDER_ADMINS: csvAllowlist(''),
   MAX_PROMPT_TEMPLATES: numericString(200),
   MAX_VARIABLE_LISTS: numericString(100),
   MAX_OPTIONS_PER_LIST: numericString(MAX_OPTIONS_PER_LIST).pipe(
@@ -492,6 +500,28 @@ export function ephemeraEnabled(config: Config): config is EphemeraConfig {
   );
 }
 
+/** Config narrowed to a configured CLIProxyAPI (GPT Image, legacy seed). */
+export type CliproxyConfig = Config & {
+  readonly CLIPROXY_BASE_URL: string;
+  readonly CLIPROXY_TOKEN: string;
+};
+
+/** True when CLIProxyAPI is configured (both base URL and token set). */
+export function cliproxyEnabled(config: Config): config is CliproxyConfig {
+  return config.CLIPROXY_BASE_URL !== undefined && config.CLIPROXY_TOKEN !== undefined;
+}
+
+const CLIPROXY_PAIR_MESSAGE = 'CLIPROXY_BASE_URL and CLIPROXY_TOKEN must be set together (or both left unset)';
+
+// CLIProxyAPI is optional, but half a configuration is an operator mistake:
+// report the missing half rather than silently disabling GPT Image.
+function cliproxyIssues(data: z.infer<typeof ConfigSchema>): { var: string; message: string }[] {
+  const hasUrl = data.CLIPROXY_BASE_URL !== undefined;
+  const hasToken = data.CLIPROXY_TOKEN !== undefined;
+  if (hasUrl === hasToken) return [];
+  return [{ var: hasUrl ? 'CLIPROXY_TOKEN' : 'CLIPROXY_BASE_URL', message: CLIPROXY_PAIR_MESSAGE }];
+}
+
 // Cross-field Ephemera rules. With the base URL unset the integration is off
 // and nothing else is checked. The key follows the TRUSTED_PROXY_KEY rules in
 // production (long, never a template placeholder).
@@ -628,7 +658,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   //   unsafe in prod if atelier-api is ever exposed beyond SWAG).
   // - BYOK_ENCRYPTION_KEY must be set.
   const production = env.NODE_ENV === 'production';
-  const integrationIssues = ephemeraIssues(parsed.data, production);
+  const integrationIssues = [...cliproxyIssues(parsed.data), ...ephemeraIssues(parsed.data, production)];
   if (!production && integrationIssues.length > 0) throw new ConfigError(integrationIssues);
   if (production) {
     const issues: { var: string; message: string }[] = [...integrationIssues];

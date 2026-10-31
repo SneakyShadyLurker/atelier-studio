@@ -12,7 +12,6 @@ import { rescueRoutes } from './rescue';
 import { diagnoseSelectionRoutes } from './diagnoseSelection';
 import { libraryDiagnosisRoutes } from './libraryDiagnosis';
 import { libraryCoverageRoutes } from './libraryCoverage';
-import { textBackendsRoutes } from './textBackends';
 import { withTimedDb } from '../../observability/db';
 
 // Prompt-library router. Split into four cohesive sub-routers (templates,
@@ -59,5 +58,4 @@ export const promptsRoutes = new Hono<AppEnv>()
   .route('/', rescueRoutes)
   .route('/', diagnoseSelectionRoutes)
   .route('/', libraryDiagnosisRoutes)
-  .route('/', libraryCoverageRoutes)
-  .route('/', textBackendsRoutes);
+  .route('/', libraryCoverageRoutes);

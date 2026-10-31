@@ -17,5 +17,7 @@ export const GptModerationNoticeSchema = z.object({
   target: z.enum(['text', 'image']),
   /** Absent on historical decisions that did not distinguish nudity from age. */
   categories: z.optional(GptModerationCategoriesSchema),
+  /** Display name of the screened text model ("Not sent to <model>"). Absent on image targets and older decisions. */
+  modelLabel: z.optional(z.string().check(z.minLength(1), z.maxLength(60))),
 });
 export type GptModerationNotice = z.infer<typeof GptModerationNoticeSchema>;

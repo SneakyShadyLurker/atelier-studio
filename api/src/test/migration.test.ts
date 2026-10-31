@@ -409,13 +409,14 @@ describe('migration runner', () => {
     expect(existsSync(join(images, `${tileB}.png`))).toBe(false);
   });
 
-  test('migration37 creates user_text_backends on a fresh database', () => {
+  test('migration37 creates user_text_backends on a fresh database, and migration 58 replaces it', () => {
     const dataDir = tempDir();
     const db = openDb({ dataDir });
 
-    migrate(db, dataDir);
+    // The table lives through v57; migration 58 drops it for user_text_models.
+    migrate(db, dataDir, { targetVersion: 57 });
 
-    expect(db.query<{ version: number }, []>('SELECT MAX(version) AS version FROM schema_versions').get()?.version).toBe(BINARY_SCHEMA_VERSION);
+    expect(db.query<{ version: number }, []>('SELECT MAX(version) AS version FROM schema_versions').get()?.version).toBe(57);
     const table = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='user_text_backends'").get();
     expect(table).toBeTruthy();
     const columns = db.query<{ name: string }, []>("PRAGMA table_info('user_text_backends')").all().map((c) => c.name);
@@ -436,16 +437,22 @@ describe('migration runner', () => {
         db.query("INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u', 'brainstorm', ?, 1)").run(retired);
       }).toThrow();
     }
+
+    migrate(db, dataDir);
+
+    expect(db.query<{ version: number }, []>('SELECT MAX(version) AS version FROM schema_versions').get()?.version).toBe(BINARY_SCHEMA_VERSION);
+    expect(db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='user_text_backends'").get()).toBeNull();
+    expect(db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='user_text_models'").get()).toBeTruthy();
   });
 
   test('migration37 is idempotent when the runner is called twice and cascades on user delete', () => {
     const dataDir = tempDir();
     const db = openDb({ dataDir });
-    migrate(db, dataDir);
+    migrate(db, dataDir, { targetVersion: 57 });
     db.query('INSERT INTO users (id, created_at) VALUES (?, ?)').run('u', Date.now());
     db.query("INSERT INTO user_text_backends (user_id, workload, backend, updated_at) VALUES ('u', 'condense', 'kimi', 1)").run();
 
-    migrate(db, dataDir);
+    migrate(db, dataDir, { targetVersion: 57 });
 
     expect(db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM schema_versions WHERE version = 37').get()?.count).toBe(1);
     expect(db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM user_text_backends').get()?.count).toBe(1);

@@ -171,7 +171,7 @@ export default function TemplateEditor({ template, initialName = '', variableLis
             className={btn.ai}
             onClick={draftHook.draft}
             disabled={!trimmedName || busy}
-            data-tip={!trimmedName ? 'Name the template first' : 'Generate or continue the prompt body with Kimi K3'}
+            data-tip={!trimmedName ? 'Name the template first' : 'Generate or continue the prompt body with the text model assigned to this task'}
           >
             <I.sparkle aria-hidden="true" />
             {busy ? 'Drafting…' : 'Draft Template'}

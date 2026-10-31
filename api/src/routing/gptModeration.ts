@@ -8,11 +8,25 @@ export class GptModerationError extends Error {
   readonly status: number;
 
   constructor(readonly kind: GptModerationFailureKind, readonly moderation: GptModerationNotice) {
-    super(kind === 'moderation-blocked'
-      ? 'Atelier blocked this request under its GPT content policy.'
-      : 'Atelier could not check this request. Nothing was sent to GPT. Please try again.');
+    super(moderationMessage(kind, moderation));
     this.status = kind === 'moderation-blocked' ? 422 : 503;
   }
+}
+
+/**
+ * GPT Image targets keep the GPT wording; a text target names the screened
+ * model (its display name, or "the text model" on a notice without one).
+ */
+function moderationMessage(kind: GptModerationFailureKind, moderation: GptModerationNotice): string {
+  if (moderation.target === 'image') {
+    return kind === 'moderation-blocked'
+      ? 'Atelier blocked this request under its GPT content policy.'
+      : 'Atelier could not check this request. Nothing was sent to GPT. Please try again.';
+  }
+  const model = moderation.modelLabel ?? 'the text model';
+  return kind === 'moderation-blocked'
+    ? `Atelier blocked this request under its content policy. Nothing was sent to ${model}.`
+    : `Atelier could not check this request. Nothing was sent to ${model}. Please try again.`;
 }
 
 // Initial operating threshold, not a calibrated accuracy guarantee. Valid
@@ -65,15 +79,22 @@ export interface GptModerationEvidence {
   readonly instructions?: string;
 }
 
-/** Called at the GPT transports, after assembly and before any GPT fetch. */
+export interface GptModerationOptions {
+  /** Display name of the screened text model; text-target notices carry it. Never sent to JEV. */
+  readonly modelLabel?: string;
+}
+
+/** Called at the screened transports, after assembly and before any upstream fetch. */
 export async function moderateGptInput(
   apiKey: string | undefined,
   evidence: GptModerationEvidence,
   signal: AbortSignal,
+  options: GptModerationOptions = {},
 ): Promise<void> {
   signal.throwIfAborted();
   const target = evidence.task === 'image-generation' ? 'image' : 'text';
-  const unavailable = () => new GptModerationError('moderation-unavailable', { reason: 'unavailable', target });
+  const label = target === 'text' && options.modelLabel !== undefined ? { modelLabel: options.modelLabel } : {};
+  const unavailable = () => new GptModerationError('moderation-unavailable', { reason: 'unavailable', target, ...label });
   // Never truncate evidence: an unchecked suffix could contain the violation.
   if (Buffer.byteLength(JSON.stringify(evidence), 'utf8') > MAX_EVIDENCE_BYTES) {
     throw unavailable();
@@ -99,6 +120,7 @@ export async function moderateGptInput(
         reason: (nudity || age) && violence ? 'sexual-age-and-violence' : nudity || age ? 'sexual-age' : 'graphic-violence',
         categories,
         target,
+        ...label,
       });
     }
   } catch (error) {

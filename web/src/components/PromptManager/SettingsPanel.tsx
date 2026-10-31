@@ -1,87 +1,56 @@
-import type { AiFillBackend, TextBackendWorkload, TextReasoningEffort } from '@atelier/shared';
-import { TEXT_BACKEND_LABELS, TEXT_REASONING_EFFORT_LABELS, textBackendReasoningEfforts } from '@atelier/shared';
+import type { PublicTextModel, TaskRow, TextModelsResponse, TextReasoningEffort } from '@atelier/shared';
+import { TEXT_REASONING_EFFORT_LABELS, TEXT_TASK_LABELS, TEXT_TASKS } from '@atelier/shared';
 import { describeError } from '../../lib/errorCopy';
 import { useAtelierStore } from '../../store/atelier';
-import { usePendingTextBackendWorkloads, useSetTextBackend, useTextBackends } from '../../hooks/useTextBackends';
+import { usePendingTaskPicks, useSetTaskPick, useTextModels } from '../../hooks/useTextModels';
 import ChipSelect, { type ChipSelectOption } from '../Composer/ChipSelect';
 import { LoadingState, ErrorState } from '../StateView';
 import ModelStepsSection from './ModelStepsSection';
 import styles from './SettingsPanel.module.css';
 
-type SettingsBackend = Exclude<AiFillBackend, 'gpt'>;
-type RowValue = 'auto' | SettingsBackend;
+// Model ids are never empty, so '' stands for "Use default".
+const DEFAULT_PICK = '';
 type EffortValue = 'default' | TextReasoningEffort;
 
-interface WorkloadRow {
-  readonly workload: TextBackendWorkload;
-  readonly label: string;
-  readonly description: string;
-}
-
-const ROWS: readonly WorkloadRow[] = [
-  {
-    workload: 'ai-fill',
-    label: 'Ai-fill',
-    description: 'Fills {{ai-fill:}} blanks in prompts',
-  },
-  {
-    workload: 'brainstorm',
-    label: 'Brainstorm',
-    description: 'Writes full character prompts from a brief',
-  },
-  {
-    workload: 'enhance',
-    label: 'Enhance',
-    description: 'Rewrites the composer prompt',
-  },
-  {
-    workload: 'condense',
-    label: 'Krea condense',
-    description: 'Shortens over-budget Krea prompts before render',
-  },
-  {
-    workload: 'storytelling',
-    label: 'Storytelling planner',
-    description: 'Plans AI Storytelling videos from an outline',
-  },
-];
-
-const BACKENDS: readonly SettingsBackend[] = [
-  'kimi',
-  'mimo',
-  'grok',
-  'gemini-argon',
-  'deepseek-abliterated',
-  'glm-abliterated',
-];
-
-// The settings response is not validated, and a server deployed ahead of this
-// bundle can return a backend key it does not know yet.
-function isSettingsBackend(backend: string | undefined): backend is SettingsBackend {
-  return (BACKENDS as readonly (string | undefined)[]).includes(backend);
-}
-
-// Unavailable backends stay listed but dimmed; the server routes their pins as Auto.
-function backendOptions(unavailable: ReadonlySet<AiFillBackend>): readonly ChipSelectOption<RowValue>[] {
+// Models grouped by provider in first-appearance order; offline ones stay
+// listed but dimmed, since the server refuses to save them.
+function modelOptions(models: readonly PublicTextModel[], defaultName: string | undefined): readonly ChipSelectOption<string>[] {
+  const byProvider = new Map<string, PublicTextModel[]>();
+  for (const model of models) {
+    const group = byProvider.get(model.providerName);
+    if (group) group.push(model);
+    else byProvider.set(model.providerName, [model]);
+  }
   return [
-    { value: 'auto', label: 'Auto (default)' },
-    ...BACKENDS.map((value) => (unavailable.has(value)
-      ? { value, label: TEXT_BACKEND_LABELS[value], hint: 'unavailable', disabled: true }
-      : { value, label: TEXT_BACKEND_LABELS[value] })),
+    { value: DEFAULT_PICK, label: defaultName === undefined ? 'Use default' : `Use default · ${defaultName}` },
+    ...[...byProvider].flatMap(([providerName, group]) => group.map((model) => (model.status === 'offline'
+      ? { value: model.id, label: model.displayName, group: providerName, hint: 'offline', disabled: true }
+      : { value: model.id, label: model.displayName, group: providerName }))),
   ];
 }
 
-function effortOptions(backend: SettingsBackend): readonly ChipSelectOption<EffortValue>[] {
+function effortOptions(levels: readonly TextReasoningEffort[]): readonly ChipSelectOption<EffortValue>[] {
   return [
     { value: 'default', label: 'Default' },
-    ...textBackendReasoningEfforts(backend).map((value) => ({ value, label: TEXT_REASONING_EFFORT_LABELS[value] })),
+    ...levels.map((value) => ({ value, label: TEXT_REASONING_EFFORT_LABELS[value] })),
   ];
 }
 
-function TextBackendsSection() {
-  const settings = useTextBackends();
-  const setBackend = useSetTextBackend();
-  const saving = usePendingTextBackendWorkloads();
+// The model "Use default" resolves to. Without a usable pick the server's
+// effective model already is the default (after its own fallbacks); otherwise
+// the first listed fallback that is not offline, as the resolver skips those.
+function defaultModelId(data: TextModelsResponse, row: TaskRow, byId: ReadonlyMap<string, PublicTextModel>): string | undefined {
+  const configured = [data.defaults.byTask[row.task], data.defaults.default].find((id) => {
+    const model = id === undefined ? undefined : byId.get(id);
+    return model !== undefined && model.status !== 'offline';
+  });
+  return row.pick === undefined || row.pickState === 'offline' ? row.effectiveModelId ?? configured : configured;
+}
+
+function TextModelsSection() {
+  const settings = useTextModels();
+  const setPick = useSetTaskPick();
+  const saving = usePendingTaskPicks();
   const addToast = useAtelierStore((state) => state.addToast);
 
   if (settings.isPending) return <LoadingState label="Loading settings…" />;
@@ -90,84 +59,95 @@ function TextBackendsSection() {
   if (settings.data === undefined) {
     return (
       <ErrorState
-        message="Couldn’t load the text backend settings."
+        message="Couldn’t load the text model settings."
         onRetry={() => { void settings.refetch(); }}
       />
     );
   }
 
-  const unavailable = new Set(settings.data.unavailable);
-  const options = backendOptions(unavailable);
+  const data = settings.data;
+  const byId = new Map(data.models.map((model) => [model.id, model]));
+  // Rows come from the shared task list, so every task shows even when the
+  // response omits one, and a task this bundle does not know is skipped.
+  const rowByTask = new Map(data.tasks.map((row) => [row.task, row]));
 
   return (
-    <section className={styles.panel} aria-label="Prompt library text backend settings">
+    <section className={styles.panel} aria-label="Prompt library text model settings">
       <div className={styles.head} data-zone="head">
-        <h2 className={styles.headTitle}>Text backends</h2>
+        <h2 className={styles.headTitle}>Text models</h2>
         <p className={styles.headNote}>
-          Choose the writing models for local ComfyUI generations. Auto uses each feature’s
-          default. Pin a model to set its reasoning effort. GPT image generations always use GPT for
-          text.
+          Pick which model writes for each feature. Default uses what your admin set.
         </p>
       </div>
       <div className={styles.body} data-zone="body">
-        {ROWS.map((row) => {
-          const override = settings.data.overrides[row.workload];
-          // Local routing already ignores legacy GPT preferences and uses Auto; a key
-          // this bundle does not know also shows as Auto instead of breaking the panel.
-          const value: RowValue = isSettingsBackend(override) ? override : 'auto';
-          const display = value === 'auto'
-            ? 'Auto (default)'
-            : unavailable.has(value)
-              ? `${TEXT_BACKEND_LABELS[value]} unavailable · using Auto`
-              : TEXT_BACKEND_LABELS[value];
-          // An effort belongs to a pinned, routable backend; Auto keeps each default.
-          const effortBackend = value === 'auto' || unavailable.has(value) ? null : value;
-          const effort: EffortValue = effortBackend === null
-            ? 'default'
-            : settings.data.efforts[row.workload] ?? 'default';
-          const rowSaving = saving.has(row.workload);
+        {TEXT_TASKS.map((task) => {
+          const row: TaskRow = rowByTask.get(task) ?? { task };
+          const label = TEXT_TASK_LABELS[row.task];
+          const defaultId = defaultModelId(data, row, byId);
+          const defaultName = defaultId === undefined ? undefined : byId.get(defaultId)?.displayName;
+          // A pick the response does not list shows as the default instead of breaking the panel.
+          const picked = row.pick === undefined ? undefined : byId.get(row.pick);
+          const offlinePick = picked !== undefined && row.pickState === 'offline';
+          // An effort belongs to a pick the task actually uses; the default keeps its own.
+          const activePick = picked !== undefined && !offlinePick ? picked : undefined;
+          const display = picked !== undefined
+            ? picked.displayName
+            : defaultName === undefined ? 'Default' : `Default · ${defaultName}`;
+          // Only an effort the picked model still offers is in use.
+          const effort: EffortValue = activePick !== undefined && row.effort !== undefined && activePick.reasoningLevels.includes(row.effort)
+            ? row.effort
+            : 'default';
           const effortDisplay = effort === 'default'
             ? 'Default effort'
             : `${TEXT_REASONING_EFFORT_LABELS[effort]} effort`;
+          const rowSaving = saving.has(row.task);
           return (
-            <div key={row.workload} className={styles.row}>
+            <div key={row.task} className={styles.row}>
               <div className={styles.rowMain}>
-                <p className={styles.rowLabel}>{row.label}</p>
-                <p className={styles.rowDescription}>{row.description}</p>
+                <p className={styles.rowLabel}>{label}</p>
+                {offlinePick && (
+                  <p className={styles.rowNote}>
+                    {`${picked.displayName} is offline right now; ${label} is using the default.`}
+                  </p>
+                )}
               </div>
               <div className={styles.rowControl}>
-                <ChipSelect<RowValue>
-                  ariaLabel={`Text backend for ${row.label}, currently ${display}`}
+                <ChipSelect<string>
+                  ariaLabel={`Text model for ${label}, currently ${display}`}
                   valueDisplay={display}
-                  options={options}
-                  value={value}
+                  options={modelOptions(data.models, defaultName)}
+                  value={picked?.id ?? DEFAULT_PICK}
                   disabled={rowSaving}
                   onChange={(next) => {
-                    // ChipSelect still reports dimmed rows; an unavailable backend is not selectable.
-                    if (next !== 'auto' && unavailable.has(next)) return;
+                    // ChipSelect still reports dimmed rows; an offline model is not selectable.
+                    if (next !== DEFAULT_PICK && byId.get(next)?.status === 'offline') return;
                     // mutateAsync: a second row's mutate() replaces per-call callbacks,
                     // which silenced the first save's failure toast.
-                    setBackend.mutateAsync({ workload: row.workload, backend: next === 'auto' ? null : next })
+                    setPick.mutateAsync({ task: row.task, modelId: next === DEFAULT_PICK ? null : next })
                       .catch((error: unknown) => {
-                        addToast(describeError(error, "Couldn't save the text backend."), 'error');
+                        addToast(describeError(error, "Couldn't save the text model."), 'error');
                       });
                   }}
                 />
-                <ChipSelect<EffortValue>
-                  ariaLabel={`Reasoning effort for ${row.label}, currently ${effortDisplay}`}
-                  valueDisplay={effortDisplay}
-                  options={effortBackend === null ? [{ value: 'default', label: 'Default' }] : effortOptions(effortBackend)}
-                  value={effort}
-                  disabled={effortBackend === null || rowSaving}
-                  {...(effortBackend === null ? { tip: 'Pin a model to choose its reasoning effort' } : {})}
-                  onChange={(next) => {
-                    if (effortBackend === null) return;
-                    setBackend.mutateAsync({ workload: row.workload, backend: effortBackend, effort: next === 'default' ? null : next })
-                      .catch((error: unknown) => {
-                        addToast(describeError(error, "Couldn't save the reasoning effort."), 'error');
-                      });
-                  }}
-                />
+                {activePick?.reasoningLevels.length === 0 ? (
+                  <p className={styles.effortFixed}>Effort fixed by the model</p>
+                ) : (
+                  <ChipSelect<EffortValue>
+                    ariaLabel={`Reasoning effort for ${label}, currently ${effortDisplay}`}
+                    valueDisplay={effortDisplay}
+                    options={activePick === undefined ? [{ value: 'default', label: 'Default' }] : effortOptions(activePick.reasoningLevels)}
+                    value={effort}
+                    disabled={activePick === undefined || rowSaving}
+                    {...(activePick === undefined ? { tip: 'Pick a model to choose its reasoning effort' } : {})}
+                    onChange={(next) => {
+                      if (activePick === undefined) return;
+                      setPick.mutateAsync({ task: row.task, modelId: activePick.id, effort: next === 'default' ? null : next })
+                        .catch((error: unknown) => {
+                          addToast(describeError(error, "Couldn't save the reasoning effort."), 'error');
+                        });
+                    }}
+                  />
+                )}
               </div>
             </div>
           );
@@ -181,7 +161,7 @@ function TextBackendsSection() {
 export default function SettingsPanel() {
   return (
     <div className={styles.stack}>
-      <TextBackendsSection />
+      <TextModelsSection />
       <ModelStepsSection />
     </div>
   );

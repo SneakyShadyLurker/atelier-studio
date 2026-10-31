@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import { TaskCancelledError } from 'cockatiel';
 import type { VariableList } from '@atelier/shared';
-import { setCliproxyTextProviderForTests, type InferResult, type TestCliproxyTextProvider } from '../providers/cliproxyText';
-import { parseInferDone, parseSse, testRuntime } from '../test/helpers';
+import { type InferResult, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
+import { parseInferDone, parseSse, pickLegacyTextModel, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 import { promptLibrary } from './prompts/_shared';
 import { toLibrarySnapshot } from '../prompts/librarySnapshot';
 import { takeProposalForUser } from '../prompts/proposalStore';
 import { inferPool } from '../orchestrator/llmAdmission';
 
-afterEach(() => { setCliproxyTextProviderForTests(null); });
+afterEach(() => { setTextModelProviderForTests(null); });
 
 const FAST_RESILIENCE_ENV = {
   RESILIENT_PER_ATTEMPT_TIMEOUT_MS: '15000',
@@ -31,7 +32,7 @@ async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
   if (Date.now() < 0) yield undefined as never;
 }
 
-function fakeProvider(ops: RawInferOp[]): TestCliproxyTextProvider {
+function fakeProvider(ops: RawInferOp[]): TestTextFeatureProvider {
   return {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
@@ -57,7 +58,7 @@ for (const detail of ['invalid operation payload', 'transient transport failure'
   test(`taxonomy recovers one ${detail} within the same signal`, async () => {
     const signals: AbortSignal[] = [];
     let chunks = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider([]),
       inferTaxonomy: (_snapshot, signal) => {
         signals.push(signal);
@@ -67,7 +68,7 @@ for (const detail of ['invalid operation payload', 'transient transport failure'
       },
       inferDimensions: () => { chunks += 1; return Promise.resolve({ type: 'ok', ops: [] }); },
     });
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
     await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
     const frames = await parseSse(await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' } }));
     expect(signals).toHaveLength(2);
@@ -82,12 +83,12 @@ for (const kind of ['transient', 'permanent', 'quota', 'moderation-blocked'] as 
   test(`taxonomy ${kind} failure stops after ${kind === 'transient' ? 'two' : 'one'} calls`, async () => {
     let calls = 0;
     let chunks = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider([]),
       inferTaxonomy: () => { calls += 1; return Promise.resolve({ type: 'failed', kind, status: null, detail: 'taxonomy failure' }); },
       inferDimensions: () => { chunks += 1; return Promise.resolve({ type: 'ok', ops: [] }); },
     });
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
     await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
     const frames = await parseSse(await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' } }));
     expect(calls).toBe(kind === 'transient' ? 2 : 1);
@@ -103,7 +104,7 @@ for (const boundary of ['shared timeout', 'policy cancellation', 'disconnect'] a
     const abort = new AbortController();
     const signals: AbortSignal[] = [];
     const beganTaxonomy = Promise.withResolvers<undefined>();
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider([]),
       inferTaxonomy: async (_snapshot, signal): Promise<InferResult> => {
         signals.push(signal);
@@ -121,7 +122,7 @@ for (const boundary of ['shared timeout', 'policy cancellation', 'disconnect'] a
       },
     });
     try {
-      const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
+      const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
       await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
       timeoutSpy?.mockClear();
       const response = await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' }, signal: abort.signal });
@@ -150,7 +151,7 @@ for (const boundary of ['local deadline', 'parent abort'] as const) {
     const abort = new AbortController();
     const began = Promise.withResolvers<undefined>();
     let calls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider([]),
       inferTaxonomy: async (_snapshot, signal): Promise<InferResult> => {
         calls += 1;
@@ -163,7 +164,7 @@ for (const boundary of ['local deadline', 'parent abort'] as const) {
       },
     });
     try {
-      const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
+      const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
       await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
       const response = await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' }, signal: abort.signal });
       await began.promise;
@@ -179,7 +180,7 @@ for (const boundary of ['local deadline', 'parent abort'] as const) {
 test('a non-abort taxonomy error still reaches the crash handler even if its deadline elapsed', async () => {
   const timeoutSpy = shortenTaxonomyTimeout(10);
   let calls = 0;
-  setCliproxyTextProviderForTests({
+  setTextModelProviderForTests({
     ...fakeProvider([]),
     inferTaxonomy: async (_snapshot, signal) => {
       calls += 1;
@@ -191,7 +192,7 @@ test('a non-abort taxonomy error still reaches the crash handler even if its dea
     },
   });
   try {
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
     await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
     const frames = await parseSse(await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' } }));
     expect(calls).toBe(1);
@@ -205,7 +206,7 @@ for (const kind of ['quota', 'permanent', 'moderation-blocked'] as const) {
   test(`an explicit taxonomy ${kind} decision racing its deadline is not reclassified as timeout`, async () => {
     const timeoutSpy = shortenTaxonomyTimeout(10);
     let calls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider([]),
       inferTaxonomy: async (_snapshot, signal): Promise<InferResult> => {
         calls += 1;
@@ -217,7 +218,7 @@ for (const kind of ['quota', 'permanent', 'moderation-blocked'] as const) {
       },
     });
     try {
-      const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
+      const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV, INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', LOG_LEVEL: 'warn' });
       await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'A', options: ['a'] }] });
       const frames = await parseSse(await runtime.fetch('/api/prompts/dimensions/infer', { method: 'POST', headers: { 'Remote-User': 'alice' } }));
       expect(calls).toBe(1);
@@ -292,10 +293,42 @@ async function seedInferenceHierarchy(runtime: ReturnType<typeof testRuntime>, m
 }
 
 describe('POST /api/prompts/dimensions/infer', () => {
+  test("the user's pinned effort reaches the wire on every infer call", async () => {
+    const efforts: unknown[] = [];
+    const content = JSON.stringify({ ops: [] });
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        if (new URL(req.url).pathname !== '/v1/chat/completions') return new Response('not found', { status: 404 });
+        efforts.push((await req.json() as { reasoning_effort?: unknown }).reasoning_effort);
+        const frames = [
+          JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: 'stop' }] }),
+          '[DONE]',
+        ];
+        return new Response(frames.map((f) => `data: ${f}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } });
+      },
+    });
+    try {
+      const runtime = testRuntime({
+        seedLegacyText: true,
+        PROMPT_LIBRARY_USERS: 'alice',
+        CLIPROXY_BASE_URL: `http://127.0.0.1:${server.port}`,
+        CLIPROXY_TOKEN: 'sk-x',
+      });
+      await seedPromptUser(runtime.app, 'alice', { lists: [{ name: 'L', options: ['option'] }] });
+      pickLegacyTextModel(runtime.db, 'alice', 'infer', 'kimi', 'high');
+      await parseInferDone(await runtime.app.fetch(inferenceRequest('dimensions/infer', {})));
+      expect(efforts.length).toBeGreaterThan(0);
+      expect(efforts.every((effort) => effort === 'high')).toBe(true);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
   test('unsafe assignment keeps an independent applicable proposal and reports rejected operations', async () => {
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedInferenceHierarchy(runtime);
-    setCliproxyTextProviderForTests(fakeProvider([
+    setTextModelProviderForTests(fakeProvider([
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Era', label: 'child' }] },
       { op: 'createDimension', name: 'Mood', tags: ['happy'] },
     ]));
@@ -314,9 +347,9 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('all unsafe inference operations yield explicit rejected done instead of a generic error', async () => {
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedInferenceHierarchy(runtime);
-    setCliproxyTextProviderForTests(fakeProvider([
+    setTextModelProviderForTests(fakeProvider([
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Era', label: 'child' }] },
     ]));
     const done = await parseInferDone<{ proposalId: string; rejected: { count: number }[]; proposal: { bundles: unknown[] } }>(
@@ -328,9 +361,9 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('inference retains a later final-state repair and exact-tag require wins on apply', async () => {
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedInferenceHierarchy(runtime);
-    setCliproxyTextProviderForTests(fakeProvider([
+    setTextModelProviderForTests(fakeProvider([
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Era', label: 'child' }] },
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Era', label: 'parent' }] },
     ]));
@@ -351,7 +384,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('two-pass rejects an unsafe taxonomy merge but continues with accepted namespaces and indices', async () => {
-    const runtime = testRuntime({ ...FAST_RESILIENCE_ENV, PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
+    const runtime = testRuntime({ seedLegacyText: true, ...FAST_RESILIENCE_ENV, PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
     await seedInferenceHierarchy(runtime, true);
     const original = toLibrarySnapshot(promptLibrary(runtime.db, 'alice'));
     const from = original.dimensions.find((dimension) => dimension.name === 'From');
@@ -359,7 +392,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
     const other = original.dimensions.find((dimension) => dimension.name === 'Other');
     if (!from || !into || !other) throw new Error('expected taxonomy dimensions');
     const chunkInputs: string[] = [];
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider([]),
       inferTaxonomy: () => Promise.resolve({ type: 'ok', ops: [
         { op: 'mergeDimensions', fromIdx: from.idx, intoIdx: into.idx, tagMap: {} },
@@ -397,8 +430,8 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('inference accepts legal prototype-shaped list names', async () => {
-    setCliproxyTextProviderForTests(fakeProvider([]));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    setTextModelProviderForTests(fakeProvider([]));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedPromptUser(app, 'alice', { lists: ['constructor', '__proto__', 'toString'].map((name) => ({ name, options: ['option'] })) });
     const response = await app.fetch(new Request('http://local/api/prompts/dimensions/infer', {
       method: 'POST', headers: { 'Remote-User': 'alice' },
@@ -408,14 +441,14 @@ describe('POST /api/prompts/dimensions/infer', () => {
     expect(typeof proposal.proposalId).toBe('string');
   });
   test('pass2 tags a pass1-renamed dimension and accepting its extend bundle includes the rename', async () => {
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider([
         { op: 'addTags', dimIdx: 0, tags: ['new'] },
         { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'X', label: 'new' }] },
       ]),
       inferTaxonomy: () => Promise.resolve({ type: 'ok', ops: [{ op: 'renameDimension', dimIdx: 0, newName: 'X' }] }),
     });
-    const { app } = testRuntime({ ...FAST_RESILIENCE_ENV, PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
+    const { app } = testRuntime({ seedLegacyText: true, ...FAST_RESILIENCE_ENV, PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
     await seedPromptUser(app, 'alice', { lists: [{ name: 'L', options: ['option'] }] });
     const created = await app.fetch(new Request('http://local/api/prompts/dimensions', {
       method: 'POST', headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'A' }),
@@ -443,8 +476,9 @@ describe('POST /api/prompts/dimensions/infer', () => {
       { op: 'addTags', dimIdx: 1, tags: ['C-tag'] },
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'C', label: 'C-tag' }] },
     ];
-    setCliproxyTextProviderForTests({ ...fakeProvider(pass2), inferTaxonomy: () => Promise.resolve({ type: 'ok', ops: pass1 }) });
+    setTextModelProviderForTests({ ...fakeProvider(pass2), inferTaxonomy: () => Promise.resolve({ type: 'ok', ops: pass1 }) });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV, PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
     });
     await seedPromptUser(app, 'alice', { lists: [{ name: 'L', options: ['option'] }] });
@@ -472,7 +506,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test.each(['moderation-blocked', 'moderation-unavailable'] as const)('%s is terminal and never enters retry-gaps', async (kind) => {
     let retries = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider([]),
       inferDimensions: () => Promise.resolve({
         type: 'failed', kind, status: kind === 'moderation-blocked' ? 422 : 503, detail: 'Content check',
@@ -480,7 +514,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       }),
       inferDimensionsSingleAttempt: () => { retries += 1; return Promise.resolve({ type: 'ok', ops: [] }); },
     });
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedPromptUser(app, 'alice', { lists: [{ name: 'Scene', options: ['A landscape'] }] });
     const frames = await parseSse(await app.fetch(new Request('http://local/api/prompts/dimensions/infer', {
       method: 'POST', headers: { 'Remote-User': 'alice' },
@@ -491,11 +525,11 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('returns proposal + proposalId + baseSnapshotHash from model ops', async () => {
-    setCliproxyTextProviderForTests(fakeProvider([
+    setTextModelProviderForTests(fakeProvider([
       { op: 'createDimension', name: 'Franchise', tags: ['Warhammer'] },
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Franchise', label: 'Warhammer' }] },
     ]));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc'] }] });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/infer', {
@@ -514,7 +548,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('non-allowlisted user gets 404 (gate)', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/infer', {
       method: 'POST',
       headers: { 'Remote-User': 'stranger' },
@@ -523,7 +557,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('saturated inference admission rejects before hydrating or diagnosing the library', async () => {
-    const runtime = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await runtime.fetch('/api/session', { headers: { 'Remote-User': 'alice' } });
     const held = inferPool.acquire('alice');
     if (!held.ok) throw new Error('could not reserve inference slot');
@@ -539,7 +573,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test('uses two-pass provider calls when the snapshot exceeds the token budget', async () => {
     let calls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -553,7 +587,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       },
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
     });
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_SNAPSHOT_TOKENS: '1' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_SNAPSHOT_TOKENS: '1' });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc'] }] });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/infer', {
@@ -565,8 +599,8 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('single-shot path emits chunks progress then finalize before done', async () => {
-    setCliproxyTextProviderForTests(fakeProvider([]));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    setTextModelProviderForTests(fakeProvider([]));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc'] }] });
 
@@ -591,7 +625,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test.each(['transport', 'malformed output'] as const)('two-pass retry-gaps recovers %s and then emits done', async (failure) => {
     let calls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -608,6 +642,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'closed',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
@@ -646,7 +681,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test('breaker open after wave 1 skips retry-gaps and emits terminal error', async () => {
     let calls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -663,6 +698,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'open',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
     });
@@ -685,7 +721,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
     let inFlight = 0;
     let peak = 0;
     const release: (() => void)[] = [];
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -704,6 +740,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', // force two-pass
@@ -728,7 +765,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   test('two-pass retries failed chunks before emitting SSE error', async () => {
     let calls = 0;
     let dispatched = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -749,6 +786,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
@@ -773,7 +811,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   test('two-pass retry-gaps uses single-attempt provider calls', async () => {
     let calls = 0;
     let retryCalls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -790,6 +828,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'closed',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
@@ -812,7 +851,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test('permanent wave-1 failure skips retry-gaps and emits terminal error', async () => {
     let retryCalls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -831,6 +870,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'closed',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
@@ -857,7 +897,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
     // Taxonomy succeeds; the L0 chunk fails transiently in BOTH wave 1 and
     // retry-gaps; the other 11 succeed. 1 residual failure <= tolerance, so the
     // run finalizes with a coverage notice naming L0 instead of aborting.
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -882,6 +922,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'closed',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
@@ -907,7 +948,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test('graceful partial: too many unrecoverable chunks still aborts with an error', async () => {
     // 12 chunks, tolerance 1; fail L0/L1/L2 in both waves -> 3 > 1 -> abort.
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -928,6 +969,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'closed',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
@@ -949,7 +991,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   for (const retryKind of ['permanent', 'quota'] as const) {
     test(`partial grace rejects a transient chunk that becomes ${retryKind} on retry`, async () => {
       let retryCalls = 0;
-      setCliproxyTextProviderForTests({
+      setTextModelProviderForTests({
         ...fakeProvider([]),
         inferDimensions: (snapshot) => {
           const parsed = JSON.parse(snapshot) as { lists?: { name?: string }[] };
@@ -968,6 +1010,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
         inferBreakerState: () => 'closed',
       });
       const { app } = testRuntime({
+        seedLegacyText: true,
         ...FAST_RESILIENCE_ENV, PROMPT_LIBRARY_USERS: 'alice',
         INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', INFER_DIMENSIONS_BATCH_CONCURRENCY: '4',
       });
@@ -989,7 +1032,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test('a wave-one quota failure receives neither a retry nor partial-coverage grace', async () => {
     let retryCalls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       ...fakeProvider([]),
       inferDimensions: (snapshot) => {
         const parsed = JSON.parse(snapshot) as { lists?: { name?: string }[] };
@@ -1005,6 +1048,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'closed',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV, PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', INFER_DIMENSIONS_BATCH_CONCURRENCY: '4',
     });
@@ -1024,7 +1068,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
     // 12 chunks, tolerance 1. One chunk (L0) fails PERMANENTLY. Although 1 <=
     // tolerance, a permanent (structural) failure must still abort — only
     // transient timeouts get the partial-coverage grace.
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -1039,6 +1083,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'closed',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
@@ -1060,7 +1105,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   test('mixed transient and permanent failures retry only transient gaps and still end in error', async () => {
     let calls = 0;
     let retryCalls = 0;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -1078,6 +1123,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'closed',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
@@ -1100,7 +1146,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('wave-1 progress counts successful chunks only', async () => {
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -1117,6 +1163,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferBreakerState: () => 'closed',
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1',
@@ -1154,7 +1201,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       lists: { options: { value: string; tagIdxs: number[] }[] }[];
     }
     const snapshots: Snap[] = [];
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -1172,6 +1219,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
     });
     const { app } = testRuntime({
+      seedLegacyText: true,
       ...FAST_RESILIENCE_ENV,
       PROMPT_LIBRARY_USERS: 'alice',
       INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1', // force two-pass
@@ -1262,7 +1310,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test('healthy library: provider receives system prompt WITHOUT DETERMINISTIC PRIOR DIAGNOSIS section', async () => {
     let capturedSystemPrompt: string | undefined;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -1276,7 +1324,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       },
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
     });
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     // One healthy list — no dimensions, so diagnosis is all-satisfiable.
     await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc'] }] });
@@ -1295,7 +1343,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test('broken library: provider receives system prompt WITH DETERMINISTIC PRIOR DIAGNOSIS section', async () => {
     let capturedSystemPrompt: string | undefined;
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -1309,7 +1357,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       },
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
     });
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
 
     // Seed two lists A and B with fully-disjoint tags on one dimension, then
@@ -1366,8 +1414,8 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('empty body with Content-Type application/json returns 200 (smoke-test safe)', async () => {
-    setCliproxyTextProviderForTests(fakeProvider([]));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    setTextModelProviderForTests(fakeProvider([]));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc'] }] });
 
@@ -1383,7 +1431,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 
   test('two-pass tagging calls receive dimensions created by taxonomy pass', async () => {
     const snapshots: unknown[] = [];
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -1397,7 +1445,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: [] }),
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
     });
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_SNAPSHOT_TOKENS: '1' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_SNAPSHOT_TOKENS: '1' });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc'] }] });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/infer', {
@@ -1410,7 +1458,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('quota failure from provider → error event with quota-exhausted code + retryAfterSeconds', async () => {
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -1419,7 +1467,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'failed', kind: 'quota', status: 429, detail: 'quota', retryAfterSeconds: 900 }),
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'x' }),
     });
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc'] }] });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/infer', {
@@ -1437,7 +1485,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
   });
 
   test('non-quota provider failure → error event with provider-error code', async () => {
-    setCliproxyTextProviderForTests({
+    setTextModelProviderForTests({
       enhance: emptyEnhance,
       draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
       draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -1446,7 +1494,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
       inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: 400, detail: 'bad' }),
       rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'x' }),
     });
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', ...FAST_RESILIENCE_ENV });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc'] }] });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/infer', {
@@ -1463,7 +1511,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
 });
 
 test('two-pass accepted creation provenance survives an earlier rejected same-name create', async () => {
-  setCliproxyTextProviderForTests({
+  setTextModelProviderForTests({
     ...fakeProvider([
       { op: 'addTags', dimIdx: 1, tags: ['z'] },
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'A', label: 'z' }] },
@@ -1474,7 +1522,7 @@ test('two-pass accepted creation provenance survives an earlier rejected same-na
       { op: 'createDimension', name: 'A', tags: ['new'] },
     ] }),
   });
-  const { app } = testRuntime({ ...FAST_RESILIENCE_ENV, PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
+  const { app } = testRuntime({ seedLegacyText: true, ...FAST_RESILIENCE_ENV, PROMPT_LIBRARY_USERS: 'alice', INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS: '1' });
   await seedPromptUser(app, 'alice', { lists: [{ name: 'L', options: ['O'] }] });
   const created = await app.fetch(new Request('http://local/api/prompts/dimensions', {
     method: 'POST', headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'A' }),

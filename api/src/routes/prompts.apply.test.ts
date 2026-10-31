@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
-import { setCliproxyTextProviderForTests, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import { parseInferDone, testRuntime } from '../test/helpers';
 import type { RawInferOp } from '../prompts/inferTypes';
 import { templateSatisfiable } from '../prompts/dimensionCoherence';
@@ -8,7 +9,7 @@ import { snapshotHash, templatesDigest, toLibrarySnapshot } from '../prompts/lib
 import { putProposal, takeProposalForUser } from '../prompts/proposalStore';
 import type { RawBundle } from '../prompts/inferTypes';
 
-afterEach(() => { setCliproxyTextProviderForTests(null); });
+afterEach(() => { setTextModelProviderForTests(null); });
 
 function req<T>(value: T | undefined, message = 'expected value'): T {
   if (value === undefined) throw new Error(message);
@@ -20,7 +21,7 @@ async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
   if (Date.now() < 0) yield undefined as never;
 }
 
-function fake(ops: RawInferOp[]): TestCliproxyTextProvider {
+function fake(ops: RawInferOp[]): TestTextFeatureProvider {
   return {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: '' }),
@@ -86,7 +87,7 @@ async function infer(app: ReturnType<typeof testRuntime>['app'], userId: string)
 
 describe('POST /api/prompts/dimensions/apply', () => {
   test('invalid final ancestry previews return retryable 409 for apply and diagnosis; later repair is allowed', async () => {
-    const { app, db } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app, db } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedPromptUser(app, 'alice', { lists: [{ name: 'L', options: ['option'] }] });
     const dimensionId = crypto.randomUUID();
     const parent = crypto.randomUUID(); const child = crypto.randomUUID(); const safe = crypto.randomUUID();
@@ -132,7 +133,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
   });
 
   test('unknown assignment references return typed 409 without implicit tag creation or proposal consumption', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedPromptUser(app, 'alice', { lists: [{ name: 'L', options: ['option'] }] });
     const before = await getLibrary(app, 'alice');
     const proposalId = putProposal({ userId: 'alice', rawBundles: [{ key: 'invalid', dependsOn: [], ops: [
@@ -150,7 +151,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
   });
   for (const commented of [false, true]) {
     test(`${commented ? 'commented' : 'active'} conflicting and missing slots agree with the apply coherence gate`, async () => {
-      const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+      const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
       await seedPromptUser(app, 'alice', { lists: [
         { name: 'A', options: ['A'] }, { name: 'B', options: ['B'] },
       ] });
@@ -162,7 +163,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
         body: JSON.stringify({ name: 'T', body }),
       }));
       expect(template.status).toBe(201);
-      setCliproxyTextProviderForTests(fake([
+      setTextModelProviderForTests(fake([
         { op: 'createDimension', name: 'Genre', tags: ['Fantasy', 'Modern'] },
         { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Fantasy' }] },
         { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Modern' }] },
@@ -179,11 +180,11 @@ describe('POST /api/prompts/dimensions/apply', () => {
   }
 
   test('applies accepted bundle; preserves unmentioned options/tags; option UUIDs stable', async () => {
-    setCliproxyTextProviderForTests(fake([
+    setTextModelProviderForTests(fake([
       { op: 'createDimension', name: 'Franchise', tags: ['Warhammer'] },
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Franchise', label: 'Warhammer' }] },
     ]));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [{ name: 'Races', options: ['Orc', 'Human'] }] });
     const before = await getLibrary(app, userId);
@@ -205,8 +206,8 @@ describe('POST /api/prompts/dimensions/apply', () => {
   });
 
   test('drift -> 409', async () => {
-    setCliproxyTextProviderForTests(fake([{ op: 'createDimension', name: 'X', tags: ['a'] }]));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    setTextModelProviderForTests(fake([{ op: 'createDimension', name: 'X', tags: ['a'] }]));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [{ name: 'L', options: ['v'] }] });
     const prop = await infer(app, userId);
@@ -224,7 +225,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
   });
 
   test('unknown/expired proposalId -> 410', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     await seedPromptUser(app, userId, { lists: [] });
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/apply', {
@@ -240,8 +241,8 @@ describe('POST /api/prompts/dimensions/apply', () => {
     // ApplyLimitError preflight at countDimensions() >= MAX_TAG_DIMENSIONS
     // throws before any INSERT runs, so this is a precondition-guard test,
     // not a rollback test. The real rollback semantics are exercised below.
-    setCliproxyTextProviderForTests(fake([{ op: 'createDimension', name: 'X', tags: ['a'] }]));
-    const { app, config } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    setTextModelProviderForTests(fake([{ op: 'createDimension', name: 'X', tags: ['a'] }]));
+    const { app, config } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     const list = await createList(app, userId, 'L');
     const keepRes = await app.fetch(new Request('http://local/api/prompts/dimensions', {
@@ -293,7 +294,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
     // MAX_TAGS_PER_DIMENSION on the pre-seeded dim D and throws
     // ApplyLimitError mid-transaction. db.transaction(...) must roll back
     // the N1 insert — otherwise the user sees a 409 and a half-applied state.
-    const { app, config } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app, config } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     // Seed D with MAX_TAGS_PER_DIMENSION - 1 tags so adding two more throws
     // on the SECOND insert (not the first) — guaranteeing one insert has
@@ -315,7 +316,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
     }));
     expect(seedRes.status).toBe(200);
 
-    setCliproxyTextProviderForTests(fake([
+    setTextModelProviderForTests(fake([
       { op: 'createDimension', name: 'N1', tags: ['only'] },
       { op: 'addTags', dimIdx: 0, tags: ['overflow1', 'overflow2'] },
     ]));
@@ -343,7 +344,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
   });
 
   test('coherence 422 names the failing templates so the toast is actionable', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     // Two single-option lists referenced by a template that combines them.
     // Tag the two options on the same dimension with disjoint tags so the
@@ -361,7 +362,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
     }));
     expect(templateRes.status).toBe(201);
 
-    setCliproxyTextProviderForTests(fake([
+    setTextModelProviderForTests(fake([
       { op: 'createDimension', name: 'Genre', tags: ['Fantasy', 'Modern'] },
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Fantasy' }] },
       { op: 'assignOptionTags', listIdx: 1, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Modern' }] },
@@ -402,7 +403,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
       body: JSON.stringify({ name: 'Scene', body: 'a {{var::Roles}} wears {{var::Outfits}}' }),
     }));
     expect(templateRes.status).toBe(201);
-    setCliproxyTextProviderForTests(fake([
+    setTextModelProviderForTests(fake([
       { op: 'createDimension', name: 'Genre', tags: ['Fantasy', 'Modern'] },
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Fantasy' }] },
       { op: 'assignOptionTags', listIdx: 1, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Modern' }] },
@@ -412,7 +413,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
   }
 
   test('apply with acceptUnsatisfiableTemplates ships partial despite a failing template', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     const { proposalId, allKeys } = await seedUnsatisfiableScene(app, userId);
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/apply', {
@@ -431,7 +432,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
   });
 
   test('apply with legacy overrideCoherence:true expands to all failing templates and warn-logs', async () => {
-    const { app, logs } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'warn' });
+    const { app, logs } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'warn' });
     const userId = 'alice';
     const { proposalId, allKeys } = await seedUnsatisfiableScene(app, userId);
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/apply', {
@@ -452,7 +453,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
   });
 
   test('apply 422s when failing template not in acceptUnsatisfiableTemplates', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const userId = 'alice';
     const { proposalId, allKeys } = await seedUnsatisfiableScene(app, userId);
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/apply', {
@@ -479,7 +480,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
     // cannot bypass the gate by inventing template names. The drop is
     // logged for telemetry; behaviour should match passing only the known
     // entry.
-    const { app, logs } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'warn' });
+    const { app, logs } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'warn' });
     const userId = 'alice';
     const { proposalId, allKeys } = await seedUnsatisfiableScene(app, userId);
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/apply', {
@@ -503,7 +504,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
   });
 
   test('apply ignores overrideCoherence when acceptUnsatisfiableTemplates already covers the template', async () => {
-    const { app, logs } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'warn' });
+    const { app, logs } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'warn' });
     const userId = 'alice';
     const { proposalId, allKeys } = await seedUnsatisfiableScene(app, userId);
     const res = await app.fetch(new Request('http://local/api/prompts/dimensions/apply', {
@@ -527,7 +528,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
 });
 
 test('single-wave assignment before rename is diagnosed and blocked by the production apply gate', async () => {
-  const { app, db } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app, db } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   await seedPromptUser(app, 'alice', { lists: [{ name: 'L0', options: ['O'] }, { name: 'L1', options: ['P'] }] });
   const before = await getLibrary(app, 'alice');
   db.query('INSERT INTO tag_dimensions (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').run('ordered-axis', 'alice', 'A', 1);
@@ -542,7 +543,7 @@ test('single-wave assignment before rename is diagnosed and blocked by the produ
     method: 'POST', headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: 'Scene', body: '{{var::L0}} {{var::L1}}' }),
   }))).status).toBe(201);
-  setCliproxyTextProviderForTests(fake([
+  setTextModelProviderForTests(fake([
     { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'A', label: 'y' }] },
     { op: 'renameDimension', dimIdx: 0, newName: 'X' },
   ]));
@@ -567,11 +568,11 @@ test('single-wave assignment before rename is diagnosed and blocked by the produ
 
 for (const spaced of [false, true]) {
   test(`single-wave partial apply preserves ${spaced ? 'spaced tag identities' : 'reciprocal multi-axis dependencies'}`, async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     await seedPromptUser(app, 'alice', { lists: [{ name: 'L', options: ['O'] }] });
     const first = spaced ? { dimName: 'Hair color', label: 'dark brown' } : { dimName: 'A', label: 'x' };
     const second = spaced ? { dimName: 'Hair', label: 'color dark brown' } : { dimName: 'B', label: 'y' };
-    setCliproxyTextProviderForTests(fake([
+    setTextModelProviderForTests(fake([
       { op: 'createDimension', name: first.dimName, tags: [first.label] },
       { op: 'createDimension', name: second.dimName, tags: [second.label] },
       { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: spaced ? [first] : [first, second] },
@@ -592,7 +593,7 @@ for (const spaced of [false, true]) {
 }
 
 test('partial rename selection includes the earlier rename that freed its destination', async () => {
-  const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   await seedPromptUser(app, 'alice', { lists: [{ name: 'L', options: ['O'] }] });
   const ids: string[] = [];
   for (const name of ['A', 'B']) {
@@ -602,7 +603,7 @@ test('partial rename selection includes the earlier rename that freed its destin
     expect(response.status).toBe(201);
     ids.push((await response.json() as { id: string }).id);
   }
-  setCliproxyTextProviderForTests(fake([
+  setTextModelProviderForTests(fake([
     { op: 'renameDimension', dimIdx: 0, newName: 'X' },
     { op: 'renameDimension', dimIdx: 1, newName: 'A' },
   ]));
@@ -618,7 +619,7 @@ test('partial rename selection includes the earlier rename that freed its destin
 });
 
 test('production merge apply skips collapsed inherited cycles and writes hierarchy accepted by normal tag replacement', async () => {
-  const { app, db } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app, db } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   await seedPromptUser(app, 'alice', { lists: [{ name: 'L', options: ['O'] }] });
   const source = crypto.randomUUID();
   const target = crypto.randomUUID();
@@ -632,7 +633,7 @@ test('production merge apply skips collapsed inherited cycles and writes hierarc
       .run(id, 'alice', source, label, index, parentId);
     parentId = id;
   }
-  setCliproxyTextProviderForTests(fake([{ op: 'mergeDimensions', fromIdx: 0, intoIdx: 1, tagMap: { p: 'x', c: 'y', g: 'x' } }]));
+  setTextModelProviderForTests(fake([{ op: 'mergeDimensions', fromIdx: 0, intoIdx: 1, tagMap: { p: 'x', c: 'y', g: 'x' } }]));
   const proposal = await infer(app, 'alice');
   const applied = await app.fetch(new Request('http://local/api/prompts/dimensions/apply', {
     method: 'POST', headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' },
@@ -653,7 +654,7 @@ test('production merge apply skips collapsed inherited cycles and writes hierarc
 });
 
 test('apply gate and persisted SAT agree for gapped tags through chained hierarchy merges', async () => {
-  const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+  const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
   await seedPromptUser(app, 'alice', { lists: [{ name: 'L0', options: ['O'] }, { name: 'L1', options: ['P'] }] });
   const ids: string[] = [];
   for (const name of ['A', 'B', 'C']) {
@@ -694,7 +695,7 @@ test('apply gate and persisted SAT agree for gapped tags through chained hierarc
     method: 'POST', headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: 'Scene', body: '{{var::L0}} {{var::L1}}' }),
   }))).status).toBe(201);
-  setCliproxyTextProviderForTests(fake([
+  setTextModelProviderForTests(fake([
     { op: 'mergeDimensions', fromIdx: 0, intoIdx: 1, tagMap: {} },
     { op: 'mergeDimensions', fromIdx: 1, intoIdx: 2, tagMap: { a: 'Aparent', ca: 'child', b: 'Bparent', cb: 'child' } },
   ]));
@@ -712,7 +713,7 @@ test('apply gate and persisted SAT agree for gapped tags through chained hierarc
 });
 
 test('accepting one costly UNSAT template does not require overriding a later SAT template', async () => {
-  const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', MAX_TAG_DIMENSIONS: '100' });
+  const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', MAX_TAG_DIMENSIONS: '100' });
   await seedPromptUser(app, 'alice', { lists: [
     { name: 'A', options: ['a'] }, { name: 'B', options: ['b'] }, { name: 'Empty', options: [] },
   ] });
@@ -722,7 +723,7 @@ test('accepting one costly UNSAT template does not require overriding a later SA
     }));
     expect(created.status).toBe(201);
   }
-  setCliproxyTextProviderForTests(fake(Array.from({ length: 40 }, (_, index) => ({
+  setTextModelProviderForTests(fake(Array.from({ length: 40 }, (_, index) => ({
     op: 'createDimension', name: `D${index}`, tags: ['a', 'b'],
   }))));
   const proposal = await infer(app, 'alice');

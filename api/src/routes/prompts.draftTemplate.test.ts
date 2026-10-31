@@ -1,19 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { DraftTemplateResponse, VariableList } from '@atelier/shared';
-import { setCliproxyTextProviderForTests, type CliproxyTextProvider, type TestCliproxyTextProvider } from '../providers/cliproxyText';
+import { type TextFeatureProvider, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import type { LibraryOverview } from '../prompts/libraryOverview';
-import { parseSseText, restoreFetch, testRuntime } from '../test/helpers';
+import { parseSseText, pickLegacyTextModel, restoreFetch, testRuntime } from '../test/helpers';
+import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 
 const servers: Bun.Server<unknown>[] = [];
 beforeEach(() => { restoreFetch(); });
 afterEach(async () => {
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   restoreFetch();
   await Promise.all(servers.splice(0).map((s) => s.stop(true)));
 });
 
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: handler });
+  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }
@@ -41,8 +43,8 @@ async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
 }
 
 function fakeProvider(
-  draftTemplate: CliproxyTextProvider['draftTemplate'],
-): TestCliproxyTextProvider {
+  draftTemplate: TextFeatureProvider['draftTemplate'],
+): TestTextFeatureProvider {
   return {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -84,7 +86,7 @@ async function draftTemplate(
 
 describe('POST /api/prompts/templates/draft', () => {
   test('non-allowlisted user → 404', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await app.fetch(new Request('http://local/api/prompts/templates/draft', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Remote-User': 'stranger' },
@@ -95,27 +97,42 @@ describe('POST /api/prompts/templates/draft', () => {
 
   test('happy path returns body', async () => {
     const expectedPayload: DraftTemplateResponse = { kind: 'body', body: 'A cinematic portrait.', warnings: [] };
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       () => Promise.resolve({ type: 'ok', payload: expectedPayload }),
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await draftTemplate(app, { name: 'Portrait', existingBody: 'A portrait.' });
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
     expect(done).toEqual(expectedPayload);
   });
 
+  test("the user's pinned effort reaches the wire", async () => {
+    const efforts: unknown[] = [];
+    const up = serve(async (req) => {
+      efforts.push((await req.json() as { reasoning_effort?: unknown }).reasoning_effort);
+      const content = JSON.stringify({ kind: 'body', body: 'a portrait' });
+      return Response.json({ choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
+    });
+    const { app, db } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
+    pickLegacyTextModel(db, 'alice', 'template-draft', 'kimi', 'high');
+    const res = await draftTemplate(app, { name: 'Portrait', existingBody: '' });
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(efforts).toEqual(['high']);
+  });
+
   test('unsaved-template flow — works without a stored template id (headline use case)', async () => {
     // The route must accept requests with no pre-existing template. The library
     // overview must be built from the calling user's own data, not the absent template.
     let capturedLibrary: LibraryOverview | null = null;
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       (input) => {
         capturedLibrary = input.library;
         return Promise.resolve({ type: 'ok', payload: { kind: 'body', body: 'drafted', warnings: [] } });
       },
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     // alice has a list but no saved template — this is the "new template + AI" flow
     await createList(app, 'alice', 'subject');
     const res = await draftTemplate(app, { name: 'New Template', existingBody: '' }, 'alice');
@@ -130,10 +147,10 @@ describe('POST /api/prompts/templates/draft', () => {
 
   test('clarify path passes through unchanged', async () => {
     const expectedPayload: DraftTemplateResponse = { kind: 'clarify', question: 'What subject?' };
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       () => Promise.resolve({ type: 'ok', payload: expectedPayload }),
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await draftTemplate(app, { name: 'Portrait', existingBody: '' });
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
@@ -141,10 +158,10 @@ describe('POST /api/prompts/templates/draft', () => {
   });
 
   test('clarify after description present → sanitized error frame', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       () => Promise.resolve({ type: 'ok', payload: { kind: 'clarify', question: 'What subject?' } }),
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await draftTemplate(app, { name: 'Portrait', existingBody: '', description: 'cinematic' });
     expect(res.status).toBe(200);
     const { done, error } = await readDraft(res);
@@ -154,7 +171,7 @@ describe('POST /api/prompts/templates/draft', () => {
   });
 
   test('invalid body (Zod rejection) → 400', async () => {
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     // Missing required `existingBody` field
     const res = await app.fetch(new Request('http://local/api/prompts/templates/draft', {
       method: 'POST',
@@ -168,10 +185,10 @@ describe('POST /api/prompts/templates/draft', () => {
   });
 
   test('multibyte body byte-cap parity — single 4-byte emoji at 4-byte cap accepted', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       () => Promise.resolve({ type: 'ok', payload: { kind: 'body', body: '🌅', warnings: [] } }),
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', MAX_TEMPLATE_BODY_BYTES: '4' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', MAX_TEMPLATE_BODY_BYTES: '4' });
     const res = await draftTemplate(app, { name: 'T', existingBody: '🌅' });
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
@@ -179,19 +196,19 @@ describe('POST /api/prompts/templates/draft', () => {
   });
 
   test('multibyte body byte-cap parity — two emoji over 4-byte cap → 409', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       () => Promise.resolve({ type: 'ok', payload: { kind: 'body', body: '🌅🌅', warnings: [] } }),
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice', MAX_TEMPLATE_BODY_BYTES: '4' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', MAX_TEMPLATE_BODY_BYTES: '4' });
     const res = await draftTemplate(app, { name: 'T', existingBody: '🌅🌅' });
     expect(res.status).toBe(409);
   });
 
   test('upstream failure → sanitized error frame (detail not leaked)', async () => {
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       () => Promise.resolve({ type: 'failed', status: 500, detail: 'PRIVATE DEBUG model key abc123' }),
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await draftTemplate(app, { name: 'Portrait', existingBody: '' });
     expect(res.status).toBe(200);
     const text = await res.text();
@@ -205,13 +222,13 @@ describe('POST /api/prompts/templates/draft', () => {
 
   test('cross-user isolation — provider receives the caller user library only', async () => {
     let capturedLibrary: LibraryOverview | null = null;
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       (input) => {
         capturedLibrary = input.library;
         return Promise.resolve({ type: 'ok', payload: { kind: 'body', body: 'result', warnings: [] } });
       },
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice,bob' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice,bob' });
 
     // Seed alice with a 'lens' list
     await createList(app, 'alice', 'lens');
@@ -238,10 +255,10 @@ describe('POST /api/prompts/templates/draft', () => {
     const existingBody = 'A portrait in golden hour light.';
     const modelContinuation = 'Soft bokeh background.';
     const modelOutput = existingBody + ' ' + modelContinuation; // model echoed + continued
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       () => Promise.resolve({ type: 'ok', payload: { kind: 'body', body: modelOutput, warnings: [] } }),
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
     const res = await draftTemplate(app, { name: 'Portrait', existingBody });
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
@@ -262,6 +279,7 @@ describe('POST /api/prompts/templates/draft', () => {
       req.signal.addEventListener('abort', () => { resolve(new Response('{}', { status: 200 })); }, { once: true });
     }));
     const { app, logs } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', CLOUD_TIMEOUT_MS: '250',
       LOG_LEVEL: 'info',
     });
@@ -277,7 +295,7 @@ describe('POST /api/prompts/templates/draft', () => {
     // Track whether the signal passed to the provider was aborted.
     let upstreamSignalAborted = false;
     // Fake provider that stalls until its signal is aborted
-    setCliproxyTextProviderForTests(fakeProvider(
+    setTextModelProviderForTests(fakeProvider(
       (_input, signal) => {
         return new Promise((_resolve, reject) => {
           signal.addEventListener('abort', () => {
@@ -288,7 +306,7 @@ describe('POST /api/prompts/templates/draft', () => {
         });
       },
     ));
-    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
 
     // Stand up a real Bun.serve so the client abort propagates as a real network
     // disconnect — c.req.raw.signal fires when the client closes the connection.

@@ -1,20 +1,20 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { setTextModelProviderForTests } from '../providers/text/registry';
 import type {
   DraftTemplateResponse,
   DraftVariableListResponse,
 } from '@atelier/shared';
 import {
-  setCliproxyTextProviderForTests,
   type DraftResult,
   type DraftTemplateResult,
   type EnhanceChunk,
-  type TestCliproxyTextProvider,
-} from '../providers/cliproxyText';
+  type TestTextFeatureProvider,
+} from '../providers/text/featureHelpers';
 import { resetLlmAdmissionForTests } from '../orchestrator/llmAdmission';
 import { parseSseText, testRuntime } from '../test/helpers';
 
 afterEach(() => {
-  setCliproxyTextProviderForTests(null);
+  setTextModelProviderForTests(null);
   resetLlmAdmissionForTests();
 });
 
@@ -26,20 +26,20 @@ async function* emptyEnhance(): AsyncGenerator<EnhanceChunk, void, unknown> {
 function pendingProvider(
   method: 'draftList',
   result: DraftResult,
-): { provider: TestCliproxyTextProvider; resolve(): void };
+): { provider: TestTextFeatureProvider; resolve(): void };
 function pendingProvider(
   method: 'draftTemplate',
   result: DraftTemplateResult,
-): { provider: TestCliproxyTextProvider; resolve(): void };
+): { provider: TestTextFeatureProvider; resolve(): void };
 function pendingProvider(
   method: 'draftList' | 'draftTemplate',
   result: DraftResult | DraftTemplateResult,
-): { provider: TestCliproxyTextProvider; resolve(): void } {
+): { provider: TestTextFeatureProvider; resolve(): void } {
   let release: (() => void) | null = null;
   const wait = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const base: TestCliproxyTextProvider = {
+  const base: TestTextFeatureProvider = {
     enhance: emptyEnhance,
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
     draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
@@ -91,8 +91,9 @@ describe('prompt draft LLM admission', () => {
       type: 'ok',
       payload: { kind: 'entries', entries: ['wistful'] } satisfies DraftVariableListResponse,
     });
-    setCliproxyTextProviderForTests(pending.provider);
+    setTextModelProviderForTests(pending.provider);
     const { app, db } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       MAX_CONCURRENT_LLM_DRAFT_PER_USER: '1',
     });
@@ -118,8 +119,9 @@ describe('prompt draft LLM admission', () => {
       type: 'ok',
       payload: { kind: 'body', body: 'portrait body', warnings: [] } satisfies DraftTemplateResponse,
     });
-    setCliproxyTextProviderForTests(pending.provider);
+    setTextModelProviderForTests(pending.provider);
     const { app } = testRuntime({
+      seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       MAX_CONCURRENT_LLM_DRAFT_PER_USER: '1',
     });

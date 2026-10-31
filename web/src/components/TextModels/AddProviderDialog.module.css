@@ -1,0 +1,338 @@
+/* Add / Edit provider dialogs (ProviderForm). The card, title, actions and
+   sheet behaviour come from styles/dialog.module.css; only the form lives
+   here. Flat selectors, no cross-module descendants. */
+
+@media (width >= 768px) {
+  .dialog {
+    max-width: 560px;
+  }
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.fieldLabel {
+  display: block;
+  margin: 0 0 6px;
+  padding: 0;
+  color: var(--ink);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.fieldHint,
+.fieldError,
+.fieldWarning {
+  max-width: 70ch;
+  margin: 6px 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.fieldHint {
+  color: var(--ink-3);
+}
+
+.fieldError,
+.fieldWarning {
+  color: var(--danger);
+}
+
+.inputBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.inputBox:focus-within {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 1px var(--focus-ring);
+}
+
+.inputBox:has(input[aria-invalid='true']) {
+  border-color: var(--danger);
+}
+
+.textInput,
+.monoInput {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+
+.textInput {
+  font-family: var(--sans);
+}
+
+/* Machine text: addresses, keys and model ids. */
+.monoInput {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+.textInput:disabled,
+.monoInput:disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+.textInput::placeholder,
+.monoInput::placeholder {
+  color: var(--ink-3);
+}
+
+.linkBtn {
+  flex-shrink: 0;
+  min-height: 28px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: var(--text-xs);
+}
+
+.linkBtn:hover:not(:disabled) {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.linkBtn:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.linkBtn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-3);
+}
+
+/* Presets: one radio group drawn as rectangular chips. */
+
+.choiceGroup {
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.preset:hover {
+  color: var(--ink);
+}
+
+.preset:has(input:checked) {
+  border-color: var(--ink);
+  background: var(--bg-sunk);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.preset:has(input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.preset:has(input:disabled) {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.presetInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Advanced disclosure */
+
+.advanced {
+  margin: 0 0 14px;
+  border-top: 1px solid var(--line);
+}
+
+.advancedSummary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.advancedSummary:hover {
+  color: var(--ink);
+}
+
+.advancedSummary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-3);
+}
+
+.advancedBody {
+  padding-top: 6px;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.choice input {
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.choice input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.monoLabel {
+  font-family: var(--mono);
+}
+
+/* Saved key (Edit) */
+
+.keyRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 36px;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+}
+
+.mono {
+  font-family: var(--mono);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* Connection report: the one memorable block, in sentences. */
+
+.report {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--good);
+  background: var(--bg-sunk);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  animation: global(atelier-fade-in) var(--dur-settle) var(--ease-out) both;
+}
+
+.reportFail {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.reportHead {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.reportLine {
+  max-width: 70ch;
+  margin: 4px 0 0;
+  color: var(--ink-2);
+}
+
+.report > .reportLine:first-child {
+  margin-top: 0;
+}
+
+.checks {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.check,
+.checkFail {
+  max-width: 70ch;
+  margin-top: 2px;
+  color: var(--ink-2);
+}
+
+.checkFail {
+  color: var(--ink);
+}
+
+.actions {
+  margin-top: 4px;
+}
+
+/* The phone sheet lifts the right-hand group to the top; adding a provider
+   tests before it saves, so the test button leads there. */
+@media (width < 768px) {
+  .testButton {
+    order: -2;
+  }
+}
+
+@media (hover: none) {
+  .preset,
+  .choice,
+  .linkBtn,
+  .advancedSummary {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .report {
+    animation-duration: var(--dur-reduced);
+  }
+}

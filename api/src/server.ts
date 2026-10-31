@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { secureHeaders } from 'hono/secure-headers';
 import type { Database } from 'bun:sqlite';
-import { loadConfig, ConfigError, type Config } from './config';
+import { loadConfig, ConfigError, renamedEnvVarsInUse, type Config } from './config';
 import { authelia } from './auth/authelia';
 import { csrfGuard } from './auth/csrf';
 import { sessionScopeGuard } from './auth/sessionScope';
@@ -299,6 +299,12 @@ export async function boot(): Promise<{
     logger.warn(
       { event: 'legacy_text_model_env', vars: staleTextModelVars },
       'CLIPROXY_TEXT_MODEL_* is no longer read; manage text models in the app (Text models view)',
+    );
+  }
+  for (const { from, to } of renamedEnvVarsInUse(process.env)) {
+    logger.warn(
+      { event: 'renamed_env_var', from, to },
+      `${from} is deprecated; rename it to ${to} (the old name still works while ${to} is unset)`,
     );
   }
   // Runs after migrate so a schema upgrade can't be mistaken for damage, and

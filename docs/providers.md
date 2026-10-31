@@ -166,7 +166,7 @@ A model row (`text_models`) names one upstream `model_id` on a provider. Its set
 
 **Test model** (`POST /api/text-providers/:id/models/:mid/test`, `providers/text/probe.ts`) runs four sequential checks through the real adapter, each with a 20 s timeout and a 64 KiB cap: plain reply, JSON output (schema, then `json_object`, then none), a 1×1 image, and reasoning efforts `low` then `high`. A failing plain reply skips the rest. The report separates values the probe confirmed (`proposed`) from list hints it did not exercise (`advertised`); applying them is a client-side merge followed by a normal PATCH. `verified_at` is set only when the plain reply passed and no check failed. One limiter covers connection tests, model tests and list calls: one in flight per admin, two per instance, 429 beyond.
 
-Shared rules that do not depend on the model: the adapters keep only answer text and discard reasoning content; Atelier sends no prompt-cache keys, affinity headers or `verbosity`; `CLIPROXY_TEXT_MAX_RESPONSE_BYTES` (1 MiB) bounds the raw stream of every text call, raised to 16 MiB when the effective effort is above `low` (`pinnedEffortMaxResponseBytes`), and `CLIPROXY_TEXT_INFER_MAX_RESPONSE_BYTES` (8 MiB) bounds inference.
+Shared rules that do not depend on the model: the adapters keep only answer text and discard reasoning content; Atelier sends no prompt-cache keys, affinity headers or `verbosity`; `TEXT_MAX_RESPONSE_BYTES` (1 MiB) bounds the raw stream of every text call, raised to 16 MiB when the effective effort is above `low` (`pinnedEffortMaxResponseBytes`), and `TEXT_INFER_MAX_RESPONSE_BYTES` (8 MiB) bounds inference.
 
 ### Availability
 

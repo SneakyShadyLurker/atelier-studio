@@ -246,10 +246,11 @@ const ConfigSchema = z.object({
   // outbound provider fetches — this is the matching outbound bound.
   CLIPROXY_MAX_RESPONSE_BYTES: numericString(50 * 1024 * 1024),
   LOCAL_VIDEO_MAX_RESPONSE_BYTES: numericString(200 * 1024 * 1024),
-  // Hard ceiling on the prompt-enhance response body. This byte cap plus the
-  // AbortController bounds a malformed or runaway Kimi stream independently of
-  // its completion-token ceiling. 1 MB is far above any sane rewritten prompt.
-  CLIPROXY_TEXT_MAX_RESPONSE_BYTES: numericString(1 * 1024 * 1024),
+  // Hard ceiling on a text-model response body, whatever the provider. This
+  // byte cap plus the AbortController bounds a malformed or runaway stream
+  // independently of its completion-token ceiling. 1 MB is far above any sane
+  // rewritten prompt. Formerly CLIPROXY_TEXT_MAX_RESPONSE_BYTES (still read).
+  TEXT_MAX_RESPONSE_BYTES: numericString(1 * 1024 * 1024),
   // Deprecated: read only by migration 58's one-time seed (`legacyTextSeed`),
   // which names the upstream id of each migrated text model. Once the seed has
   // run they do nothing (boot warns); text models are managed in the app.
@@ -268,7 +269,8 @@ const ConfigSchema = z.object({
   // KB taxonomy payload). The functional output bound is max_completion_tokens
   // (36000 for infer), so 8 MB is the matching anti-runaway ceiling; the tight
   // 1 MB guard stays on the small enhance/draftList/draftTemplate paths.
-  CLIPROXY_TEXT_INFER_MAX_RESPONSE_BYTES: numericString(8 * 1024 * 1024),
+  // Formerly CLIPROXY_TEXT_INFER_MAX_RESPONSE_BYTES (still read).
+  TEXT_INFER_MAX_RESPONSE_BYTES: numericString(8 * 1024 * 1024),
   // Brainstorm Characters. The operator MAX_COUNT clamps to the shared wire
   // ceiling via a transform (not a max, which would reject an above-ceiling
   // override and fail config load). Clamp, never reject. The DEFAULT count is
@@ -557,7 +559,33 @@ function ephemeraIssues(
   return issues;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+/**
+ * Env names renamed without changing meaning. The old name keeps working when
+ * the new one is unset (the new one wins when both are set), and boot warns
+ * once so operators can move their env file at their own pace.
+ */
+export const RENAMED_ENV_VARS = [
+  { from: 'CLIPROXY_TEXT_MAX_RESPONSE_BYTES', to: 'TEXT_MAX_RESPONSE_BYTES' },
+  { from: 'CLIPROXY_TEXT_INFER_MAX_RESPONSE_BYTES', to: 'TEXT_INFER_MAX_RESPONSE_BYTES' },
+] as const;
+
+const isSet = (value: string | undefined): value is string => value !== undefined && value !== '';
+
+/** Renamed env vars still set under their old name, for the boot warning. */
+export function renamedEnvVarsInUse(env: NodeJS.ProcessEnv): readonly (typeof RENAMED_ENV_VARS)[number][] {
+  return RENAMED_ENV_VARS.filter(({ from }) => isSet(env[from]));
+}
+
+function withRenamedEnvVars(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const aliased = renamedEnvVarsInUse(env).filter(({ to }) => !isSet(env[to]));
+  if (aliased.length === 0) return env;
+  const next = { ...env };
+  for (const { from, to } of aliased) next[to] = env[from];
+  return next;
+}
+
+export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env): Config {
+  const env = withRenamedEnvVars(rawEnv);
   // Migration guard: MAX_CONCURRENT_BATCHES was renamed to MAX_CONCURRENT_TILES
   // when the cap moved from per-user, per-batch to global, per-tile. Silently
   // ignoring the old name would let an operator who set

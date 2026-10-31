@@ -3,8 +3,10 @@
 Atelier uses a text model (an LLM) for every feature that writes words
 instead of pixels. That covers **Enhance**, `{{ai-fill: …}}` blanks,
 **Brainstorm**, story planning, the motion writer for video, Krea prompt
-condensing and the AI helpers in the Prompt Library. Image generation works without one, but until an admin
-connects a text model those features fail with "No text model is set up".
+condensing and the AI helpers in the Prompt Library. Image generation works
+without one. Until an admin connects a text model and sets a default, most of
+those features fail with "No text model is set up". Krea condensing and
+automatic motion rewriting keep the original text instead.
 
 This guide connects one, step by step. It assumes Atelier already runs, either
 locally from [Getting started](getting-started.md) or on a server from
@@ -43,8 +45,9 @@ Add these lines to the API's environment file (`api/.env` for a local install,
    ```
 
    Production installs already require this key. On a local install without
-   it, keyless providers such as Ollama and LM Studio still work, but the
-   **API key** field is disabled and the dialog explains why. Keep the key
+   it, keyless providers such as Ollama and LM Studio still work. Saving a
+   provider with a key fails, and the **API key** field is then disabled with
+   an explanation. Keep the key
    safe. If it changes, saved provider keys can no longer be read.
 
 3. Only if you plan to use **Screen requests first** (see
@@ -54,9 +57,11 @@ Add these lines to the API's environment file (`api/.env` for a local install,
    OPENROUTER_API_KEY=<your OpenRouter key>
    ```
 
-After the restart, sign in as one of the admins. A **Text models** button (a
-chip icon) appears at the bottom of the sidebar, next to **API keys**. Click it
-to open the Text models view. With nothing connected yet it shows "No text
+After the restart, sign in as one of the admins. A **Text models** row (a
+chip icon) appears near the bottom of the sidebar, between **Prompt Library**
+and **Archive**. Click it to open the Text models view. The
+[Admin guide](admin-guide.md#2-open-the-admin-panel) shows where with a
+screenshot. With nothing connected yet it shows "No text
 model yet" and an **Add provider** button.
 
 ## Connect a local model
@@ -313,7 +318,7 @@ model. Leave the switch off for local models you control.
 
 | What you see | What to do |
 |---|---|
-| No **Text models** button in the sidebar | Add your exact signed-in username to `TEXT_PROVIDER_ADMINS` and restart the API. |
+| No **Text models** row in the sidebar | Add your exact signed-in username to `TEXT_PROVIDER_ADMINS` and restart the API. |
 | "Could not reach the server: …" (connection refused) | Check that the model server is running and that the Base URL, including the port, is right. Under Docker, replace `localhost` (see [When Atelier runs in Docker](#when-atelier-runs-in-docker)). |
 | "The server refused the key (401)" or "(403)" | Re-check the API key, then click **Replace key** under **Edit provider** (the pencil next to the provider's name). Check that the key has access and credit. |
 | "The server answered with a redirect. Enter the address it redirects to instead." | Atelier never follows redirects. Use the final address, often `https://` instead of `http://`, or with `/v1` added. |

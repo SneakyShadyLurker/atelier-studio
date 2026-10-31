@@ -105,10 +105,11 @@ In **Settings**, each task (Enhance, AI fill, Brainstorm and the rest) shows a
 model menu. **Use default** follows what the admin chose and names that model.
 Pick another model to use it for that task, and choose a reasoning effort if
 the model offers levels. A model that is offline right now cannot be picked,
-and if your pick goes offline, the task uses the default until it is back. The
-admin can set one text model to write every prompt for a particular image
-model. Your pick does not apply there, so the result can come from a different
-model than the one you chose.
+and if your pick goes offline, the task uses the default until it is back. An
+admin can also choose a text model to write the prompts for a particular image
+model. If they lock that choice, your pick does not apply there and the result
+can come from a different model than the one you chose. Otherwise your pick
+still wins.
 Read [Prompt Library authoring](prompt-library-authoring.md) for syntax,
 weights, dimensions and worked examples.
 

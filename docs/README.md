@@ -10,6 +10,7 @@ access and, if you use local models, model weights.
 |---|---|
 | [Getting started](getting-started.md) | Download Atelier, run a local test without credentials, then connect a real model |
 | [Using Atelier](user-guide.md) | Generate and edit images, organise work, use templates and understand optional features |
+| [Admin guide](admin-guide.md) | Become an admin, open the admin panel and set up what Atelier needs to work fully |
 | [Connect a text model](connect-a-text-model.md) | Connect Ollama, LM Studio, OpenAI, Anthropic or OpenRouter for Enhance, AI fill and Brainstorm, and choose which model writes what |
 | [Deployment](deployment.md) | Set up authentication and encryption; launch, operate, back up and restore a server |
 | [ComfyUI worker](../infra/comfyui/README.md) | Provision the included worker on a Windows portable ComfyUI install |

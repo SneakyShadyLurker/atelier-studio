@@ -556,6 +556,8 @@ Refresh-time perf has three layers, each owning a narrow concern:
 
 What lives in the browser's IndexedDB at rest: prompt-library data, collection names, tile IDs, and image URLs for the default history view. No model availability, raw image bytes (those are the browser HTTP cache's job), or auth state. Clear via DevTools → Application → IndexedDB → `keyval-store` → `atelier-rq-cache-v1:<cacheScope>`, or by bumping `PERSIST_CACHE_VERSION`.
 
+Small UI state uses Web Storage instead. `localStorage` holds the theme (`atelier.theme`), the sidebar collapse state (`atelier.sidebarCollapsed`) and the composer's remembered model, ratio, count and clip length (`atelier.composerPrefs.v1:<cacheScope>`, owned by `web/src/lib/composerPrefs.ts`). Startup restores the composer settings after binding the session scope, and the existing owners validate them against the live model list (unknown or offline models fall back, ratios and counts are checked per model). An image-to-video model is never stored, because its source still does not survive a reload. `sessionStorage` holds the roll queue under `atelier.rollQueue.v1:<cacheScope>`.
+
 ## Observability
 
 Structured logging via `pino` (JSON to stdout). Each request gets a `reqId` (ULID) bound to the logger; SSE generation routes additionally bind `batchId` and per-tile `tileId` so log lines can be correlated across browser → api → provider.

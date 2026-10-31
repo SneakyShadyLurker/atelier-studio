@@ -378,9 +378,11 @@ describe('useRollQueueSubmit — POSTs follow press order', () => {
     if (!key) throw new Error('missing replay key');
     await act(async () => { posts[0]?.refuse(queueFull429()); await waitUntil(() => posts.length === 2, 2_000); });
     expect(posts[1]?.request).toEqual({ ...historical, idempotencyKey: key });
-    h.stop();
-    h.replay({ ...historical, prompt: 'next historical click' });
-    await act(async () => { await tick(); });
+    await act(async () => {
+      h.stop();
+      h.replay({ ...historical, prompt: 'next historical click' });
+      await tick();
+    });
     expect(posts).toHaveLength(2);
     expect(store().draft.rollQueue.map((roll) => roll.id)).toEqual([paused.id, key]);
     await act(async () => { posts[1]?.accept(); await waitUntil(() => posts.length === 3); });

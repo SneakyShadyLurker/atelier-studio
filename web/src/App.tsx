@@ -7,6 +7,7 @@ import { HISTORY_WRITE_MUTATION_KEY } from './hooks/historyWrites';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { resolveActiveBatchId } from './lib/burstFollow';
 import { describeError } from './lib/errorCopy';
+import { composerPrefsFromDraft, saveComposerPrefs } from './lib/composerPrefs';
 import { resolveEffectiveModel } from './lib/effectiveModel';
 import { buildHistoricalRequest, isRetiredHistoricalModel, RETIRED_MODEL_TOAST, type HistoricalReplay } from './lib/historicalGeneration';
 import { findI2VModel } from './lib/i2v';
@@ -317,6 +318,17 @@ function AppContent() {
     [models, draft.modelId],
   );
   const effectiveModelId = effectiveModel?.id ?? '';
+  const draftModelId = draft.modelId;
+  // Remember the composer settings across reloads. The raw selection, not the
+  // effective fallback, so an offline host's model is still restored once it
+  // returns; the model's metadata keeps image-to-video rows out of storage.
+  const selectedIsI2V = modelById.get(draft.modelId)?.supportsI2V === true;
+  useEffect(() => {
+    saveComposerPrefs(composerPrefsFromDraft(
+      { modelId: draft.modelId, ratio: draft.ratio, count: draft.count, durationFrames: draft.durationFrames, lastImageModelId: draft.lastImageModelId },
+      selectedIsI2V,
+    ));
+  }, [draft.modelId, draft.ratio, draft.count, draft.durationFrames, draft.lastImageModelId, selectedIsI2V]);
   // A boolean, not the model object, so availability polls don't churn the
   // memoized batch-action handler.
   const pickerAvailable = promptPickerAvailable(promptsEnabled, effectiveModel);
@@ -403,10 +415,21 @@ function AppContent() {
       // Re-selecting the current model keeps count/ratio, but a non-I2V
       // selection still drops any leftover animate/extend state.
       if (model?.supportsI2V !== true) setDraft(VIDEO_DRAFT_RESET);
+      // Picking the model shown as a fallback is an explicit choice: it
+      // replaces a remembered selection that is offline or gone, so that one
+      // no longer comes back when its host returns or after a reload.
+      if (draftModelId !== modelId) {
+        // Through the selection owner, but keeping the count and ratio the
+        // composer already shows for this model.
+        const patch = modelSelectionPatch(modelId, model);
+        delete patch.count;
+        delete patch.ratio;
+        setDraft(patch);
+      }
       return;
     }
     setDraft(modelSelectionPatch(modelId, model));
-  }, [setDraft, modelById, effectiveModelId]);
+  }, [setDraft, modelById, effectiveModelId, draftModelId]);
   const onRatioChange = useCallback((ratio: Ratio) => { setDraft({ ratio }); }, [setDraft]);
   const onDurationChange = useCallback((durationFrames: VideoDurationFrames) => { setDraft({ durationFrames }); }, [setDraft]);
   const onCountChange = useCallback((count: Count) => { setDraft({ count }); }, [setDraft]);

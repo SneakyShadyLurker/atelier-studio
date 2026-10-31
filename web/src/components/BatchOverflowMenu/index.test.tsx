@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import type { Batch } from '@atelier/shared';
 import BatchOverflowMenu, { type BatchOverflowAction } from './index';
@@ -94,7 +94,7 @@ describe('BatchOverflowMenu', () => {
     // Enter on the still-focused row inside the fade window.
     fireEvent.click(reroll);
     expect(onSelect).not.toHaveBeenCalled();
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSelect).not.toHaveBeenCalled();
   });
@@ -119,7 +119,7 @@ describe('BatchOverflowMenu', () => {
     reroll.focus();
     // Dismissal rides the shared exit transition (useExitTransition).
     fireEvent.keyDown(reroll, { key: 'Escape' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
   });
 

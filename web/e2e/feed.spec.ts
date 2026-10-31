@@ -179,3 +179,51 @@ test.describe('bottom-anchored feed', () => {
     expect(gap).toBeLessThan(120);
   });
 });
+
+/*
+ * A lone batch on a wide feed spans two tracks, so its tile grows with the
+ * window. On a short window the end-anchored feed used to keep the tile's
+ * bottom clear of the floating composer by pushing the batch header off the
+ * top. The lone-tile cap now also respects the room above the composer.
+ */
+test.describe('a lone batch fits above the composer', () => {
+  const sizes = [
+    { width: 1280, height: 577 },
+    { width: 1280, height: 800 },
+    { width: 1440, height: 900 },
+  ] as const;
+
+  for (const ratio of ['1:1', '9:16'] as const) {
+    for (const size of sizes) {
+      test(`${ratio} at ${size.width}×${size.height} keeps header and tile in view`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await page.goto(`/e2e/harness/index.html?case=phone-feed&seed=1&composer=215&ratio=${ratio}`);
+        await expect(page.getByText('Prompt 100', { exact: true })).toBeVisible();
+        // Let the end-anchored landing settle before measuring.
+        await page.waitForTimeout(400);
+        const box = await page.evaluate(() => {
+          const canvas = document.querySelector('[data-testid="canvas-scroller"]');
+          const composer = document.getElementById('composer');
+          const header = document.querySelector('section[data-batch-id] header');
+          const tile = document.querySelector('[data-testid="batch-grid"] > *');
+          if (!canvas || !composer || !header || !tile) throw new Error('harness not mounted');
+          return {
+            canvasTop: canvas.getBoundingClientRect().top,
+            composerTop: composer.getBoundingClientRect().top,
+            headerTop: header.getBoundingClientRect().top,
+            tileBottom: tile.getBoundingClientRect().bottom,
+            tileHeight: tile.getBoundingClientRect().height,
+            headerLeft: header.getBoundingClientRect().left,
+            tileLeft: tile.getBoundingClientRect().left,
+          };
+        });
+        expect(box.headerTop).toBeGreaterThanOrEqual(box.canvasTop);
+        expect(box.tileBottom).toBeLessThanOrEqual(box.composerTop);
+        // Not shrunk to a thumbnail to get there.
+        expect(box.tileHeight).toBeGreaterThanOrEqual(220);
+        // Still aligned under the header, not centred in its empty span.
+        expect(Math.abs(box.tileLeft - box.headerLeft)).toBeLessThanOrEqual(1);
+      });
+    }
+  }
+});

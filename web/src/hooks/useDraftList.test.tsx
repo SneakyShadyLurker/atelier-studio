@@ -224,7 +224,7 @@ describe('useDraftList', () => {
       resolve?.(draftResponse(200, { kind: 'entries', entries: ['blue', 'green'] }));
     });
     // Give the mutation a tick to settle.
-    await new Promise((r) => setTimeout(r, 10));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     expect(onEntries).not.toHaveBeenCalled();
     expect(h.view.result.current.status).toBe('idle');
     expect(h.view.result.current.dialogMode).toBeNull();

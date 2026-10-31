@@ -12,6 +12,7 @@ import { getBatch, registerBatch, resetInFlightForTests } from './inFlightBatche
 import type { HistoryData } from './historyCache';
 import { useGenerate } from './useGenerate';
 import { markDrainOwned } from '../lib/drainOwnership';
+import { flushQueryNotifications } from '../../test/fixtures/queryNotifications';
 
 const originalFetch = globalThis.fetch;
 const originalBroadcastChannel = window.BroadcastChannel;
@@ -83,7 +84,10 @@ function setBroadcastChannel(value: typeof BroadcastChannel | undefined): void {
   });
 }
 
-afterEach(() => {
+afterEach(async () => {
+  // A settled generation notifies its TanStack observers one tick later; land
+  // that inside act before tearing down.
+  await act(async () => { await flushQueryNotifications(); });
   globalThis.fetch = originalFetch;
   mock.restore();
   resetBroadcastForTests();

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
 import { MAX_OPTIONS_PER_LIST } from '@atelier/shared';
@@ -360,7 +360,7 @@ describe('ListEditor — AI Draft List', () => {
       expect(screen.getByDisplayValue('green')).toBeDefined();
     });
     // Dismissal rides the shared exit transition (useExitTransition).
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -382,7 +382,7 @@ describe('ListEditor — AI Draft List', () => {
     wrap(<ListEditor list={list()} dimensions={[]} />);
     fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(f).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.getByText('Add options to make this list usable in templates.')).toBeDefined();
@@ -393,7 +393,7 @@ describe('ListEditor — AI Draft List', () => {
     fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
     fireEvent.change(screen.getByRole('textbox', { name: /list description/i }), { target: { value: 'paint colours' } });
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
     expect(screen.getByRole('textbox', { name: /list description/i })).toHaveProperty('value', '');
   });

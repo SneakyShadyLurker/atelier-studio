@@ -15,9 +15,13 @@ export function isModelAvailable(model: Model): boolean {
  * Resolve the model the composer actually targets for a given draft selection.
  * The selection is honored whenever it resolves to an available model; when it
  * is missing (deregistered / empty fresh-load) or its upstream is offline we
- * fall back to a usable cloud model, so Generate can never get stuck disabled
- * behind an offline local host. Pure derivation — the draft is left untouched,
- * so the user's selection self-restores once the host comes back.
+ * fall back, in order, to: an available cloud model that needs no BYOK key; any
+ * available image model that needs no key (Mock on a mock-only install, an online
+ * local row otherwise), so a fresh load never opens on a key-gated model; any
+ * available cloud model (key-gated: the Composer opens BYOK on submit); any
+ * available model; and finally the first model. Generate can never get stuck
+ * disabled behind an offline local host. Pure derivation — the draft is left
+ * untouched, so the user's selection self-restores once the host comes back.
  */
 export function resolveEffectiveModel(
   models: readonly Model[],
@@ -33,6 +37,16 @@ export function resolveEffectiveModel(
     (model) => model.backend === 'cloud' && model.requiresKey === undefined && isModelAvailable(model),
   );
   if (usableCloud) return usableCloud;
+  // Next, any image model the user can submit to without a key, whatever its
+  // backend: a fresh mock-only install must open on Mock, not on a key-gated
+  // cloud row. Never a video row here: image-to-video would open the composer
+  // in Animate mode with no source still, and text-to-video is not the image
+  // default either.
+  const usableUngated = models.find((model) => model.requiresKey === undefined
+    && model.outputsVideo !== true
+    && model.supportsI2V !== true
+    && isModelAvailable(model));
+  if (usableUngated) return usableUngated;
   // Degrade gracefully: a key-gated cloud model still beats an offline local
   // one (the Composer opens BYOK on submit), then any available model at all.
   const anyCloud = models.find((model) => model.backend === 'cloud' && isModelAvailable(model));

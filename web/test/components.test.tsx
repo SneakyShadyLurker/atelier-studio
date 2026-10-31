@@ -11,6 +11,7 @@ import Sidebar from '../src/components/Sidebar';
 import Toast from '../src/components/Toast';
 import { fixtureBatches, historyFixture } from './fixtures/batches';
 import { fixtureModels } from './fixtures/models';
+import { flushQueryNotifications } from './fixtures/queryNotifications';
 import { collectionKeys } from '../src/api/collections';
 import { APP_VIEW_PINNED, APP_VIEW_UNSORTED, toGenerateRequest, useAtelierStore } from '../src/store/atelier';
 
@@ -708,7 +709,7 @@ describe('visual scaffold components', () => {
     // Dismissal rides the shared exit transition (useExitTransition); the
     // close callback lands ~160ms after Escape.
     fireEvent.keyDown(document, { key: 'Escape' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
 
     rerender(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><></></QueryClientProvider>);
@@ -808,7 +809,7 @@ describe('visual scaffold components', () => {
       expect(useAtelierStore.getState().draft.refImages).toHaveLength(1);
       expect(useAtelierStore.getState().draft.refImages[0]).toMatchObject({ clientId: 'client-edit', serverId: 'upload-edit', status: 'ready' });
     });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
     // editFromTile hands focus to the composer from the lightbox's unmount
     // cleanup — App unmounts the lightbox in response to onClose. Model that.
@@ -984,7 +985,7 @@ describe('visual scaffold components', () => {
     fireEvent.pointerDown(secondImage, { clientX: 120, clientY: 100, pointerId: 2, pointerType: 'touch' });
     fireEvent.pointerMove(secondImage, { clientX: 120, clientY: 210, pointerId: 2, pointerType: 'touch' });
     fireEvent.pointerUp(secondImage, { clientX: 120, clientY: 210, pointerId: 2, pointerType: 'touch' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -1295,13 +1296,31 @@ describe('visual scaffold components', () => {
     fireEvent.click(moreBtn);
     const rerollItem = requireValue(screen.getAllByRole('menuitem', { name: /re-roll/i })[0], 'reroll menuitem');
 
-    // Now change the store to the "stale" state — the menu is already open
-    useAtelierStore.setState({ view: APP_VIEW_PINNED, q: 'queued search' });
+    // Now change the store to the "stale" state — the menu is already open.
+    // The store write deliberately bypasses act so React has not re-rendered
+    // when the click runs: the handler must still see the live store, not the
+    // App closure. Wrapping it in act (or turning the act environment off)
+    // lets React re-render first and the test stops catching a closure-reading
+    // handler, so only React's expected act warning for this write is dropped.
+    const consoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      if (typeof args[0] === 'string' && args[0].includes('not wrapped in act')) return;
+      consoleError(...args);
+    };
+    try {
+      useAtelierStore.setState({ view: APP_VIEW_PINNED, q: 'queued search' });
+    } finally {
+      console.error = consoleError;
+    }
 
     fireEvent.click(rerollItem);
 
+    // Assert synchronously: a later async render could reset the scope and
+    // mask a handler that skipped it.
     expect(useAtelierStore.getState().view).toEqual(APP_VIEW_UNSORTED);
     expect(useAtelierStore.getState().q).toBe('');
+    // Then drain the re-roll's stream and query updates inside act.
+    await act(async () => { await flushQueryNotifications(); });
   });
 
   test('Retry forwards refImageIds from the failed tile\'s batch', async () => {

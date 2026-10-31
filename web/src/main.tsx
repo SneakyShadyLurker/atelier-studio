@@ -14,6 +14,7 @@ import { promptKeys } from './api/prompts';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { createIDBPersister, PERSIST_CACHE_VERSION, preparePersistenceScope, shouldDehydrateQuery } from './lib/persister';
 import { createPreloadErrorHandler } from './lib/preloadRecovery';
+import { loadComposerPrefs, setComposerPrefsScope } from './lib/composerPrefs';
 import { loadRollQueue, persistRollQueue, setRollQueueScope } from './lib/rollQueuePersist';
 import { useAtelierStore } from './store/atelier';
 import { isSessionLocked, onSessionScopeInvalidated } from './lib/sessionScope';
@@ -78,6 +79,8 @@ function SessionScopedApp() {
       setRollQueueScope(cacheScope);
       useAtelierStore.getState().hydrateRollQueue(loadRollQueue());
       persistRollQueue(useAtelierStore.getState().draft.rollQueue);
+      setComposerPrefsScope(cacheScope);
+      useAtelierStore.getState().hydrateComposerPrefs(loadComposerPrefs());
       ready = {
         queryClient: new QueryClient({ defaultOptions: { mutations: { retry: false } } }),
         persister: createIDBPersister(cacheScope),

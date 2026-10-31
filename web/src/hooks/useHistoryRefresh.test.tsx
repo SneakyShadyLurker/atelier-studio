@@ -9,6 +9,7 @@ import { initialAtelierState, useAtelierStore } from '../store/atelier';
 import { useHistory } from './useHistory';
 import { mergeHistoryRefresh, useHistoryRefresh } from './useHistoryRefresh';
 import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
+import { flushQueryNotifications } from '../../test/fixtures/queryNotifications';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { cleanup(); globalThis.fetch = originalFetch; useAtelierStore.setState(initialAtelierState, true); });
@@ -30,7 +31,12 @@ function setup(pages: HistoryData['pages']) {
   return { client, data };
 }
 const urlOf = (input: RequestInfo | URL) => typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-const tickRefresh = (client: QueryClient) => client.refetchQueries({ queryKey: historyRefreshKeys.all() });
+// Callers wrap this in act; the trailing flush lets TanStack's batched observer
+// notifications land inside it.
+const tickRefresh = async (client: QueryClient) => {
+  await client.refetchQueries({ queryKey: historyRefreshKeys.all() });
+  await flushQueryNotifications();
+};
 
 describe('active history refresh', () => {
   test('surfaces active polling errors through the existing history error interface', async () => {

@@ -823,6 +823,20 @@ function Sidebar({
         </button>
       )}
 
+      {textModelsEnabled && (
+        <button
+          className={`${styles.archiveBtn} ${view.kind === 'text-models' ? styles.archiveActive : ''}`}
+          type="button"
+          aria-label="Text models"
+          aria-pressed={view.kind === 'text-models'}
+          aria-current={view.kind === 'text-models' ? 'page' : undefined}
+          onClick={() => { onSelectView(APP_VIEW_TEXT_MODELS); }}
+        >
+          <span className={styles.archiveChip} aria-hidden="true"><I.chip /></span>
+          <span className={styles.archiveLabel}>Text models</span>
+        </button>
+      )}
+
       <button
         className={`${styles.archiveBtn} ${view.kind === 'archive' ? styles.archiveActive : ''}`}
         type="button"
@@ -851,19 +865,6 @@ function Sidebar({
         >
           <I.settings />
         </button>
-        {textModelsEnabled && (
-          <button
-            className={styles.settingsBtn}
-            type="button"
-            aria-label="Text models"
-            aria-current={view.kind === 'text-models' ? 'page' : undefined}
-            data-tip="Text models"
-            data-tip-place="above-end"
-            onClick={() => { onSelectView(APP_VIEW_TEXT_MODELS); }}
-          >
-            <I.chip />
-          </button>
-        )}
         {onToggleTheme && (
           <button
             className={styles.themeBtn}

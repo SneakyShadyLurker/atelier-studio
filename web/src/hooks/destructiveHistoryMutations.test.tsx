@@ -8,6 +8,7 @@ import { archiveKeys } from '../api/archive';
 import { collectionKeys } from '../api/collections';
 import { historyKeys } from '../api/history';
 import { useAtelierStore } from '../store/atelier';
+import { flushQueryNotifications } from '../../test/fixtures/queryNotifications';
 
 const invalidateLibrarySpy = mock((queryClient: QueryClient) => Promise.all([
   queryClient.invalidateQueries({ queryKey: historyKeys.all() }),
@@ -98,6 +99,7 @@ async function mutateWith<TInput>(
 
   await act(async () => {
     await result.current.mutateAsync(input).catch(() => undefined);
+    await flushQueryNotifications();
   });
 }
 

@@ -1,7 +1,7 @@
 import type { Batch, Tile } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import { historyKeys } from '../../api/history';
 import { doneTile, loadingTile } from '../../../test/fixtures/tiles';
@@ -384,7 +384,7 @@ describe('BatchView move scope', () => {
 });
 
 describe('BatchView generated-image edit action', () => {
-  test('shows Edit for images from a reference-capable model and dispatches the concrete tile', () => {
+  test('shows Edit for images from a reference-capable model and dispatches the concrete tile', async () => {
     const onEditTile = mock(() => Promise.resolve(true));
     render(
       <BatchView
@@ -401,7 +401,8 @@ describe('BatchView generated-image edit action', () => {
       { wrapper: wrap() },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit image 1' }));
+    // The resolved handoff settles the button's pending state.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Edit image 1' })); await Promise.resolve(); });
     expect(onEditTile).toHaveBeenCalledWith(batch, batch.tiles[0]);
   });
 

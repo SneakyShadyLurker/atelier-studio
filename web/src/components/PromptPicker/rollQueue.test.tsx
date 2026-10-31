@@ -1,7 +1,7 @@
 import type { PromptLibraryResponse, PromptTemplate } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { promptKeys } from '../../api/prompts';
 import { initialAtelierState, useAtelierStore } from '../../store/atelier';
@@ -265,7 +265,7 @@ describe('PromptPicker queue interactions', () => {
     fireEvent.click(screen.getByRole('button', { name: /keep queue/i }));
     // "Keep queue" is the confirm's cancel path — it rides the shared exit
     // transition (useExitTransition), so the dialog releases ~160ms later.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(useAtelierStore.getState().promptPickerDraft.templateId).toBe(template.id);
     expect(useAtelierStore.getState().draft.rollQueue.map((r) => r.id)).toEqual(['a']);
 

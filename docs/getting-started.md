@@ -123,16 +123,22 @@ bun run dev:web
 
 Open **[http://localhost:5173](http://localhost:5173)**. Then:
 
-1. Open the model selector in the composer and choose **Mock Fast**.
+1. Check the model chip in the composer at the bottom of the screen. Without
+   any provider configured it already shows `Mock`; otherwise open it and
+   choose **Mock Fast**. The chip shows a short family name; hover it for the
+   full model name.
 2. Enter a short prompt, such as `A blue ceramic cup on a wooden table`.
-3. Select one image and press **Generate**.
+3. Open the count chip (`×2`), choose `×1`, and press **Generate**.
 4. Open the resulting tile and download it.
-5. Refresh the page and confirm that the batch is still in your history.
+5. Refresh the page and confirm that the batch is still in your history. The
+   composer keeps Mock Fast and `×1` selected.
 
 The result is a **32 × 32 solid-colour PNG**, regardless of the prompt. That
 checks the app, API, identity forwarding, storage and download path. It is not
 an AI-generated picture. Enhance and the other text actions answer "No text
 model is set up" until you [connect a text model](connect-a-text-model.md).
+Because `alice` is a text-model admin, **Text models** appears in the sidebar
+below **Prompt Library**.
 
 Continue with [Using Atelier](user-guide.md) for the normal workflow.
 

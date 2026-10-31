@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import DescribeListDialog from './index';
 
 afterEach(() => { cleanup(); });
@@ -41,10 +41,10 @@ describe('DescribeListDialog', () => {
     // gesture's close lands ~160ms later, and repeat gestures inside that
     // window collapse into one close.
     fireEvent.keyDown(document, { key: 'Escape' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onCancel.mock.calls.length).toBe(1);
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onCancel.mock.calls.length).toBe(2);
   });
 

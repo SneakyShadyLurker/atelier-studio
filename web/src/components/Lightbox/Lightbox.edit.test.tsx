@@ -1,7 +1,7 @@
 import type { Batch, Model, Tile } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import Lightbox from './index';
 import { initialAtelierState, useAtelierStore } from '../../store/atelier';
@@ -138,7 +138,7 @@ describe('Lightbox Edit action', () => {
       expect(state.composerExpanded).toBe(true);
     });
     expect(fetchMock.mock.calls.some(([input]) => fetchInputUrl(input) === '/api/img/done-01')).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
   });
 

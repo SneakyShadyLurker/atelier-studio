@@ -9,6 +9,7 @@ import { collectionKeys } from '../api/collections';
 import { historyKeys, historyRefreshInterval } from '../api/history';
 import { APP_VIEW_PINNED, APP_VIEW_UNSORTED, collectionView, useAtelierStore } from '../store/atelier';
 import { updateBatchInActiveScope, useScopedBatchPatch, type HistoryData } from './scopedHistoryMutation';
+import { flushQueryNotifications } from '../../test/fixtures/queryNotifications';
 
 function wrapper(client: QueryClient) {
   return function TestWrapper({ children }: PropsWithChildren) {
@@ -91,6 +92,7 @@ describe('useScopedBatchPatch', () => {
 
     await act(async () => {
       await result.current.mutateAsync({ batchId: 'batch-1', pinned: true });
+      await flushQueryNotifications();
     });
 
     const active = queryClient.getQueryData<InfiniteData<HistoryPage<Batch>>>(activeKey);
@@ -122,6 +124,7 @@ describe('useScopedBatchPatch', () => {
 
     await act(async () => {
       await result.current.mutateAsync({ batchId: 'batch-1', collectionId });
+      await flushQueryNotifications();
     });
 
     const active = queryClient.getQueryData<InfiniteData<HistoryPage<Batch>>>(activeKey);

@@ -5,6 +5,7 @@ import { isAbortError } from '../lib/abort';
 import type { ApiErrorCode, Batch, GenerateRequest, Model, Tile } from '@atelier/shared';
 import { ApiError, apiImageUrl } from '../api/client';
 import { generateStream, type GenerateAcceptance } from '../api/generate';
+import { collectionKeys } from '../api/collections';
 import { apiErrorCode, describeError } from '../lib/errorCopy';
 import { historyKeys } from '../api/history';
 import { modelKeys } from '../api/models';
@@ -160,6 +161,9 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
         if (accepted.batchId !== null) return;
         accepted.batchId = id;
         accepted.replayed = acceptance.replayed;
+        // The persisted batch already contributes to the Library counts,
+        // even if its events stream has not attached or rendering is queued.
+        void queryClient.invalidateQueries({ queryKey: collectionKeys.list() });
         if (acceptance.replayed) void queryClient.invalidateQueries({ queryKey: historyKeys.all() });
         onAccepted?.(id);
       };

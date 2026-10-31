@@ -27,7 +27,16 @@ void mock.module('idb-keyval', () => ({
 }));
 
 const { get, set } = await import('idb-keyval');
-const { createIDBPersister, flushPersisterForTests, preparePersistenceScope, PERSIST_CACHE_VERSION, shouldDehydrateQuery } = await import('./persister');
+const { createIDBPersister, flushPersisterForTests, preparePersistenceScope, PERSIST_CACHE_VERSION, removePersistedQueryClient, shouldDehydrateQuery } = await import('./persister');
+
+// happy-dom has no IndexedDB; idb-keyval is mocked above, so a stub global
+// stands in for a browser that has it. The no-IndexedDB tests remove it.
+function installIndexedDbStub(): void {
+  Object.defineProperty(globalThis, 'indexedDB', { value: {}, configurable: true, writable: true });
+}
+function removeIndexedDbStub(): void {
+  Reflect.deleteProperty(globalThis, 'indexedDB');
+}
 
 type QueryStatus = Query['state']['status'];
 
@@ -86,13 +95,41 @@ function historyData(pages: readonly Batch[][]): { pages: { items: readonly Batc
 }
 
 beforeEach(async () => {
+  installIndexedDbStub();
   await flushPersisterForTests();
   resetSessionScopeForTests();
   readOverride = undefined;
   idbStore.clear();
   sessionStorage.clear();
 });
-afterEach(() => { resetSessionScopeForTests(); });
+afterEach(() => {
+  resetSessionScopeForTests();
+  removeIndexedDbStub();
+});
+
+describe('without IndexedDB', () => {
+  test('removing and preparing the cache is a quiet no-op, and roll-queue cleanup still runs', async () => {
+    removeIndexedDbStub();
+    const warn = mock(() => undefined);
+    const originalWarn = console.warn;
+    console.warn = warn;
+    try {
+      await set(IDB_KEY, persistedClient('kept'));
+      sessionStorage.setItem('atelier.rollQueue.v1:scope-b', 'bob');
+      await removePersistedQueryClient();
+      await removePersistedQueryClient('scope-a');
+      await preparePersistenceScope('scope-a');
+      const persister = createIDBPersister('scope-a');
+      expect(await persister.restoreClient()).toBeUndefined();
+      await persister.removeClient();
+      expect(warn).not.toHaveBeenCalled();
+      expect(await get<PersistedClient>(IDB_KEY)).toEqual(persistedClient('kept'));
+      expect(sessionStorage.getItem('atelier.rollQueue.v1:scope-b')).toBeNull();
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+});
 
 describe('createIDBPersister', () => {
   test('uses a new buster after sequence fields joined persisted history', () => {

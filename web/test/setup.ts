@@ -5,6 +5,20 @@ import compilerPkg from 'babel-plugin-react-compiler/package.json' with { type: 
 
 GlobalRegistrator.register();
 
+// TanStack Query delivers observer updates to React from its own deferred
+// batches (a `setTimeout(0)` each), outside any act scope a test holds. A fixed
+// number of awaited ticks cannot reliably catch them on a loaded runner, so
+// deliver every batch inside act, the way React would flush it in a browser.
+// Only while the act environment is on: Testing Library turns it on for the
+// tests of files that import it, and act outside it only trades one warning
+// for another.
+const { act } = await import('react');
+const { notifyManager } = await import('@tanstack/react-query');
+notifyManager.setBatchNotifyFunction((callback) => {
+  if ((globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT === true) act(callback);
+  else callback();
+});
+
 // Production code runs through React Compiler (vite.config.ts), but `bun test`
 // does not run Vite plugins. Compile web/src the same way so unit tests exercise
 // the memoization the app actually ships. Test files and dependencies load as-is.

@@ -1,10 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import type { Batch, HistoryPage, Model } from '@atelier/shared';
+import type { Batch, CollectionsResponse, HistoryPage, Model } from '@atelier/shared';
 import type { InfiniteData } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
 import { historyKeys } from '../src/api/history';
+import { collectionKeys } from '../src/api/collections';
+import { buildLibraryRows } from '../src/components/Sidebar/rows';
+import type { HistoryData } from '../src/hooks/historyCache';
+import { useCollections } from '../src/hooks/useCollections';
 import { emitHistoryInvalidate, resetBroadcastForTests } from '../src/hooks/broadcastHistory';
 import { getBatch, resetInFlightForTests } from '../src/hooks/inFlightBatches';
 import { useGenerate } from '../src/hooks/useGenerate';
@@ -14,6 +18,7 @@ import { useGenerate } from '../src/hooks/useGenerate';
 // BYOK key.
 const emptyModelsById: ReadonlyMap<string, Model> = new Map();
 import { APP_VIEW_UNSORTED, collectionView, useAtelierStore } from '../src/store/atelier';
+import { flushQueryNotifications } from './fixtures/queryNotifications';
 
 const originalBroadcastChannel = window.BroadcastChannel;
 
@@ -47,7 +52,10 @@ function setBroadcastChannel(value: typeof BroadcastChannel | undefined): void {
   });
 }
 
-afterEach(() => {
+afterEach(async () => {
+  // A settled generation notifies its TanStack observers one tick later; land
+  // that inside act before tearing down.
+  await act(async () => { await flushQueryNotifications(); });
   cleanup();
   mock.restore();
   resetBroadcastForTests();
@@ -64,13 +72,28 @@ afterEach(() => {
   });
 });
 
+// Settles inside act, plus one tick for TanStack's batched observer notifications,
+// so the hook's state updates never land outside it.
 async function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
-  try {
+  let rejection: { error: unknown } | undefined;
+  await act(async () => {
+    try {
+      await promise;
+    } catch (error) {
+      rejection = { error };
+    }
+    await flushQueryNotifications();
+  });
+  if (rejection === undefined) throw new Error('expected promise to reject');
+  return rejection.error;
+}
+
+/** Awaits a generation inside act, plus one tick for TanStack's batched notifications. */
+async function settleInAct(promise: Promise<unknown>): Promise<void> {
+  await act(async () => {
     await promise;
-  } catch (error) {
-    return error;
-  }
-  throw new Error('expected promise to reject');
+    await flushQueryNotifications();
+  });
 }
 
 function wrapper(client: QueryClient) {
@@ -133,6 +156,106 @@ function controllableSseResponse(): {
 function sseChunk(lines: readonly string[]): string {
   return `${lines.join('\n')}\n\n`;
 }
+
+describe('useGenerate Library counts', () => {
+  const originalFetch = globalThis.fetch;
+  const clients: QueryClient[] = [];
+
+  afterEach(() => {
+    for (const client of clients.splice(0)) client.clear();
+    globalThis.fetch = originalFetch;
+  });
+
+  function existingBatch(id: string, count: number): Batch {
+    return {
+      id, prompt: 'test', modelId: 'mock', modelLabel: 'Mock', ratio: '1:1',
+      createdAt: 1, collectionId: null, pinned: false, status: 'done',
+      tiles: Array.from({ length: count }, (_, index) => ({
+        id: `${id}-${index}`, seed: index, status: 'done', url: '/image.png',
+        ext: 'png', mime: 'image/png', completedAt: 2,
+      })),
+    };
+  }
+
+  function setup(submit: () => Response, events: () => Response) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    clients.push(client);
+    client.setQueryData<HistoryData>(historyKeys.list(), {
+      pages: [{ items: [existingBatch('second', 1), existingBatch('first', 2)], nextCursor: null }],
+      pageParams: [null],
+    });
+    let batchCount = 2;
+    globalThis.fetch = Object.assign(mock((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (url.endsWith('/collections')) {
+        return Promise.resolve(Response.json({
+          items: [],
+          summary: {
+            totalCount: batchCount, unsortedCount: batchCount, pinnedCount: 0,
+            archivedTotalCount: 0, archivedPinnedCount: 0, archivedUnsortedCount: 0,
+          },
+        } satisfies CollectionsResponse));
+      }
+      if (url.endsWith('/generate') && init?.method === 'POST') {
+        batchCount += 1;
+        return Promise.resolve(submit());
+      }
+      if (url.endsWith('/batches/third/events')) return Promise.resolve(events());
+      throw new Error(`Unexpected request: ${url}`);
+    }), { preconnect: originalFetch.preconnect });
+    const hook = renderHook(() => ({ collections: useCollections(), ...useGenerate(emptyModelsById) }), { wrapper: wrapper(client) });
+    return { client, ...hook };
+  }
+
+  test.each(['JSON acceptance', 'legacy SSE'] as const)(
+    'Unsorted count matches three batches after a new generation lands via %s',
+    async (transport) => {
+      let controller!: ReadableStreamDefaultController<Uint8Array>;
+      const stream = new Response(new ReadableStream<Uint8Array>({ start(value) { controller = value; } }), {
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+      const enqueue = (event: string, data: unknown) => {
+        controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      };
+      const { client, result } = setup(
+        () => transport === 'legacy SSE' ? stream : Response.json({ batchId: 'third' }, { status: 201 }),
+        () => stream,
+      );
+      await waitFor(() => { expect(result.current.collections.data?.summary.unsortedCount).toBe(2); });
+      const generation = result.current.generate({ prompt: 'third', modelId: 'mock', ratio: '1:1', count: 1 });
+      enqueue('batch', { batchId: 'third', createdAt: 3, tiles: [{ tileId: 'third-0', tileIndex: 0, seed: 0 }] });
+      try {
+        await waitFor(() => {
+          const batches = client.getQueryData<HistoryData>(historyKeys.list())?.pages.flatMap((page) => page.items) ?? [];
+          expect(batches).toHaveLength(3);
+          const data = result.current.collections.data;
+          if (!data) throw new Error('Collections have not loaded');
+          const unsortedRow = buildLibraryRows(data.items, data.summary, false).find((row) => row.kind === 'unsorted');
+          expect(unsortedRow?.count).toBe(batches.filter((batch) => batch.collectionId === null).length);
+        });
+      } finally {
+        enqueue('tile', { tileId: 'third-0', tileIndex: 0, status: 'done', url: '/image.png', ext: 'png', mime: 'image/png', completedAt: 4 });
+        enqueue('done', { batchId: 'third' });
+        controller.close();
+        await act(async () => { await generation; await flushQueryNotifications(); });
+      }
+      expect(result.current.collections.data?.summary.unsortedCount).toBe(3);
+      expect(result.current.collections.data?.summary.totalCount).toBe(3);
+    },
+  );
+
+  test('refreshes the batch count after acceptance even when the events stream cannot attach', async () => {
+    const { client, result } = setup(
+      () => Response.json({ batchId: 'third' }, { status: 201 }),
+      () => Response.json({ error: 'Unavailable' }, { status: 503 }),
+    );
+    await waitFor(() => { expect(result.current.collections.data?.summary.unsortedCount).toBe(2); });
+    const error = await rejectedValue(result.current.generate({ prompt: 'third', modelId: 'mock', ratio: '1:1', count: 1 }));
+    expect(error).toMatchObject({ name: 'StreamTruncatedError', batchId: 'third' });
+    await waitFor(() => { expect(result.current.collections.data?.summary.unsortedCount).toBe(3); });
+    expect(client.getQueryState(collectionKeys.list())?.isInvalidated).toBe(false);
+  });
+});
 
 describe('useGenerate', () => {
   test('the live optimistic batch retains effective motion instructions before history settles', async () => {
@@ -322,7 +445,7 @@ describe('useGenerate', () => {
     // Drain: the stream truncates without `done`. The finally block must
     // sweep the orphan preview entry so the data: URL doesn't leak.
     close();
-    await promise.catch(() => { /* expected truncation */ });
+    await settleInAct(promise.catch(() => { /* expected truncation */ }));
     await waitFor(() => {
       expect(useAtelierStore.getState().previews.get('tp')).toBeUndefined();
     });
@@ -375,7 +498,7 @@ describe('useGenerate', () => {
       ]));
       stream.close();
     });
-    await promise;
+    await settleInAct(promise);
 
     const data = client.getQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list());
     expect(data?.pages[0]?.items[0]?.status).toBe('done');
@@ -485,7 +608,7 @@ describe('useGenerate', () => {
       'data: {"batchId":"batch-cancel"}',
     ]));
     stream.close();
-    await promise;
+    await settleInAct(promise);
 
     const toastTexts = useAtelierStore.getState().toasts.map((toast) => toast.text);
     expect(toastTexts.some((text) => text === 'Canceled' || text.toLowerCase().includes('error'))).toBe(false);
@@ -512,7 +635,7 @@ describe('useGenerate', () => {
       'data: {"batchId":"batch-live"}',
     ]));
     stream.close();
-    await promise;
+    await settleInAct(promise);
 
     expect(getBatch('batch-live')).toBeUndefined();
   });

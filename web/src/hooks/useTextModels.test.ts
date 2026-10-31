@@ -71,6 +71,8 @@ describe('useSetTaskPick', () => {
     const { fetchMock, hook } = setup(() => Promise.resolve(Response.json(SETTINGS)));
     await waitFor(() => { expect(hook.result.current.settings.isSuccess).toBe(true); });
     await act(async () => { await hook.result.current.setPick.mutateAsync({ task: 'ai-fill', modelId: 'grok' }); });
+    // The observers learn of the settled save on a later tick.
+    await waitFor(() => { expect(hook.result.current.setPick.isSuccess).toBe(true); });
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/text-models/tasks/ai-fill',
       expect.objectContaining({ method: 'PUT', body: JSON.stringify({ modelId: 'grok' }) }),
@@ -162,6 +164,7 @@ describe('useSetTaskPick', () => {
       await hook.result.current.setPick.mutateAsync({ task: 'enhance', modelId: 'scout' }).catch((error: unknown) => { failure = error; });
     });
     expect(failure).toBeInstanceOf(Error);
+    await waitFor(() => { expect(hook.result.current.setPick.isError).toBe(true); });
     expect(enhanceRow(client)).toEqual(SETTINGS.tasks[0]);
   });
 });

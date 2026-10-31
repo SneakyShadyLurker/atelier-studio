@@ -11,7 +11,7 @@ import {
   useTextProviders,
   useUpdateModel,
 } from '../../hooks/useTextProviders';
-import { APP_VIEW_TEXT_MODELS, useAtelierStore } from '../../store/atelier';
+import { APP_VIEW_TEXT_MODELS, APP_VIEW_UNSORTED, useAtelierStore } from '../../store/atelier';
 import Sidebar from '../Sidebar';
 import { GLM, KIMI, PROVIDERS, ROUTING } from './fixtures';
 import TextModels from './index';
@@ -72,7 +72,7 @@ function renderView(options: Parameters<typeof installFetch>[0] = {}) {
 afterEach(() => {
   cleanup();
   mock.restore();
-  useAtelierStore.setState({ toasts: [] });
+  useAtelierStore.setState({ toasts: [], view: APP_VIEW_UNSORTED });
 });
 
 describe('Text models gating', () => {
@@ -90,7 +90,7 @@ describe('Text models gating', () => {
     await waitFor(() => { expect(result.current.enabled).toBe(true); });
   });
 
-  test('the sidebar shows the Text models button only to admins', () => {
+  test('the sidebar shows the labelled Text models row only to admins', () => {
     const models: readonly Model[] = [];
     const onSelectView = mock();
     const props = {
@@ -107,11 +107,41 @@ describe('Text models gating', () => {
     const { rerender } = render(<Sidebar {...props} />, { wrapper: wrapper(newClient()) });
     expect(screen.queryByRole('button', { name: 'Text models' })).toBeNull();
 
-    rerender(<Sidebar {...props} textModelsEnabled />);
+    rerender(<Sidebar {...props} promptsEnabled textModelsEnabled />);
     const button = screen.getByRole('button', { name: 'Text models' });
-    expect(screen.getByRole('button', { name: 'API keys' })).toBeTruthy();
+    // A labelled rail row directly after Prompt Library, not a footer icon.
+    expect(button.textContent).toBe('Text models');
+    expect(button.closest('footer')).toBeNull();
+    expect(button.previousElementSibling).toBe(screen.getByRole('button', { name: 'Prompt Library' }));
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(button.getAttribute('aria-current')).toBeNull();
+    const footer = screen.getByRole('button', { name: 'API keys' }).closest('footer');
+    if (!footer) throw new Error('expected the sidebar footer');
+    expect(within(footer).queryByRole('button', { name: 'Text models' })).toBeNull();
     fireEvent.click(button);
     expect(onSelectView).toHaveBeenCalledWith(APP_VIEW_TEXT_MODELS);
+  });
+
+  test('the Text models row marks itself current in the Text models view', () => {
+    useAtelierStore.setState({ view: APP_VIEW_TEXT_MODELS });
+    installFetch();
+    render(
+      <Sidebar
+        history={{ items: [], nextCursor: null }}
+        models={[]}
+        activeBatchId={null}
+        historyQ=""
+        archivedCount={0}
+        onSelect={mock()}
+        onSelectView={mock()}
+        onClear={mock()}
+        textModelsEnabled
+      />,
+      { wrapper: wrapper(newClient()) },
+    );
+    const button = screen.getByRole('button', { name: 'Text models' });
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(button.getAttribute('aria-current')).toBe('page');
   });
 });
 

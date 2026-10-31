@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import { useAtelierStore } from '../../store/atelier';
 import SaveTemplateDialog from './index';
@@ -110,7 +110,7 @@ describe('SaveTemplateDialog', () => {
     // Dismissals ride the shared exit transition (useExitTransition), so the
     // store close lands ~160ms after the gesture.
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(useAtelierStore.getState().saveTemplatePrompt).toBeNull();
     expect(spy).not.toHaveBeenCalled();
   });
@@ -135,7 +135,7 @@ describe('SaveTemplateDialog', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.keyDown(input, { key: 'Enter' });
     fireEvent.click(screen.getByRole('button', { name: 'Save template' }));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(useAtelierStore.getState().saveTemplatePrompt).toBeNull();
     expect(spy).not.toHaveBeenCalled();
     expect(useAtelierStore.getState().toasts.some((t) => t.text === 'Saved to templates')).toBe(false);
@@ -144,7 +144,7 @@ describe('SaveTemplateDialog', () => {
   test('Escape closes', async () => {
     renderOpen();
     fireEvent.keyDown(document, { key: 'Escape' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(useAtelierStore.getState().saveTemplatePrompt).toBeNull();
   });
 

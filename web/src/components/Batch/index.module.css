@@ -243,6 +243,16 @@
 
   .grid[data-tile-count='1'] > * {
     grid-column: span 2;
+    /* A lone tile spans two tracks, so on a short window the 72dvh cap alone
+       lets it outgrow the room above the composer and the end-anchored feed
+       clips its header. Also cap it by that room: the window minus the
+       composer's reserved height and the canvas padding (14px), chapter mark
+       (44px), batch header (36px) and composer gap (24px) above and below it.
+       220px keeps very short windows from shrinking it to a thumbnail. */
+    --tile-cap: min(72dvh, max(220px, calc(100dvh - var(--composer-top, 156px) - 120px)));
+    /* A capped lone tile is narrower than its span; keep it under the batch
+       header's left edge instead of centring it in the empty span. */
+    margin-inline: 0 auto;
   }
 }
 

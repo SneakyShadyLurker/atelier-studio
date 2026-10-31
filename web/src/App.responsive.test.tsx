@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import App from './App';
 import { fixtureModels } from '../test/fixtures/models';
@@ -98,7 +98,9 @@ afterEach(() => {
 describe('App phone composer scrim', () => {
   test('expanding the phone composer renders a scrim and inerts the feed', async () => {
     renderApp({ phone: true });
-    fireEvent.click(await screen.findByRole('button', { name: 'Expand composer' }));
+    const expand = await screen.findByRole('button', { name: 'Expand composer' });
+    // Expanding focuses the textarea in a microtask; flush it inside act.
+    await act(async () => { fireEvent.click(expand); await Promise.resolve(); });
     expect(screen.getByTestId('composer-scrim')).toBeDefined();
     expect(screen.getByTestId('feed').hasAttribute('inert')).toBe(true);
     const scrim = screen.getByTestId('composer-scrim');

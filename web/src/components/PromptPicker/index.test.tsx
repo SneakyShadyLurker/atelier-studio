@@ -263,7 +263,7 @@ describe('PromptPicker', () => {
     // roll, so no provenance is stamped (mirrors the manual-edit invalidation).
     expect(draft.provenance).toBeUndefined();
     // Dismissal rides the shared exit transition (useExitTransition).
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -302,7 +302,7 @@ describe('PromptPicker', () => {
     expect(draft.provenance).toBeUndefined();
     expect(draft.enhanceAnchor).toBeUndefined();
     expect(draft.enhancedText).toBeUndefined();
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -392,7 +392,7 @@ describe('PromptPicker', () => {
 
     // Dismissal rides the shared exit transition (useExitTransition).
     fireEvent.keyDown(dialog, { key: 'Escape' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -404,7 +404,7 @@ describe('PromptPicker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use prompt' }));
     // The picker exit (useExitTransition) keeps body siblings inert/aria-hidden
     // for ~160ms; the composer's Generate is queryable once it unmounts.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
 
     await waitFor(() => { expect(generateBodies.length).toBe(1); });
@@ -1352,7 +1352,7 @@ describe('axis sweep — footer + overload guard', () => {
     expect(queue).toHaveLength(2);
     expect(queue.every((r) => r.source === 'sweep')).toBe(true);
     expect(queue.every((r) => r.provenance?.templateId === 'tpl-constraint')).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
   });
 

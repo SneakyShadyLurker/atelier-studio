@@ -113,6 +113,33 @@ describe('Composer source intents vs pending tile handoffs', () => {
     expect(onModelChange).toHaveBeenCalledWith(imageModel.id);
   });
 
+  test('picking the displayed fallback over a remembered offline model supersedes a pending tile handoff', async () => {
+    // The draft remembers an offline row; the composer shows its fallback.
+    useAtelierStore.getState().setDraft({ modelId: 'krea-2-gonzalomo' });
+    const onModelChange = mock();
+    renderComposer({ onModelChange, modelId: imageModel.id, ratio: '1:1' });
+    const isCurrent = beginSourceHandoff();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    fireEvent.click(screen.getByRole('option', { name: /GPT Image 2\.5 Sunburst/ }));
+
+    await waitFor(() => { expect(onModelChange).toHaveBeenCalledWith(imageModel.id); });
+    expect(isCurrent()).toBe(false);
+  });
+
+  test('re-picking the model already selected leaves a pending tile handoff alone', async () => {
+    useAtelierStore.getState().setDraft({ modelId: imageModel.id });
+    const onModelChange = mock();
+    renderComposer({ onModelChange, modelId: imageModel.id, ratio: '1:1' });
+    const isCurrent = beginSourceHandoff();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    fireEvent.click(screen.getByRole('option', { name: /GPT Image 2\.5 Sunburst/ }));
+
+    await waitFor(() => { expect(onModelChange).toHaveBeenCalledWith(imageModel.id); });
+    expect(isCurrent()).toBe(true);
+  });
+
   test('typing motion text is not a source change', () => {
     useAtelierStore.getState().setDraft({ i2vSourceUploadId: 'upload-source-1' });
     renderComposer();
@@ -142,7 +169,7 @@ describe('Composer I2V mode', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Expand composer' }));
       await waitFor(() => { expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Motion prompt' })); });
       const model = screen.getByRole('button', { name: 'Model' });
-      model.focus();
+      act(() => { model.focus(); });
       await act(async () => { view.rerenderComposer({ modelId: imageModel.id }); await Promise.resolve(); });
       expect(document.activeElement === model).toBe(true);
     } finally { window.matchMedia = matchMedia; }
@@ -158,7 +185,7 @@ describe('Composer I2V mode', () => {
       useAtelierStore.getState().setComposerExpanded(false);
       renderComposer();
       const trigger = screen.getByRole('button', { name: 'Expand composer' });
-      trigger.focus();
+      act(() => { trigger.focus(); });
       fireEvent.click(trigger);
       await waitFor(() => { expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Motion prompt' })); });
       expect(trigger.isConnected).toBe(false);
@@ -425,6 +452,24 @@ describe('Composer I2V mode', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to image generation' }));
     // T2V outputs video, so the exit skips it and falls back to the first
     // image-producing model in the list.
+    expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.5-sunburst-cloud');
+  });
+
+  test('exit affordance skips a remembered image model that is offline', () => {
+    // A restored or remembered local image row whose host is down cannot be
+    // switched to, which would strand the user in video mode.
+    const offlineB: Model = { ...imageModelB, availability: { ok: false, checkedAt: 1, reason: 'unavailable' } };
+    const withOffline: readonly Model[] = [i2vModel, offlineB, imageModel];
+    useAtelierStore.getState().setDraft({ lastImageModelId: 'krea-2-gonzalomo' });
+    const onModelChange = mock();
+    renderComposer({
+      onModelChange,
+      models: withOffline,
+      modelById: new Map(withOffline.map((model) => [model.id, model])),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to image generation' }));
+    // Neither the offline remembered row nor the offline first image row.
     expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.5-sunburst-cloud');
   });
 });

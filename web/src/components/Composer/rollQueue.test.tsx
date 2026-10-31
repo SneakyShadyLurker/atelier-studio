@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import Composer from './index';
 import { useKeyboard } from '../../hooks/useKeyboard';
@@ -117,12 +117,12 @@ describe('Composer roll-queue chip', () => {
     const firstRow = rows[0];
     expect(firstRow).toBeDefined();
     if (!firstRow) return;
-    firstRow.focus();
+    act(() => { firstRow.focus(); });
     fireEvent.keyDown(firstRow, { key: 'ArrowDown', altKey: true });
     expect(useAtelierStore.getState().draft.rollQueue.map((r) => r.id)).toEqual(['b', 'a']);
   });
 
-  test('phone collapsed bar shows queued count and expands the queue directly', () => {
+  test('phone collapsed bar shows queued count and expands the queue directly', async () => {
     installMatchMedia(true);
     useAtelierStore.setState((state) => ({
       ...state,
@@ -135,7 +135,8 @@ describe('Composer roll-queue chip', () => {
     render(<Composer {...baseProps} />, { wrapper: wrapper() });
 
     expect(screen.getByText('· 2 queued')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /expand composer/i }));
+    // Expanding focuses the prompt in a microtask; flush it inside act.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /expand composer/i })); await Promise.resolve(); });
     expect(screen.getByRole('region', { name: /composer roll-queue/i })).toBeTruthy();
     expect(screen.getByText('phone prompt one')).toBeTruthy();
   });

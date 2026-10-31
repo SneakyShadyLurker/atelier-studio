@@ -9,6 +9,7 @@ import { collectionKeys } from '../src/api/collections';
 import { useHistory } from '../src/hooks/useHistory';
 import { useMoveBatch } from '../src/hooks/useMoveBatch';
 import { useTogglePin } from '../src/hooks/useTogglePin';
+import { flushQueryNotifications } from './fixtures/queryNotifications';
 import {
   APP_VIEW_PINNED,
   APP_VIEW_UNSORTED,
@@ -110,6 +111,7 @@ describe('collection mutations', () => {
     await act(async () => {
       resolveFetch(new Response(JSON.stringify({ error: 'nope' }), { status: 500 }));
       await mutationPromise;
+      await flushQueryNotifications();
     });
     const restored = client.getQueryData<InfiniteData<HistoryPage<Batch>>>(activeKey);
     expect(restored?.pages[0]?.items[0]?.collectionId).toBe(collectionId);
@@ -128,6 +130,7 @@ describe('collection mutations', () => {
         batchId: '019e13e4-f168-7555-8dbe-6be97df82b17',
         pinned: false,
       });
+      await flushQueryNotifications();
     });
 
     const data = client.getQueryData<InfiniteData<HistoryPage<Batch>>>(activeKey);
@@ -168,6 +171,7 @@ describe('collection mutations', () => {
     await act(async () => {
       resolveFetch(new Response(JSON.stringify({ error: 'nope' }), { status: 500 }));
       await mutationPromise;
+      await flushQueryNotifications();
     });
 
     const rolledBack = client.getQueryData<CollectionsResponse>(collectionKeys.list());
@@ -226,6 +230,7 @@ describe('collection mutations', () => {
     await act(async () => {
       rejectB?.(new Response(JSON.stringify({ error: 'nope' }), { status: 500 }));
       await Promise.all([promiseA, promiseB]);
+      await flushQueryNotifications();
     });
 
     const final = client.getQueryData<CollectionsResponse>(collectionKeys.list());

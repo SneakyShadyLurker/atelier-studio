@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import DescribeTemplateDialog from './index';
 
 afterEach(() => { cleanup(); });
@@ -64,7 +64,7 @@ describe('DescribeTemplateDialog', () => {
     );
     // Dismissal rides the shared exit transition (useExitTransition).
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onCancel).toHaveBeenCalled();
   });
 

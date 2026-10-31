@@ -96,10 +96,11 @@ This is the step people most often miss. Adding models does not choose one
 for anybody. Until you set a default, text features work only for people who
 pick their own model in their settings.
 
-At the top of the Text models view, open the **Routing** panel and pick a
-**Default model**. That one choice switches on every text feature for
-everyone. The default is the fallback: Atelier uses it whenever nothing more
-specific applies, such as a task assignment or a person's own pick.
+In the **Routing** panel beside your providers (below them in a narrow
+window), pick a **Default model**. That one choice switches on every text
+feature for everyone. The default is the fallback: Atelier uses it whenever
+nothing more specific applies, such as a task assignment or a person's own
+pick.
 
 Pick a model that passed the **Image input** check if people attach
 reference images to Enhance or the video motion writer. Then try **Enhance**
@@ -135,13 +136,13 @@ explains the exact order Atelier follows.
 ## Keeping it healthy
 
 - **Status labels.** Each model shows **available**, **offline** or
-  **unknown**. Atelier rechecks every minute, and **Check again** rechecks
-  now. Offline models are skipped automatically, except a locked prompt
-  writer, which Atelier still tries.
+  **unknown**. Atelier rechecks every minute, and **Check again** in the
+  provider's header rechecks now. Offline models are skipped automatically,
+  except a locked prompt writer, which Atelier still tries.
 - **Changing a key.** Open the provider with the pencil next to its name,
   then use **Replace key**.
-- **New models.** Click **Add models** at the bottom of a provider's section,
-  then test and enable them.
+- **New models.** Click **Add models** in a provider's header, then test and
+  enable them.
 
 ## Server settings outside the app
 

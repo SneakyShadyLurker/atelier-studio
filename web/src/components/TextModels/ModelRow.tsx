@@ -31,15 +31,24 @@ export function removeModelCopy(usage: TextModelUsage, imageLabel: (id: string) 
   return `It is ${joinWords(parts)}. Those will fall back to the next model in line.`;
 }
 
-function capabilityMarks(model: AdminModel): readonly { key: string; label: string; icon: ReactNode }[] {
-  const marks: { key: string; label: string; icon: ReactNode }[] = [];
-  if (model.vision) marks.push({ key: 'vision', label: 'Image input', icon: <I.image /> });
-  if (model.structuredOutput !== 'none') marks.push({ key: 'json', label: 'JSON output', icon: <I.braces /> });
-  if (model.reasoningLevels.length > 0) {
-    const levels = model.reasoningLevels.map((level) => TEXT_REASONING_EFFORT_LABELS[level]).join(', ');
-    marks.push({ key: 'reasoning', label: `Reasoning: ${levels}`, icon: <I.reasoning /> });
-  }
-  return marks;
+/** One fixed slot per capability (label null when absent), so the icons line up down the list. */
+function capabilitySlots(model: AdminModel): readonly { key: string; label: string | null; icon: ReactNode }[] {
+  const levels = model.reasoningLevels.map((level) => TEXT_REASONING_EFFORT_LABELS[level]).join(', ');
+  return [
+    { key: 'vision', label: model.vision ? 'Image input' : null, icon: <I.image /> },
+    { key: 'json', label: model.structuredOutput === 'none' ? null : 'JSON output', icon: <I.braces /> },
+    { key: 'reasoning', label: levels === '' ? null : `Reasoning: ${levels}`, icon: <I.reasoning /> },
+  ];
+}
+
+/** The routing role a model carries, for the tag beside its name; null when routing does not use it. */
+export function usageTag(usage: TextModelUsage, imageLabel: (id: string) => string): { label: string; detail: string } | null {
+  if (!usage.isDefault && usage.tasks.length === 0 && usage.writers.length === 0) return null;
+  const detail = joinWords(usagePhrases(usage, imageLabel));
+  return {
+    label: usage.isDefault ? 'Default' : 'In use',
+    detail: `${detail.charAt(0).toUpperCase()}${detail.slice(1)}`,
+  };
 }
 
 const MENU_GROUPS: readonly OverflowMenuGroup<ModelAction>[] = [{
@@ -62,53 +71,55 @@ interface ModelRowProps {
   /** The provider was added moments ago; an unknown status reads "checking…". */
   readonly checking: boolean;
   readonly toggling: boolean;
-  readonly checkingAgain: boolean;
+  readonly imageLabel: (id: string) => string;
   readonly onToggle: (enabled: boolean) => void;
-  readonly onCheckAgain: () => void;
   readonly onAction: (action: ModelAction) => void;
 }
 
-export default function ModelRow({ model, checking, toggling, checkingAgain, onToggle, onCheckAgain, onAction }: ModelRowProps) {
+// Status re-checks belong to the provider (one refresh lists every model), so
+// "Check again" lives in ProviderSection's header, not on each row.
+export default function ModelRow({ model, checking, toggling, imageLabel, onToggle, onAction }: ModelRowProps) {
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const word = model.status === 'unknown' && checking ? 'checking…' : STATUS_WORD[model.status];
-  const marks = capabilityMarks(model);
+  const tag = usageTag(model.usage, imageLabel);
 
   return (
     <li className={styles.modelRow} aria-label={model.displayName} data-enabled={model.enabled ? 'true' : 'false'}>
       <div className={styles.modelIdentity}>
-        <span className={styles.modelName}>{model.displayName}</span>
-        <span className={styles.mono}>{model.modelId}</span>
+        <div className={styles.modelNameLine}>
+          <span className={styles.modelName}>{model.displayName}</span>
+          {tag && (
+            <span className={styles.tag} data-tone={model.usage.isDefault ? 'strong' : undefined} data-tip={tag.detail}>
+              {tag.label}
+              <span className="srOnly">{`: ${tag.detail}`}</span>
+            </span>
+          )}
+          {model.verifiedAt === null && model.lastTest === null && (
+            // Imported rows start from unverified list hints; the quiet way in to the test.
+            <button
+              className={`${styles.tag} ${styles.tagButton}`}
+              type="button"
+              aria-label="Untested: test to confirm capabilities"
+              data-tip="Test to confirm capabilities"
+              onClick={() => { onAction('test'); }}
+            >
+              Untested
+            </button>
+          )}
+        </div>
+        <span className={styles.modelId}>{model.modelId}</span>
       </div>
       <div className={styles.modelMeta}>
         <span className={styles.caps}>
-          {marks.map((mark) => (
-            <span key={mark.key} className={styles.cap} role="img" aria-label={mark.label} data-tip={mark.label}>
-              {mark.icon}
-            </span>
-          ))}
+          {capabilitySlots(model).map(({ key, label, icon }) => (label === null
+            ? <span key={key} className={styles.cap} aria-hidden="true" />
+            : <span key={key} className={styles.cap} role="img" aria-label={label} data-tip={label}>{icon}</span>))}
         </span>
         <span className={styles.status} data-status={model.status}>
           <span className={styles.statusDot} aria-hidden="true" />
           <span>{word}</span>
         </span>
-        {model.verifiedAt === null && model.lastTest === null && (
-          // Imported rows start from unverified list hints; the quiet way in to the test.
-          <button
-            className={styles.textButton}
-            type="button"
-            aria-label="Untested: test to confirm capabilities"
-            data-tip="Test to confirm capabilities"
-            onClick={() => { onAction('test'); }}
-          >
-            Untested
-          </button>
-        )}
-        {model.status !== 'available' && !checking && (
-          <button className={styles.textButton} type="button" disabled={checkingAgain} onClick={onCheckAgain}>
-            Check again
-          </button>
-        )}
       </div>
       <div className={styles.modelControls}>
         <button

@@ -85,18 +85,26 @@ export default function TextModels({ onBack }: TextModelsProps) {
       />
     );
   } else {
+    // Inventory first, routing beside it: the order an admin works in (add a
+    // provider, add its models, then route tasks to them). The two panes sit
+    // side by side once the body is wide enough (container query in the CSS).
     content = (
       <div className={styles.body} data-zone="body">
-        <RoutingPanel providers={providers} />
-        {providers.map((provider) => (
-          <ProviderSection
-            key={provider.id}
-            provider={provider}
-            onEditProvider={() => { setDialog({ kind: 'edit-provider', provider }); }}
-            onAddModels={() => { setDialog({ kind: 'add-models', provider }); }}
-            onModelAction={onModelAction(provider)}
-          />
-        ))}
+        <div className={styles.layout}>
+          <div className={styles.providers}>
+            {providers.map((provider) => (
+              <ProviderSection
+                key={provider.id}
+                provider={provider}
+                imageLabel={imageLabel}
+                onEditProvider={() => { setDialog({ kind: 'edit-provider', provider }); }}
+                onAddModels={() => { setDialog({ kind: 'add-models', provider }); }}
+                onModelAction={onModelAction(provider)}
+              />
+            ))}
+          </div>
+          <RoutingPanel providers={providers} />
+        </div>
       </div>
     );
   }
@@ -105,7 +113,10 @@ export default function TextModels({ onBack }: TextModelsProps) {
     <section className={styles.view} aria-labelledby={headingId}>
       <div className={styles.head} data-zone="head">
         <ManagedViewHeader heading="Text models" headingId={headingId} label="TEXT MODELS" onBack={onBack}>
-          <button className={btn.secondary} type="button" onClick={addProvider}>Add provider</button>
+          <button className={btn.secondary} type="button" onClick={addProvider}>
+            <I.plus aria-hidden="true" />
+            Add provider
+          </button>
         </ManagedViewHeader>
       </div>
       {content}

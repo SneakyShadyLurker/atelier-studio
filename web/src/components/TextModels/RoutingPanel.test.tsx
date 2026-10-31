@@ -97,6 +97,18 @@ describe('RoutingPanel', () => {
     expect(screen.getAllByRole('option')[0]?.textContent).toBe('Use default');
   });
 
+  test('an unassigned task shows the default model it falls back to', async () => {
+    renderPanel();
+    const enhance = await screen.findByRole('button', { name: 'Model for Enhance, currently Use default' });
+    expect(enhance.textContent).toContain('Kimi K3');
+  });
+
+  test('with no default model, an unassigned task reads "Use default"', async () => {
+    renderPanel({ ...ROUTING, defaults: { byTask: {} } });
+    const motion = await screen.findByRole('button', { name: 'Model for Motion writer, currently Use default' });
+    expect(motion.textContent).toBe('Use default');
+  });
+
   test('assigning and clearing a task', async () => {
     const { calls } = renderPanel(ROUTING, (url, body, current) => {
       const task = url.split('/').at(-1) as 'enhance' | 'ai-fill';

@@ -214,14 +214,48 @@ describe('Text models view', () => {
     expect(within(scout).queryByLabelText('JSON output')).toBeNull();
   });
 
-  test('"Check again" re-polls that provider and refreshes the lists', async () => {
+  test('"Check again" is one provider action, shown while a model is not available', async () => {
     const { calls } = renderView();
-    const glm = await screen.findByRole('listitem', { name: 'GLM 5.3' });
-    fireEvent.click(within(glm).getByRole('button', { name: 'Check again' }));
+    const cli = await screen.findByRole('region', { name: 'CLIProxyAPI' });
+    const glm = within(cli).getByRole('listitem', { name: 'GLM 5.3' });
+    expect(within(glm).queryByRole('button', { name: 'Check again' })).toBeNull();
+    expect(within(cli).getAllByRole('button', { name: 'Check again' })).toHaveLength(1);
+    fireEvent.click(within(cli).getByRole('button', { name: 'Check again' }));
     await waitFor(() => {
       expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/api/text-providers/p-cli/refresh'))).toBe(true);
     });
     expect(calls.some((call) => call.method === 'PATCH')).toBe(false);
+  });
+
+  test('a provider whose models are all available offers no re-check', async () => {
+    const [cli] = PROVIDERS;
+    if (!cli) throw new Error('fixture missing');
+    renderView({ providers: [{ ...cli, models: [KIMI] }] });
+    const section = await screen.findByRole('region', { name: 'CLIProxyAPI' });
+    expect(within(section).queryByRole('button', { name: 'Check again' })).toBeNull();
+    expect(section.textContent).toContain('1 of 1 on');
+  });
+
+  test('a model routing depends on carries a tag naming its role', async () => {
+    renderView();
+    const kimi = await screen.findByRole('listitem', { name: 'Kimi K3' });
+    const tag = within(kimi).getByText('Default');
+    // The image model's label arrives with the routing query.
+    await waitFor(() => {
+      expect(tag.getAttribute('data-tip')).toBe(
+        'The default model, assigned to AI fill, the prompt writer for GPT Image 2.5 Sunburst, and picked by 3 people',
+      );
+    });
+    expect(tag.textContent).toContain(': The default model');
+    expect(within(screen.getByRole('listitem', { name: 'GLM 5.3' })).queryByText(/^(Default|In use)/)).toBeNull();
+  });
+
+  test('provider inventory comes before routing', async () => {
+    const { container } = renderView();
+    const routing = await screen.findByRole('region', { name: 'Routing' });
+    const cli = screen.getByRole('region', { name: 'CLIProxyAPI' });
+    expect(cli.compareDocumentPosition(routing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector('[data-zone="body"]')?.contains(routing)).toBe(true);
   });
 
   test('a provider with every model offline says so', async () => {

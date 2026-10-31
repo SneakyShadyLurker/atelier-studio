@@ -1,6 +1,8 @@
 /* Text models admin view (spec § 12.2): the Prompt Library fixed-zone
    contract. The head holds ManagedViewHeader; the body is the single
-   scroller. Panels use --radius + --shadow-1; rows carry no chrome. */
+   scroller. The body is also the size container: provider inventory and the
+   routing rail sit side by side once it is wide enough, whatever the sidebar
+   is doing, and stack (inventory first) below that. */
 
 .view {
   height: 100%;
@@ -26,6 +28,28 @@
   overscroll-behavior: contain;
   padding: 2px 0 max(24px, env(safe-area-inset-bottom));
   mask-image: var(--scroll-fade-mask);
+  container: text-models / inline-size;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.providers {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@container text-models (width >= 980px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+    gap: 24px;
+  }
 }
 
 .guideLink {
@@ -46,15 +70,15 @@
 
 .panel {
   flex-shrink: 0;
+  min-width: 0;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--bg-elev);
   box-shadow: var(--shadow-1);
-  padding: 14px 16px;
 }
 
 .panelTitle {
-  margin: 0 0 4px;
+  margin: 0;
   color: var(--ink);
   font-size: var(--text-md);
   font-weight: 500;
@@ -75,15 +99,63 @@
   overflow-wrap: anywhere;
 }
 
-/* Routing */
+/* Small inline label: a model's routing role, a provider that is off. The
+   button variant (Untested) carries an interactive boundary. */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
 
-.routeRow {
+.tag[data-tone='strong'] {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+
+.tagButton {
+  position: relative;
+  border-style: dashed;
+  border-color: var(--line-control);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.tagButton:hover {
+  border-style: solid;
+  color: var(--ink);
+}
+
+.tagButton:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Routing rail */
+
+.routing {
+  padding: 16px 18px 10px;
+}
+
+.routeDefault {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sunk);
 }
 
 .routeMain {
@@ -91,6 +163,28 @@
 }
 
 .routeControl {
+  min-width: 0;
+  max-width: 60%;
+}
+
+/* ChipSelect renders its trigger button as the grid/flex item; a long model
+   name truncates inside it instead of pushing the picker out of the panel. */
+.routeItem > button,
+.routeControl > button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.routeItem > button > span,
+.routeControl > button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routeItem > button > svg,
+.routeControl > button > svg {
   flex-shrink: 0;
 }
 
@@ -102,11 +196,8 @@
 }
 
 .routeGroup {
-  padding: 12px 0 0;
-}
-
-.routeGroup + .routeGroup {
-  margin-top: 12px;
+  margin-top: 16px;
+  padding-top: 14px;
   border-top: 1px solid var(--line);
 }
 
@@ -115,42 +206,67 @@
 }
 
 .routeList {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 32px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* Stacked under the inventory with room to spare: two columns of routes. */
+@container text-models (640px <= width < 980px) {
+  .routeList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Label left, picker right: right edges line up down the list, so the eye
+   runs straight from a task to the model it goes to. */
 .routeItem {
   display: grid;
-  grid-template-columns: minmax(140px, 12rem) minmax(0, 1fr);
+  grid-template-columns: minmax(96px, 1fr) minmax(0, max-content);
   align-items: center;
-  /* Pickers size to their label like the default-model picker, not the column. */
-  justify-items: start;
-  column-gap: 16px;
-  row-gap: 6px;
-  padding: 4px 0;
+  column-gap: 12px;
+  row-gap: 4px;
+  min-height: 36px;
+  padding: 2px 0;
 }
 
 .routeItemLabel {
   color: var(--ink-2);
   font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* A route with no model of its own: the task's inherited model, or no writer. */
+.unsetValue {
+  color: var(--ink-3);
 }
 
 .modes {
-  grid-column: 2;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0;
+  margin: 2px 0 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sunk);
 }
 
 .mode {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-height: 28px;
   color: var(--ink-2);
   font-size: var(--text-xs);
   cursor: pointer;
+}
+
+.mode:has(input:checked) {
+  color: var(--ink);
 }
 
 .mode input {
@@ -163,18 +279,24 @@
   outline-offset: 2px;
 }
 
-/* Providers */
+/* Provider cards: header, notes, then a full-bleed model list. */
 
 .providerHead {
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px 12px;
 }
 
-.providerTitleRow {
+.providerTitle {
+  min-width: 0;
+}
+
+.providerNameLine {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .providerName {
@@ -186,14 +308,62 @@
   overflow-wrap: anywhere;
 }
 
+.providerCard[data-enabled='false'] .providerName {
+  color: var(--ink-2);
+}
+
 .providerMeta {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 16px;
-  margin: 4px 0 0;
-  color: var(--ink-2);
+  gap: 2px 14px;
+  margin: 3px 0 0;
+  color: var(--ink-3);
   font-size: var(--text-xs);
+}
+
+.providerActions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.count {
+  margin-right: 4px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Header-sized secondary buttons: same vocabulary, row-height footprint. */
+.providerActions .compactButton {
+  height: 28px;
+  padding: 0 12px;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* Re-checking is a quiet, occasional action next to the primary Add models. */
+.providerActions .ghostButton {
+  border-color: transparent;
+  color: var(--ink-2);
+}
+
+.providerActions .ghostButton:hover:not(:disabled) {
+  border-color: var(--line-control);
+  color: var(--ink);
+}
+
+.providerNotes {
+  display: grid;
+  gap: 6px;
+  padding: 0 18px 12px;
+}
+
+.providerNotes .note {
+  margin: 0;
 }
 
 .warning {
@@ -201,7 +371,7 @@
   align-items: flex-start;
   gap: 6px;
   max-width: 70ch;
-  margin: 8px 0 0;
+  margin: 0;
   color: var(--danger);
   font-size: var(--text-xs);
   line-height: 1.5;
@@ -213,45 +383,57 @@
 }
 
 .providerEmpty {
-  padding: 12px 0 0;
-}
-
-.providerFoot {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 10px;
+  margin: 0;
+  padding: 14px 18px 16px;
+  border-top: 1px solid var(--line);
 }
 
 .modelList {
   margin: 0;
   padding: 0;
   list-style: none;
+  border-top: 1px solid var(--line);
 }
 
-/* name · id | capabilities · status | switch · more */
+/* name + id | capabilities · status | switch · more */
 .modelRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 16px;
-  padding: 8px 0;
+  gap: 20px;
+  padding: 10px 18px;
 }
 
 .modelRow + .modelRow {
   border-top: 1px solid var(--line);
 }
 
+/* Tracks the row across the gap between its name and its switch. */
+.modelRow:hover,
+.modelRow:focus-within {
+  background: color-mix(in oklab, var(--bg-sunk) 45%, var(--bg-elev));
+}
+
+.modelRow:last-child {
+  border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px);
+}
+
 .modelRow[data-enabled='false'] .modelIdentity,
 .modelRow[data-enabled='false'] .modelMeta {
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 .modelIdentity {
   min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.modelNameLine {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 12px;
+  align-items: center;
+  gap: 4px 8px;
 }
 
 .modelName {
@@ -260,29 +442,40 @@
   font-weight: 500;
 }
 
+.modelId {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
 .modelMeta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
 }
 
+/* Three fixed slots (image, JSON, reasoning): a missing capability leaves a
+   gap, so each icon keeps its column down the list. */
 .caps {
-  display: inline-flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(3, 16px);
   gap: 8px;
-  min-width: 62px;
   color: var(--ink-3);
 }
 
 .cap {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
 }
 
 .status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 72px;
+  min-width: 76px;
   color: var(--ink-2);
   font-size: var(--text-xs);
 }
@@ -291,6 +484,7 @@
 .statusDot {
   width: 7px;
   height: 7px;
+  flex-shrink: 0;
   box-sizing: border-box;
   border-radius: 50%;
   border: 1px solid var(--ink-3);
@@ -301,32 +495,16 @@
   background: var(--good);
 }
 
+.status[data-status='offline'] {
+  color: var(--danger);
+}
+
+.status[data-status='offline'] .statusDot {
+  border-color: var(--danger);
+}
+
 .status[data-status='unknown'] .statusDot {
   border-style: dashed;
-}
-
-.textButton {
-  min-height: 28px;
-  padding: 0 4px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: var(--text-xs);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.textButton:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.textButton:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-radius: var(--radius-3);
 }
 
 .modelControls {
@@ -396,6 +574,7 @@
 .iconButton:hover,
 .iconButton[aria-expanded='true'] {
   border-color: var(--line-control);
+  background: var(--bg-sunk);
   color: var(--ink);
 }
 
@@ -404,13 +583,57 @@
   outline-offset: 2px;
 }
 
+/* Narrow inventory (stacked layout on a small window or phone): the header
+   actions wrap under the title and each row puts its meta under the name. */
+@container text-models (width < 600px) {
+  .providerHead {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .providerActions {
+    flex-wrap: wrap;
+  }
+
+  .count {
+    margin-right: auto;
+  }
+
+  .modelRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 8px;
+  }
+
+  .modelMeta {
+    grid-column: 1;
+    grid-row: 2;
+    flex-wrap: wrap;
+  }
+
+  .modelControls {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+}
+
 /* Touch devices: every control reaches the 44 px floor. */
 @media (hover: none) {
   .iconButton,
-  .textButton,
   .mode {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  .providerActions .compactButton {
+    height: 44px;
+  }
+
+  /* Tags stay visually small; the hit area reaches 44 px. */
+  .tagButton::before {
+    content: '';
+    position: absolute;
+    inset: -13px -4px;
   }
 
   .switch {
@@ -444,44 +667,31 @@
     padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
   }
 
-  .panel {
-    padding: 12px;
+  .routing {
+    padding: 14px 14px 8px;
   }
 
-  .routeRow {
+  .providerHead {
+    padding: 12px 14px 10px;
+  }
+
+  .providerNotes {
+    padding: 0 14px 10px;
+  }
+
+  .modelRow,
+  .providerEmpty {
+    padding-inline: 14px;
+  }
+
+  .routeDefault {
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-start;
     gap: 8px;
   }
 
   .routeControl {
-    align-self: flex-start;
-  }
-
-  .routeItem {
-    grid-template-columns: minmax(0, 1fr);
-    padding: 6px 0;
-  }
-
-  .modes {
-    grid-column: 1;
-  }
-
-  /* Rows stack: name and id first, the controls wrap underneath. */
-  .modelRow {
-    grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 6px;
-  }
-
-  .modelMeta {
-    grid-column: 1;
-    grid-row: 2;
-    flex-wrap: wrap;
-  }
-
-  .modelControls {
-    grid-column: 2;
-    grid-row: 1 / span 2;
+    max-width: 100%;
   }
 }
 

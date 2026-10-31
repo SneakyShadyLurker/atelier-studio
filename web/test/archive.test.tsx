@@ -209,7 +209,7 @@ describe('ConfirmDialog', () => {
     // window collapse into one close.
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onCancel).not.toHaveBeenCalled();
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onCancel).toHaveBeenCalledTimes(1);
 
     // Enter routes by focused button: Cancel is the destructive-default
@@ -217,7 +217,7 @@ describe('ConfirmDialog', () => {
     // first to actually confirm — prevents "Enter accepts the default" from
     // becoming a destructive footgun.
     fireEvent.keyDown(document, { key: 'Enter' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onCancel).toHaveBeenCalledTimes(2);
     expect(onConfirm).not.toHaveBeenCalled();
 
@@ -258,7 +258,7 @@ describe('ConfirmDialog', () => {
     expect(backdrop.getAttribute('aria-modal')).toBe('true');
     fireEvent.mouseDown(backdrop);
     fireEvent.mouseUp(backdrop);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 

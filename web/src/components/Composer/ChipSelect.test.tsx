@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useKeyboard } from '../../hooks/useKeyboard';
 import ChipSelect, { type ChipSelectOption } from './ChipSelect';
 
@@ -125,7 +125,7 @@ describe('ChipSelect keyboard listener', () => {
     // The click on the still-mounted backdrop is what closes the sheet —
     // after the shared exit transition (useExitTransition) has played.
     fireEvent.click(backdrop);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(screen.queryByRole('listbox', { name: 'Choice' })).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -180,7 +180,7 @@ describe('ChipSelect keyboard listener', () => {
     fireEvent.click(screen.getByRole('button', { name: 'First' }));
     const first = screen.getByRole('listbox', { name: 'First' }).style.getPropertyValue('--named-anchor');
     fireEvent.keyDown(document, { key: 'Escape' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     fireEvent.click(screen.getByRole('button', { name: 'Second' }));
     const second = screen.getByRole('listbox', { name: 'Second' }).style.getPropertyValue('--named-anchor');
     expect(first).not.toBe('');
@@ -231,7 +231,7 @@ describe('ChipSelect keyboard listener', () => {
       fireEvent.keyDown(document, { key: 'Tab' });
       expect(onChange).not.toHaveBeenCalled();
       expect(document.activeElement).toBe(trigger);
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
       expect(screen.queryByRole('listbox', { name: 'Choice' })).toBeNull();
 
       // Space activates the focused option (ARIA single-select listbox APG):
@@ -240,7 +240,7 @@ describe('ChipSelect keyboard listener', () => {
       fireEvent.keyDown(document, { key: 'ArrowDown' });
       fireEvent.keyDown(document, { key: ' ' });
       expect(onChange).toHaveBeenCalledWith('two');
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
       expect(screen.queryByRole('listbox', { name: 'Choice' })).toBeNull();
     } finally {
       if (originalScrollIntoView) {

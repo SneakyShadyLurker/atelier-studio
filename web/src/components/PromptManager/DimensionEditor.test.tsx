@@ -77,12 +77,13 @@ describe('DimensionEditor — hierarchy and description', () => {
     expect(onRename).not.toHaveBeenCalled();
   });
 
-  test('description edits retain the saved name when the name field is cleared', () => {
+  test('description edits retain the saved name when the name field is cleared', async () => {
     const onRename = mock((_: string, __?: string) => undefined);
     wrap(<DimensionEditor dimension={dimension} onRename={onRename} />);
     fireEvent.change(screen.getByLabelText('Dimension name'), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('Dimension description'), { target: { value: 'time of day' } });
-    fireEvent.click(screen.getByRole('button', { name: /save dimension/i }));
+    // The save settles its pending state in a microtask; flush it inside act.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save dimension/i })); await Promise.resolve(); });
     expect(onRename).toHaveBeenCalledWith('Epoch', 'time of day');
   });
 
@@ -122,13 +123,14 @@ describe('DimensionEditor — hierarchy and description', () => {
     expect(offered).toEqual(['no parent']);
   });
 
-  test('editing the description alone enables Save and reaches onRename', () => {
+  test('editing the description alone enables Save and reaches onRename', async () => {
     const onRename = mock((_: string, __?: string) => undefined);
     wrap(<DimensionEditor dimension={dimension} onRename={onRename} />);
     fireEvent.change(screen.getByLabelText('Dimension description'), {
       target: { value: '  the hour this reads as  ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /save dimension/i }));
+    // The save settles its pending state in a microtask; flush it inside act.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save dimension/i })); await Promise.resolve(); });
     expect(onRename).toHaveBeenCalledWith('Epoch', 'the hour this reads as');
   });
 });
@@ -143,12 +145,13 @@ describe('DimensionEditor — name-save contract', () => {
     expect(onRename).not.toHaveBeenCalled();
   });
 
-  test('"Save dimension" commits the trimmed name via onRename', () => {
+  test('"Save dimension" commits the trimmed name via onRename', async () => {
     const onRename = mock((_: string, __?: string) => undefined);
     wrap(<DimensionEditor dimension={dimension} onRename={onRename} />);
     const field = screen.getByLabelText('Dimension name');
     fireEvent.change(field, { target: { value: '  Era  ' } });
-    fireEvent.click(screen.getByRole('button', { name: /save dimension/i }));
+    // The save settles its pending state in a microtask; flush it inside act.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save dimension/i })); await Promise.resolve(); });
     // Second arg is the description, undefined when it was not edited.
     expect(onRename).toHaveBeenCalledWith('Era', undefined);
   });

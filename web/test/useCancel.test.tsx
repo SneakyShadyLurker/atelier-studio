@@ -11,6 +11,7 @@ import { resetBroadcastForTests } from '../src/hooks/broadcastHistory';
 import { registerBatch, resetInFlightForTests } from '../src/hooks/inFlightBatches';
 import { useCancel } from '../src/hooks/useCancel';
 import { APP_VIEW_UNSORTED, collectionView, useAtelierStore } from '../src/store/atelier';
+import { flushQueryNotifications } from './fixtures/queryNotifications';
 
 const originalBroadcastChannel = window.BroadcastChannel;
 
@@ -131,6 +132,7 @@ describe('useCancel', () => {
 
     await act(async () => {
       await result.current.cancelTile('batch-1', 'tile-loading');
+      await flushQueryNotifications();
     });
 
     expect(calls).toEqual([{ url: '/api/history/batch-1/tile-loading', method: 'DELETE' }]);
@@ -209,6 +211,7 @@ describe('useCancel', () => {
 
     await act(async () => {
       await result.current.cancelTile('batch-1', 'tile-loading').catch(() => undefined);
+      await flushQueryNotifications();
     });
 
     const items = client.getQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list())?.pages[0]?.items;
@@ -267,6 +270,7 @@ describe('useCancel', () => {
 
     await act(async () => {
       await result.current.cancelTile('batch-1', 'tile-loading');
+      await flushQueryNotifications();
     });
 
     const unsortedCache = client.getQueryData(historyKeys.list());

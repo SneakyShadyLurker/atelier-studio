@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DescribeDialog } from './index';
 
 afterEach(() => {
@@ -44,7 +44,7 @@ describe('DescribeDialog', () => {
     fireEvent.keyDown(field, { key: 'Enter', metaKey: true });
     fireEvent.click(screen.getByRole('button', { name: 'Draft list' }));
 
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSubmit).not.toHaveBeenCalled();
   });

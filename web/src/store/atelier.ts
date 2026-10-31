@@ -10,6 +10,7 @@ import { BRAINSTORM_DEFAULT_COUNT, MAX_HISTORY_Q_LEN, MAX_TILE_COUNT } from '@at
 import { create, type StateCreator } from 'zustand';
 import { refImageUrl } from '../api/uploads';
 import { pinAt, withoutPin } from '../lib/promptPins';
+import type { ComposerPrefs } from '../lib/composerPrefs';
 import { MAX_ROLL_QUEUE_ENTRIES, persistRollQueue, unsettledInFlightCount } from '../lib/rollQueuePersist';
 import { overlayExitDurationMs } from '../lib/overlayDuration';
 
@@ -245,6 +246,8 @@ interface ComposerSlice {
   reorderQueuedRolls: (fromIdx: number, toIdx: number) => void;
   clearRollQueue: () => void;
   hydrateRollQueue: (rolls: readonly QueuedRoll[]) => void;
+  /** Applies remembered composer settings once at boot; App validates them against the model list. */
+  hydrateComposerPrefs: (prefs: ComposerPrefs) => void;
   restoreRollQueue: (snapshot: readonly QueuedRoll[]) => void;
   /** Removes rolls the server took as batches; no restore brings them back. */
   retireQueuedRolls: (ids: readonly string[]) => void;
@@ -589,6 +592,19 @@ const createComposerSlice: StateCreator<AtelierState, [], [], ComposerSlice> = (
     set((state) => state.draft.rollQueue.length === 0
       ? { draft: { ...state.draft, rollQueue: rolls } }
       : {});
+  },
+  hydrateComposerPrefs: (prefs) => {
+    if (Object.keys(prefs).length === 0) return;
+    // A stored model is never an image-to-video row, so it is also the model
+    // "back to image generation" returns to — and what the next save keeps
+    // when Animate or Extend switches to a video row.
+    set((state) => ({
+      draft: {
+        ...state.draft,
+        ...prefs,
+        ...(prefs.modelId !== undefined ? { lastImageModelId: prefs.modelId } : {}),
+      },
+    }));
   },
   retiredRollIds: new Set<string>(),
   retireQueuedRolls: (ids) => {

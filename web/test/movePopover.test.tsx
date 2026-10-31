@@ -1,7 +1,7 @@
 import type { Batch, Collection, CollectionsResponse, Model } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import { readFileSync } from 'node:fs';
 import BatchView from '../src/components/Batch';
@@ -230,7 +230,7 @@ describe('MovePopover', () => {
     });
     // Dismissal rides the shared exit transition (useExitTransition); the
     // unmount lands ~160ms later, outside waitFor's act-wrapped polling.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(screen.queryByRole('dialog', { name: 'Move to collection' })).toBeNull();
   });
 
@@ -267,7 +267,7 @@ describe('MovePopover', () => {
         && (call.body as { collectionId?: string }).collectionId === 'collection-new',
       )).toBe(true);
     });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(screen.queryByRole('dialog', { name: 'Move to collection' })).toBeNull();
   });
 
@@ -292,7 +292,7 @@ describe('MovePopover', () => {
     expect(portalHost.hasAttribute('inert')).toBe(false);
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(screen.queryByRole('dialog', { name: 'Move to collection' })).toBeNull();
     expect(bgHost.hasAttribute('inert')).toBe(false);
     // Focus restore is deferred a macrotask (must run after inert cleanup).
@@ -303,7 +303,7 @@ describe('MovePopover', () => {
     renderBatch(batch());
     await openMove();
     fireEvent.pointerDown(document.body);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(screen.queryByRole('dialog', { name: 'Move to collection' })).toBeNull();
   });
 
@@ -329,7 +329,7 @@ describe('MovePopover', () => {
     expect(dialog.hasAttribute('data-anchor-place')).toBe(false);
     expect(dialog.hasAttribute('popover')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Close move popover' }));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(screen.queryByRole('dialog', { name: 'Move to collection' })).toBeNull();
   });
 

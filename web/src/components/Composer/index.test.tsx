@@ -423,13 +423,15 @@ describe('Composer offline model re-probe', () => {
     fireEvent.click(screen.getByRole('option', { name: /Krea 2 Test Alpha.*Offline/ }));
     await waitFor(() => { expect(fetchMock).toHaveBeenCalledTimes(1); });
 
-    useAtelierStore.getState().setDraft({
-      modelId: healthyI2VModel.id,
-      i2vSourceUploadId: 'external-source',
-      i2vSourcePrompt: 'external prompt',
-      motionPrompt: 'external motion',
-      extendsTileId: 'external-tile',
-      extendPrevPrompt: 'external previous',
+    act(() => {
+      useAtelierStore.getState().setDraft({
+        modelId: healthyI2VModel.id,
+        i2vSourceUploadId: 'external-source',
+        i2vSourcePrompt: 'external prompt',
+        motionPrompt: 'external motion',
+        extendsTileId: 'external-tile',
+        extendPrevPrompt: 'external previous',
+      });
     });
     rendered.rerender(composerElement({ ...common, modelId: healthyI2VModel.id }));
 
@@ -682,13 +684,14 @@ describe('Composer enhance', () => {
     rerender(composer({ prompt: 'rewritten prompt', onPromptChange }));
     expect(useAtelierStore.getState().draft.enhanceAnchor).toBe('original');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear prompt and reference images' }));
+    // Flush Clear's follow-up updates inside act.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Clear prompt and reference images' })); await Promise.resolve(); });
     expect(useAtelierStore.getState().draft.prompt).toBe('');
     expect(useAtelierStore.getState().draft.enhanceAnchor).toBeUndefined();
     expect(useAtelierStore.getState().draft.enhancedText).toBeUndefined();
 
     const undoToast = useAtelierStore.getState().toasts.find((t) => t.text === 'Composer cleared');
-    undoToast?.action?.onClick();
+    act(() => { undoToast?.action?.onClick(); });
     expect(useAtelierStore.getState().draft.prompt).toBe('rewritten prompt');
     expect(useAtelierStore.getState().draft.enhanceAnchor).toBe('original');
   });
@@ -815,12 +818,13 @@ describe('Composer minimized bar (desktop)', () => {
     });
   });
 
-  test('Escape inside the composer minimizes it', () => {
+  test('Escape inside the composer minimizes it', async () => {
     installDesktop();
     renderComposer();
     const textarea = screen.getByRole('textbox', { name: 'Prompt' });
     act(() => { textarea.focus(); });
-    fireEvent.keyDown(textarea, { key: 'Escape' });
+    // Minimizing moves focus in a microtask; flush it inside act.
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'Escape' }); await Promise.resolve(); });
     expect(screen.getByRole('button', { name: 'Expand composer' })).toBeDefined();
     expect(screen.queryByRole('textbox', { name: 'Prompt' })).toBeNull();
   });
@@ -834,18 +838,19 @@ describe('Composer minimized bar (desktop)', () => {
     expect(screen.queryByRole('textbox', { name: 'Prompt' })).toBeNull();
   });
 
-  test('a minimized bar offers Stop, not Generate, while a drain is running', () => {
+  test('a minimized bar offers Stop, not Generate, while a drain is running', async () => {
     installDesktop();
     useAtelierStore.setState({ draining: true });
     renderComposer({ prompt: 'a red fox' });
-    fireEvent.click(screen.getByRole('button', { name: 'Minimize composer' }));
+    // Minimizing moves focus in a microtask; flush it inside act.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Minimize composer' })); await Promise.resolve(); });
     expect(screen.getByRole('button', { name: 'Stop working through the queue' })).toBeDefined();
     expect(screen.queryByRole('button', { name: /^Generate/ })).toBeNull();
-    useAtelierStore.setState({ draining: false });
+    act(() => { useAtelierStore.setState({ draining: false }); });
   });
 
   for (const collapsed of [false, true]) {
-    test(`standalone replay capacity exposes Stop in the ${collapsed ? 'collapsed' : 'expanded'} composer without activating the queue`, () => {
+    test(`standalone replay capacity exposes Stop in the ${collapsed ? 'collapsed' : 'expanded'} composer without activating the queue`, async () => {
       installDesktop();
       useAtelierStore.setState({ draining: false });
       const stop = mock();
@@ -855,7 +860,8 @@ describe('Composer minimized bar (desktop)', () => {
       fireEvent.keyDown(prompt, { key: 'Enter', metaKey: true });
       fireEvent.keyDown(prompt, { key: 'Enter', ctrlKey: true });
       expect(submit).not.toHaveBeenCalled();
-      if (collapsed) fireEvent.click(screen.getByRole('button', { name: 'Minimize composer' }));
+      // Minimizing moves focus in a microtask; flush it inside act.
+      if (collapsed) await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Minimize composer' })); await Promise.resolve(); });
       fireEvent.click(screen.getByRole('button', { name: 'Stop working through the queue' }));
       expect(stop).toHaveBeenCalledTimes(1);
       expect(useAtelierStore.getState().draining).toBe(false);
@@ -873,7 +879,7 @@ describe('Composer minimized bar (desktop)', () => {
       fireEvent.keyDown(prompt, { key: 'Enter', ctrlKey: true });
       expect(submit).toHaveBeenCalledTimes(2);
     } finally {
-      useAtelierStore.setState({ draining: false });
+      act(() => { useAtelierStore.setState({ draining: false }); });
     }
   });
 
@@ -915,13 +921,14 @@ describe('Composer collapsed bar (phone)', () => {
     expect(screen.getByText('Describe an image…')).toBeDefined();
   });
 
-  test('an empty prompt has no danger tone in the status or phone collapsed bar', () => {
+  test('an empty prompt has no danger tone in the status or phone collapsed bar', async () => {
     installPhone();
     renderComposer({ prompt: '' });
     const expand = screen.getByRole('button', { name: 'Expand composer' });
     expect(expand.parentElement?.getAttribute('data-tone')).toBeNull();
 
-    fireEvent.click(expand);
+    // Expanding focuses the prompt in a microtask; flush it inside act.
+    await act(async () => { fireEvent.click(expand); await Promise.resolve(); });
     const status = screen.getByText('Write a prompt or queue a roll');
     expect(status.getAttribute('data-tone')).not.toBe('danger');
   });
@@ -946,10 +953,11 @@ describe('Composer collapsed bar (phone)', () => {
     expect(screen.queryByRole('button', { name: /Generate/ })).toBeNull();
   });
 
-  test('tapping the bar expands to the full composer', () => {
+  test('tapping the bar expands to the full composer', async () => {
     installPhone();
     renderComposer({ prompt: 'a red fox' });
-    fireEvent.click(screen.getByRole('button', { name: 'Expand composer' }));
+    // Expanding focuses the prompt in a microtask; flush it inside act.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Expand composer' })); await Promise.resolve(); });
     expect(screen.getByRole('textbox', { name: 'Prompt' })).toBeDefined();
     expect(useAtelierStore.getState().composerExpanded).toBe(true);
   });

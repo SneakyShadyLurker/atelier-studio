@@ -2,7 +2,7 @@ import type { Batch, GenerateRequest, Model, PromptLibraryResponse } from '@atel
 import type { GenerateOptions } from './hooks/useGenerate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import { fixtureModels } from '../test/fixtures/models';
 import { modelKeys } from './api/models';
@@ -365,7 +365,7 @@ describe('App submitDraft fan-out', () => {
     render(<Wrapper client={client}><App /></Wrapper>);
     // Cmd+Enter is owned by the composer prompt field itself.
     const textarea = await screen.findByRole('textbox', { name: /prompt/i });
-    textarea.focus();
+    act(() => { textarea.focus(); });
     fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
     await waitFor(() => { expect(generateMock).toHaveBeenCalledTimes(2); });
     expect(useAtelierStore.getState().draft.rollQueue).toEqual([]);
@@ -391,7 +391,7 @@ describe('App submitDraft fan-out', () => {
     const client = makeClient();
     render(<Wrapper client={client}><App /></Wrapper>);
     const textarea = await screen.findByRole('textbox', { name: /prompt/i });
-    textarea.focus();
+    act(() => { textarea.focus(); });
     fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
     await waitFor(() => { expect(useAtelierStore.getState().byokOpen).toBe(true); });
     expect(generateMock).not.toHaveBeenCalled();
@@ -533,13 +533,13 @@ describe('App submitDraft fan-out', () => {
     const client = makeClient();
     render(<Wrapper client={client}><App /></Wrapper>);
     const textarea = await screen.findByRole('textbox', { name: /prompt/i });
-    textarea.focus();
+    act(() => { textarea.focus(); });
     fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
     await waitFor(() => { expect(generateMock).toHaveBeenCalledTimes(2); });
     expect(useAtelierStore.getState().draft.rollQueue).toEqual([]);
 
     // User queues a fresh roll while the first batch is still streaming.
-    useAtelierStore.getState().stashRoll({ id: 'c', text: 'queued three', seed: 3, source: 'template' });
+    act(() => { useAtelierStore.getState().stashRoll({ id: 'c', text: 'queued three', seed: 3, source: 'template' }); });
 
     // First batch finishes — its completion must NOT wipe roll 'c'.
     resolvers.forEach((resolve) => { resolve(); });
@@ -600,7 +600,7 @@ describe('App submitDraft fan-out', () => {
     const client = makeClient();
     render(<Wrapper client={client}><App /></Wrapper>);
     const textarea = await screen.findByRole('textbox', { name: /prompt/i });
-    textarea.focus();
+    act(() => { textarea.focus(); });
     fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
     await waitFor(() => { expect(useAtelierStore.getState().byokOpen).toBe(true); });
     expect(generateMock).not.toHaveBeenCalled();

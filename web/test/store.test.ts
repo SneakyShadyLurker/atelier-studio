@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { canSubmitDraft, toGenerateRequest, useAtelierStore, type QueuedRoll } from '../src/store/atelier';
+import { composerPrefsFromDraft } from '../src/lib/composerPrefs';
 
 afterEach(() => {
   mock.restore();
@@ -60,6 +61,37 @@ describe('atelier UI store', () => {
 
     useAtelierStore.getState().markRefImageError('client-2', 'quota exceeded');
     expect(toGenerateRequest(useAtelierStore.getState().draft, 'model-1', '1:1')).not.toHaveProperty('refImageIds');
+  });
+
+  test('hydrateComposerPrefs restores remembered composer settings and leaves the rest of the draft alone', () => {
+    useAtelierStore.setState({
+      draft: { prompt: 'keep me', modelId: '', ratio: null, durationFrames: null, count: 2, refImages: [], rollQueue: [] },
+    });
+    useAtelierStore.getState().hydrateComposerPrefs({ modelId: 'mock-fast', ratio: '16:9', count: 4, durationFrames: 243 });
+    expect(useAtelierStore.getState().draft).toMatchObject({
+      prompt: 'keep me', modelId: 'mock-fast', ratio: '16:9', count: 4, durationFrames: 243,
+    });
+  });
+
+  test('hydrateComposerPrefs makes the restored model the image model to return to', () => {
+    useAtelierStore.setState({
+      draft: { prompt: '', modelId: '', ratio: null, durationFrames: null, count: 2, refImages: [], rollQueue: [] },
+    });
+    useAtelierStore.getState().hydrateComposerPrefs({ modelId: 'mock-slow' });
+    const restored = useAtelierStore.getState().draft;
+    expect(restored.lastImageModelId).toBe('mock-slow');
+    // Animate/Extend then switches to an image-to-video row: the remembered
+    // model must survive the next save instead of being dropped.
+    expect(composerPrefsFromDraft({ ...restored, modelId: 'minimax-h3-i2v' }, true).modelId).toBe('mock-slow');
+  });
+
+  test('hydrateComposerPrefs with empty prefs keeps the defaults', () => {
+    useAtelierStore.setState({
+      draft: { prompt: '', modelId: '', ratio: null, durationFrames: null, count: 2, refImages: [], rollQueue: [] },
+    });
+    const before = useAtelierStore.getState().draft;
+    useAtelierStore.getState().hydrateComposerPrefs({});
+    expect(useAtelierStore.getState().draft).toEqual(before);
   });
 
   test('canSubmitDraft gates the keyboard shortcut on the same conditions as the Composer button', () => {

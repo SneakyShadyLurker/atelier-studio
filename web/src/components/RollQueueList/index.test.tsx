@@ -124,7 +124,7 @@ describe('RollQueueList', () => {
     expect(within(panel).queryByRole('region')).toBeNull();
 
     const undo = within(panel).getByRole('button', { name: 'Undo' });
-    useAtelierStore.getState().stashRoll({ id: 'c', text: 'new queued prompt', seed: 33, source: 'template' });
+    act(() => { useAtelierStore.getState().stashRoll({ id: 'c', text: 'new queued prompt', seed: 33, source: 'template' }); });
     fireEvent.click(undo);
     expect(useAtelierStore.getState().draft.rollQueue.map((roll) => roll.id)).toEqual(['a', 'b', 'c']);
   });

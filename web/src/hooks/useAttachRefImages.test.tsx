@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { MAX_REF_BYTES_PER_BATCH, MAX_UPLOAD_INPUT_BYTES } from '@atelier/shared';
 import { useAttachRefImages } from './useAttachRefImages';
 import { useAtelierStore } from '../store/atelier';
+import { flushQueryNotifications } from '../../test/fixtures/queryNotifications';
 
 const createObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
 const revokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
@@ -215,6 +216,7 @@ describe('useAttachRefImages', () => {
     const heic = new File([new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70])], 'IMG_1234.HEIC', { type: '' });
     await act(async () => {
       await result.current([heic], { mode: 'append', capacity: 4 });
+      await flushQueryNotifications();
     });
     expect(useAtelierStore.getState().draft.refImages.length).toBe(1);
   });

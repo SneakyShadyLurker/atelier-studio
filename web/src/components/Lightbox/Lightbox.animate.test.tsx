@@ -1,7 +1,7 @@
 import type { Batch, Model, Tile } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import Lightbox from './index';
 import { initialAtelierState, useAtelierStore } from '../../store/atelier';
@@ -138,7 +138,7 @@ describe('Lightbox Animate action', () => {
     expect(file.type).toBe('image/png');
     expect(await file.text()).toBe('tile-bytes');
     // Dismissal rides the shared exit transition (useExitTransition).
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
   });
 

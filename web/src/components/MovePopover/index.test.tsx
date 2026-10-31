@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef, type ReactNode } from 'react';
 import { allDoneBatch } from '../../../test/fixtures/batches';
 import MovePopover from './index';
@@ -61,7 +61,7 @@ describe('MovePopover closing', () => {
     fireEvent.click(screen.getByRole('button', { name: '+ New collection' }));
 
     expect(screen.queryByRole('textbox', { name: 'Collection name' })).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(writes).toEqual([]);
   });

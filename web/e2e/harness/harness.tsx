@@ -323,16 +323,18 @@ function FeedCase() {
    viewport bottom as `--composer-top` — which is the only thing telling the
    canvas how much bottom room to reserve. FeedCase's in-flow footer cannot
    reproduce anything about content trapped behind the composer, so the phone
-   specs need this shell. `tall` makes the newest batch a 9:16 clip, the shape
-   that pushes a tile's action row furthest down. */
+   specs need this shell. The newest batch is a 9:16 clip, the shape that
+   pushes a tile's action row furthest down, unless `ratio=1:1` asks for a
+   square one. */
 function PhoneFeedCase() {
   const params = new URLSearchParams(window.location.search);
   const seed = Number(params.get('seed') ?? '4');
   const composerHeight = Number(params.get('composer') ?? '150');
+  const newestRatio = params.get('ratio') === '1:1' ? '1:1' as const : '9:16' as const;
   const [batches, setBatches] = useState(() => {
     const feed = feedBatches(seed, 100);
     const last = feed[feed.length - 1];
-    if (last) feed[feed.length - 1] = { ...last, ratio: '9:16' };
+    if (last) feed[feed.length - 1] = { ...last, ratio: newestRatio };
     return feed;
   });
   const modelById = new Map([[MODEL.id, MODEL]]);

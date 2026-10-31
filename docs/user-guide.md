@@ -6,15 +6,23 @@ or [Deployment](deployment.md).
 
 ## Generate your first image
 
-1. Select a model in the composer at the bottom of the screen. The menu shows
-   the models available on this installation.
+1. Select a model with the model chip in the composer at the bottom of the
+   screen. The chip shows a short family name, such as `GPT`, `Banana` or
+   `Mock`; hover it for the full model name. The menu groups the models
+   available on this installation into Local and Cloud, and marks models that
+   need your own key as **Key required**.
 2. Enter a prompt describing the picture you want.
-3. Choose an aspect ratio and the number of images. The available choices
-   depend on the model.
+3. Choose an aspect ratio with the ratio chip (for example `1:1`) and the number
+   of images with the count chip (`×1` to `×4`). The available choices depend
+   on the model.
 4. Press **Generate**, or **Cmd+Enter** on macOS / **Ctrl+Enter** elsewhere while
    editing the prompt.
 5. Watch the tiles. Some providers stream previews; others return only the
    finished image. A queued batch waits for capacity.
+
+Atelier remembers your model, ratio and count for your account in this browser,
+so they are still selected after a reload. When nothing is remembered, it opens
+on a model you can use without adding a key.
 
 Choose **Mock Fast** only when testing a development installation. Its small
 solid-colour images do not reflect your prompt.
@@ -25,7 +33,8 @@ operator needs to set `BYOK_ENCRYPTION_KEY`. Provider credits and quotas belong
 to the configured service or your own key.
 
 Text features such as **Enhance** need a text model, which an admin connects
-in the **Text models** view. If they answer "No text model is set up", ask
+in the **Text models** view, listed in the sidebar below **Prompt Library**
+for admins. If they answer "No text model is set up", ask
 your operator, or follow [Connect a text model](connect-a-text-model.md) if
 you run the server yourself.
 
@@ -84,7 +93,7 @@ New installations do not include the operator's personal prompt library.
   effort where the model offers one.
 
 Start with a simple reusable template, then add variables as you need them.
-The **Templates** control in the composer opens the picker. A roll queue lets
+The **Library** chip in the composer opens the picker. A roll queue lets
 you prepare multiple prompts before generating them.
 
 **Enhance** asks a text model to rewrite a prompt. **Brainstorm** produces ideas

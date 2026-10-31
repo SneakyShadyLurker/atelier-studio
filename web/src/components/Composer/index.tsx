@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { textModelsOpts } from '../../api/textModels';
 import { refImageUrl, uploadRefImage } from '../../api/uploads';
 import { beginSourceHandoff, supersedeSourceHandoffs } from '../../lib/composerSourceHandoff';
+import { isModelAvailable } from '../../lib/effectiveModel';
 import { I2V_ESTIMATED_LABEL } from '../../lib/i2v';
 import { isImeComposing } from '../../lib/ime';
 import { promptPickerAvailable } from '../../lib/modelSelection';
@@ -220,11 +221,16 @@ function Composer({
     const isImageModel = (model: Model): boolean =>
       model.outputsVideo !== true && model.supportsI2V !== true;
     const remembered = lastImageModelId ? modelById.get(lastImageModelId) : undefined;
-    if (remembered && isImageModel(remembered)) return remembered.id;
+    // An offline row cannot be switched to, so it would strand the user in
+    // video mode; prefer an available image model, then any image model.
+    if (remembered && isImageModel(remembered) && isModelAvailable(remembered)) return remembered.id;
+    let firstImageModelId: string | undefined;
     for (const model of modelById.values()) {
-      if (isImageModel(model)) return model.id;
+      if (!isImageModel(model)) continue;
+      if (isModelAvailable(model)) return model.id;
+      firstImageModelId ??= model.id;
     }
-    return undefined;
+    return remembered && isImageModel(remembered) ? remembered.id : firstImageModelId;
   }, [lastImageModelId, modelById]);
   // Local-pool models share a server-wide cap of 1 tile (single GPU host).
   // Lock the count chip to 1 + visually communicate it so the user doesn't
@@ -448,8 +454,10 @@ function Composer({
       return;
     }
     // A deliberate model pick is the newest source intent: a tile handoff
-    // still in flight must not switch the model or video draft back.
-    if (next !== modelIdAtStart) supersedeSourceHandoffs();
+    // still in flight must not switch the model or video draft back. That
+    // includes picking the displayed fallback over a remembered selection
+    // (draft.modelId), which App commits as an explicit choice.
+    if (next !== modelIdAtStart || useAtelierStore.getState().draft.modelId !== next) supersedeSourceHandoffs();
     if (candidate?.availability && !candidate.availability.ok) {
       // ChipSelect renders the option with `aria-disabled` + a styles hook,
       // but its click / keyboard-Enter handlers do NOT gate on `disabled`

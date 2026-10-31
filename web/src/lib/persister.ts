@@ -92,21 +92,29 @@ function scopedIdbKey(cacheScope: string): string {
   return `${IDB_KEY_PREFIX}:${cacheScope}`;
 }
 
+// Without IndexedDB (happy-dom, some private modes) nothing was ever
+// persisted, so there is nothing to read, write or remove.
+function hasIndexedDb(): boolean {
+  return typeof indexedDB !== 'undefined';
+}
+
 export async function preparePersistenceScope(cacheScope: string): Promise<void> {
   if (isSessionLocked()) return;
   clearPendingPersist();
   const currentKey = scopedIdbKey(cacheScope);
   const currentRollQueueKey = rollQueueStorageKey(cacheScope);
   activeIdbKey = currentKey;
-  try {
-    const storedKeys = await keys();
-    if (isSessionLocked()) return;
-    await Promise.all(storedKeys
-      .filter((key): key is string => typeof key === 'string'
-        && (key === IDB_KEY_PREFIX || (key.startsWith(`${IDB_KEY_PREFIX}:`) && key !== currentKey)))
-      .map((key) => del(key)));
-  } catch (error) {
-    console.warn('Failed to prepare scoped QueryClient cache', error);
+  if (hasIndexedDb()) {
+    try {
+      const storedKeys = await keys();
+      if (isSessionLocked()) return;
+      await Promise.all(storedKeys
+        .filter((key): key is string => typeof key === 'string'
+          && (key === IDB_KEY_PREFIX || (key.startsWith(`${IDB_KEY_PREFIX}:`) && key !== currentKey)))
+        .map((key) => del(key)));
+    } catch (error) {
+      console.warn('Failed to prepare scoped QueryClient cache', error);
+    }
   }
   if (isSessionLocked()) return;
   try {
@@ -127,6 +135,7 @@ export async function preparePersistenceScope(cacheScope: string): Promise<void>
 
 export async function removePersistedQueryClient(cacheScope?: string): Promise<void> {
   clearPendingPersist();
+  if (!hasIndexedDb()) return;
   try {
     const storedKeys = cacheScope === undefined ? await keys() : [scopedIdbKey(cacheScope)];
     await Promise.all(storedKeys
@@ -139,7 +148,7 @@ export async function removePersistedQueryClient(cacheScope?: string): Promise<v
 }
 
 async function writeClient(key: string, client: PersistedClient): Promise<void> {
-  if (isSessionLocked() || key !== activeIdbKey) return;
+  if (isSessionLocked() || key !== activeIdbKey || !hasIndexedDb()) return;
   try {
     await set(key, client);
   } catch (error) {
@@ -311,7 +320,7 @@ export function createIDBPersister(cacheScope: string): Persister {
       }, PERSIST_DEBOUNCE_MS);
     },
     restoreClient: async () => {
-      if (isSessionLocked() || idbKey !== activeIdbKey) return undefined;
+      if (isSessionLocked() || idbKey !== activeIdbKey || !hasIndexedDb()) return undefined;
       const restored = await get<unknown>(idbKey);
       if (isSessionLocked() || idbKey !== activeIdbKey) return undefined;
       if (!isValidPersistedClient(restored)) {
@@ -327,6 +336,7 @@ export function createIDBPersister(cacheScope: string): Persister {
     removeClient: async () => {
       if (isSessionLocked()) return;
       if (idbKey === activeIdbKey) clearPendingPersist();
+      if (!hasIndexedDb()) return;
       try {
         await del(idbKey);
       } catch (error) {

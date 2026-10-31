@@ -5,6 +5,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { modelKeys, modelsOpts } from '../api/models';
 import { useProbeModel } from './useProbeModel';
+import { flushQueryNotifications } from '../../test/fixtures/queryNotifications';
 
 const originalFetch = globalThis.fetch;
 
@@ -111,6 +112,7 @@ describe('useProbeModel cache freshness', () => {
 
     await act(async () => {
       await result.current.mutateAsync('model-a');
+      await flushQueryNotifications();
     });
 
     const cached = client.getQueryData<readonly Model[]>(modelKeys.list());

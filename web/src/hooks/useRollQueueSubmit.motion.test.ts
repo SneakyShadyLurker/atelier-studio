@@ -121,21 +121,33 @@ describe('useRollQueueSubmit — h3-motion enhancement', () => {
 
   test('falls back to the RAW motion text on enhance failure (no drop, no error toast)', async () => {
     formatMock.mockImplementation(() => Promise.reject(new Error('deepseek down')));
-    const h = setup({ motionPrompt: 'she dances', sourcePrompt: 'a dancer in red' });
-    await h.submit();
-    expect(h.generate).toHaveBeenCalledTimes(1);
-    const req = h.generate.mock.calls[0]?.[0];
-    expect(req?.prompt).toBe('she dances');
-    expect(req?.motionPrompt).toBe('she dances');
-    expect(h.toasts.some((t) => t.tone === 'error')).toBe(false);
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const h = setup({ motionPrompt: 'she dances', sourcePrompt: 'a dancer in red' });
+      await h.submit();
+      expect(h.generate).toHaveBeenCalledTimes(1);
+      const req = h.generate.mock.calls[0]?.[0];
+      expect(req?.prompt).toBe('she dances');
+      expect(req?.motionPrompt).toBe('she dances');
+      expect(h.toasts.some((t) => t.tone === 'error')).toBe(false);
+      expect(warn).toHaveBeenCalledWith('motion_enhance_fallback_raw');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test('fires a billable raw render on quota exhaustion (not preserved/held back)', async () => {
     formatMock.mockImplementation(() => Promise.reject(new QuotaExhaustedError(30)));
-    const h = setup({ motionPrompt: 'she dances' });
-    await h.submit();
-    expect(h.generate).toHaveBeenCalledTimes(1);
-    expect(h.generate.mock.calls[0]?.[0]?.motionPrompt).toBe('she dances');
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const h = setup({ motionPrompt: 'she dances' });
+      await h.submit();
+      expect(h.generate).toHaveBeenCalledTimes(1);
+      expect(h.generate.mock.calls[0]?.[0]?.motionPrompt).toBe('she dances');
+      expect(warn).toHaveBeenCalledWith('motion_enhance_fallback_raw');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test('an over-length enhancement falls back to the raw motion text', async () => {

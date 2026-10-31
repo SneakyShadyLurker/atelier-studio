@@ -20,7 +20,8 @@
   <a href="docs/getting-started.md"><strong>Get started</strong></a> ·
   <a href="#set-up-with-your-ai-agent">Set up with AI</a> ·
   <a href="docs/deployment.md">Deploy a server</a> ·
-  <a href="docs/user-guide.md">User guide</a>
+  <a href="docs/user-guide.md">User guide</a> ·
+  <a href="#sister-project-ephemera">Sister project: Ephemera</a>
 </p>
 
 <p align="center">
@@ -123,9 +124,28 @@ volume they live on.
   search prompts, and restore archived work for 30 days
 - **Gemini BYOK**: each user brings their own Google key, encrypted on the server
 - **Ephemera character cards**: turn a finished image into a character card in
-  [Ephemera](https://github.com/SneakyShadyLurker/ephemera)
+  [Ephemera](#sister-project-ephemera)
 - **Polish**: light and dark themes, a lightbox with zoom, keyboard shortcuts,
   and layouts built for phones, tablets and desktops
+
+## Sister project: Ephemera
+
+**[Ephemera](https://github.com/SneakyShadyLurker/ephemera)** is a self-hosted
+roleplay chat from the same author, also AGPL and built on Bun. Your
+characters, personas and lorebooks are saved and encrypted per user, and every
+conversation vanishes when you close the tab. It imports SillyTavern cards and
+writes new ones with AI.
+
+The two apps run independently and work well together:
+
+- **Image to card**: an optional action on a finished Atelier image sends it to
+  Ephemera, which writes a character card from it
+  ([setup](docs/deployment.md#ephemera-character-cards-optional),
+  [how it works](docs/providers.md#ephemera-character-cards))
+- **Pictures in chat**: Ephemera can use Atelier as its image backend for
+  portraits and scene pictures
+
+Neither app needs the other.
 
 ## Documentation
 

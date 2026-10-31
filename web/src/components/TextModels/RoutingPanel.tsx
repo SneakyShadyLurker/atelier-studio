@@ -43,7 +43,7 @@ export default function RoutingPanel({ providers }: RoutingPanelProps) {
   const data = routing.data;
   if (data === undefined) {
     return (
-      <section className={styles.panel} aria-labelledby={headingId}>
+      <section className={`${styles.panel} ${styles.routing}`} aria-labelledby={headingId}>
         <h3 id={headingId} className={styles.panelTitle}>Routing</h3>
         <p className={styles.note}>
           {routing.isError ? 'Couldn’t load the routing settings.' : 'Loading routing…'}
@@ -71,14 +71,19 @@ export default function RoutingPanel({ providers }: RoutingPanelProps) {
   };
 
   const defaultName = nameOf(data.defaults.default, 'No default');
+  // An unassigned task shows the model it falls through to, quietly, so the
+  // list reads as a map of where every task goes; overrides stay full ink.
+  const inherited = data.defaults.default === undefined
+    ? <span className={styles.unsetValue}>Use default</span>
+    : <span className={styles.unsetValue}><span aria-hidden="true">↳ </span>{defaultName}</span>;
   const taskOptions = modelOptions(providers, 'Use default');
   const writerOptions = modelOptions(providers, 'No writer');
 
   return (
-    <section className={styles.panel} aria-labelledby={headingId}>
+    <section className={`${styles.panel} ${styles.routing}`} aria-labelledby={headingId}>
       <h3 id={headingId} className={styles.panelTitle}>Routing</h3>
 
-      <div className={styles.routeRow}>
+      <div className={styles.routeDefault}>
         <div className={styles.routeMain}>
           <p className={styles.routeLabel}>Default model</p>
           <p className={styles.note}>Every task uses it unless assigned below.</p>
@@ -110,7 +115,7 @@ export default function RoutingPanel({ providers }: RoutingPanelProps) {
                 <span className={styles.routeItemLabel}>{label}</span>
                 <ChipSelect<string>
                   ariaLabel={`Model for ${label}, currently ${display}`}
-                  valueDisplay={display}
+                  valueDisplay={picked === undefined ? inherited : display}
                   options={taskOptions}
                   value={picked ?? NONE}
                   disabled={saving}
@@ -136,7 +141,7 @@ export default function RoutingPanel({ providers }: RoutingPanelProps) {
                 <span className={styles.routeItemLabel}>{image.label}</span>
                 <ChipSelect<string>
                   ariaLabel={`Prompt writer for ${image.label}, currently ${display}`}
-                  valueDisplay={display}
+                  valueDisplay={writer ? display : <span className={styles.unsetValue}>{display}</span>}
                   options={writerOptions}
                   value={writer?.modelId ?? NONE}
                   disabled={saving}

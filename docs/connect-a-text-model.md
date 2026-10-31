@@ -182,7 +182,7 @@ Save the provider and type the model ids yourself.
 ## Add models
 
 **Add models** opens right after you save a provider. For an existing
-provider, click **Add models** at the bottom of its section.
+provider, click **Add models** in its section's header.
 
 - **From the list.** Atelier loads the provider's model list. Search it, tick
   the models you want and click **Add N models**. Models you already added show
@@ -201,7 +201,8 @@ id, small icons for image input, JSON output and reasoning, and a status:
 - **unknown**: Atelier has not been able to check yet, or the provider's
   list is turned off. Unknown models are still used.
 
-Atelier rechecks each provider's list every minute. **Check again** asks
+Atelier rechecks each provider's list every minute. While any model in a
+provider is not **available**, **Check again** in the provider's header asks
 straight away. The switch at the end of each row turns a model on or off
 without deleting it.
 
@@ -251,8 +252,8 @@ on reference images per request), **JSON output**, **Reasoning levels** and
 
 ## Choose which model writes what
 
-The **Routing** panel at the top of the Text models view decides which model
-each feature uses.
+The **Routing** panel beside your providers decides which model each feature
+uses. In a narrow window it sits below them.
 
 1. **Default model**: every task uses it unless assigned below. Set this first.
    One default is enough to switch on every text feature.

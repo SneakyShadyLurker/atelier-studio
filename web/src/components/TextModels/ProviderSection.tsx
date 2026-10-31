@@ -45,18 +45,20 @@ function useFirstPoll(createdAt: number): boolean {
 
 interface ProviderSectionProps {
   readonly provider: AdminProvider;
+  readonly imageLabel: (id: string) => string;
   readonly onEditProvider: () => void;
   readonly onAddModels: () => void;
   readonly onModelAction: (model: AdminModel, action: ModelAction) => void;
 }
 
-export default function ProviderSection({ provider, onEditProvider, onAddModels, onModelAction }: ProviderSectionProps) {
+export default function ProviderSection({ provider, imageLabel, onEditProvider, onAddModels, onModelAction }: ProviderSectionProps) {
   const headingId = useId();
   const addToast = useAtelierStore((state) => state.addToast);
   const refresh = useRefreshProvider();
   const updateModel = useUpdateModel();
   const checking = useFirstPoll(provider.createdAt);
-  const checkingAgain = refresh.isPending;
+  const enabledCount = provider.models.filter((model) => model.enabled).length;
+  const needsCheck = !checking && provider.models.some((model) => model.status !== 'available');
   const allOffline = provider.models.length > 0 && provider.models.every((model) => model.status === 'offline');
 
   const checkAgain = () => {
@@ -66,10 +68,32 @@ export default function ProviderSection({ provider, onEditProvider, onAddModels,
   };
 
   return (
-    <section className={styles.panel} aria-labelledby={headingId}>
+    <section className={`${styles.panel} ${styles.providerCard}`} aria-labelledby={headingId} data-enabled={provider.enabled ? 'true' : 'false'}>
       <header className={styles.providerHead}>
-        <div className={styles.providerTitleRow}>
-          <h3 id={headingId} className={styles.providerName}>{provider.name}</h3>
+        <div className={styles.providerTitle}>
+          <div className={styles.providerNameLine}>
+            <h3 id={headingId} className={styles.providerName}>{provider.name}</h3>
+            {!provider.enabled && <span className={styles.tag}>Off</span>}
+          </div>
+          <p className={styles.providerMeta}>
+            <span>{PROTOCOL_LABEL[provider.protocol]}</span>
+            <span className={styles.mono}>{provider.baseUrl}</span>
+            <AuthSummary provider={provider} />
+          </p>
+        </div>
+        <div className={styles.providerActions}>
+          {provider.models.length > 0 && (
+            <span className={styles.count}>{`${enabledCount} of ${provider.models.length} on`}</span>
+          )}
+          {needsCheck && (
+            <button className={`${btn.secondary} ${styles.compactButton} ${styles.ghostButton}`} type="button" disabled={refresh.isPending} onClick={checkAgain}>
+              Check again
+            </button>
+          )}
+          <button className={`${btn.secondary} ${styles.compactButton}`} type="button" onClick={onAddModels}>
+            <I.plus aria-hidden="true" />
+            Add models
+          </button>
           <button
             className={styles.iconButton}
             type="button"
@@ -80,24 +104,24 @@ export default function ProviderSection({ provider, onEditProvider, onAddModels,
             <I.pencil />
           </button>
         </div>
-        <p className={styles.providerMeta}>
-          <span>{PROTOCOL_LABEL[provider.protocol]}</span>
-          <span className={styles.mono}>{provider.baseUrl}</span>
-          <AuthSummary provider={provider} />
-        </p>
-        {!provider.enabled && <p className={styles.note}>This provider is turned off. Its models are not used.</p>}
-        {provider.warnings.map((warning) => (
-          <p key={warning} className={styles.warning}>
-            <I.warn aria-hidden="true" />
-            <span>{WARNING_COPY[warning]}</span>
-          </p>
-        ))}
-        {allOffline && (
-          <p className={styles.note}>
-            {`Nothing listed at ${provider.baseUrl}. Check that the server is running.`}
-          </p>
-        )}
       </header>
+
+      {(!provider.enabled || provider.warnings.length > 0 || allOffline) && (
+        <div className={styles.providerNotes}>
+          {!provider.enabled && <p className={styles.note}>This provider is turned off. Its models are not used.</p>}
+          {provider.warnings.map((warning) => (
+            <p key={warning} className={styles.warning}>
+              <I.warn aria-hidden="true" />
+              <span>{WARNING_COPY[warning]}</span>
+            </p>
+          ))}
+          {allOffline && (
+            <p className={styles.note}>
+              {`Nothing listed at ${provider.baseUrl}. Check that the server is running.`}
+            </p>
+          )}
+        </div>
+      )}
 
       {provider.models.length === 0 ? (
         <p className={`${styles.note} ${styles.providerEmpty}`}>No models yet.</p>
@@ -108,9 +132,8 @@ export default function ProviderSection({ provider, onEditProvider, onAddModels,
               key={model.id}
               model={model}
               checking={checking}
-              checkingAgain={checkingAgain}
+              imageLabel={imageLabel}
               toggling={updateModel.isPending && updateModel.variables.modelId === model.id}
-              onCheckAgain={checkAgain}
               onToggle={(enabled) => {
                 updateModel.mutateAsync({ providerId: provider.id, modelId: model.id, patch: { enabled } })
                   .catch((error: unknown) => {
@@ -122,10 +145,6 @@ export default function ProviderSection({ provider, onEditProvider, onAddModels,
           ))}
         </ul>
       )}
-
-      <div className={styles.providerFoot}>
-        <button className={btn.secondary} type="button" onClick={onAddModels}>Add models</button>
-      </div>
     </section>
   );
 }

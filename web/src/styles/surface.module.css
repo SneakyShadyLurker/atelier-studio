@@ -1,0 +1,42 @@
+/* Interruptible overlay motion. CSS retains the current pose on reversal;
+   useExitTransition still owns the mounted lifetime and native top layer. */
+.surface {
+  --surface-from: translateY(var(--m-shift));
+  --surface-to: translateY(calc(var(--m-shift) / 3));
+  --surface-duration: var(--dur-overlay);
+  opacity: 1;
+  transform: none;
+  transition: opacity var(--surface-duration, var(--dur-overlay)) var(--ease-out),
+    transform var(--surface-duration, var(--dur-overlay)) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: var(--surface-from, translateY(var(--m-shift)));
+  }
+}
+
+.surface[data-closing='true'] {
+  opacity: 0;
+  transform: var(--surface-to, translateY(calc(var(--m-shift) / 3)));
+  transition-duration: var(--dur-overlay);
+  transition-timing-function: var(--ease-exit);
+  pointer-events: none;
+}
+
+.fade {
+  composes: surface;
+  --surface-from: none;
+  --surface-to: none;
+}
+
+.drop {
+  composes: surface;
+  --surface-from: translateY(calc(-1 * var(--m-shift)));
+  --surface-to: translateY(calc(var(--m-shift) / -3));
+}
+
+.scale {
+  composes: surface;
+  --surface-from: scale(var(--m-scale));
+  --surface-to: scale(calc((1 + var(--m-scale)) / 2));
+}

@@ -1,0 +1,41 @@
+.root {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  padding: 24px;
+  z-index: var(--z-overlay-max);
+}
+
+.panel {
+  max-width: 480px;
+  width: 100%;
+  padding: 36px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-panel);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-3);
+}
+
+/* The crash card holds the StateView plate; the card sizes and pads it,
+   and the StateView's own rise is the card's one entrance. */
+.panel > .crash {
+  min-height: 0;
+  padding-block: 0;
+}
+
+.detail {
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 10px 12px;
+  margin: 20px 0 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

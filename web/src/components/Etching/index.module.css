@@ -1,0 +1,29 @@
+/* The only stylesheet that sets an artwork mask (design 4.4): the ink is a
+   plain fill, the etched line is the mask's alpha. index.tsx supplies the
+   asset URL, ratio and per-asset widths as custom properties. */
+.etching {
+  --etch-default-width: var(--etch-width-desktop, 320px);
+  flex: none;
+  /* max-width, not min(100%, …): the plate shrink-wraps the etching, and a
+     percentage width against that indefinite size would collapse it to 0. */
+  width: var(--etch-width, var(--etch-default-width));
+  max-width: 100%;
+  aspect-ratio: var(--etch-ratio);
+  background: var(--etch-ink);
+  mask: var(--etch-url) center / contain no-repeat;
+  -webkit-mask: var(--etch-url) center / contain no-repeat;
+  mask-mode: alpha;
+}
+
+@media (width < 768px) {
+  .etching {
+    --etch-default-width: var(--etch-width-phone, 220px);
+  }
+}
+
+@media (forced-colors: active) {
+  .etching {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
+}

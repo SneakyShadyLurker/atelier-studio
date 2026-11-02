@@ -1,0 +1,87 @@
+.dialog {
+  max-width: 520px;
+}
+
+.source {
+  composes: label from '../../styles/type.module.css';
+  margin: 2px 0 18px;
+}
+
+/* The outline field is the shared dialog field (dialog.module.css .field*);
+   only its larger size and reading type are local. */
+.outline {
+  min-height: 132px;
+  max-height: 42dvh;
+  font-size: var(--text-md);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.spinner {
+  composes: ring from '../../styles/spinner.module.css';
+  --spinner-size: 13px;
+  --spinner-head: currentColor;
+}
+
+.announcement {
+  margin-top: 16px;
+}
+
+.logline {
+  margin: 0 0 16px;
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.segments {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 24px;
+}
+
+.segments li {
+  padding-left: 4px;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.segments li::marker {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.duration {
+  composes: numeral from '../../styles/type.module.css';
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.summary {
+  composes: numeral from '../../styles/type.module.css';
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: var(--text-xs);
+}
+
+@media (width < 768px) {
+  .outline {
+    min-height: 120px;
+    font-size: var(--text-base);
+  }
+}
+

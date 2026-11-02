@@ -1,0 +1,157 @@
+.tile {
+  composes: shell from '../shell.module.css';
+  cursor: default;
+}
+
+.tile:hover {
+  transform: none;
+  box-shadow: var(--shadow-1);
+}
+
+.frame {
+  width: 100%;
+  aspect-ratio: var(--tile-ratio);
+  background: var(--bg-sunk);
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+
+.tile[data-moderation='true'] .frame { min-height: 220px; }
+.tile[data-moderation='true'] .mini { min-height: 44px; }
+
+.body {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  /* The plate (design 3.3, 4.2): the same mat and plate mark as the queued
+     and loading tiles, so the three states share one material. A failure is
+     not an art surface, so no etching; icon and words carry it. */
+  background: var(--bg-sunk);
+  box-shadow: var(--plate-mark);
+  border-radius: var(--radius-tile);
+  /* No delay: an empty sunk frame during the delay reads as a still-loading
+     tile, lying about the underlying state. The body fades alongside .tile. */
+  animation: global(atelier-fade-in) var(--dur-rise) var(--ease-out) both;
+}
+
+.icon {
+  color: var(--danger);
+  margin-bottom: 8px;
+}
+
+.title {
+  composes: label from '../../../styles/type.module.css';
+  color: var(--danger);
+  margin-bottom: 6px;
+}
+
+.message {
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mini {
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  padding: 5px 9px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-elev);
+  color: var(--ink-2);
+  border-radius: var(--radius-control);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-hover) var(--ease-out);
+}
+
+.mini:hover {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.mini:active {
+  transform: scale(var(--m-press));
+  transition: transform var(--dur-hover) var(--ease-out);
+}
+
+.mini:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (hover: none) {
+  .mini {
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+}
+
+/* Phone (design 5, Batch and tiles; audit 13): a failure carries no image,
+   so it gives up the image footprint. The tile is as tall as
+   its content: icon and title on one line, the sentence, then the actions in
+   one compact row. Desktop keeps the tile footprint above. */
+@media (width < 768px) {
+  .frame,
+  .tile[data-moderation='true'] .frame {
+    aspect-ratio: auto;
+    min-height: 0;
+  }
+
+  .body {
+    position: static;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 8px;
+    padding: 12px 14px;
+  }
+
+  .icon {
+    display: flex;
+    margin-bottom: 0;
+  }
+
+  .title {
+    margin-bottom: 0;
+  }
+
+  .message {
+    grid-column: 1 / -1;
+    margin-top: 6px;
+  }
+
+  .actions {
+    grid-column: 1 / -1;
+    flex-wrap: nowrap;
+    margin-top: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile {
+    animation-duration: var(--dur-reduced);
+    animation-name: global(atelier-fade-in);
+  }
+
+  .body {
+    animation-duration: var(--dur-reduced);
+  }
+
+  .mini:active {
+    transform: none;
+  }
+}

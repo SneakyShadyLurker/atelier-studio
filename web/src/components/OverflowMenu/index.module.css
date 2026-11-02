@@ -1,0 +1,85 @@
+/* The More (⋯) action menu shared by BatchOverflowMenu and the text-model
+   rows. Shell (portal root, surface, popover, sheet, backdrop and their
+   motion) and the row variant live in styles/menuShell.module.css; only sizes,
+   danger and the submenu chevron are local. */
+.portalRoot {
+  composes: portalRoot from '../../styles/menuShell.module.css';
+}
+
+.panel {
+  composes: panel from '../../styles/menuShell.module.css';
+}
+
+.popover {
+  composes: popover from '../../styles/menuShell.module.css';
+  --menu-width: 208px;
+}
+
+.content {
+  composes: content from '../../styles/menuShell.module.css';
+}
+
+.sheet {
+  composes: sheet from '../../styles/menuShell.module.css';
+  --sheet-pad: 8px;
+  --sheet-pad-bottom: 18px;
+}
+
+.backdrop {
+  composes: backdrop from '../../styles/menuShell.module.css';
+}
+
+.groupLabel {
+  composes: groupLabel from '../../styles/menuShell.module.css';
+}
+
+.row {
+  composes: row from '../../styles/menuShell.module.css';
+}
+
+.row[data-danger='true'] {
+  color: var(--danger);
+}
+
+.row[data-danger='true'] .icon {
+  color: var(--danger);
+}
+
+.icon {
+  color: var(--danger);
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink-3);
+  flex: 0 0 auto;
+}
+
+.name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: var(--text-md);
+  line-height: 1;
+}
+
+.divider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--line);
+}
+
+@media (width < 768px) {
+  .row {
+    min-height: 48px;
+    font-size: var(--text-md);
+  }
+}

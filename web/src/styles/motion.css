@@ -1,0 +1,283 @@
+/* Shared motion vocabulary: the keyframes several components use, declared
+   once. CSS modules localise bare animation names, so a module references
+   these as `animation: global(atelier-fade-in) ...`; a bare name silently
+   resolves to nothing. Effects specific to one component (scan veils, drift,
+   AI-fill shimmer) stay local to its module.
+
+   Every translation, scale and blur amplitude reads the --m-* tokens, and
+   every duration and ease is a --dur-* / --ease-* token, so the single
+   reduced-motion rule set at the end of this file collapses all of them to a
+   short linear opacity change. Loops (spin, sweep, scan) cannot collapse that
+   way: their owners swap them for atelier-pulse or stop them. */
+
+@keyframes atelier-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes atelier-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes atelier-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Reduced-motion stand-in for atelier-spin. */
+@keyframes atelier-pulse {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@keyframes atelier-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes atelier-sheet-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+
+@keyframes atelier-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--m-shift)));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The leave of a panel that dropped in from above: back up, 2px. */
+@keyframes atelier-drop-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(calc(var(--m-shift) / -3));
+  }
+}
+
+@keyframes atelier-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--m-shift));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes atelier-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--m-shift));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes atelier-popover-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    /* 2px at the default shift. */
+    transform: translateY(calc(var(--m-shift) / 3));
+  }
+}
+
+@keyframes atelier-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--m-scale));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes atelier-scale-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    /* Half the enter amplitude (0.985 at the default scale). */
+    transform: scale(calc((1 + var(--m-scale)) / 2));
+  }
+}
+
+@keyframes atelier-shrink-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(var(--m-scale));
+  }
+}
+
+@keyframes atelier-tile-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--m-shift));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The image develops: grey and soft to the full print, no scale. */
+@keyframes atelier-img-in {
+  from {
+    opacity: 0;
+    filter: grayscale(1) blur(var(--m-blur));
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+/* A selection mark settles in place; no scale pop. */
+@keyframes atelier-check-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--m-scale));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Loader veils: a gradient band crossing the box horizontally / vertically. */
+@keyframes atelier-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+@keyframes atelier-scan {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(100%); }
+}
+
+/* View navigation (App.tsx <ViewTransition>). The stage owns its direction;
+   the Composer fades independently only when entering or leaving a view.
+   The root keeps no transition name, so the sidebar, toasts and overlays
+   stay live, and the pseudo-element tree never swallows input while the swap
+   plays. React names the boundaries and passes these classes. */
+:root {
+  view-transition-name: none;
+}
+
+::view-transition {
+  pointer-events: none;
+}
+
+@keyframes atelier-view-in-deeper {
+  from {
+    opacity: 0;
+    transform: translateX(var(--m-shift));
+  }
+}
+
+@keyframes atelier-view-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(calc(-1 * var(--m-shift)));
+  }
+}
+
+::view-transition-new(.view-enter-deeper) {
+  animation: atelier-view-in-deeper var(--dur-view) var(--ease-view) both;
+}
+
+::view-transition-new(.view-enter-back) {
+  animation: atelier-view-in-back var(--dur-view) var(--ease-view) both;
+}
+
+::view-transition-new(.view-enter-lateral) {
+  animation: atelier-fade-in var(--dur-view) var(--ease-view) both;
+}
+
+::view-transition-old(.view-exit) {
+  animation: atelier-fade-out var(--dur-view) var(--ease-view) both;
+}
+
+/* The dock's captured frame keeps its own size and position. Ordinary draft
+   edits and feed-scope changes do not activate this enter/exit-only boundary. */
+::view-transition-group(.composer-enter),
+::view-transition-group(.composer-exit) {
+  animation: none;
+}
+
+@keyframes atelier-composer-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes atelier-composer-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+::view-transition-new(.composer-enter) {
+  animation: atelier-composer-in var(--dur-overlay) var(--ease-out) both;
+}
+
+::view-transition-old(.composer-exit) {
+  animation: atelier-composer-out var(--dur-overlay) var(--ease-exit) both;
+}
+
+/* Reduced motion: one rule set. Amplitudes collapse to nothing and every
+   duration to --dur-reduced (transform channels to 0ms), so each keyframe
+   above becomes a short linear opacity change and every press holds still.
+   JS-timed exits read --dur-reduced through lib/overlayDuration.ts. What a
+   token cannot reach (sheet slides, loops) is handled by its owner. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --m-shift: 0px;
+    --m-scale: 1;
+    --m-blur: 0px;
+    --m-press: 1;
+    --m-press-icon: 1;
+    --m-press-row: 1;
+    --dur-hover: var(--dur-reduced);
+    --dur-overlay: var(--dur-reduced);
+    --dur-transform: 0ms;
+    --dur-view: var(--dur-reduced);
+    --dur-entrance: var(--dur-reduced);
+    --dur-sheet: var(--dur-reduced);
+    --dur-dialog: var(--dur-reduced);
+    --dur-settle: var(--dur-reduced);
+    --dur-rise: var(--dur-reduced);
+    --dur-reveal: var(--dur-reduced);
+    --ease-out: linear;
+    --ease-exit: linear;
+    --ease-tactile: linear;
+    --ease-view: linear;
+  }
+
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: var(--dur-reduced);
+    animation-timing-function: linear;
+  }
+}

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Mirrors web/index.html. Under Playwright's `isMobile: true` emulation a
+         page without it lays out at the 980px fallback viewport, so every
+         `@media (width < 768px)` rule silently fails to apply. (Specs that
+         set only `viewport` + `hasTouch` were already fine.) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Atelier overlay harness</title>
+  </head>
+  <body>
+    <div id="harness"></div>
+    <script type="module" src="./harness.tsx"></script>
+  </body>
+</html>

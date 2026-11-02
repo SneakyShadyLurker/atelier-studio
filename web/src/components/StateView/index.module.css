@@ -1,0 +1,123 @@
+.state {
+  /* Placement: the state centres in the space its container owns. Floor
+     first (a short or content-sized host still gives the plate room), then
+     the fill rules: a flex host grows it into the leftover space below an
+     in-flow header (PromptManager, Text models, an empty editor panel); a
+     state that is its host's only child (the Canvas scroller, whose bottom
+     padding is the composer reserve, and the Archive contents) fills that
+     host's content box, i.e. the area above the floating Composer. The
+     padding is the top gap when the host is shorter than the state.
+     :where() keeps the fill at single-class weight so parent-qualified
+     host rules (picker panel, crash card) still win. */
+  min-height: min(360px, max(0px, calc(100dvh - 160px)));
+  flex: 1 0 auto;
+  padding-block: 32px;
+  display: flex;
+  align-items: center;
+  /* safe: a state taller than its host overflows downward (scrollable)
+     instead of clipping its plate above the top edge. */
+  justify-content: safe center;
+  flex-direction: column;
+  gap: 18px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.state:where(:only-child) {
+  min-height: max(min(360px, max(0px, calc(100dvh - 160px))), 100%);
+}
+
+@media (width < 768px) {
+  .state {
+    padding-block: 24px;
+  }
+}
+
+/* The navigation stage owns spatial motion. A state can remount inside its
+   snapshot, so translating it here would make the art settle a second time. */
+.state {
+  animation: global(atelier-fade-in) var(--dur-overlay) var(--ease-out) both;
+}
+
+/* The plate: a debossed mat that frames the etching (design 1.1, 4.4). */
+.plate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  padding: 24px;
+  background: var(--bg-sunk);
+  border-radius: var(--radius-tile);
+  box-shadow: var(--plate-mark);
+}
+
+@media (width < 768px) {
+  .plate {
+    padding: 16px;
+  }
+}
+
+/* The plate at rest (design 5, State views): the loading state and
+   LazyFallback show the same empty mat, no glyph or spinner, so loading,
+   empty and error speak one language. It breathes with atelier-pulse, the
+   opacity-only loop motion.css names as the reduced-motion stand-in, so it
+   needs no reduced branch. */
+.restPlate {
+  composes: plate;
+  width: 96px;
+  aspect-ratio: 3 / 2;
+  animation: global(atelier-pulse) 1.6s ease-in-out infinite;
+}
+
+/* Icon-only states (view error fallbacks): the glyph alone, no medallion. */
+.glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+}
+
+/* Editorial display moment — the serif carries the "atelier" voice at the
+   few places the app speaks in a full sentence. */
+.state h2 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: var(--text-display);
+  letter-spacing: 0.005em;
+  line-height: 1.15;
+  text-wrap: balance;
+  color: var(--ink);
+  margin: 0;
+  max-width: 520px;
+}
+
+.state p {
+  max-width: 420px;
+  line-height: 1.55;
+  margin: 0;
+  font-size: var(--text-sm);
+  text-wrap: pretty;
+}
+
+.state code {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  /* Template tokens sit on the mat (design 5, Prompt library editors). */
+  background: var(--bg-sunk);
+  border-radius: var(--radius-control);
+  padding: 1px 5px;
+  color: var(--ink-2);
+}
+
+.state kbd {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-control);
+  padding: 2px 6px;
+  color: var(--ink-2);
+}

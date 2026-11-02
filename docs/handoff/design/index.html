@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Atelier — Image Generation</title>
+<style>
+  /* Self-hosted Atelier font subsets from the web app (no font CDN). */
+  @font-face {
+    font-family: 'Atelier Sans';
+    src: url('../../../web/public/fonts/AtelierSans-VF.woff2') format('woff2');
+    font-weight: 400 600;
+    font-display: swap;
+    font-style: normal;
+    unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+      U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+  }
+  @font-face {
+    font-family: 'Atelier Sans';
+    src: url('../../../web/public/fonts/AtelierSans-Italic-VF.woff2') format('woff2');
+    font-weight: 400 600;
+    font-display: swap;
+    font-style: italic;
+    unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+      U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+  }
+  @font-face {
+    font-family: 'Atelier Serif';
+    src: url('../../../web/public/fonts/AtelierSerif-VF.woff2') format('woff2');
+    font-weight: 400 600;
+    font-display: swap;
+    font-style: normal;
+    unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+      U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+  }
+  @font-face {
+    font-family: 'Atelier Code';
+    src: url('../../../web/public/fonts/AtelierCode-VF.woff2') format('woff2');
+    font-weight: 400 500;
+    font-display: swap;
+    font-style: normal;
+    unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+      U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+  }
+  :root {
+    --bg: #ebeae6;
+    --bg-elev: #f7f7f3;
+    --bg-sunk: #dedcd6;
+    --ink: #1b1d20;
+    --ink-2: #44474b;
+    --ink-3: #5c5f63;
+    --line: #d6d4ce;
+    --line-2: #c2c0b9;
+    /* Resting boundary for INTERACTIVE controls only (buttons, icon
+       buttons). --line/--line-2 are decorative dividers and exempt from
+       WCAG 1.4.11; a control boundary is not. Lightest cool grey clearing
+       3:1 against every surface a control boundary touches: --bg,
+       --bg-elev, and --bg-sunk (which is .icon's own fill, i.e. the
+       border's INNER neighbour). */
+    --line-control: #777a7e;
+    --accent: oklch(46% 0.085 195);
+    --accent-soft: oklch(93% 0.025 195);
+    --glass-surface: color-mix(in oklab, var(--bg-elev) 90%, transparent);
+    --glass-blur: blur(28px) saturate(0.6);
+    --danger: oklch(50% 0.15 28);
+    --danger-soft: oklch(94% 0.025 28);
+    /* --good: calibrated for graphical/dot use on light surfaces; not for inline text without a contrast check (use --good-on-ink for text on the --ink toast surface) */
+    --good: oklch(55% 0.11 150);
+    --good-on-ink: oklch(78% 0.14 150);
+    --radius-control: 3px;
+    --radius-tile: 5px;
+    --radius-panel: 8px;
+    --radius-sheet: 12px;
+    --shadow-1: 0 0 0 1px rgba(27,29,32,0.05), 0 1px 1px rgba(27,29,32,0.08);
+    --shadow-2: 0 1px 2px rgba(27,29,32,0.10), 0 10px 24px -14px rgba(27,29,32,0.28);
+    --shadow-3: 0 1px 2px rgba(27,29,32,0.12), 0 24px 48px -24px rgba(27,29,32,0.40);
+    --shadow-2-up: 0 -1px 2px rgba(27,29,32,0.10), 0 -10px 24px -14px rgba(27,29,32,0.28);
+    --plate-mark: inset 0 1px 1px rgba(27,29,32,0.14), inset 0 0 0 1px rgba(27,29,32,0.06), 0 1px 0 rgba(255,255,255,0.75);
+    --etch-ink: color-mix(in oklab, var(--ink) 72%, transparent);
+    --scrim: rgba(27,29,32,0.4);
+    --scrim-soft: rgba(27,29,32,0.32);
+    --scrim-tile: rgba(27,29,32,0.55);
+    --scrim-control: rgba(27,29,32,0.6);
+    --scrim-panel: rgba(27,29,32,0.7);
+    --scrim-strong: rgba(27,29,32,0.85);
+    --scrim-scan: rgba(27,29,32,0.06);
+    --scrim-on-image: rgba(0,0,0,0.32);
+    --shadow-text-on-image: 0 1px 2px rgba(0,0,0,0.55);
+    --glass-on-dark-6: rgba(255,255,255,0.06);
+    --glass-on-dark-8: rgba(255,255,255,0.08);
+    --glass-on-dark-10: rgba(255,255,255,0.10);
+    --glass-on-dark-12: rgba(255,255,255,0.12);
+    --glass-on-dark-15: rgba(255,255,255,0.15);
+    --glass-on-dark-34: rgba(255,255,255,0.34);
+    --glass-on-dark-35: rgba(255,255,255,0.35);
+    --glass-on-dark-65: rgba(255,255,255,0.65);
+    --glass-on-dark-70: rgba(255,255,255,0.7);
+    --glass-on-dark-75: rgba(255,255,255,0.75);
+    --glass-on-dark-85: rgba(255,255,255,0.85);
+    --glass-on-dark-90: rgba(255,255,255,0.9);
+    --glass-on-dark-100: rgba(255,255,255,1);
+    --shadow-photo: 0 40px 100px -20px rgba(0,0,0,0.5);
+    /* Focus ring color. Light mode = --ink (lamp black on plate paper).
+       Dark theme overrides to --ink-2 so focus stays clearly active without
+       flashing near-white against the graphite surface. */
+    --focus-ring: var(--ink);
+    --z-popover: 50;
+    --z-lightbox: 100;
+    --z-toast: 200;
+    --z-confirm: 250;
+    --z-composer: 5;
+    --z-drawer: 10;
+    --z-overlay-max: 1000;
+    --sidebar-width: 240px;
+    --app-header-h: 56px;
+    --tile-min: clamp(220px, 18vw, 320px);
+    --tile-cap: 72dvh;
+    --grid-gap: 14px;
+    --ease-out: cubic-bezier(.2,.8,.2,1);
+    --ease-exit: cubic-bezier(.4,0,1,1);
+    --ease-tactile: cubic-bezier(.2,.8,.2,1);
+    --ease-view: cubic-bezier(.22,1,.36,1);
+    --dur-hover: 120ms;
+    --dur-overlay: 160ms;
+    --dur-transform: 200ms;
+    --dur-view: 220ms;
+    --dur-entrance: 380ms;
+    --dur-sheet: 240ms;
+    --dur-dialog: 240ms;
+    --dur-settle: 280ms;
+    --dur-rise: 420ms;
+    --dur-reveal: 500ms;
+    --dur-reduced: 80ms;
+    --m-shift: 6px;
+    --m-scale: 0.97;
+    --m-blur: 6px;
+    --m-press: 0.98;
+    --m-press-icon: 0.94;
+    --m-press-row: 0.985;
+    --mono: 'Atelier Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'Atelier Sans', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    --serif: 'Atelier Serif', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+    --text-2xs: 0.6875rem;
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-md: 0.9375rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.375rem;
+    --text-display: 2rem;
+    --bp-phone: 767px;
+  }
+  @media (max-width: 767px) {
+    :root {
+      --tile-cap: 70dvh;
+      --grid-gap: 10px;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 15px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  button { font-family: inherit; font-size: inherit; cursor: pointer; }
+  input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+  ::selection { background: var(--ink); color: var(--bg); }
+
+  #root { height: 100%; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    // Load JSX manually then hand to Babel — sidesteps the in-browser Babel src loader,
+    // which fails on some serving contexts.
+    (async () => {
+      const res = await fetch('app.js');
+      const code = await res.text();
+      const s = document.createElement('script');
+      s.type = 'text/babel';
+      s.setAttribute('data-presets', 'react');
+      s.textContent = code;
+      document.body.appendChild(s);
+      // Trigger babel transform
+      if (window.Babel) {
+        window.Babel.transformScriptTags();
+      }
+    })();
+  </script>
+</body>
+</html>

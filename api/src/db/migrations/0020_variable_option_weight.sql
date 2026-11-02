@@ -1,0 +1,4 @@
+ALTER TABLE variable_options
+  ADD COLUMN weight INTEGER NOT NULL
+  DEFAULT 1
+  CHECK(weight BETWEEN 1 AND 100);

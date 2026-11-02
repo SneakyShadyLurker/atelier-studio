@@ -1,0 +1,32 @@
+.inline,
+.overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--ink-3);
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.inline {
+  min-height: 100%;
+  background: var(--bg);
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-confirm);
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  animation: global(atelier-fade-in) var(--dur-overlay) var(--ease-out) both;
+}
+
+/* The plate at rest: StateView owns it (the loading state shows the same). */
+.plate {
+  composes: restPlate from '../StateView/index.module.css';
+}

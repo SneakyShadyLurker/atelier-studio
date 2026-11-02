@@ -1,0 +1,33 @@
+/* The plate at rest (design 3.3): the loading tile's mat and plate mark,
+   without the wipe. Monochrome, no gradient. */
+.queued {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-sunk);
+  box-shadow: var(--plate-mark);
+  overflow: hidden;
+}
+
+.text {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--glass-on-dark-100);
+  /* Same contrast backing as LoadingTile. */
+  background:
+    linear-gradient(var(--scrim-on-image), var(--scrim-on-image)),
+    linear-gradient(var(--scrim-on-image), var(--scrim-on-image)),
+    var(--scrim-on-image);
+  padding: 4px 6px;
+  border-radius: var(--radius-control);
+  text-shadow: var(--shadow-text-on-image);
+  letter-spacing: 0;
+  z-index: 1;
+}

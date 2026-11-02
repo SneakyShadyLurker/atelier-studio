@@ -1,0 +1,20 @@
+# Atelier access-control rule fragment.
+# Merge into your Authelia config under `access_control.rules:`.
+#
+# Why `domain_regex` and not `domain: atelier.*`: Authelia's `domain` field accepts only exact domains or LEADING wildcards
+# (`*.example.com`) per the access-control schema, NOT trailing wildcards.
+# A literal `atelier.*` would either be rejected by Authelia at config-load
+# time or silently fall through to default_policy. We use `domain_regex`
+# instead so it matches `atelier.<your-parent-domain>` cleanly. Replace
+# the regex (or pin to the exact FQDN) for your parent domain before
+# deploy.
+#
+# Reference: https://www.authelia.com/configuration/security/access-control/
+
+- domain_regex: '^atelier\.[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
+  policy: one_factor
+  # Audience is "any authenticated user". Tighten by uncommenting `groups`
+  # and adding the user(s) to the matching group in your Authelia user
+  # database.
+  # groups:
+  #   - atelier

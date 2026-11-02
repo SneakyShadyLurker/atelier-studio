@@ -1,0 +1,102 @@
+/* Shell (portal root, surface, popover, sheet, backdrop and their motion)
+   and the row variant live in styles/menuShell.module.css; only sizes, the
+   current row, the inline create/rename input and the check are local. */
+.portalRoot {
+  composes: portalRoot from '../../styles/menuShell.module.css';
+}
+
+.panel {
+  composes: panel from '../../styles/menuShell.module.css';
+}
+
+.popover {
+  composes: popover from '../../styles/menuShell.module.css';
+  --menu-width: 220px;
+}
+
+.content {
+  composes: content from '../../styles/menuShell.module.css';
+}
+
+.sheet {
+  composes: sheet from '../../styles/menuShell.module.css';
+  --sheet-pad: 10px;
+  --sheet-pad-bottom: 18px;
+}
+
+.backdrop {
+  composes: backdrop from '../../styles/menuShell.module.css';
+}
+
+.header {
+  composes: groupLabel from '../../styles/menuShell.module.css';
+  padding: 8px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  composes: row from '../../styles/menuShell.module.css';
+}
+
+.row[data-current='true'] {
+  background: var(--bg-sunk);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink);
+  animation: global(atelier-check-in) var(--dur-sheet) var(--ease-out) both;
+}
+
+.name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.divider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--line);
+}
+
+.newButton {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.input {
+  width: 100%;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 0 9px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font-size: var(--text-xs);
+}
+
+@media (hover: none) {
+  .input {
+    font-size: var(--text-base);
+  }
+}
+
+@media (width < 768px) {
+  .input {
+    font-size: var(--text-base);
+  }
+}

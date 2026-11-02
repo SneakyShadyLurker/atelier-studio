@@ -1,0 +1,40 @@
+# Example host override. Copy to docker-compose.override.yml beside
+# docker-compose.yml (compose merges it automatically) and adjust the values
+# for the host. Every path and port below is a placeholder.
+
+services:
+  atelier-api:
+    # Pin the image platform when the host needs it. On an arm64 host,
+    # uncomment this line (and the matching one under atelier-web).
+    # platform: linux/arm64
+
+    # The api's /tmp tmpfs (4 GiB) counts against this limit; keep the limit
+    # well above it.
+    mem_limit: 8g
+    cpus: 4
+
+    # Optional direct access from the host itself. The reverse proxy reaches
+    # the containers over the shared network, so nothing is published by
+    # default; if you publish, bind to loopback only.
+    # ports:
+    #   - "127.0.0.1:8787:8787"
+
+    environment:
+      COMFYUI_MODELS_DIR: /run/comfyui-models
+
+    # Optional local model manifests (docs/local-models.md). The directory is
+    # mounted read-only; the api only reads it.
+    volumes:
+      - type: bind
+        source: ${COMFYUI_MODELS_HOST_DIR:-/srv/atelier/comfyui-models}
+        target: /run/comfyui-models
+        read_only: true
+        bind:
+          create_host_path: false
+
+  atelier-web:
+    # platform: linux/arm64
+    mem_limit: 512m
+    cpus: 1
+    # ports:
+    #   - "127.0.0.1:8788:80"

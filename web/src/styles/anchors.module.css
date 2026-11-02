@@ -1,0 +1,90 @@
+/* Native CSS anchor positioning for element-anchored popover panels
+   (docs/native-anchors.md). Everything geometric lives here: the preferred
+   side, the alternate placements, viewport-edge clearance, trigger-width
+   matching and the height budget for a panel too tall for its side. A
+   component applies `.panel` with a data-anchor-place value in its desktop
+   popover mode only; phone sheets never carry it.
+
+   The anchor is either the panel's implicit anchor (a manual popover shown
+   with showPopover({ source }) by useAnchoredPopover: data-anchored="source")
+   or a name the owner declares on both ends in --named-anchor (ChipSelect:
+   data-anchored="name"). A panel with neither keeps the nonanchored base.
+
+   Placements (gap 8px toward the trigger, 12px clear of the far edges):
+     below-end    below, right edges aligned (More menu, Move popover)
+     below-start  below, left edges aligned (axis values)
+     above-start  above, left edges aligned (composer chip menus)
+   Each placement stays content-sized up to its side's height budget. Native
+   tactics try the opposite side, then the horizontal mirrors when needed.
+   A 120px usable-height floor rejects cramped sides, reduced to half the
+   window's free height in very short windows so at least one side fits.
+   Chip menus raise that floor to half the free height, capped by content,
+   so they grow or flip before scrolling on an unnecessarily cramped side.
+   Base plus three candidates stays within CSSWG's guaranteed five-option
+   minimum; a longer list can be truncated by an engine. */
+
+/* Every engine, and the whole placement where there is no anchor: a centred
+   panel that scrolls. Focus trap, roving keys, Escape and outside-pointer
+   dismissal are unchanged; only the relationship to the trigger is lost.
+   Zero specificity, so a component's own width or tighter cap (the axis
+   menu's) wins. */
+:where(.panel[data-anchor-place]) {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+}
+
+:where(.panel[data-anchor-width='trigger']) {
+  width: fit-content;
+}
+
+/* Selectors are class + attributes so they outrank a component's own
+   single-class popover rule without relying on stylesheet order. */
+@supports (anchor-name: --a) and (position-area: top) and (position-try-fallbacks: flip-block) {
+  .panel[data-anchor-place][data-anchored] {
+    /* Explicit, never the engine's initial value: `auto` is the implicit
+       anchor, and an owner's declared name takes precedence. */
+    position-anchor: var(--named-anchor, auto);
+    inset: auto;
+    /* Keep sizing in the normal style, not a @position-try override: WebKit
+       can leave focused controls clipped when a try changes sizing.
+       Percentages resolve against whichever native area the tactics choose. */
+    height: min(var(--anchor-height-limit, 100dvh), max(min(var(--anchor-height-floor, 120px), calc((100dvh - anchor-size(height, 0px) - 40px) / 2)), calc(100% - 20px)));
+    max-height: max-content;
+    position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  }
+
+  .panel[data-anchor-place='below-end'][data-anchored] {
+    --anchor-area: bottom span-left;
+    --anchor-margin: 8px 0 0 12px;
+    position-area: var(--anchor-area);
+    margin: var(--anchor-margin);
+  }
+
+  .panel[data-anchor-place='below-start'][data-anchored] {
+    --anchor-area: bottom span-right;
+    --anchor-margin: 8px 12px 0 0;
+    position-area: var(--anchor-area);
+    margin: var(--anchor-margin);
+  }
+
+  .panel[data-anchor-place='above-start'][data-anchored] {
+    --anchor-area: top span-right;
+    --anchor-margin: 12px 12px 8px 0;
+    position-area: var(--anchor-area);
+    margin: var(--anchor-margin);
+  }
+
+  /* Content width, at least the trigger's, never squeezed by a narrow side:
+     a menu that does not fit mirrors instead of wrapping. */
+  .panel[data-anchor-width='trigger'][data-anchored] {
+    --anchor-height-floor: 100dvh;
+    width: max-content;
+    min-width: anchor-size(width);
+    max-width: calc(100vw - 24px);
+  }
+}

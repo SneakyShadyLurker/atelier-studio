@@ -1,0 +1,239 @@
+.archive {
+  composes: inset from '../ManagedViewHeader/index.module.css';
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.contents {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 24px;
+}
+
+.emptyButton {
+  border-radius: var(--radius-control);
+  padding: 5px 10px;
+  font-size: var(--text-xs);
+  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), opacity var(--dur-hover) var(--ease-out);
+}
+
+/* Touch capability (not viewport width) mandates the 44px floor — covers iPad
+   landscape and touch laptops at >=768px. Visual size stays compact on pointer
+   devices; only the hit area grows. */
+@media (hover: none) {
+  .emptyButton {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
+
+.virtualGrid {
+  position: relative;
+}
+
+.virtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: grid;
+  gap: var(--grid-gap);
+}
+
+/* The feed tile shell (surface, border, radius, transitions, entrance);
+   Archive keeps only its geometry: the virtual grid track sizes the frame,
+   so the feed's --tile-cap width and centring do not apply. */
+.tile {
+  composes: shell from '../tile/shell.module.css';
+  width: auto;
+  margin-inline: 0;
+  cursor: zoom-in;
+  animation: none;
+}
+
+.media {
+  position: relative;
+}
+
+.tile:hover {
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-2px);
+}
+
+.frame:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-tile);
+}
+
+.tile:has(.frame:focus-visible) {
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-2);
+}
+
+.tileLeaving {
+  pointer-events: none;
+  animation: global(atelier-shrink-out) var(--dur-sheet) var(--ease-out) both;
+}
+
+.frame {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: var(--bg-sunk);
+  color: inherit;
+  cursor: zoom-in;
+  display: block;
+  position: relative;
+  overflow: hidden;
+  text-align: inherit;
+}
+
+.frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity var(--dur-hover) var(--ease-out);
+}
+
+.frame img.imageLoaded {
+  opacity: 1;
+}
+
+.skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, var(--bg-sunk) 25%, var(--bg-elev) 45%, var(--bg-sunk) 65%);
+  transition: opacity var(--dur-hover) var(--ease-out);
+}
+
+.skeletonHidden {
+  opacity: 0;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-overlay) var(--ease-out);
+  background: linear-gradient(180deg, transparent 60%, var(--scrim-tile) 100%);
+}
+
+.tile:hover .overlay,
+.tile:focus-within .overlay {
+  opacity: 1;
+}
+
+.actions {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.identity {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px 11px;
+  cursor: default;
+}
+
+.identity .prompt {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity .prompt > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tile meta: a Meta list (type.module.css .meta) on one line, model name
+   first, archived date pinned to the end. */
+.identity > .meta {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.identity > .meta > li {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity > .meta > li:last-child {
+  flex-shrink: 0;
+}
+
+@media (width < 768px) {
+  .archive {
+    padding: 0 14px;
+  }
+
+  .contents {
+    padding-bottom: 20px;
+  }
+
+  .virtualRow {
+    gap: 10px;
+  }
+}
+
+@media (hover: none) {
+  .overlay {
+    opacity: 0.7;
+  }
+
+  .actions {
+    opacity: 1;
+  }
+
+  .tile:active {
+    transform: scale(var(--m-press-row));
+    transition: transform var(--dur-hover) var(--ease-out);
+  }
+}
+
+@media (hover: none) and (prefers-reduced-motion: reduce) {
+  .tile:active {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile {
+    animation-duration: var(--dur-reduced);
+    animation-name: global(atelier-fade-in);
+  }
+
+  /* .tileLeaving needs no rule: under reduced motion Archive hides the tile
+     at once, and motion.css already collapses atelier-shrink-out to opacity. */
+
+  .frame img.imageLoaded {
+    animation-duration: var(--dur-reduced);
+    animation-name: global(atelier-fade-in);
+    filter: none;
+  }
+
+  .tile:hover {
+    transform: none;
+  }
+}

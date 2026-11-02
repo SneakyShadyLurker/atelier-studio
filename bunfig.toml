@@ -1,0 +1,6 @@
+[install]
+exact = true
+
+[test]
+# Same per-run temp root as api/bunfig.toml for `bun test` run from the root.
+preload = ["./api/src/test/preload.ts"]

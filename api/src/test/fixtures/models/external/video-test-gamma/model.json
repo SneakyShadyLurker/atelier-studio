@@ -1,0 +1,46 @@
+{
+  "id": "video-test-gamma",
+  "name": "Video Test Gamma Override",
+  "family": "video",
+  "residencyKey": "video-test",
+  "saveImageNodeId": "15",
+  "requiredPlaceholders": [
+    "{{prompt}}",
+    "{{seed}}",
+    "{{width}}",
+    "{{height}}",
+    "{{videoFrames}}",
+    "{{steps}}"
+  ],
+  "defaultSteps": 8,
+  "ratioMap": "h3-768p",
+  "supportedRatios": [
+    "1:1",
+    "4:5",
+    "3:4",
+    "16:9",
+    "9:16"
+  ],
+  "supportedDurations": [
+    124,
+    243,
+    362
+  ],
+  "defaultDuration": 124,
+  "size": "test video",
+  "latency": "slow",
+  "batched": false,
+  "defaultCount": 1,
+  "outputKind": "video",
+  "graphs": {
+    "base": "workflow.json"
+  },
+  "requiredModelFiles": [
+    "test-video-unet.safetensors",
+    "test-video-encoder.safetensors",
+    "test-video-vae.safetensors",
+    "test-audio-vae.safetensors"
+  ],
+  "requiredClipType": "minimax",
+  "overrides": true
+}

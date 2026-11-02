@@ -1,0 +1,305 @@
+/* A batch is a sheet laid on the feed's table (design 1.2, 5 "Batch and
+   tiles"): --bg-elev with the resting contact shadow and the panel radius.
+   The sheet's padding and the inter-batch gap (margin) both live on .batch,
+   inside the virtualizer's measured .virtualBatch row: that row is absolutely
+   positioned, so it is a block formatting context and the margin does not
+   collapse through it; measureElement sees the whole footprint. The sheet's
+   edge marks the chapter break, so no hairline sits in the gap. */
+.batch {
+  animation: batch-in var(--dur-entrance) var(--ease-out) both;
+  scroll-margin-top: 12px;
+  position: relative;
+  margin-top: 28px;
+  padding: 16px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-1);
+  border-radius: var(--radius-panel);
+}
+
+.batch[data-first='true'] {
+  margin-top: 0;
+}
+
+.batch[data-seen='true'] {
+  animation: none;
+}
+
+@keyframes batch-in {
+  from { opacity: 0; transform: translateY(var(--m-shift)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .batch {
+    animation-duration: var(--dur-reduced);
+    animation-name: global(atelier-fade-in);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+/* Batch prompt heading: data, so the sans at --text-md 500 (the serif is kept
+   for the four display moments). */
+.prompt {
+  font-family: var(--sans);
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.45;
+  flex: 1;
+  min-width: 0;
+  /* BatchPrompt declares its own per-instance name inline (--prompt-anchor)
+     while its element card is open; every other prompt has none. */
+  anchor-name: var(--prompt-anchor, none);
+}
+
+.promptText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Cursor-following full-prompt reveal (BatchPrompt). Portalled to <body>, so
+   it escapes the feed scroller's clip, and kept in the page's popover layer
+   below the global toast stack (--z-toast), so it never covers an Undo.
+   Readable prose card on app tokens, distinct from the [data-tip] label
+   primitive (a short sans label). Pointer, keyboard, and touch
+   activation are truncation-gated in the component. Hoverable: the pointer
+   can move onto it to read and scroll a long prompt in place. Without anchor
+   positioning the card rests top-centre, still readable and still dismissed
+   the same way. */
+.promptTip {
+  position: fixed;
+  inset: 12px 0 auto;
+  margin: 0 auto;
+  width: max-content;
+  max-width: min(46ch, 80vw);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: calc(var(--z-popover) + 1);
+  padding: 12px 14px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-photo);
+  animation: global(atelier-fade-in) var(--dur-hover) var(--ease-out);
+}
+
+/* Zero-size stand-in for the pointer: BatchPrompt writes the pointer's client
+   coordinates to left/top, and the card anchors to it by the name it
+   declares in pointer mode. */
+.promptCursor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  anchor-name: var(--prompt-anchor, none);
+}
+
+/* Below-right of the pointer (16px off it) or flush under the prompt (8px
+   gap), 12px clear of the viewport edges. Flips above, then to the other
+   side, when it would overflow; a card taller than either side pins to the
+   top edge and scrolls. Content width, never squeezed by a narrow side: a
+   card that does not fit flips instead of wrapping into a sliver. The anchor
+   is the instance's --prompt-anchor name, declared only by the active
+   source: the stand-in or the prompt. */
+@supports (anchor-name: --a) and (position-area: top) and (position-try-fallbacks: flip-block) {
+  .promptTip[data-anchored] {
+    position-anchor: var(--prompt-anchor);
+    inset: auto;
+    position-area: bottom span-right;
+    position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline, --prompt-tip-tall;
+  }
+
+  .promptTip[data-anchored][data-anchor='pointer'] {
+    margin: 16px 12px 12px 16px;
+  }
+
+  /* A prompt scrolled out of the feed's clip takes its card with it. Not the
+     pointer stand-in: it has no box to be clipped. */
+  .promptTip[data-anchored][data-anchor='element'] {
+    margin: 8px 12px 12px 0;
+    position-visibility: anchors-visible;
+  }
+}
+
+@position-try --prompt-tip-tall {
+  position-area: span-all;
+  justify-self: anchor-center;
+  align-self: start;
+  margin: 12px;
+  max-height: calc(100% - 24px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promptTip {
+    animation: none;
+  }
+}
+
+/* Model, ratio, chips, time and collection as a Meta list
+   (type.module.css .meta); items keep their own interactive chrome. */
+.header > .meta {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.header > .meta > li {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.metaCol {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color var(--dur-hover) var(--ease-out);
+}
+
+.metaColName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metaCol:hover,
+.metaCol:focus-visible {
+  color: var(--ink);
+}
+
+.metaProvenance {
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modelName {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.queueBadge {
+  color: var(--ink-2);
+}
+
+.sequenceChip {
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+}
+
+.grid {
+  display: grid;
+  gap: var(--grid-gap);
+  grid-template-columns: 1fr;
+}
+
+@container feed (min-width: 480px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--tile-min)), 1fr));
+  }
+}
+
+@container feed (min-width: 920px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .grid[data-tile-count='1'] > * {
+    grid-column: span 2;
+    /* A lone tile spans two tracks, so on a short window the 72dvh cap alone
+       lets it outgrow the room above the composer and the end-anchored feed
+       clips its header. Also cap it by that room: the window minus the
+       composer's reserved height and the canvas padding (14px), inter-batch
+       gap (28px), sheet padding (2 x 16px), batch header (36px) and composer
+       gap (24px) above and below it.
+       220px keeps very short windows from shrinking it to a thumbnail. */
+    --tile-cap: min(72dvh, max(220px, calc(100dvh - var(--composer-top, 156px) - 136px)));
+    /* A capped lone tile is narrower than its span; keep it under the batch
+       header's left edge instead of centring it in the empty span. */
+    margin-inline: 0 auto;
+  }
+}
+
+@media (width < 768px) {
+  /* Phone: the sheet keeps its edge but gives the tiles more of the narrow
+     column (12px in, 20px between sheets). */
+  .batch {
+    scroll-margin-top: calc(var(--app-header-h) + 12px);
+    margin-top: 20px;
+    padding: 12px;
+  }
+
+  .batch[data-first='true'] {
+    margin-top: 0;
+  }
+
+  .header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    align-items: flex-start;
+  }
+
+  .prompt {
+    flex: 0 0 100%;
+  }
+
+  .promptText {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  /* The meta row shares a line with the actions on a phone: let its chips
+     wrap and a long collection name truncate instead of running off-screen. */
+  .header > .meta {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .metaCol {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .actions {
+    margin-left: auto;
+  }
+
+  .header > .meta > li:has(> .metaTime) {
+    display: none;
+  }
+}

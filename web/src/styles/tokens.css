@@ -1,0 +1,215 @@
+/* Atelier Sans / Atelier Serif / Atelier Code: subset variable WOFF2 builds of
+   Adobe's Source Sans 3, Source Serif 4 and Source Code Pro (OFL 1.1). The OFL
+   reserves the name "Source" for modified versions, so the subsets carry
+   renamed families; provenance, build script and license text are in
+   web/public/fonts/LICENSE-fonts.txt. Axes: sans wght 400-600, serif wght
+   400-600 with opsz pinned at 20 (no serif italic: nothing uses it), code wght
+   400-500. Glyphs cover Latin, Latin Extended-A, punctuation, currency, arrows,
+   maths, technical, box and geometric symbols; unicode-range mirrors that set,
+   so anything else falls back to the next face in the stack. */
+@font-face {
+  font-family: 'Atelier Sans';
+  src: url('/fonts/AtelierSans-VF.woff2') format('woff2');
+  font-weight: 400 600;
+  font-display: swap;
+  font-style: normal;
+  unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+    U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Atelier Sans';
+  src: url('/fonts/AtelierSans-Italic-VF.woff2') format('woff2');
+  font-weight: 400 600;
+  font-display: swap;
+  font-style: italic;
+  unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+    U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Atelier Serif';
+  src: url('/fonts/AtelierSerif-VF.woff2') format('woff2');
+  font-weight: 400 600;
+  font-display: swap;
+  font-style: normal;
+  unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+    U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Atelier Code';
+  src: url('/fonts/AtelierCode-VF.woff2') format('woff2');
+  font-weight: 400 500;
+  font-display: swap;
+  font-style: normal;
+  unicode-range: U+0000-017F, U+0192, U+02C6-02DC, U+2000-206F, U+20A0-20CF, U+2100-214F,
+    U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
+}
+
+  :root {
+    --bg: #ebeae6;
+    --bg-elev: #f7f7f3;
+    --bg-sunk: #dedcd6;
+    --ink: #1b1d20;
+    --ink-2: #44474b;
+    --ink-3: #5c5f63;
+    --line: #d6d4ce;
+    --line-2: #c2c0b9;
+    /* Resting boundary for INTERACTIVE controls only (buttons, icon
+       buttons). --line/--line-2 are decorative dividers and exempt from
+       WCAG 1.4.11; a control boundary is not. Lightest cool grey clearing
+       3:1 against every surface a control boundary touches: --bg,
+       --bg-elev, and --bg-sunk (which is .icon's own fill, i.e. the
+       border's INNER neighbour). */
+    --line-control: #777a7e;
+    --accent: oklch(46% 0.085 195);
+    --accent-soft: oklch(93% 0.025 195);
+    --glass-surface: color-mix(in oklab, var(--bg-elev) 90%, transparent);
+    --glass-blur: blur(28px) saturate(0.6);
+    --danger: oklch(50% 0.15 28);
+    --danger-soft: oklch(94% 0.025 28);
+    /* --good: calibrated for graphical/dot use on light surfaces; not for inline text without a contrast check (use --good-on-ink for text on the --ink toast surface) */
+    --good: oklch(55% 0.11 150);
+    --good-on-ink: oklch(78% 0.14 150);
+    --radius-control: 3px;
+    --radius-tile: 5px;
+    --radius-panel: 8px;
+    --radius-sheet: 12px;
+    --shadow-1: 0 0 0 1px rgba(27,29,32,0.05), 0 1px 1px rgba(27,29,32,0.08);
+    --shadow-2: 0 1px 2px rgba(27,29,32,0.10), 0 10px 24px -14px rgba(27,29,32,0.28);
+    --shadow-3: 0 1px 2px rgba(27,29,32,0.12), 0 24px 48px -24px rgba(27,29,32,0.40);
+    --shadow-2-up: 0 -1px 2px rgba(27,29,32,0.10), 0 -10px 24px -14px rgba(27,29,32,0.28);
+    --plate-mark: inset 0 1px 1px rgba(27,29,32,0.14), inset 0 0 0 1px rgba(27,29,32,0.06), 0 1px 0 rgba(255,255,255,0.75);
+    --etch-ink: color-mix(in oklab, var(--ink) 72%, transparent);
+    --scrim: rgba(27,29,32,0.4);
+    --scrim-soft: rgba(27,29,32,0.32);
+    --scrim-tile: rgba(27,29,32,0.55);
+    --scrim-control: rgba(27,29,32,0.6);
+    --scrim-panel: rgba(27,29,32,0.7);
+    --scrim-strong: rgba(27,29,32,0.85);
+    --scrim-scan: rgba(27,29,32,0.06);
+    --scrim-on-image: rgba(0,0,0,0.32);
+    --shadow-text-on-image: 0 1px 2px rgba(0,0,0,0.55);
+    --glass-on-dark-6: rgba(255,255,255,0.06);
+    --glass-on-dark-8: rgba(255,255,255,0.08);
+    --glass-on-dark-10: rgba(255,255,255,0.10);
+    --glass-on-dark-12: rgba(255,255,255,0.12);
+    --glass-on-dark-15: rgba(255,255,255,0.15);
+    --glass-on-dark-34: rgba(255,255,255,0.34);
+    --glass-on-dark-35: rgba(255,255,255,0.35);
+    --glass-on-dark-65: rgba(255,255,255,0.65);
+    --glass-on-dark-70: rgba(255,255,255,0.7);
+    --glass-on-dark-75: rgba(255,255,255,0.75);
+    --glass-on-dark-85: rgba(255,255,255,0.85);
+    --glass-on-dark-90: rgba(255,255,255,0.9);
+    --glass-on-dark-100: rgba(255,255,255,1);
+    --shadow-photo: 0 40px 100px -20px rgba(0,0,0,0.5);
+    /* Focus ring color. Light mode = --ink (lamp black on plate paper).
+       Dark theme overrides to --ink-2 so focus stays clearly active without
+       flashing near-white against the graphite surface. */
+    --focus-ring: var(--ink);
+    --z-popover: 50;
+    --z-lightbox: 100;
+    --z-toast: 200;
+    --z-confirm: 250;
+    --z-composer: 5;
+    --z-drawer: 10;
+    --z-overlay-max: 1000;
+    --sidebar-width: 240px;
+    --app-header-h: 56px;
+    --tile-min: clamp(220px, 18vw, 320px);
+    --tile-cap: 72dvh;
+    --grid-gap: 14px;
+    --ease-out: cubic-bezier(.2,.8,.2,1);
+    --ease-exit: cubic-bezier(.4,0,1,1);
+    --ease-tactile: cubic-bezier(.2,.8,.2,1);
+    --ease-view: cubic-bezier(.22,1,.36,1);
+    --dur-hover: 120ms;
+    --dur-overlay: 160ms;
+    --dur-transform: 200ms;
+    --dur-view: 220ms;
+    --dur-entrance: 380ms;
+    --dur-sheet: 240ms;
+    --dur-dialog: 240ms;
+    --dur-settle: 280ms;
+    --dur-rise: 420ms;
+    --dur-reveal: 500ms;
+    --dur-reduced: 80ms;
+    --m-shift: 6px;
+    --m-scale: 0.97;
+    --m-blur: 6px;
+    --m-press: 0.98;
+    --m-press-icon: 0.94;
+    --m-press-row: 0.985;
+    --mono: 'Atelier Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'Atelier Sans', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    --serif: 'Atelier Serif', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+    --text-2xs: 0.6875rem;
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-md: 0.9375rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.375rem;
+    --text-display: 2rem;
+    --bp-phone: 767px;
+  }
+
+/* Print-room palette. Light = plate paper: a cool table (--bg), a lighter
+   laid sheet (--bg-elev), a darker mat (--bg-sunk), lamp-black ink at three
+   dilutions, verdigris (--accent) for AI actions only, sanguine danger.
+   Dark = the plate: graphite surfaces with the same jobs and pale ink.
+   Contrast, sRGB relative luminance (light / dark):
+     --ink on --bg 14.0 / 14.3; --ink-2 on --bg 7.8 / 9.4;
+     --ink-3 on --bg 5.3 / 5.8, on --bg-elev 6.0 / 5.3, on --bg-sunk 4.7 / 6.4;
+     --line-control on --bg 3.6 / 4.0, on --bg-elev 4.0 / 3.6, on --bg-sunk 3.1 / 4.3;
+     --accent on --bg 5.6 / 7.7, on --accent-soft 5.6 / 6.9;
+     --danger on --bg 5.4 / 6.5, on --danger-soft 5.4 / 6.3;
+     --good-on-ink on --ink 8.9 / 4.9. --good is graphical only in light.
+   Text pairs clear WCAG AA and control boundaries clear 3:1 in both themes.
+   Shadows are ink-tinted contact shadows in light and stay pure black in
+   dark. --etch-ink is one token with a lighter dilution in dark, so one mask
+   asset serves both themes.
+   Activated by an inline bootstrap script in index.html that resolves
+   localStorage('atelier.theme') ?? prefers-color-scheme before React mounts
+   (prevents FOUC). */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #1a1c1f;
+  --bg-elev: #222527;
+  --bg-sunk: #111315;
+  --ink: #ecebe6;
+  --ink-2: #c0c1bc;
+  --ink-3: #95979a;
+  --line: #2d3033;
+  --line-2: #3b3f43;
+  --line-control: #767a7e;
+  --accent: oklch(74% 0.09 195);
+  --accent-soft: oklch(26% 0.03 195);
+  --danger: oklch(72% 0.14 28);
+  --danger-soft: oklch(24% 0.04 28);
+  --good: oklch(72% 0.11 150);
+  --good-on-ink: oklch(49% 0.13 150);
+  --focus-ring: var(--ink-2);
+  --shadow-1: 0 1px 0 rgba(0,0,0,0.30), 0 1px 2px rgba(0,0,0,0.22);
+  --shadow-2: 0 8px 28px -10px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.30);
+  --shadow-3: 0 30px 80px -20px rgba(0,0,0,0.75), 0 8px 20px rgba(0,0,0,0.40);
+  --shadow-2-up: 0 -8px 28px -10px rgba(0,0,0,0.55), 0 -2px 6px rgba(0,0,0,0.30);
+  --plate-mark: inset 0 1px 1px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.05), 0 1px 0 rgba(255,255,255,0.05);
+  --etch-ink: color-mix(in oklab, var(--ink) 62%, transparent);
+  /* Ink-tinted scan sweep reads as dark-on-dark against the dark frame; flip
+     to a faint white sweep at the same alpha so the motion stays a signal. */
+  --scrim-scan: var(--glass-on-dark-6);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+@media (width < 768px) {
+  :root {
+    --tile-cap: 70dvh;
+    --grid-gap: 10px;
+  }
+}

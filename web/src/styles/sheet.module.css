@@ -1,0 +1,38 @@
+/* Bottom-sheet primitive: the phone (or short-viewport) form of an overlay.
+   Owners compose `.sheet` and set only custom properties:
+     --sheet-max-h       ceiling (default 60dvh)
+     --sheet-pad         top and side padding (default 0)
+     --sheet-pad-bottom  bottom padding above the safe-area inset (default 0)
+     --sheet-border      top border colour (default --line)
+   The safe-area bottom padding (docs/web-conventions.md) and the --keyboard-inset lift live
+   here once. Owners keep their full border on the popover form only, so it
+   never overrides this top-only border. Dismissal (backdrop click, not
+   useOutsidePointer) stays with the components. */
+
+.sheet {
+  composes: surface from './surface.module.css';
+  --surface-from: translateY(var(--sheet-shift, 100%));
+  --surface-to: translateY(var(--sheet-shift, 100%));
+  --surface-duration: var(--dur-sheet);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--keyboard-inset, 0);
+  max-height: var(--sheet-max-h, 60dvh);
+  border-top: 1px solid var(--sheet-border, var(--line));
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  padding: var(--sheet-pad, 0px) var(--sheet-pad, 0px) calc(var(--sheet-pad-bottom, 0px) + env(safe-area-inset-bottom));
+}
+
+/* Designed leave (useExitTransition stamps data-closing for --dur-overlay). */
+.sheet[data-closing='true'] {
+  pointer-events: none;
+}
+
+/* Reduced motion: a full-height slide is not an --m-* amplitude, so this
+   owner swaps it for the short opacity-only fade itself. */
+@media (prefers-reduced-motion: reduce) {
+  .sheet {
+    --sheet-shift: 0px;
+  }
+}

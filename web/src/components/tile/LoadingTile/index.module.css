@@ -1,0 +1,357 @@
+.tile {
+  composes: shell from '../shell.module.css';
+  cursor: default;
+}
+
+.frame {
+  width: 100%;
+  background: var(--bg-sunk);
+  display: block;
+  position: relative;
+  overflow: hidden;
+  /* Width comes from the parent and height from aspect-ratio, so inline-size
+     containment changes no sizing; it lets the status pill shed fields on
+     narrow tiles. */
+  container-type: inline-size;
+}
+
+/* The plate (design 1.1, 3.3): a debossed mat with one --scrim-scan band
+   wiping across it diagonally. Monochrome; colour arrives with the image. */
+.loading {
+  position: absolute;
+  inset: 0;
+  background-color: var(--bg-sunk);
+  box-shadow: var(--plate-mark);
+  overflow: hidden;
+  z-index: 1;
+  /* tweenable bg-color + opacity so the cold-load fill dissolves into the
+     translucent veil the moment the first partial preview slides in behind it. */
+  transition: background-color var(--dur-reveal) var(--ease-out), opacity var(--dur-reveal) var(--ease-out);
+}
+
+/* Veiled mode: a partial preview is showing behind. Drop the opaque fill so
+   the developing image is visible, and reduce overall presence to ~80% so
+   the placeholder reads as a translucent overlay rather than a curtain. The
+   wipe on this layer continues as the developing veil. */
+.loading.veiled {
+  background-color: transparent;
+  opacity: 0.8;
+}
+
+/* The wipe: an oversized layer tilted 20deg (the individual `rotate`
+   property composes with atelier-sweep's translate) so the band crosses the
+   plate on a diagonal and clears both corners. */
+.loading::after {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background: linear-gradient(90deg, transparent 0%, transparent 42%, var(--scrim-scan) 50%, transparent 58%, transparent 100%);
+  rotate: 20deg;
+  animation: global(atelier-sweep) 1.6s linear infinite;
+}
+
+.preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  /* Slight overscan hides the soft halo a heavy blur leaves at the frame edges. */
+  transform: scale(1.06);
+  --pass-blur: 16px;
+  filter: blur(var(--pass-blur));
+  /* Smooth filter tween so each new partial reads as "sharpening into focus"
+     rather than a hard repaint. These two timings are loader-internal preview
+     choreography (paced against the plate wipe above), not part of the
+     --dur-* interaction scale — intentionally off-scale, do not tokenize. */
+  transition: filter 600ms var(--ease-out);
+  animation: global(atelier-fade-in) 320ms var(--ease-out) both;
+}
+
+.preview[data-pass="1"] { --pass-blur: 12px; }
+.preview[data-pass="2"] { --pass-blur: 8px; }
+.preview[data-pass="3"] { --pass-blur: 4px; }
+.preview[data-pass="4"] { --pass-blur: 2px; }
+.preview[data-pass="5"] { --pass-blur: 2px; }
+
+/* The I2V source still is a static backdrop, not a developing partial — show it
+   at a gentle, fixed blur so the frame stays recognisable behind the progress
+   veil + scan without competing with the status line. */
+.preview[data-source="true"] { --pass-blur: 4px; }
+
+.text {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  font-family: var(--sans);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  color: var(--glass-on-dark-100);
+  /* The elapsed Meta list reads its ink from these (type.module.css). */
+  --meta-ink: var(--glass-on-dark-100);
+  --meta-ink-strong: var(--glass-on-dark-100);
+  /* Three 32% scrims cap even a white preview at 31.45% sRGB, keeping
+     white text above 8:1 in both themes, outside the veil's opacity. */
+  background:
+    linear-gradient(var(--scrim-on-image), var(--scrim-on-image)),
+    linear-gradient(var(--scrim-on-image), var(--scrim-on-image)),
+    var(--scrim-on-image);
+  padding: 4px 6px;
+  border-radius: var(--radius-control);
+  text-shadow: var(--shadow-text-on-image);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
+}
+
+.text > .elapsed {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.loading.veiled ~ .text .bar {
+  background: var(--glass-on-dark-35);
+}
+
+/* Over a partial preview the ink fill would lose contrast against the
+   translucent track; white keeps the progressbar ≥3:1 whatever the preview. */
+.loading.veiled ~ .text .bar::after {
+  background: var(--glass-on-dark-100);
+}
+
+.bar {
+  width: 60px;
+  height: 1px;
+  background: var(--line-2);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Video renders are long and determinate — give the bar more presence so the
+   progress reads as the primary signal during the multi-minute wait. */
+.bar[data-video='true'] {
+  width: 88px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Ink, not accent: loaders stay monochrome until the image arrives
+     (design 1.7 principle 3). */
+  background: var(--ink-2);
+  /* Intentional non-token easing — the progress sweep is rhythmic, not
+     directional. Material's linear-out-slow-in (cubic-bezier(.4,0,.2,1))
+     reads as a heartbeat where var(--ease-out) reads as "arriving". */
+  animation: progress 1.8s cubic-bezier(.4,0,.2,1) infinite;
+  transform-origin: left;
+}
+
+.bar[data-progress="true"]::after {
+  animation: none;
+  background: var(--ink-2);
+  transform: scaleX(var(--tile-progress));
+  transform-origin: left;
+}
+
+/* Sampler steps: a slightly firmer determinate bar whose fill glides to each
+   step over the measured step cadence (set inline as --tile-step-ms). */
+.bar[data-steps='true'] {
+  height: 2px;
+  border-radius: 1px;
+}
+
+.bar[data-steps='true']::after {
+  transition: transform var(--tile-step-ms, var(--dur-transform)) linear;
+}
+
+/* Finishing: a soft highlight band travels the full bar while the graph
+   decodes and saves. The travel is the band's own width percentages. */
+.bar[data-finishing='true']::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  z-index: 1;
+  background: linear-gradient(90deg, transparent, var(--glass-on-dark-65), transparent);
+  animation: sheen 1.1s var(--ease-out) infinite;
+}
+
+@keyframes sheen {
+  from { translate: -100% 0; }
+  to { translate: 250% 0; }
+}
+
+.steps {
+  white-space: nowrap;
+}
+
+.stage,
+.stepTotal {
+  opacity: 0.7;
+}
+
+/* Fixed numerator width so the readout never shifts as digits change. */
+.stepNow {
+  display: inline-block;
+  min-width: calc(var(--digits) * 1ch);
+  text-align: right;
+}
+
+/* Keyed per step, so each new numeral mounts and rises in. */
+.stepNum {
+  display: inline-block;
+  transition: opacity var(--dur-hover) var(--ease-out), translate var(--dur-transform) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    translate: 0 calc(var(--m-shift) / 2);
+  }
+}
+
+/* Narrow tiles keep the readout: the model goes first, then the ETA. */
+@container (width < 230px) {
+  .elapsed > li:has(> .model) { display: none; }
+}
+
+@container (width < 150px) {
+  .elapsed > li:has(> .time) { display: none; }
+  /* A short bar keeps the pill inside the tile beside the step readout. */
+  .bar[data-steps='true'] { width: 24px; }
+}
+
+@keyframes progress {
+  0% {
+    transform: scaleX(0) translateX(0);
+    transform-origin: left;
+  }
+
+  50% {
+    transform: scaleX(0.8) translateX(0);
+    transform-origin: left;
+  }
+
+  51% {
+    transform-origin: right;
+  }
+
+  100% {
+    transform: scaleX(0) translateX(0);
+    transform-origin: right;
+  }
+}
+
+/* Reduced motion: the wipe holds still at the centre and swaps to the shared
+   pulse (motion.css's stand-in for loops); the progress loop stops. Keep
+   tile-in as a brief opacity fade (no translate/scale), and pin the
+   partial-preview blur curve so it reads as a single still pass instead of a
+   sharpen sequence. */
+@media (prefers-reduced-motion: reduce) {
+  .loading::after {
+    animation: global(atelier-pulse) 1.6s ease-in-out infinite;
+  }
+
+  .bar::after {
+    animation: none;
+  }
+
+  .bar[data-steps='true']::after,
+  .stepNum {
+    transition: none;
+  }
+
+  .bar[data-finishing='true']::before {
+    animation: none;
+    display: none;
+  }
+
+  .preview {
+    filter: none;
+    transition: none;
+    animation: none;
+  }
+
+  .tile {
+    animation-name: global(atelier-fade-in);
+    animation-duration: var(--dur-reduced);
+  }
+}
+
+.cancelBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim-on-image);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid var(--glass-on-dark-8);
+  border-radius: 50%;
+  color: var(--glass-on-dark-100);
+  /* Resting opacity is discoverable without hover (touch/stylus have none) —
+     this aborts an in-flight paid generation, so it must not be hover-gated. */
+  opacity: 0.7;
+  transition: opacity var(--dur-transform) var(--ease-out);
+  cursor: pointer;
+  z-index: 3;
+  padding: 0;
+  -webkit-appearance: none;
+}
+
+.cancelBtn :global(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+.tile:hover .cancelBtn { opacity: 0.85; }
+.cancelBtn:hover { opacity: 1; }
+.cancelBtn:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (width < 768px) {
+  .cancelBtn {
+    /* Hit area >= 44x44 on mobile while keeping visible chrome at 24x24.
+       background-clip: content-box paints the tint only in the inner
+       content area (visible 24x24 circle); 10px padding grows the
+       touchable surface to 24+10+10 = 44. */
+    opacity: 0.75;
+    width: 44px;
+    height: 44px;
+    padding: 10px;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cancelBtn { transition: none; }
+}
+
+.tile[data-canceling="true"] {
+  animation: cancel-out var(--dur-sheet) var(--ease-out) forwards;
+}
+
+@keyframes cancel-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Opacity only, at the reduced duration TilePlaceholder waits on. */
+  .tile[data-canceling="true"] {
+    animation: global(atelier-fade-out) var(--dur-reduced) linear forwards;
+  }
+}

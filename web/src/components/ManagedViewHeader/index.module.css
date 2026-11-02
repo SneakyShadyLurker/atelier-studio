@@ -1,0 +1,104 @@
+.inset {
+  padding-inline: 36px;
+}
+
+@media (width < 768px) {
+  .inset {
+    padding-inline: 14px;
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  min-height: var(--app-header-h);
+  margin: 0 0 14px;
+  padding: 8px 0;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Title and scope: the managed view's serif display moment, then its scope
+   as a small-caps label (type.module.css). */
+.titleGroup {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  min-width: 0;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: var(--text-xl);
+  font-weight: 500;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.label {
+  composes: label from '../../styles/type.module.css';
+}
+
+/* The secondary button (buttons.module.css) owns border, hover, focus ring,
+   press and touch floor; only the compact padding around the arrow is local,
+   raised one step in specificity so it never depends on source order. */
+.header > .backButton {
+  flex: 0 0 auto;
+  padding: 6px 12px 6px 8px;
+  white-space: nowrap;
+}
+
+.backIcon {
+  display: inline-flex;
+  transform: scaleX(-1);
+  transition: transform var(--dur-transform) var(--ease-out);
+}
+
+.backButton:hover .backIcon {
+  transform: scaleX(-1) translateX(2px);
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  gap: 10px;
+}
+
+@media (width >= 768px) {
+  :global([data-sidebar-collapsed='true']) .header {
+    padding-left: 52px;
+  }
+}
+
+@media (width < 768px) {
+  .header {
+    flex-wrap: wrap;
+    padding-left: 46px;
+  }
+
+  .actions {
+    flex-basis: 100%;
+    margin-top: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backIcon {
+    transition: none;
+  }
+
+  .backButton:hover .backIcon {
+    transform: scaleX(-1);
+  }
+}

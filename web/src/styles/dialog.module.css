@@ -1,0 +1,391 @@
+/* Shared dialog shell — ByokDialog and SaveTemplateDialog were ~98%
+   byte-identical; this is the single source of truth for their backdrop,
+   card, field primitive, inline error/actions, sheet (mobile) and motion.
+   Action buttons come from buttons.module.css (.primary/.secondary/.danger).
+   Per-dialog uniques (SaveTemplateDialog .preview) stay local.
+   Dialogs are flat (no cross-class descendant selectors), so this extract
+   carries no source-order cascade risk. */
+
+/* The backdrop IS the <dialog> element (DialogShell opens it with showModal),
+   so it has to shed the UA dialog box first: default border/padding/background,
+   the auto margins and the fit-content max sizes would otherwise shrink it to a
+   centred card instead of a full-bleed scrim. `display` stays flex — the UA
+   `dialog:not([open])` display:none rule never applies because DialogShell
+   unmounts a closed dialog rather than leaving it in the DOM. */
+.backdrop {
+  composes: fade from './surface.module.css';
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-confirm);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  color: inherit;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+/* We paint the scrim on the dialog itself (it is full-bleed), so the UA's own
+   ::backdrop layer must not darken it a second time. */
+.backdrop::backdrop {
+  background: transparent;
+}
+
+.dialog {
+  composes: scale from './surface.module.css';
+  --surface-duration: var(--dur-dialog);
+  position: relative;
+  width: calc(100% - 48px);
+  max-width: 420px;
+  max-height: calc(100dvh - 48px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px 24px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-panel);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-3);
+}
+
+/* Designed leave — DialogShell stamps data-closing (useExitTransition) for
+   --dur-overlay before the unmount; the card recedes the way it arrived. */
+.backdrop[data-closing='true'] {
+  pointer-events: none;
+}
+
+.backdrop[data-closing='true'] .dialog {
+  opacity: 0;
+  transform: var(--surface-to);
+  transition-duration: var(--dur-overlay);
+  transition-timing-function: var(--ease-exit);
+}
+
+.handle {
+  display: none;
+}
+
+/* Section label inside a dialog body (e.g. above a preview); never an
+   eyebrow above the title. */
+.label {
+  composes: label from './type.module.css';
+  display: block;
+  margin-bottom: 10px;
+}
+
+/* Display moment: dialog titles speak in the serif (one of the four). */
+.title {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.body {
+  max-width: 360px;
+  margin: 0 0 14px;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+.docLink {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.docLink:hover {
+  text-decoration: underline;
+}
+
+/* Field primitive: every dialog form field (Describe*, Byok, SaveTemplate,
+   Story, the Text models forms) composes this family instead of rolling
+   its own frame, focus ring or link button.
+   .field       wrapper with the field rhythm
+   .fieldLabel  visible label: small caps (type.module.css .label)
+   .fieldWell   the sunk well that frames the control (and any trailing link
+                button); the control itself is transparent inside it
+   .fieldInput  single-line control; add .fieldMachine for machine text (keys,
+                addresses, model ids)
+   .fieldTextarea  multi-line control: no resize grip, grows with its
+                content where field-sizing is supported, from a min-height
+   .fieldHelp / .fieldError  lines under the well
+   .fieldLink   quiet text button inside or beside a well (Show, Replace) */
+.field {
+  min-width: 0;
+  margin-bottom: 14px;
+}
+
+.fieldLabel {
+  composes: label from './type.module.css';
+  display: block;
+  margin: 0 0 6px;
+  padding: 0;
+}
+
+.fieldWell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-control);
+  background: var(--bg-sunk);
+  transition: border-color var(--dur-hover) var(--ease-out);
+}
+
+.fieldWell:hover {
+  border-color: var(--ink-3);
+}
+
+/* The control inside carries no ring of its own; the well draws the shared
+   2px focus ring (buttons.module.css) around it. A link button in the well
+   keeps its own ring. */
+.fieldWell:has(:is(input, textarea, select):focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.fieldWell:has([aria-invalid='true']) {
+  border-color: var(--danger);
+}
+
+.fieldInput,
+.fieldTextarea {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.fieldInput::placeholder,
+.fieldTextarea::placeholder {
+  color: var(--ink-3);
+}
+
+.fieldInput:disabled,
+.fieldTextarea:disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+.fieldMachine {
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: var(--text-xs);
+}
+
+.fieldTextarea {
+  align-self: stretch;
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  padding: 9px 0;
+  line-height: 1.5;
+  resize: none;
+}
+
+@supports (field-sizing: content) {
+  .fieldTextarea {
+    field-sizing: content;
+    max-height: 42dvh;
+  }
+}
+
+.fieldHelp,
+.fieldError {
+  max-width: 70ch;
+  margin: 6px 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.fieldHelp {
+  color: var(--ink-3);
+}
+
+.fieldError {
+  color: var(--danger);
+}
+
+.fieldLink {
+  flex-shrink: 0;
+  min-height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.fieldLink:hover:not(:disabled) {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.fieldLink:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.fieldLink:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Saved secret shown in place of the input (Byok): machine text. */
+.masked {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: var(--text-xs);
+}
+
+.inlineError {
+  margin: -8px 0 14px;
+  color: var(--danger);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.actionsRight {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.progressBar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--ink-2) 50%, transparent 100%);
+  animation: global(atelier-sweep) 1.2s linear infinite;
+}
+
+/* Reduced motion: motion.css collapses the card's scale, the durations and
+   the eases, so the scrim and card fades need no rule here; the loop stops. */
+@media (prefers-reduced-motion: reduce) {
+  .progressBar {
+    animation: none;
+    background: var(--ink-2);
+    opacity: 0.6;
+  }
+}
+
+@media (width < 768px) {
+  .backdrop {
+    align-items: flex-end;
+  }
+
+  .dialog {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - 12px - env(safe-area-inset-top));
+    /* Flush to the bottom edge as a sheet, so the action row lands in the
+       home-indicator strip without the inset. */
+    padding: 18px 18px calc(24px + env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    --surface-duration: var(--dur-sheet);
+    --surface-from: translateY(var(--sheet-shift, 100%));
+    --surface-to: translateY(var(--sheet-shift, 100%));
+  }
+
+  /* Sheets leave the way they arrived — downward, faster than the enter. */
+  .backdrop[data-closing='true'] .dialog {
+    transform: var(--surface-to);
+  }
+
+  .handle {
+    display: block;
+    width: 36px;
+    height: 3px;
+    margin: 0 auto 14px;
+    border-radius: var(--radius-control);
+    background: var(--line-2);
+  }
+
+  .actions,
+  .actionsRight {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actionsRight {
+    margin-left: 0;
+    order: -1;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+
+  /* iOS Safari zooms a focused field under 16px. */
+  .fieldInput,
+  .fieldTextarea {
+    font-size: var(--text-base);
+  }
+}
+
+@media (hover: none) {
+  .fieldLink {
+    min-height: 44px;
+  }
+}
+
+/* The sheet slide is not an --m-* amplitude, so the phone card swaps it for
+   the opacity keyframes itself (as styles/sheet.module.css does). */
+@media (width < 768px) and (prefers-reduced-motion: reduce) {
+  .dialog {
+    --sheet-shift: 0px;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .backdrop {
+    background: var(--scrim-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

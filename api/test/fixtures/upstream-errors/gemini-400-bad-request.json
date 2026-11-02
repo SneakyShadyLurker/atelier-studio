@@ -1,0 +1,4 @@
+{
+  "status": 400,
+  "body": { "error": { "code": 400, "message": "Invalid request: prompt was rejected.", "status": "INVALID_ARGUMENT" } }
+}

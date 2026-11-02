@@ -1,0 +1,99 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.feedHeader {
+  flex: 0 0 auto;
+  min-height: var(--app-header-h);
+  padding: 0 36px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.feedHeaderLabel {
+  composes: label from '../../styles/type.module.css';
+}
+
+.canvas {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 36px calc(var(--composer-top, 156px) + 24px);
+  container-type: inline-size;
+  container-name: feed;
+  /* TanStack Virtual's canonical Dynamic example sets both — without
+     `overflow-anchor: none` the browser auto-adjusts scrollTop when content
+     prepends above the viewport, which yanks the spring animation, and
+     TanStack's own measureElement size-correction does the same. With
+     `contain: strict` the browser isolates this scroller's layout/paint so
+     virtualized rows can't bleed into the parent reflow. */
+  overflow-anchor: none;
+  contain: strict;
+}
+
+.virtualFeed {
+  position: relative;
+}
+
+/* Illustration placement must not follow the live dock measurement. That
+   measurement still reserves the actual feed's newest row, while a passive
+   state keeps the same centre through dock resizing and view remounts. */
+.canvas[data-state='true'] {
+  padding-bottom: 241px;
+}
+
+/* The fixed 44px sidebar-expand button sits over the feed's top-left corner
+   when the sidebar is collapsed. Reserve its band on the shell, outside the
+   scroller, so scrolled content never passes under it. */
+@media (width >= 768px) {
+  .shell {
+    padding-top: 0;
+    transition: padding-top var(--dur-overlay) var(--ease-out);
+  }
+  :global([data-sidebar-collapsed='true']) .shell {
+    padding-top: 60px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell {
+    transition: none;
+  }
+}
+
+.virtualBatch {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+@media (width < 768px) {
+  .feedHeader {
+    padding: 0 14px 0 60px;
+  }
+
+  .canvas {
+    padding: 14px 14px calc(var(--composer-top, 140px) + 20px);
+  }
+
+  .canvas[data-state='true'] {
+    padding-bottom: calc(77px + env(safe-area-inset-bottom));
+  }
+}
+
+/* The feed reads oldest → newest, and `anchorTo: 'end'` + `scrollToEnd` keep the
+   newest batch against the composer as soon as it overflows. A feed too short to
+   scroll starts at the TOP of the canvas: floating a lone batch in the middle of
+   an empty column reads as a layout fault, and it would jump back up the moment a
+   second batch made the column overflow. */
+.feedColumn {
+  display: flex;
+  flex-direction: column;
+}

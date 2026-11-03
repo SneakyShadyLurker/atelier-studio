@@ -71,7 +71,7 @@ files in `DATA_DIR`.
 ## Organise your work
 
 The **Library** sidebar contains your collections, **Unsorted** work and
-**Pinned** batches. Create a collection with **+ New collection**, then drag
+**Pinned** batches. Create a collection with **New collection**, then drag
 a batch into it. Pin a batch to make it easier to find, and use search to look
 for prompt text.
 

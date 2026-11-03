@@ -1,4 +1,5 @@
-import { useId } from 'react';
+import { useDeferredValue, useId, useMemo, ViewTransition } from 'react';
+import { useHeldWhileRunning } from './ProviderForm';
 import type { TestReport as TestReportData, TextModelCapabilities, TextProbeCheck } from '@atelier/shared';
 import { TEXT_REASONING_EFFORT_LABELS } from '@atelier/shared';
 import { ApiError } from '../../api/client';
@@ -124,7 +125,8 @@ interface TestReportProps {
   /** Advertised keys the admin ticked. */
   readonly chosen: ReadonlySet<CapabilityKey>;
   readonly onChoose: (key: CapabilityKey, chosen: boolean) => void;
-  readonly onApply: () => void;
+  /** Receives the report on screen (the deferred one), which is what the admin reviewed. */
+  readonly onApply: (report: TestReportData) => void;
   /** Set once findings were applied: what was applied and what was kept. */
   readonly appliedNote: readonly string[] | null;
 }
@@ -145,11 +147,32 @@ function CheckLine({ check }: { check: TextProbeCheck }) {
   );
 }
 
-export default function TestReport({ state, chosen, onChoose, onApply, appliedNote }: TestReportProps) {
+const NO_REPORT: TestState = { kind: 'idle' };
+
+/**
+ * The report renders from a deferred snapshot: the report itself and its
+ * findings and apply sections are part boundaries, so each drops in and lifts
+ * out in a Transition. The ticked findings (`chosen`) stay urgent input.
+ */
+export default function TestReport({ state: liveState, ...rest }: TestReportProps) {
+  // A re-test keeps the last report in its shell, busy, until the new one lands.
+  const { shown: live, busy: liveBusy } = useHeldWhileRunning(liveState);
+  const liveSnapshot = useMemo(() => ({ state: live.kind === 'idle' ? NO_REPORT : live, busy: liveBusy }), [live, liveBusy]);
+  const { state, busy } = useDeferredValue(liveSnapshot);
+  if (state.kind === 'idle') return null;
+  return (
+    <ViewTransition default="none" enter="part-enter" exit="part-exit">
+      <TestReportBody state={state} busy={busy} {...rest} />
+    </ViewTransition>
+  );
+}
+
+function TestReportBody({ state, busy, chosen, onChoose, onApply, appliedNote }: TestReportProps & { readonly busy: boolean }) {
   const confirmedId = useId();
+  const ariaBusy = busy || undefined;
   if (state.kind === 'idle') return null;
   if (state.kind === 'error') {
-    return <div role="alert" className={`${form.report} ${form.reportFail}`}><p className={form.reportLine}>{state.message}</p></div>;
+    return <div role="alert" aria-busy={ariaBusy} className={`${form.report} ${form.reportFail}`}><p className={form.reportLine}>{state.message}</p></div>;
   }
   if (state.kind === 'running') {
     return (
@@ -170,7 +193,7 @@ export default function TestReport({ state, chosen, onChoose, onApply, appliedNo
   const canApply = confirmed.length > 0 || suggested.length > 0;
 
   return (
-    <div role="status" aria-live="polite" className={`${form.report} ${failed > 0 ? form.reportFail : ''}`}>
+    <div role="status" aria-live="polite" aria-busy={ariaBusy} className={`${form.report} ${failed > 0 ? form.reportFail : ''}`}>
       {failed > 0 && (
         <p role="alert" className={form.reportHead}>
           {failed === 1 ? '1 check failed.' : `${failed} checks failed.`}
@@ -181,15 +204,18 @@ export default function TestReport({ state, chosen, onChoose, onApply, appliedNo
       </ul>
 
       {confirmed.length > 0 && (
+        <ViewTransition default="none" enter="part-enter" exit="part-exit">
         <div className={styles.findings} role="group" aria-labelledby={confirmedId}>
           <p id={confirmedId} className={styles.findingsHead}>Confirmed by the test</p>
           <ul className={styles.findingList}>
             {confirmed.map((finding) => <li key={finding.key}>{finding.text}</li>)}
           </ul>
         </div>
+        </ViewTransition>
       )}
 
       {suggested.length > 0 && (
+        <ViewTransition default="none" enter="part-enter" exit="part-exit">
         <fieldset className={styles.findings}>
           <legend className={styles.findingsHead}>Reported by the provider</legend>
           <div className={form.choices}>
@@ -205,17 +231,20 @@ export default function TestReport({ state, chosen, onChoose, onApply, appliedNo
             ))}
           </div>
         </fieldset>
+        </ViewTransition>
       )}
 
       {report.wireNotes.map((note) => <p key={note} className={form.reportLine}>{note}</p>)}
 
       {canApply && (
+        <ViewTransition default="none" enter="part-enter" exit="part-exit">
         <div className={styles.applyRow}>
-          <button type="button" className={btn.secondary} onClick={onApply} disabled={appliedNote !== null}>
+          <button type="button" className={btn.secondary} onClick={() => { onApply(report); }} disabled={busy || appliedNote !== null}>
             Apply findings
           </button>
           {appliedNote?.map((line) => <span key={line} className={styles.testNote}>{line}</span>)}
         </div>
+        </ViewTransition>
       )}
     </div>
   );

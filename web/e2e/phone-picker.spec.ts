@@ -271,3 +271,47 @@ test.describe('desktop picker', () => {
     expect(animations.find((a) => a.label === 'Re-roll')?.anim).toBe('none');
   });
 });
+
+/*
+ * The phone composer's Model chip opens a bottom sheet. Escape belongs to the
+ * keyboard registry's `chipselect-open` scope, stacked above the expanded
+ * phone composer's own `composer` scope, so one Escape closes only the menu.
+ * The tooltip primitive takes Escape first while a label is visible (WCAG
+ * 1.4.13, useTooltipDismiss): a sheet that slides under a resting mouse can
+ * show a row's label, and that Escape dismisses the label, not the menu.
+ */
+async function openModelSheet(page: Page): Promise<void> {
+  await page.goto('/e2e/studio/index.html');
+  await expect(page.getByTestId('feed')).toBeVisible();
+  const expand = page.getByRole('button', { name: 'Expand composer' });
+  if (await expand.count() > 0) await expand.click();
+  await page.getByRole('button', { name: 'Model' }).click();
+  await expect(page.getByRole('listbox', { name: 'Model' })).toBeFocused();
+}
+
+test.describe('phone composer Model menu', () => {
+  test('Escape closes the open Model menu and returns focus to the chip', async ({ page }) => {
+    await openModelSheet(page);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('listbox', { name: 'Model' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Model' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Expand composer' })).toHaveCount(0);
+  });
+
+  test.describe('with a hovering mouse', () => {
+    test.use({ hasTouch: false, isMobile: false });
+
+    test('a visible row label takes the first Escape; the next one closes the menu', async ({ page }) => {
+      await openModelSheet(page);
+      const label = page.locator('[data-tip-label]');
+      await page.locator('[role="option"][data-tip]').first().hover();
+      await expect(label).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(label).toBeHidden();
+      await expect(page.getByRole('listbox', { name: 'Model' })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('listbox', { name: 'Model' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Model' })).toBeFocused();
+    });
+  });
+});

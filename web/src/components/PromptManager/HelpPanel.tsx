@@ -68,7 +68,7 @@ export default function HelpPanel({ open, panelId, triggerRef, exitRef, onClose 
         {...closingProps}
       >
         <div className={styles.helpHead} data-zone="head">
-          <h2 id={titleId}>How the prompt library works</h2>
+          <h2 id={titleId}>How the Prompt Library works</h2>
           <button
             className={btn.icon}
             type="button"

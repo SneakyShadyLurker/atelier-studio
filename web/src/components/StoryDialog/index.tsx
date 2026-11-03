@@ -121,12 +121,16 @@ export default function StoryDialog({ source, onClose, stream = tellStoryStream 
       onCancel={close}
       closing={closing}
       labelledBy={titleId}
-      describedBy={sourceId}
     >
       <div className={`${dialogStyles.dialog} ${styles.dialog}`}>
         <div className={dialogStyles.handle} aria-hidden="true" />
         <h2 id={titleId} className={dialogStyles.title}>Tell Story</h2>
-        <p id={sourceId} className={styles.source}>{sourceLine(source.mode)}</p>
+        <div className={dialogStyles.field}>
+          <label className={dialogStyles.fieldLabel} htmlFor={sourceId}>Source</label>
+          <div className={dialogStyles.fieldWell}>
+            <input id={sourceId} className={dialogStyles.fieldInput} value={sourceLine(source.mode)} readOnly />
+          </div>
+        </div>
 
         {state !== 'announced' ? (
           <>

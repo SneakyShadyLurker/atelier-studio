@@ -74,7 +74,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-hover) var(--ease-out);
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
 }
 
 .mini:hover {
@@ -85,7 +85,6 @@
 
 .mini:active {
   transform: scale(var(--m-press));
-  transition: transform var(--dur-hover) var(--ease-out);
 }
 
 .mini:focus-visible {
@@ -93,7 +92,7 @@
   outline-offset: 2px;
 }
 
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .mini {
     min-height: 44px;
     padding: 10px 14px;

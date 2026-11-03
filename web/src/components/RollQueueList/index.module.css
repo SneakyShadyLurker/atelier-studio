@@ -33,12 +33,17 @@
   cursor: pointer;
   padding: 2px 4px;
   border-radius: var(--radius-control);
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
 }
 
 .clear:hover,
 .clear:focus-visible {
   color: var(--ink);
   background: var(--bg);
+}
+
+.clear:active {
+  transform: scale(var(--m-press));
 }
 
 .clear:focus-visible {
@@ -114,7 +119,8 @@
 
 .row {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto 24px;
+  /* The last track sizes to the remove button (44px under the touch gate). */
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   min-height: 36px;
@@ -162,31 +168,21 @@
   white-space: nowrap;
 }
 
+/* The shared icon action (hover, focus ring, press, disabled); only the
+   size and the destructive hover colour are local. */
 .remove {
+  composes: iconAction from '../../styles/buttons.module.css';
   width: 24px;
   height: 24px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--ink-3);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
 }
 
-.remove:hover,
+.remove:hover:where(:not(:disabled)),
 .remove:focus-visible {
-  background: var(--bg-sunk);
   color: var(--danger);
 }
 
-.remove:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-@media (width < 768px) {
+/* Touch floors on capability (the touch gate), never on width. */
+@media (hover: none), (any-pointer: coarse) {
   .row { min-height: 44px; }
   .remove { width: 44px; height: 44px; }
 }

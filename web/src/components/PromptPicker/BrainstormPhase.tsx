@@ -1,10 +1,12 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { Ref } from 'react';
 import { BRAINSTORM_DEFAULT_COUNT, BRAINSTORM_MIN_COUNT, BRAINSTORM_MAX_COUNT_CEILING } from '@atelier/shared';
 import ChipSelect, { type ChipSelectOption } from '../Composer/ChipSelect';
 import RollQueueList from '../RollQueueList';
 import { StateView } from '../StateView';
+import TextModelNote from '../TextModelNote';
 import { useBrainstormCharacters } from '../../hooks/useBrainstormCharacters';
+import { useTextModelGate } from '../../hooks/useTextModelGate';
 import { resolveComposerPrompt, type ComposerLibrary } from '../../lib/resolveComposerPrompt';
 import { nextSeed } from '../../lib/seed';
 import { useAtelierStore } from '../../store/atelier';
@@ -23,6 +25,8 @@ export interface BrainstormPhaseProps {
   // Prompt-library data for resolving {{var::}} in the brief. Always present
   // here: PromptPicker (the only mount site) early-returns until it loads.
   readonly library: ComposerLibrary;
+  /** The picker's exit-then-navigate, for the no-text-model note. */
+  readonly navigateToTextModels: () => void;
 }
 
 export default function BrainstormPhase({
@@ -32,7 +36,11 @@ export default function BrainstormPhase({
   onModelChange,
   modelMenuRef,
   library,
+  navigateToTextModels,
 }: BrainstormPhaseProps) {
+  const textModelGate = useTextModelGate();
+  const generateButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [textNoteOpen, setTextNoteOpen] = useState(false);
   const briefId = useId();
   const countId = useId();
   // Brief/count live in the composer draft so they survive the picker closing
@@ -192,14 +200,28 @@ export default function BrainstormPhase({
             <button className={buttons.secondary} type="button" onClick={onBack}>Back</button>
           )}
           <button
+            ref={generateButtonRef}
             className={buttons.ai}
             type="button"
             disabled={running || modelId.length === 0}
-            onClick={handleGenerate}
+            onClick={() => {
+              if (textModelGate.availability === 'none') setTextNoteOpen(true);
+              else handleGenerate();
+            }}
           >
             <I.sparkle />
             {running ? 'Generating' : `Generate ${String(count)}`}
           </button>
+          {textNoteOpen ? (
+            <TextModelNote
+              open
+              action="Brainstorm"
+              anchorRef={generateButtonRef}
+              escape="nested"
+              navigateToTextModels={navigateToTextModels}
+              onClose={() => { setTextNoteOpen(false); }}
+            />
+          ) : null}
         </div>
       </div>
     </div>

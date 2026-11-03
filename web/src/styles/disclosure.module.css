@@ -1,0 +1,42 @@
+/* Height-auto disclosure: the one owner for an in-flow reveal whose open
+   height is the content's own (components/Disclosure renders it). The panel
+   is a one-row grid whose track interpolates 0fr <-> 1fr, which every engine
+   at the browser floor animates; interpolate-size/calc-size() would reach
+   only Chromium. Because the track is a CSS transition, a toggle mid-way
+   reverses from the current height. The closed panel stays mounted, inert
+   and aria-hidden (set by the component, not here).
+
+   Owner layout: the panel adds no box of its own, so a parent's flex or grid
+   gap still applies while it is closed. Owners that sit in a gapped parent
+   move that space inside the content (contentClassName) and cancel the gap
+   on the panel (className). */
+.panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--dur-sheet) var(--ease-out), opacity var(--dur-overlay) var(--ease-out);
+}
+
+.panel[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* min-height: 0 lets the track shrink below the content; overflow clips it
+   (and contains the content's margins, so they count toward the height). */
+.clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.content {
+  min-width: 0;
+}
+
+/* Reduced motion: the height changes at once and only the fade remains
+   (--dur-overlay already collapses in motion.css). */
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    transition: opacity var(--dur-overlay) var(--ease-out);
+  }
+}

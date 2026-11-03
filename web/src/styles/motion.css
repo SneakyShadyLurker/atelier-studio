@@ -238,6 +238,14 @@
   to { opacity: 0; }
 }
 
+/* Scroll-edge fade (Sidebar rail, Canvas): driven by the scroller's own
+   scroll timeline, not by time, so reduced motion leaves it alone. The top
+   stop opens to 0 at rest and reaches the house 14px after 28px of scroll. */
+@keyframes atelier-scroll-edge {
+  from { --scroll-fade-top: 0px; }
+  to { --scroll-fade-top: 14px; }
+}
+
 ::view-transition-new(.composer-enter) {
   animation: atelier-composer-in var(--dur-overlay) var(--ease-out) both;
 }
@@ -246,11 +254,85 @@
   animation: atelier-composer-out var(--dur-overlay) var(--ease-exit) both;
 }
 
+/* Feed and Archive tiles and the Canvas batch rows (Batch, Canvas, Archive
+   <ViewTransition>s, driven by each surface's deferred snapshot). A survivor
+   or a row below a removal moves to its new slot over --dur-view; its
+   picture is the live element throughout (the old snapshot is hidden), so a
+   tile whose content changes in the same commit (loading to done) shows its
+   own entrance, not a crossfade. Only the group's duration and ease are set
+   here, never its animation name, so the reduced-motion rule below still
+   stops it. */
+::view-transition-group(.tile-move) {
+  animation-duration: var(--dur-view);
+  animation-timing-function: var(--ease-view);
+}
+
+::view-transition-old(.tile-move) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(.tile-move) {
+  animation: none;
+}
+
+::view-transition-old(.tile-exit) {
+  animation: atelier-shrink-out var(--dur-overlay) var(--ease-exit) both;
+}
+
+::view-transition-new(.tile-exit) {
+  animation: none;
+}
+
+::view-transition-new(.tile-enter) {
+  animation: atelier-tile-in var(--dur-overlay) var(--ease-out) both;
+}
+
+/* Conditional parts (Composer chips, banner and queue, Batch header slots,
+   picker phases, Lightbox chrome, Sidebar states, report sections): each is a
+   <ViewTransition default="none" enter="part-enter" exit="part-exit"> driven
+   by its surface's deferred snapshot, so it drops in on mount and lifts out
+   on unmount while the live element behind it is already final. */
+::view-transition-new(.part-enter) {
+  animation: atelier-drop-in var(--dur-overlay) var(--ease-out) both;
+}
+
+::view-transition-old(.part-exit) {
+  animation: atelier-drop-out var(--dur-overlay) var(--ease-exit) both;
+}
+
+/* The Composer frame and its mode body (App.tsx and Composer
+   <ViewTransition update>): the frame's group interpolates its footprint
+   while a part enters or leaves or the mode body swaps, and the body
+   cross-fades image and video fields. Both pictures hang from the frame's
+   bottom edge (the dock grows upward) and the group clips them, so the
+   growing frame reveals its new content instead of stretching it. The toast
+   stack re-anchors on the live frame, i.e. at the final geometry. */
+::view-transition-group(.composer-frame),
+::view-transition-group(.composer-body) {
+  animation-duration: var(--dur-sheet);
+  animation-timing-function: var(--ease-out);
+}
+
+::view-transition-group(.composer-frame) {
+  overflow: clip;
+  border-radius: var(--radius-panel);
+}
+
+::view-transition-old(.composer-frame),
+::view-transition-new(.composer-frame) {
+  inset-block: auto 0;
+}
+
 /* Reduced motion: one rule set. Amplitudes collapse to nothing and every
    duration to --dur-reduced (transform channels to 0ms), so each keyframe
    above becomes a short linear opacity change and every press holds still.
    JS-timed exits read --dur-reduced through lib/overlayDuration.ts. What a
-   token cannot reach (sheet slides, loops) is handled by its owner. */
+   token cannot reach (sheet slides, loops) is handled by its owner: the
+   --cadence-* loop tokens are deliberately left alone here, because a loop
+   stops or swaps to atelier-pulse in its own module. React does not honour
+   reduced motion, so the view-transition groups stop interpolating geometry
+   here too. */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --m-shift: 0px;
@@ -273,6 +355,10 @@
     --ease-exit: linear;
     --ease-tactile: linear;
     --ease-view: linear;
+  }
+
+  ::view-transition-group(*) {
+    animation: none;
   }
 
   ::view-transition-old(*),

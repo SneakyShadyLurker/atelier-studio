@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type Ref } from 'react';
 import { I } from '../icons/I';
 import buttons from '../../styles/buttons.module.css';
 import styles from './EnhanceControl.module.css';
@@ -12,9 +12,11 @@ interface EnhanceControlProps {
   disabled: boolean;
   onEnhance: () => void;
   onUndo: () => void;
+  /** The Enhance button, which anchors the no-text-model note. */
+  enhanceRef?: Ref<HTMLButtonElement> | undefined;
 }
 
-function EnhanceControl({ enhancing, canUndo, disabled, onEnhance, onUndo }: EnhanceControlProps) {
+function EnhanceControl({ enhancing, canUndo, disabled, onEnhance, onUndo, enhanceRef }: EnhanceControlProps) {
   // Announce the async enhance lifecycle to assistive tech: the textarea is
   // disabled mid-stream and its value is swapped on completion, neither of
   // which a screen reader picks up on its own. Derived from props (no extra
@@ -29,6 +31,7 @@ function EnhanceControl({ enhancing, canUndo, disabled, onEnhance, onUndo }: Enh
     >
       <div className="srOnly" role="status" aria-live="polite" aria-atomic="true">{liveMessage}</div>
       <button
+        ref={enhanceRef}
         type="button"
         className={`${buttons.ai} ${styles.enhance}`}
         aria-label="Enhance"

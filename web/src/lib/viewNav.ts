@@ -5,7 +5,7 @@ export type ViewNavDirection = 'deeper' | 'back' | 'lateral';
 
 /**
  * The Canvas family (the feed scopes) is the studio floor; Archive, the
- * Prompt library and Text models sit one level in. Exhaustive switch so a new
+ * Prompt Library and Text models sit one level in. Exhaustive switch so a new
  * AppView kind forces an intentional decision.
  */
 function isCanvasView(kind: AppView['kind']): boolean {

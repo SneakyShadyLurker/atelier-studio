@@ -1,14 +1,17 @@
 import type { Batch, Collection, DoneTile, Model, Tile } from '@atelier/shared';
-import { useVirtualizer } from '@tanstack/react-virtual';
-import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
+import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
+import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, ViewTransition, type Ref } from 'react';
+import { flushSync } from 'react-dom';
 import { useIsPhone } from '../../hooks/useIsPhone';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { FEED_SCROLL_END_THRESHOLD_PX, FEED_VIRTUALIZER_ANCHORING } from '../../lib/feedAnchor';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
-import { loadSeenBatches, markBatchSeen } from '../../lib/seenBatches';
+import { markBatchesSeen, useSeenBatches } from '../../lib/seenBatches';
+import { scopeTitle } from '../../lib/viewChrome';
 import { useAtelierStore, type AppView } from '../../store/atelier';
 import BatchView, { type BatchAction, type TileAction, type TileHandoff } from '../Batch';
 import { InfiniteStatus } from '../InfiniteStatus';
+import { ManagedViewHeader } from '../ManagedViewHeader';
 import { StateView, LoadingState, ErrorState } from '../StateView';
 import styles from './index.module.css';
 
@@ -50,6 +53,9 @@ interface CanvasProps {
   q: string;
 }
 
+/** The scope title's id; the scroller region is labelled by it. */
+const FEED_HEADING_ID = 'atelier-feed-heading';
+
 export interface CanvasHandle {
   /** Bring a batch to the top of the feed. False when it isn't loaded. */
   scrollToBatch: (batchId: string) => boolean;
@@ -66,7 +72,6 @@ const READER_SCROLL_WINDOW_MS = 1_000;
 
 interface VirtualBatchRowProps {
   index: number;
-  start: number;
   /** Newest batch = the one the feed lands on, so it owns eager image loading. */
   isNewest: boolean;
   batch: Batch;
@@ -135,7 +140,6 @@ function LoadingCanvas() {
 
 const VirtualBatchRow = memo(function VirtualBatchRow({
   index,
-  start,
   isNewest,
   batch,
   modelById,
@@ -155,7 +159,23 @@ const VirtualBatchRow = memo(function VirtualBatchRow({
   measureElement,
   q,
 }: VirtualBatchRowProps) {
+  // Entrance eligibility is fixed at mount: the effect that marks this batch
+  // seen re-renders the row, and flipping `data-seen` then would cut its
+  // entrance short.
+  const [seenAtMount] = useState(seen);
   return (
+    // The row element itself is the capture. Rows sit in normal flow inside
+    // the translated window (Canvas below), so a batch that shrinks or leaves
+    // moves the rows below it in the same Transition commit, a layout change
+    // React measures: they move up over --dur-view, the removed batch shrinks
+    // out, and a seen batch that comes back (Undo) fades in. Unnamed like the tiles: rows are keyed by batch
+    // id and never remount within the feed, and a name would pair a batch
+    // that Unsorted and Pinned both show across a view swap.
+    <ViewTransition
+      default="tile-move"
+      exit="tile-exit"
+      enter={seenAtMount ? 'tile-enter' : 'none'}
+    >
     <div
       data-index={index}
       // Wrapped on purpose. Passing `measureElement` itself as the ref made the
@@ -164,7 +184,6 @@ const VirtualBatchRow = memo(function VirtualBatchRow({
       ref={(element) => { measureElement(element); }}
       data-batch-id={batch.id}
       className={styles.virtualBatch}
-      style={{ transform: `translateY(${start}px)` }}
     >
       <BatchView
         batch={batch}
@@ -173,7 +192,7 @@ const VirtualBatchRow = memo(function VirtualBatchRow({
         currentCollection={currentCollection}
         isAboveFold={isNewest}
         isFirstBatch={index === 0}
-        seen={seen}
+        seen={seenAtMount}
         readOnlyActions={readOnlyActions}
         onBatchAction={onBatchAction}
         promptsEnabled={promptsEnabled}
@@ -187,10 +206,21 @@ const VirtualBatchRow = memo(function VirtualBatchRow({
         q={q}
       />
     </div>
+    </ViewTransition>
   );
 });
 
-function Canvas({ batches, modelById, collections, activeView, hasNextPage, isFetchingNextPage, isFetchNextPageError = false, isLoading = false, error = null, readOnlyActions = false, onLoadMore, onRetry, onBatchAction, promptsEnabled, onTileAction, onOpenTile, onEditTile, onAnimateTile, onTellStoryTile, onCreateCardTile, cardPendingTileIds, ref, q }: CanvasProps) {
+function Canvas({ batches: liveBatches, modelById, collections, activeView, hasNextPage, isFetchingNextPage, isFetchNextPageError = false, isLoading = false, error = null, readOnlyActions = false, onLoadMore, onRetry, onBatchAction, promptsEnabled, onTileAction, onOpenTile, onEditTile, onAnimateTile, onTellStoryTile, onCreateCardTile, cardPendingTileIds, ref, q }: CanvasProps) {
+  // One render snapshot of the feed: the virtualizer, the rows and every
+  // handler read it, so a batch removal or insertion commits in a Transition
+  // and the batch-row boundaries animate it (removeBatchFromCache).
+  // `readOnlyActions` is App's placeholder flag (keepPreviousData showing the
+  // previous scope or search); it rides in the same snapshot as the rows.
+  // Controls read `readOnly`: a placeholder row stays inert until the commit
+  // that replaces it, though the live flag clears first.
+  const liveFeed = useMemo(() => ({ batches: liveBatches, placeholder: readOnlyActions }), [liveBatches, readOnlyActions]);
+  const { batches, placeholder } = useDeferredValue(liveFeed);
+  const readOnly = readOnlyActions || placeholder;
   const trimmedQ = q.trim();
   const blockingError = batches.length === 0 ? error : null;
   const isPhone = useIsPhone();
@@ -202,7 +232,7 @@ function Canvas({ batches, modelById, collections, activeView, hasNextPage, isFe
   // virtualizer's offsets in scroller coordinates, so scrollToIndex lands on
   // the row itself rather than that much short of it.
   const [scrollMargin, setScrollMargin] = useState(0);
-  const [seenBatchIds] = useState(() => loadSeenBatches());
+  const seenBatchIds = useSeenBatches();
   const getBatchKey = useCallback((index: number) => canvasBatchKey(batches, index), [batches]);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual's useVirtualizer is the canonical virtualization primitive; React Compiler escape hatch.
@@ -220,6 +250,46 @@ function Canvas({ batches, modelById, collections, activeView, hasNextPage, isFe
     // same 12px breathing room `.batch { scroll-margin-top }` gives focus scrolls.
     scrollPaddingStart: 12,
     ...FEED_VIRTUALIZER_ANCHORING,
+    // A viewport resize must reconcile row positions and end anchoring before
+    // the browser samples intersections and CSS anchor fallbacks. Keep scroll
+    // notifications batched so removals still capture their ViewTransition.
+    // A width change (sidebar collapse, window resize) has already re-laid
+    // out every row at the new width. Their heights are read in the same
+    // synchronous pass (resizeItem: measureElement skips while the anchor's
+    // own scroll corrections mark the list as scrolling), so positions, total
+    // height and the end anchor land before the frame paints instead of one
+    // row-ResizeObserver commit later. The height is the row's own
+    // offsetHeight, the library's uncached read: its measureElement without
+    // a ResizeObserver entry returns the cached size, which left WebKit (whose
+    // row observer skips while scrolling) painting a frame with the stale
+    // total and throwing the newest batch back up mid-collapse.
+    observeElementRect: (instance, callback) => {
+      let subscribing = true;
+      let width: number | null = null;
+      const cleanup = observeElementRect(instance, (rect) => {
+        const widthChanged = width !== null && rect.width !== width;
+        width = rect.width;
+        // The initial measurement runs inside the virtualizer's layout effect.
+        if (subscribing) {
+          callback(rect);
+          return;
+        }
+        const pinned = widthChanged && instance.isAtEnd(FEED_SCROLL_END_THRESHOLD_PX);
+        flushSync(() => {
+          callback(rect);
+          if (!widthChanged) return;
+          for (const row of instance.elementsCache.values()) {
+            const size = row instanceof HTMLElement ? row.offsetHeight : row.getBoundingClientRect().height;
+            instance.resizeItem(instance.indexFromElement(row), size);
+          }
+        });
+        // A growing list was clamped to the old scroll height; the committed
+        // height now lets the end anchor reach the real end.
+        if (pinned) instance.scrollToEnd();
+      });
+      subscribing = false;
+      return cleanup;
+    },
   });
   const virtualBatches = batchVirtualizer.getVirtualItems();
   const renderBatches = virtualBatches.length > 0
@@ -314,8 +384,8 @@ function Canvas({ batches, modelById, collections, activeView, hasNextPage, isFe
 
   useEffect(() => {
     if (renderedBatchIds === '') return;
-    for (const id of renderedBatchIds.split('\0')) markBatchSeen(seenBatchIds, id);
-  }, [renderedBatchIds, seenBatchIds]);
+    markBatchesSeen(renderedBatchIds.split('\0'));
+  }, [renderedBatchIds]);
 
   // The landing reconciliation keeps re-targeting the end while rows measure,
   // and the library does not stop it for a reader who starts scrolling: hand
@@ -373,12 +443,14 @@ function Canvas({ batches, modelById, collections, activeView, hasNextPage, isFe
 
   return (
     <div className={styles.shell}>
-      {isPhone && <header className={styles.feedHeader}>
-        <span className={styles.feedHeaderLabel}>Feed</span>
-      </header>}
+      <div className={styles.head}>
+        <ManagedViewHeader heading={scopeTitle(activeView, collections)} headingId={FEED_HEADING_ID} />
+      </div>
       <div
         ref={canvasRef}
         className={styles.canvas}
+        role="region"
+        aria-labelledby={FEED_HEADING_ID}
         onScrollCapture={handleScroll}
         onWheel={onScrollGesture}
         onTouchMove={onScrollGesture}
@@ -395,8 +467,17 @@ function Canvas({ batches, modelById, collections, activeView, hasNextPage, isFe
       ) : batches.length === 0 && trimmedQ ? (
         <SearchEmptyCanvas q={trimmedQ} />
       ) : batches.length === 0 ? (
-        <EmptyCanvas />
+        // Keyed sibling of the feed column's boundary (unkeyed, React would
+        // update one boundary in place): removing the last batch
+        // deletes the whole column, so the column exits (a row boundary
+        // inside it never runs) while the empty state fades in.
+        <ViewTransition key="empty" default="none" enter="part-enter">
+          <EmptyCanvas />
+        </ViewTransition>
       ) : (
+        // Exit only, and none for placeholder rows: their replacement belongs
+        // to the view stage, as for the keyed row list below.
+        <ViewTransition key="feed" default="none" exit={placeholder ? 'none' : 'tile-exit'}>
         <div className={styles.feedColumn}>
           {/* Older history loads UPWARD: the sentinel sits above the feed, and
               `anchorTo: 'end'` holds the reader's row still while the page
@@ -408,14 +489,29 @@ function Canvas({ batches, modelById, collections, activeView, hasNextPage, isFe
             fetchNextPage={onLoadMore}
             itemCount={batches.length}
             endLabel={`Start, ${String(batches.length)} ${batches.length === 1 ? 'batch' : 'batches'}`}
-            enabled={!readOnlyActions}
+            enabled={!readOnly}
           />
+          {/* Keyed by placeholder vs live data: the commit that replaces a
+              previous scope's placeholder rows with the real ones remounts
+              the list, so no row or tile boundary sits above that change and
+              none plays an exit or entrance. The swap belongs to the view
+              stage, not to the per-batch removal motion. */}
           <div
+            key={placeholder ? 'placeholder' : 'live'}
             ref={virtualFeedRef}
             className={styles.virtualFeed}
             data-virtualized="canvas"
             style={{ height: `${virtualFeedHeight}px` }}
           >
+            {/* TanStack's dynamic-size layout: one window translated to the
+                first rendered row, the rows in flow inside it. A per-row
+                translateY would only move the rows below a shrinking batch
+                after the virtualizer re-measured it, one commit later and
+                outside the removal's Transition, so they jumped. */}
+            <div
+              className={styles.virtualWindow}
+              style={{ transform: `translateY(${String((renderBatches[0]?.start ?? 0) - (virtualBatches.length > 0 ? scrollMargin : 0))}px)` }}
+            >
             {renderBatches.map((virtualBatch) => {
               const batch = batches[virtualBatch.index];
               if (!batch) return null;
@@ -427,14 +523,13 @@ function Canvas({ batches, modelById, collections, activeView, hasNextPage, isFe
                 <VirtualBatchRow
                   key={virtualBatch.key}
                   index={virtualBatch.index}
-                  start={virtualBatch.start - (virtualBatches.length > 0 ? scrollMargin : 0)}
                   isNewest={virtualBatch.index === batches.length - 1}
                   batch={batch}
                   modelById={modelById}
                   activeView={activeView}
                   currentCollection={currentCollection}
                   seen={seen}
-                  readOnlyActions={readOnlyActions}
+                  readOnlyActions={readOnly}
                   onBatchAction={onBatchAction}
                   promptsEnabled={promptsEnabled}
                   onTileAction={onTileAction}
@@ -449,8 +544,10 @@ function Canvas({ batches, modelById, collections, activeView, hasNextPage, isFe
                 />
               );
             })}
+            </div>
           </div>
         </div>
+        </ViewTransition>
       )}
       </div>
     </div>

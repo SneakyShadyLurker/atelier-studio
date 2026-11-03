@@ -2,7 +2,7 @@ import type { LibraryDiagnosisResponse, PromptLibraryResponse } from '@atelier/s
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { PropsWithChildren } from 'react';
+import { Profiler, type PropsWithChildren } from 'react';
 import { libraryDiagnosisKeys } from '../../api/libraryDiagnosis';
 import { promptKeys } from '../../api/prompts';
 import { useAtelierStore } from '../../store/atelier';
@@ -219,5 +219,37 @@ describe('PromptManager diagnosis badges', () => {
     await screen.findByText('BrokenA');
 
     expect(container.querySelector('[data-coherence]')).toBeNull();
+  });
+
+  test('Cancel unmounts the card only through the deferred render (its part boundary exit)', async () => {
+    const diagnosis: LibraryDiagnosisResponse = {
+      templates: [
+        { templateName: 'BrokenA', satisfiable: false, reason: 'incompatible dimension tags' },
+        { templateName: 'OK', satisfiable: true },
+      ],
+      librarySnapshotHash: 'h',
+      templatesDigest: 'd',
+    };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    client.setQueryData(promptKeys.library(), library);
+    client.setQueryData(libraryDiagnosisKeys.current(), diagnosis);
+    globalThis.fetch = mock(() => Response.json(library)) as unknown as typeof fetch;
+    // Each commit of the manager records whether the card is in the DOM.
+    const commits: boolean[] = [];
+    const cardPresent = () => screen.queryByRole('button', { name: 'Cancel' }) !== null;
+    render(
+      <Profiler id="manager" onRender={() => { commits.push(cardPresent()); }}>
+        <PromptManager onBack={() => undefined} />
+      </Profiler>,
+      { wrapper: wrapper(client) },
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /BrokenA.*unsatisfiable/i }));
+    await waitFor(() => { expect(cardPresent()).toBe(true); });
+    commits.length = 0;
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(cardPresent()).toBe(false);
+    // The urgent commit still held the card; the deferred one removed it.
+    expect(commits[0]).toBe(true);
+    expect(commits.at(-1)).toBe(false);
   });
 });

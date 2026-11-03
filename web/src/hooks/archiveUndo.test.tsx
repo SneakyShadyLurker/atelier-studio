@@ -69,8 +69,9 @@ function restoreCalls(calls: readonly Call[]): string[] {
   return calls.filter((call) => call.method === 'POST' && call.url.endsWith('/restore')).map((call) => call.url);
 }
 
+// The live "Archived" toast; one already fading out (leaving) is gone for the user.
 function archivedToast() {
-  return useAtelierStore.getState().toasts.find((toast) => toast.text === 'Archived');
+  return useAtelierStore.getState().toasts.find((toast) => toast.text === 'Archived' && !toast.leaving);
 }
 
 async function clickUndo(): Promise<void> {
@@ -99,11 +100,21 @@ describe('archive Undo', () => {
     act(() => { result.current.mutate({ batchId: 'batch-1', tileId: 'tile-a' }); });
     await waitFor(() => { expect(archivedToast()?.action?.label).toBe('Undo'); });
 
+    const id = archivedToast()?.id;
     await clickUndo();
     await waitFor(() => { expect(useAtelierStore.getState().toasts.some((toast) => toast.text === 'Restored')).toBe(true); });
     expect(restoreCalls(calls)).toEqual(['/api/archive/tile-a/restore']);
-    // The Undo toast closes once used; restore refetches the library like the Archive view's Restore.
-    expect(archivedToast()).toBeUndefined();
+    // The Undo toast fades out once used (two-phase dismiss), then unmounts
+    // exactly once; restore refetches the library like the Archive view's Restore.
+    expect(useAtelierStore.getState().toasts.find((toast) => toast.id === id)?.leaving).toBe(true);
+    let unmounts = 0;
+    const unsubscribe = useAtelierStore.subscribe((next, prev) => {
+      if (prev.toasts.some((toast) => toast.id === id) && !next.toasts.some((toast) => toast.id === id)) unmounts += 1;
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    unsubscribe();
+    expect(useAtelierStore.getState().toasts.some((toast) => toast.id === id)).toBe(false);
+    expect(unmounts).toBe(1);
     expect(client.getQueryState(historyKeys.list())?.isInvalidated).toBe(true);
   });
 

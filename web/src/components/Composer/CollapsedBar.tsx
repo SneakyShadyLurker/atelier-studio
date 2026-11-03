@@ -1,4 +1,4 @@
-import type { Ref } from 'react';
+import { ViewTransition, type Ref } from 'react';
 import styles from './index.module.css';
 
 interface CollapsedBarProps {
@@ -46,15 +46,20 @@ export function CollapsedBar({
         <span className={styles.collapsedPrompt} data-empty={prompt.trim() ? undefined : 'true'}>
           {prompt.trim() || placeholder}
         </span>
+        {/* Badges are part boundaries fed by the Composer's snapshot. */}
         {refCount > 0 && (
-          <span className={styles.collapsedRefBadge} aria-hidden="true">
-            {refCount}
-          </span>
+          <ViewTransition default="none" enter="part-enter" exit="part-exit">
+            <span className={styles.collapsedRefBadge} aria-hidden="true">
+              {refCount}
+            </span>
+          </ViewTransition>
         )}
         {queueLength > 0 && (
-          <span className={styles.collapsedQueueBadge} data-tip={`${queueLength} queued roll${queueLength === 1 ? '' : 's'}`}>
-            {queueLength} queued
-          </span>
+          <ViewTransition default="none" enter="part-enter" exit="part-exit">
+            <span className={styles.collapsedQueueBadge} data-tip={`${queueLength} queued roll${queueLength === 1 ? '' : 's'}`}>
+              {queueLength} queued
+            </span>
+          </ViewTransition>
         )}
       </button>
       {draining ? (

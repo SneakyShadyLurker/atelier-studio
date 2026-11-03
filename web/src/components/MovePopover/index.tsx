@@ -316,7 +316,7 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
             inlineEdit.begin('creating');
           }}
         >
-          + New collection
+          <I.plus aria-hidden="true" />New collection
         </button>
       )}
       </div>

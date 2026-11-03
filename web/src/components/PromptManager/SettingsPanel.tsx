@@ -1,5 +1,6 @@
 import type { PublicTextModel, TaskRow, TextModelsResponse, TextReasoningEffort } from '@atelier/shared';
 import { TEXT_REASONING_EFFORT_LABELS, TEXT_TASK_LABELS, TEXT_TASKS } from '@atelier/shared';
+import { useDeferredValue, useMemo, ViewTransition } from 'react';
 import { describeError } from '../../lib/errorCopy';
 import { useAtelierStore } from '../../store/atelier';
 import { usePendingTaskPicks, useSetTaskPick, useTextModels } from '../../hooks/useTextModels';
@@ -53,26 +54,40 @@ function TextModelsSection() {
   const saving = usePendingTaskPicks();
   const addToast = useAtelierStore((state) => state.addToast);
 
-  if (settings.isPending) return <LoadingState label="Loading settings…" />;
+  // One render snapshot of the query: the loading, error and loaded states
+  // swap in a Transition, each through its own part boundary.
+  const liveSnapshot = useMemo(() => ({ pending: settings.isPending, data: settings.data }), [settings.isPending, settings.data]);
+  const snapshot = useDeferredValue(liveSnapshot);
+
+  if (snapshot.pending) {
+    return (
+      <ViewTransition key="loading" default="none" enter="part-enter" exit="part-exit">
+        <LoadingState label="Loading settings…" />
+      </ViewTransition>
+    );
+  }
   // A failed background refetch keeps the last data; only a panel with none
   // falls back to the error state.
-  if (settings.data === undefined) {
+  if (snapshot.data === undefined) {
     return (
-      <ErrorState
-        message="Couldn’t load the text model settings."
-        onRetry={() => { void settings.refetch(); }}
-      />
+      <ViewTransition key="error" default="none" enter="part-enter" exit="part-exit">
+        <ErrorState
+          message="Couldn’t load the text model settings."
+          onRetry={() => { void settings.refetch(); }}
+        />
+      </ViewTransition>
     );
   }
 
-  const data = settings.data;
+  const data = snapshot.data;
   const byId = new Map(data.models.map((model) => [model.id, model]));
   // Rows come from the shared task list, so every task shows even when the
   // response omits one, and a task this bundle does not know is skipped.
   const rowByTask = new Map(data.tasks.map((row) => [row.task, row]));
 
   return (
-    <section className={styles.panel} aria-label="Prompt library text model settings">
+    <ViewTransition key="loaded" default="none" enter="part-enter" exit="part-exit">
+    <section className={styles.panel} aria-label="Prompt Library text model settings">
       <div className={styles.head} data-zone="head">
         <h2 className={styles.headTitle}>Text models</h2>
         <p className={styles.headNote}>
@@ -154,6 +169,7 @@ function TextModelsSection() {
         })}
       </div>
     </section>
+    </ViewTransition>
   );
 }
 

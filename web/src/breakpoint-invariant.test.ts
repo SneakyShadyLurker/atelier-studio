@@ -78,3 +78,90 @@ describe('phone breakpoint invariant (width < 768px, four-category)', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// Touch floors are gated on capability, never on width (docs/web-conventions.md):
+// `(hover: none)` catches phones and iPad without a keyboard, `(any-pointer:
+// coarse)` catches iPad with a keyboard (which reports hover:hover) and touch
+// laptops. One gate string, so no owner drifts back to a partial query.
+const TOUCH_GATE = '(hover: none), (any-pointer: coarse)';
+
+// Hover-capability queries guard hover-only affordances (the complement of the
+// gate), and Composer's shortcut hint hides only where there is no keyboard
+// at all; neither is a touch floor.
+const NON_FLOOR_QUERIES: Readonly<Record<string, readonly string[]>> = {
+  '*': ['(hover: hover)', '(hover: hover) and (pointer: fine)'],
+  'components/Composer/index.module.css': ['(hover: none) and (pointer: coarse)'],
+};
+
+// 44px rules that are phone geometry rather than a touch floor: the drawer's
+// close button exists only in the phone layout, and the managed header's Back
+// becomes an arrow-only square there, matching the hamburger beside it.
+const PHONE_GEOMETRY_44: readonly string[] = [
+  'components/Sidebar/index.module.css .closeBtn',
+  'components/ManagedViewHeader/index.module.css .header > .backButton',
+];
+
+interface Declaration {
+  /** Enclosing preludes, outermost first (at-rules and selectors). */
+  context: string[];
+  text: string;
+}
+
+function declarations(css: string): Declaration[] {
+  const out: Declaration[] = [];
+  const stack: string[] = [];
+  let buffer = '';
+  for (const char of css.replace(/\/\*[\s\S]*?\*\//g, '')) {
+    if (char === '{') {
+      stack.push(buffer.trim().replace(/\s+/g, ' '));
+      buffer = '';
+    } else if (char === ';' || char === '}') {
+      if (buffer.includes(':') && stack.length > 0) out.push({ context: [...stack], text: buffer.trim() });
+      if (char === '}') stack.pop();
+      buffer = '';
+    } else {
+      buffer += char;
+    }
+  }
+  return out;
+}
+
+describe('touch floors on capability', () => {
+  test('every hover or pointer media query is the touch gate (or a named non-floor query)', async () => {
+    const offenders: string[] = [];
+    for await (const rel of new Glob('**/*.css').scan({ cwd: SRC_DIR })) {
+      const css = read(`${SRC_DIR}/${rel}`).replace(/\/\*[\s\S]*?\*\//g, '');
+      for (const [prelude] of css.matchAll(/@media[^{]*/g)) {
+        const query = prelude.replace(/^@media\s*/, '').trim().replace(/\s+/g, ' ');
+        if (!/hover|pointer/.test(query)) continue;
+        if (query === TOUCH_GATE) continue;
+        const allowed = [...(NON_FLOOR_QUERIES['*'] ?? []), ...(NON_FLOOR_QUERIES[rel] ?? [])];
+        if (!allowed.includes(query)) offenders.push(`${rel}: @media ${query}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test('every 44px rule inside a media query sits under the touch gate or is named phone geometry', async () => {
+    const offenders: string[] = [];
+    for await (const rel of new Glob('**/*.css').scan({ cwd: SRC_DIR })) {
+      for (const { context, text } of declarations(read(`${SRC_DIR}/${rel}`))) {
+        if (!/\b44px\b/.test(text)) continue;
+        const media = context.filter((prelude) => prelude.startsWith('@media'));
+        if (media.length === 0) continue; // a base size applies to every device
+        if (media.some((prelude) => prelude === `@media ${TOUCH_GATE}`)) continue;
+        const selector = context.filter((prelude) => !prelude.startsWith('@')).at(-1) ?? '';
+        if (PHONE_GEOMETRY_44.includes(`${rel} ${selector}`)) continue;
+        offenders.push(`${rel}: ${media.join(' > ')} ${selector} { ${text} }`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test('the guard sees a width-only floor and a partial touch query', () => {
+    const css = '@media (width < 768px) { .a { min-height: 44px; } } @media (hover: none) { .b { width: 44px; } }';
+    const found = declarations(css).filter(({ text }) => /\b44px\b/.test(text));
+    expect(found.map(({ context }) => context[0])).toEqual(['@media (width < 768px)', '@media (hover: none)']);
+    expect(found.every(({ context }) => !context.includes(`@media ${TOUCH_GATE}`))).toBe(true);
+  });
+});

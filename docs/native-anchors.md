@@ -24,6 +24,7 @@ Verification: the real-browser lane (`bun run --cwd web test:browser`) runs the 
 | OverflowMenu (desktop): BatchOverflowMenu, the text-model row's More | top layer, manual popover | implicit anchor: the More trigger | Toasts raised while it is open render inside its panel (`useModalChrome` toast host), so the top layer covers nothing they need. |
 | MovePopover (desktop, from More or the collection chip) | top layer, manual popover | implicit anchor: whichever trigger opened it | As above. Manual mode is required: the 260ms pending single-click move (so a double-click can rename), the exit choreography, focus and Escape stay the owner's. |
 | AxisDropdown (desktop popover) | top layer, manual popover, above PromptPicker | implicit anchor: the axis trigger | It portals nothing of its own and hosts the toast while open (`useModalToastHost`), so nothing is stranded beneath it. |
+| TextModelNote (desktop) | top layer, manual popover, above its host | implicit anchor: the pressed AI button, or the phone editors' More button that outlives its menu | Hosts the toast while open: `useModalChrome` under a page host, `useModalToastHost` inside PromptPicker. Its portal root carries `data-text-model-note`, which the picker's outside-pointer counts as inside. |
 | BatchPrompt card | page layer, `z-index` popover + 1, portalled to `<body>` | declared name `--prompt-<useId>` in `--prompt-anchor`, as `anchor-name` on the active source (a zero-size pointer stand-in after a dwell, or the prompt after focus or a tap) and `position-anchor` on the card | The body portal escapes the feed scroller's clip and the `contain: strict` feed. Below the global toast stack (`--z-toast`, 200), so a tall card never covers an Undo, whichever opened first; a top-layer card did. |
 | `[data-tip]` label | top layer, manual popover, one node | implicit anchor: the described host | Escapes every clipping, masking, filtered or transformed ancestor (glass tile actions, the picker's masked scroll body, the feed). See the tooltip section for its DOM owner. |
 | ChipSelect menu (desktop) | page layer, `z-index` popover + 10 | declared name `--chip-<useId>` in `--named-anchor`, as `anchor-name` on the chip and `position-anchor` on the menu | It sits below the global toast stack (`--z-toast`, 200) and registers no toast host, so a top-layer chip menu could cover a global Undo. Inside PromptPicker it must stay above the picker's own page layer, which the shared z-index order already gives. |
@@ -44,7 +45,7 @@ A desktop panel carries `anchors.panel`, a `data-anchor-place` and, when an anch
 | Place | Owners | Preferred | Gap / edge clearance |
 |---|---|---|---|
 | `below-end` | OverflowMenu (BatchOverflowMenu, text-model rows), MovePopover | below, right edges aligned | 8px to the trigger, 12px from the left edge |
-| `below-start` | AxisDropdown | below, left edges aligned | 8px, 12px from the right edge |
+| `below-start` | AxisDropdown, TextModelNote | below, left edges aligned | 8px, 12px from the right edge |
 | `above-start` | ChipSelect | above, left edges aligned, at least trigger-wide (`anchor-size(width)`) | 8px, 12px from the top and right edges |
 
 The preferred side stays content-sized up to its available height. Native `flip-block`, `flip-inline` and their combination try the opposite side and horizontal mirrors. Sizing stays in the normal style: a definite height from the chosen area's available space, capped by `max-height: max-content` so short menus keep their natural height. AxisDropdown keeps its additional 340px/60dvh cap. This matters in WebKit: native focus scrolling left the last collections clipped after asynchronous growth when sizing changed inside a `@position-try` override. The browser regression grows the collection cache while open, navigates to the last row, Tabs to New collection and clicks it. A 120px usable-height floor rejects cramped sides; in a very short window the floor shrinks to half the total free height, computed entirely in CSS with `anchor-size(height)` and the two gap/edge budgets. At least one side can then fit. Base plus three alternatives stays within CSSWG's guaranteed five-option minimum.
@@ -119,8 +120,15 @@ The conservative expected boundary for the complete native behavior is Chromium 
 | `overlay` transition property | supported | no | no |
 | `closedby` | see BCD | see BCD | preview only |
 | `popover="hint"` (full semantics) | 151 | 153 | preview only |
+| same-document view transitions (`startViewTransition`, `view-transition-name`) | 111 | 144 | 18 |
+| `view-transition-class` | 125 | 144 | 18.2 |
+| scroll-driven animations (`animation-timeline: scroll()`) | 115 | 159 | 26 |
+| `scrollbar-gutter` | 94 | 97 | 18.2 |
+| `field-sizing` | 123 | 152 | 26.2 |
+| `interpolate-size` / `calc-size()` (not used) | 129 | no | no |
+| scroll-state container queries (not used) | 133 | no | no |
 
-Firefox's `transition-behavior: allow-discrete` for `display` is partial.
+Firefox's `transition-behavior: allow-discrete` for `display` is partial. Two motion and layout features sit above the Firefox floor and are gated: the scroll-edge fade's scroll-driven animation runs behind `@supports (animation-timeline: scroll())` (a static 14px fade at both edges otherwise), and `field-sizing` behind its own `@supports` (fixed minimum sizes otherwise). Without view transitions React applies each change at once, correct but unanimated. Height-auto reveals use grid-track interpolation instead of `interpolate-size`, and scroll-state queries are not used, because neither has shipped outside Chromium.
 
 `interestfor` cannot replace the tooltip lifecycle while Firefox and Safari lack it. Vite's build target does not polyfill any of these. `position-anchor` is always set explicitly (`auto` for implicit anchors, a name otherwise), never left to an initial value that has changed between engine versions.
 
@@ -149,6 +157,7 @@ Fallbacks, all keeping every interaction (focus traps, roving keys, Escape order
 | MovePopover (desktop) | same, re-measured on `collections.length` and inline-edit changes | top-layer popover, implicit anchor, `below-end`, follows content on its own |
 | ChipSelect (desktop) | same, viewport coordinates, measured width and height budget, hidden first frame | page layer, declared `useId` name, `above-start`, trigger width, capped stages |
 | AxisDropdown (desktop popover) | same, re-measured on filter results | top-layer popover, implicit anchor, `below-start` |
+| TextModelNote (desktop) | new | top-layer popover, implicit anchor, `below-start` |
 | Prompt Picker (desktop) | `bottom` and `max-height` from the measured `--composer-top` | anchored to `--atelier-composer`; centred fallback |
 | Toast stack | `bottom` from the measured `--composer-top`, `left: 50%` plus translate | `anchor()` against `--atelier-composer`; top-centre fallback |
 | BatchPrompt, pointer mode | measured card size, flip and clamp in script, `transform` writes, closed on leaving the prompt | page-layer card under the toast stack, named anchor on a pointer stand-in; CSS flips and clamps; hoverable with a travel grace |

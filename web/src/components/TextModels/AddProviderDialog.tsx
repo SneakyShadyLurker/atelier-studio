@@ -8,6 +8,7 @@ import { useCreateProvider } from '../../hooks/useTextProviders';
 import { describeError } from '../../lib/errorCopy';
 import { useAtelierStore } from '../../store/atelier';
 import { DialogShell } from '../DialogShell';
+import { Disclosure } from '../Disclosure';
 import btn from '../../styles/buttons.module.css';
 import dialogStyles from '../../styles/dialog.module.css';
 import {
@@ -27,7 +28,9 @@ import {
 import styles from './AddProviderDialog.module.css';
 
 const PRESET_URLS: ReadonlySet<string> = new Set(TEXT_PRESETS.map((preset) => preset.baseUrl));
+const PRESET_HINTS: readonly string[] = [...new Set(TEXT_PRESETS.map((preset) => preset.hint))];
 const isCustom = (preset: TextPreset) => preset.baseUrl === '';
+const KEY_OPTIONAL_COPY = 'Optional for this preset.';
 
 const EMPTY_DRAFT: ProviderDraft = {
   name: '',
@@ -171,7 +174,7 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
       });
   };
 
-  const keyHint = preset !== null && !preset.keyRequired ? 'Optional for this preset.' : undefined;
+  const keyHint = preset !== null && !preset.keyRequired ? KEY_OPTIONAL_COPY : undefined;
   const keySlot = (
     <div className={styles.field}>
       <label htmlFor={keyId} className={styles.fieldLabel}>API key</label>
@@ -184,7 +187,13 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
       />
       {noKeys ? (
         <p id={byokId} className={styles.fieldWarning} role={byokRefused ? 'alert' : undefined}>{BYOK_MISSING_COPY}</p>
-      ) : keyHint !== undefined && <p id={keyHintId} className={styles.fieldHint}>{keyHint}</p>}
+      ) : (
+        // Mounted for every preset so a keyed preset closes it smoothly and
+        // the centred dialog re-centres over the reveal.
+        <Disclosure open={keyHint !== undefined}>
+          <p id={keyHintId} className={styles.fieldHint}>{KEY_OPTIONAL_COPY}</p>
+        </Disclosure>
+      )}
     </div>
   );
 
@@ -216,6 +225,7 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
           draft={draft}
           errors={visibleErrors}
           urlHint={preset?.hint}
+          urlHints={PRESET_HINTS}
           keySlot={keySlot}
           disabled={busy}
           onChange={change}

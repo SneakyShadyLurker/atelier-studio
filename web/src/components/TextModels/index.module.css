@@ -26,6 +26,7 @@
   flex-direction: column;
   gap: 18px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   padding: 2px 0 max(24px, env(safe-area-inset-bottom));
   mask-image: var(--scroll-fade-mask);
@@ -404,6 +405,7 @@
   align-items: center;
   gap: 20px;
   padding: 10px 18px;
+  transition: background-color var(--dur-hover) var(--ease-out);
 }
 
 .modelRow + .modelRow {
@@ -534,6 +536,15 @@
   background: var(--ink);
 }
 
+.switch:hover:not(:disabled) {
+  border-color: var(--ink-3);
+}
+
+.switch[aria-checked='true']:hover:not(:disabled) {
+  border-color: var(--ink-2);
+  background: var(--ink-2);
+}
+
 .switchThumb {
   position: absolute;
   top: 2px;
@@ -609,7 +620,7 @@
 }
 
 /* Touch devices: every control reaches the 44 px floor. */
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .iconButton,
   .mode {
     min-width: 44px;
@@ -683,12 +694,5 @@
 
   .routeControl {
     max-width: 100%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .switch,
-  .switchThumb {
-    transition-duration: var(--dur-reduced);
   }
 }

@@ -1,6 +1,6 @@
 import type { Batch, Collection, DoneTile, Model, Tile } from '@atelier/shared';
 import { isVideoMime } from '@atelier/shared';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useRef, useState, ViewTransition } from 'react';
 import { refImageUrl } from '../../api/uploads';
 import { sequenceMasterUrl } from '../../api/sequences';
 import { findI2VModel } from '../../lib/i2v';
@@ -199,7 +199,11 @@ function TileRowImpl({
 // batch's ref, so unrelated-batch SSE events still skip every row here.
 const TileRow = memo(TileRowImpl);
 
-function BatchView({ batch, modelById, activeView, currentCollection, isAboveFold = false, isFirstBatch = false, seen = false, onBatchAction, promptsEnabled, readOnlyActions = false, onTileAction, onOpenTile, onEditTile, onAnimateTile, onTellStoryTile, onCreateCardTile, cardPendingTileIds, q }: BatchViewProps) {
+function BatchView({ batch: liveBatch, modelById, activeView, currentCollection, isAboveFold = false, isFirstBatch = false, seen = false, onBatchAction, promptsEnabled, readOnlyActions = false, onTileAction, onOpenTile, onEditTile, onAnimateTile, onTellStoryTile, onCreateCardTile, cardPendingTileIds, q }: BatchViewProps) {
+  // One render snapshot for the whole batch: header, tiles and every handler
+  // read it, so they never disagree, and a tile removal or insertion commits
+  // in a Transition, which is what lets the tile boundaries below animate.
+  const batch = useDeferredValue(liveBatch);
   const [moveOpen, setMoveOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -298,8 +302,12 @@ function BatchView({ batch, modelById, activeView, currentCollection, isAboveFol
           batch.ratio,
           sequenceLabel ? <span key="sequence" className={styles.sequenceChip}>{sequenceLabel}</span> : null,
           storyLabel ? <span key="story" className={styles.sequenceChip}>{storyLabel}</span> : null,
+          // Header slots that come and go are part boundaries fed by the
+          // batch snapshot above, so they drop in and lift out.
           batch.status === 'queued' ? (
-            <span key="queue" className={styles.queueBadge}>{queueLabel(batch.queueLengthAhead)}</span>
+            <ViewTransition key="queue" default="none" enter="part-enter" exit="part-exit">
+              <span className={styles.queueBadge}>{queueLabel(batch.queueLengthAhead)}</span>
+            </ViewTransition>
           ) : null,
           <span key="time" className={styles.metaTime}><RelativeTime timestamp={batch.createdAt} /></span>,
           batch.collectionId !== null && currentCollection ? (
@@ -333,6 +341,7 @@ function BatchView({ batch, modelById, activeView, currentCollection, isAboveFol
         ]} />
         <div className={styles.actions}>
           {batch.pinned ? (
+            <ViewTransition default="none" enter="part-enter" exit="part-exit">
             <button
               className={buttons.starBtn}
               type="button"
@@ -349,8 +358,10 @@ function BatchView({ batch, modelById, activeView, currentCollection, isAboveFol
             >
               <I.star />
             </button>
+            </ViewTransition>
           ) : null}
           {masterReadyOnTail ? (
+            <ViewTransition default="none" enter="part-enter" exit="part-exit">
             <button
               className={buttons.iconAction}
               data-size="28"
@@ -361,6 +372,7 @@ function BatchView({ batch, modelById, activeView, currentCollection, isAboveFol
             >
               <I.play />
             </button>
+            </ViewTransition>
           ) : null}
           <button className={buttons.iconAction} data-size="28" type="button" aria-label="Archive batch" data-tip="Archive batch" disabled={readOnlyActions} onClick={() => { onBatchAction('delete', batch); }}>
             <I.archive />
@@ -413,8 +425,20 @@ function BatchView({ batch, modelById, activeView, currentCollection, isAboveFol
         } as React.CSSProperties}
       >
         {batch.tiles.map((tile, index) => (
-          <TileRow
+          // One capture per tile (motion.css .tile-*): survivors interpolate
+          // to their reflowed slot, a removed tile shrinks out, and in a batch
+          // already seen an Undo-restored tile fades in (an unseen batch plays
+          // its CSS entrance instead). Unnamed on purpose: a feed tile never
+          // changes parent, and Unsorted and Pinned can both show it, so a
+          // name would pair it across a view swap instead of letting it travel
+          // with the stage.
+          <ViewTransition
             key={tile.id}
+            default="tile-move"
+            exit="tile-exit"
+            enter={seen ? 'tile-enter' : 'none'}
+          >
+          <TileRow
             tile={tile}
             batch={batch}
             index={index}
@@ -438,6 +462,7 @@ function BatchView({ batch, modelById, activeView, currentCollection, isAboveFol
             onCreateCardTile={onCreateCardTile}
             creatingCard={cardPendingTileIds?.has(tile.id) === true}
           />
+          </ViewTransition>
         ))}
       </div>
       <div className="srOnly" role="status" aria-live="polite">{everActive ? liveStatus : ''}</div>

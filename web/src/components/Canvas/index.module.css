@@ -5,24 +5,18 @@
   min-height: 0;
 }
 
-.feedHeader {
+/* The scope title (ManagedViewHeader) owns the hamburger clearance when the
+   sidebar is collapsed and on phones, so the feed reserves no band of its own. */
+.head {
+  composes: inset from '../ManagedViewHeader/index.module.css';
   flex: 0 0 auto;
-  min-height: var(--app-header-h);
-  padding: 0 36px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--line);
-}
-
-.feedHeaderLabel {
-  composes: label from '../../styles/type.module.css';
 }
 
 .canvas {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   padding: 14px 36px calc(var(--composer-top, 156px) + 24px);
   container-type: inline-size;
@@ -35,6 +29,20 @@
      virtualized rows can't bleed into the parent reflow. */
   overflow-anchor: none;
   contain: strict;
+  /* Scroll-edge fade on the scroller itself (see Sidebar .list): the stops
+     read the scroller-scoped --scroll-fade-top. */
+  --scroll-fade-top: 14px;
+  mask-image: linear-gradient(to bottom, transparent 0, black var(--scroll-fade-top), black calc(100% - 14px), transparent 100%);
+}
+
+/* At rest the first batch sits unmasked; the top fade grows over the first
+   28px of scroll. Without scroll-driven animations the static 14px fade stays. */
+@supports (animation-timeline: scroll()) {
+  .canvas {
+    animation: global(atelier-scroll-edge) linear both;
+    animation-timeline: scroll(self block);
+    animation-range: 0 28px;
+  }
 }
 
 .virtualFeed {
@@ -48,37 +56,20 @@
   padding-bottom: 241px;
 }
 
-/* The fixed 44px sidebar-expand button sits over the feed's top-left corner
-   when the sidebar is collapsed. Reserve its band on the shell, outside the
-   scroller, so scrolled content never passes under it. */
-@media (width >= 768px) {
-  .shell {
-    padding-top: 0;
-    transition: padding-top var(--dur-overlay) var(--ease-out);
-  }
-  :global([data-sidebar-collapsed='true']) .shell {
-    padding-top: 60px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .shell {
-    transition: none;
-  }
-}
-
-.virtualBatch {
+.virtualWindow {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
 }
 
-@media (width < 768px) {
-  .feedHeader {
-    padding: 0 14px 0 60px;
-  }
+/* In flow inside the window; flow-root keeps the batch sheet's top margin
+   inside the row, so the measured height is the row's whole footprint. */
+.virtualBatch {
+  display: flow-root;
+}
 
+@media (width < 768px) {
   .canvas {
     padding: 14px 14px calc(var(--composer-top, 140px) + 20px);
   }

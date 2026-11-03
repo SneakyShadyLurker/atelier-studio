@@ -18,7 +18,7 @@
   gap: 2px;
   min-width: 0;
   padding: 9px 10px;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--line-control);
   border-radius: var(--radius-control);
   background: var(--bg);
   cursor: pointer;
@@ -28,7 +28,7 @@
 }
 
 .kind:hover {
-  border-color: var(--line-control);
+  border-color: var(--ink-3);
 }
 
 /* Selected-state chrome is ink, as elsewhere: --accent is reserved for AI

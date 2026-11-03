@@ -1,7 +1,7 @@
 import type { Batch, Collection, HistoryPage, Model } from '@atelier/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Ref } from 'react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, ViewTransition } from 'react';
 import {
   APP_VIEW_ARCHIVE,
   APP_VIEW_PROMPTS,
@@ -11,8 +11,10 @@ import {
   useAtelierStore,
 } from '../../store/atelier';
 import { FEED_VIRTUALIZER_ANCHORING } from '../../lib/feedAnchor';
+import { markBatchesSeen, useSeenBatches } from '../../lib/seenBatches';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { describeError } from '../../lib/errorCopy';
+import { scopeTitle } from '../../lib/viewChrome';
 import type { Theme } from '../../hooks/useTheme';
 import { useCollections } from '../../hooks/useCollections';
 import { useCreateCollection } from '../../hooks/useCreateCollection';
@@ -28,6 +30,7 @@ import { runWhenReachable } from '../../lib/focus';
 import ConfirmDialog from '../ConfirmDialog';
 import { InfiniteStatus } from '../InfiniteStatus';
 import { Meta } from '../Meta';
+import { StateView } from '../StateView';
 import { I } from '../icons/I';
 import buttons from '../../styles/buttons.module.css';
 import atelierMark from '../../assets/atelier-mark.png';
@@ -89,21 +92,6 @@ function collectionLabel(collections: readonly Collection[], view: AppView): str
   return null;
 }
 
-function historySectionLabel(view: AppView, collections: readonly Collection[]): string {
-  if (view.kind === 'archive') {
-    if (view.scope.kind === 'all') return 'Archive';
-    if (view.scope.kind === 'pinned') return 'Archive, pinned';
-    if (view.scope.kind === 'unsorted') return 'Archive, unsorted';
-    const name = collectionLabel(collections, view);
-    return name ? `Archive, ${name}` : 'Archive';
-  }
-  if (view.kind === 'pinned') return 'Pinned';
-  if (view.kind === 'unsorted') return 'Unsorted';
-  const name = collectionLabel(collections, view);
-  if (name) return `In ${name}`;
-  return 'Recent';
-}
-
 function emptyCopy(view: AppView, collections: readonly Collection[], q: string, totalCount: number): string {
   if (q.trim()) return `No prompts match "${q.trim()}".`;
   if (view.kind === 'archive') {
@@ -140,6 +128,8 @@ function isInlineCancelTarget(target: EventTarget | null): boolean {
 interface SidebarFeedRowProps {
   batch: Batch;
   isActive: boolean;
+  /** Whether the batch was already seen; read once, at mount. */
+  seen: boolean;
   readOnly: boolean;
   onSelect: (batchId: string) => void;
   onTogglePin: (batchId: string, pinned: boolean) => void;
@@ -149,7 +139,11 @@ interface SidebarFeedRowProps {
 // re-renders only the two rows whose isActive flips — not the whole feed. The
 // `onSelect`/`onTogglePin` callbacks are stabilized by the parent so the shallow
 // prop compare holds.
-const SidebarFeedRow = memo(function SidebarFeedRow({ batch, isActive, readOnly, onSelect, onTogglePin }: SidebarFeedRowProps) {
+const SidebarFeedRow = memo(function SidebarFeedRow({ batch, isActive, seen, readOnly, onSelect, onTogglePin }: SidebarFeedRowProps) {
+  // Entrance eligibility is fixed at mount: the rail's own mark re-renders the
+  // row with seen=true, and flipping `data-seen` then would cut a playing
+  // entrance short. A virtual remount of a seen row replays nothing.
+  const [seenAtMount] = useState(seen);
   const firstReady = batch.tiles.find((tile) => tile.status === 'done');
   const pinLabel = batch.pinned ? 'Unpin batch' : 'Pin batch';
   return (
@@ -160,8 +154,13 @@ const SidebarFeedRow = memo(function SidebarFeedRow({ batch, isActive, readOnly,
           is unchanged by the source order. */}
       <button
         type="button"
-        className={`${styles.item} ${isActive ? styles.itemActive : ''}`}
+        className={isActive ? `${styles.item} ${styles.itemActive} railActiveBar` : styles.item}
         aria-label={`Open batch: ${batch.prompt.slice(0, 80)}`}
+        // The batch the canvas was last pointed at (generate or rail
+        // selection), not the batch in view.
+        aria-current={isActive ? 'true' : undefined}
+        data-tip={isActive ? 'Current batch' : undefined}
+        data-seen={seenAtMount ? 'true' : undefined}
         disabled={readOnly}
         onClick={() => { onSelect(batch.id); }}
         onKeyDown={(event) => {
@@ -181,6 +180,10 @@ const SidebarFeedRow = memo(function SidebarFeedRow({ batch, isActive, readOnly,
               height={32}
               loading="lazy"
               decoding="async"
+              // The thumb fades in once decoded (CSS on data-loaded); a cached
+              // image is already complete when it mounts and shows at once.
+              ref={(image) => { if (image?.complete && image.naturalWidth > 0) image.dataset.loaded = 'true'; }}
+              onLoad={(event) => { event.currentTarget.dataset.loaded = 'true'; }}
               onError={(event) => {
                 if (event.currentTarget.getAttribute('src') !== firstReady.url) event.currentTarget.src = firstReady.url;
               }}
@@ -296,12 +299,36 @@ function Sidebar({
     archivedPinnedCount: 0,
     archivedUnsortedCount: 0,
   }, [collectionsData?.summary]);
+  // The rail's empty and error states render from one deferred snapshot, so
+  // switching between them (or to the list) commits in a Transition and the
+  // state's part boundary fades it in and out.
+  const emptyMessage = batches.length === 0 ? emptyCopy(view, collections, q, summary.totalCount) : null;
+  const liveRailState = useMemo(() => (
+    error && batches.length === 0 ? { kind: 'error' as const, message: error }
+      : emptyMessage !== null ? { kind: 'empty' as const, message: emptyMessage }
+        : null
+  ), [error, batches.length, emptyMessage]);
+  const railState = useDeferredValue(liveRailState);
   const isArchive = view.kind === 'archive';
   // The recent-generations feed is a Canvas concept. Full-screen management
   // views (Archive, Prompt Library, Text models) suppress it but keep the Library rail
   // byte-identical to the normal view — only the contextually-irrelevant
   // feed list is dropped.
   const hideFeed = isArchive || view.kind === 'prompts' || view.kind === 'text-models';
+  // The rail marks the batches it renders (Canvas marks its own window): a
+  // row that scrolls out of the virtual window and back, or a drawer that
+  // reopens, then remounts seen and replays no entrance.
+  const seenBatchIds = useSeenBatches();
+  const renderedBatchIds = hideFeed
+    ? ''
+    : renderRows.flatMap((row) => {
+      const id = batches[row.index]?.id;
+      return id === undefined ? [] : [id];
+    }).join('\0');
+  useEffect(() => {
+    if (renderedBatchIds === '') return;
+    markBatchesSeen(renderedBatchIds.split('\0'));
+  }, [renderedBatchIds]);
   useLayoutEffect(() => {
     const scroller = feedRef.current;
     const list = virtualListRef.current;
@@ -531,7 +558,7 @@ function Sidebar({
                 type="button"
                 onClick={() => { beginCreate(index); }}
               >
-                <span>{row.label}</span>
+                <I.plus aria-hidden="true" /><span>{row.label}</span>
               </button>
               )}
         </li>
@@ -611,7 +638,7 @@ function Sidebar({
   };
 
   const searchVisible = view.kind !== 'archive' && (isPhone || searchOpen || q.trim() !== '');
-  const historyLabel = historySectionLabel(view, collections);
+  const historyLabel = scopeTitle(view, collections);
 
   return (
     <aside
@@ -627,7 +654,6 @@ function Sidebar({
       <header className={styles.header}>
         <img className={styles.mark} src={atelierMark} width={22} height={22} alt="" />
         <div className={styles.title}>Atelier</div>
-        <div className={styles.version}>v1.0</div>
         {onCollapse && !isPhone && (
           <button
             className={styles.collapseBtn}
@@ -672,7 +698,7 @@ function Sidebar({
                   type="button"
                   aria-label="Search prompts"
                   aria-pressed={searchOpen}
-                  data-size="22"
+                  data-size="26"
                   data-tip="Search prompts"
                   data-tip-place="below"
                   onClick={() => {
@@ -746,7 +772,7 @@ function Sidebar({
         <div className={styles.section} data-zone="head">
           <span role="heading" aria-level={2}>{historyLabel}</span>
           {(view.kind === 'unsorted' || view.kind === 'collection') && batches.length > 0 && q.trim() === '' && (
-            <button className={buttons.iconAction} data-size="22" type="button" aria-label="Archive all" data-tip="Archive all" data-tip-place="below" disabled={historyReadOnly} onClick={onClear}>
+            <button className={buttons.iconAction} data-size="26" type="button" aria-label="Archive all" data-tip="Archive all" data-tip-place="below" disabled={historyReadOnly} onClick={onClear}>
               <I.archive />
             </button>
           )}
@@ -760,14 +786,15 @@ function Sidebar({
         data-testid="sidebar-feed"
         data-zone="body"
       >
-        {error && batches.length === 0 ? (
-          <div className={styles.empty}>
-            <div>{error}</div>
-            <button className={styles.retry} type="button" onClick={onRetry}>Retry</button>
-          </div>
-        ) : batches.length === 0 ? (
-          <div className={styles.empty}>{emptyCopy(view, collections, q, summary.totalCount)}</div>
-        ) : (
+        {railState !== null ? (
+          <ViewTransition key={railState.kind} default="none" enter="part-enter" exit="part-exit">
+            <StateView
+              className={styles.railState}
+              title={railState.message}
+              {...(railState.kind === 'error' && onRetry ? { action: { label: 'Retry', onClick: onRetry } } : {})}
+            />
+          </ViewTransition>
+        ) : batches.length === 0 ? null : (
           <>
           <InfiniteStatus
             hasNextPage={hasNextPage}
@@ -793,6 +820,7 @@ function Sidebar({
                   <SidebarFeedRow
                     batch={batch}
                     isActive={batch.id === activeBatchId}
+                    seen={seenBatchIds.has(batch.id)}
                     readOnly={historyReadOnly}
                     onSelect={handleSelectBatch}
                     onTogglePin={handleTogglePin}
@@ -853,7 +881,8 @@ function Sidebar({
         <span className={styles.dot} />
         <Meta className={styles.footerLabel} items={[`${String(models.length)} models`, `${String(backends)} backends`]} />
         <button
-          className={styles.settingsBtn}
+          className={`${buttons.iconAction} ${styles.footerBtn}`}
+          data-size="26"
           type="button"
           aria-label="API keys"
           data-tip="API keys"
@@ -864,7 +893,8 @@ function Sidebar({
         </button>
         {onToggleTheme && (
           <button
-            className={styles.themeBtn}
+            className={`${buttons.iconAction} ${styles.footerBtn}`}
+            data-size="26"
             type="button"
             aria-label={themeTip}
             aria-pressed={theme === 'dark'}

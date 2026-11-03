@@ -206,8 +206,8 @@ describe('App prompt-library gate', () => {
     });
 
     expect(await screen.findByRole('heading', { name: 'Prompt Library' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Back to feed' })).toBeTruthy();
-    expect(await screen.findByText('Couldn’t load the prompt library.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back to Unsorted' })).toBeTruthy();
+    expect(await screen.findByText('Couldn’t load the Prompt Library.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 });

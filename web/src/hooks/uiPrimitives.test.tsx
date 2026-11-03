@@ -98,7 +98,7 @@ describe('useModalChrome', () => {
     expect(trigger.hasAttribute('aria-hidden')).toBe(false);
     expect(background.hasAttribute('inert')).toBe(false);
     expect(background.hasAttribute('aria-hidden')).toBe(false);
-    await waitFor(() => { expect(document.activeElement).toBe(trigger); });
+    await waitFor(() => { expect(document.activeElement === trigger).toBe(true); });
   });
 
   test('Escape only cancels from inside the portal or after focus falls to body', () => {
@@ -130,11 +130,11 @@ describe('useModalChrome', () => {
     const input = screen.getByLabelText('Name');
     input.focus();
     fireEvent.change(input, { target: { value: 'edited' } });
-    await waitFor(() => { expect(document.activeElement).toBe(input); });
+    await waitFor(() => { expect(document.activeElement === input).toBe(true); });
 
     rerender(<StatefulModalHarness open={false} />);
 
-    await waitFor(() => { expect(document.activeElement).toBe(trigger); });
+    await waitFor(() => { expect(document.activeElement === trigger).toBe(true); });
   });
 });
 

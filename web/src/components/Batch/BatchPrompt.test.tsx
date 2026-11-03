@@ -321,7 +321,7 @@ describe('BatchPrompt full-text card', () => {
     expect(onOverlayEscape).toHaveBeenCalledTimes(1);
   });
 
-  test('repeated prompts declare their own names; only the active one binds', () => {
+  test('repeated prompts declare their own names; only the active one binds', async () => {
     const other = `${PROMPT} (again)`;
     render(
       <>
@@ -340,7 +340,11 @@ describe('BatchPrompt full-text card', () => {
     const next = nameOf(screen.getByRole('tooltip'));
     expect(next).not.toBe(first);
     expect(nameOf(second)).toBe(next);
+    // The first card fades out against its own prompt, then that name goes.
+    expect(nameOf(prompt())).toBe(first);
+    await wait(250);
     expect(nameOf(prompt())).toBe('');
+    expect(nameOf(second)).toBe(next);
   });
 
   test('a focused prompt card takes Escape before an older hovered card', async () => {
@@ -413,6 +417,34 @@ describe('BatchPrompt full-text card', () => {
     again.unmount();
     expect(screen.queryByRole('tooltip')).toBeNull();
     expect(cursor()).toBeNull();
+  });
+
+  test('closing plays the shared fade: the card is stamped data-closing, then unmounts', async () => {
+    render(<BatchPrompt prompt={PROMPT} />);
+    const card = await openByDwell();
+    expect(card.hasAttribute('data-closing')).toBe(false);
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    // Closed for assistive tech at once; the visual card stays through its exit.
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(prompt().hasAttribute('aria-describedby')).toBe(false);
+    expect(card.isConnected).toBe(true);
+    expect(card.getAttribute('data-closing')).toBe('true');
+    expect(card.getAttribute('aria-hidden')).toBe('true');
+    await wait(250);
+    expect(card.isConnected).toBe(false);
+    expect(cursor()).toBeNull();
+
+    // A reopen during the exit takes the card back instead of letting it go.
+    fireEvent.mouseLeave(prompt());
+    const again = await openByDwell();
+    act(() => { prompt().focus(); });
+    fireEvent.keyDown(prompt(), { key: 'Escape' });
+    expect(again.getAttribute('data-closing')).toBe('true');
+    act(() => { prompt().blur(); });
+    act(() => { prompt().focus(); });
+    await wait(250);
+    expect(screen.getByRole('tooltip').hasAttribute('data-closing')).toBe(false);
   });
 
   test('an untruncated prompt never opens a card', async () => {

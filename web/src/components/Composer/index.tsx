@@ -1,7 +1,7 @@
 import { MAX_TILE_COUNT, VAR_TOKEN_PATTERN } from '@atelier/shared';
 import type { Model, Ratio } from '@atelier/shared';
 import { AI_FILL_MAX_SLOTS, hasAiFillTokens, parseAiFillTokens } from '@atelier/shared/ai-fill';
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, ViewTransition, type RefObject } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { textModelsOpts } from '../../api/textModels';
 import { refImageUrl, uploadRefImage } from '../../api/uploads';
@@ -12,6 +12,7 @@ import { isImeComposing } from '../../lib/ime';
 import { promptPickerAvailable } from '../../lib/modelSelection';
 import { describeError } from '../../lib/errorCopy';
 import { runWhenReachable } from '../../lib/focus';
+import { goToTextModels } from '../../lib/textModelsNav';
 import { useDeleteUpload } from '../../hooks/useDeleteUpload';
 import { useAttachRefImages } from '../../hooks/useAttachRefImages';
 import { useComposerViewportInsets } from '../../hooks/useComposerViewportInsets';
@@ -21,8 +22,10 @@ import { useProbeModel } from '../../hooks/useProbeModel';
 import { useKeyboardScopeActive, useKeyboardScoped } from '../../hooks/useKeyboard';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useOutsidePointer } from '../../hooks/useOutsidePointer';
+import { useTextModelGate } from '../../hooks/useTextModelGate';
 import type { Count, RefImageDraft } from '../../store/atelier';
 import { canSubmitDraft, holdUploadsForUndo, MAX_REF_IMAGES_FALLBACK, useAtelierStore } from '../../store/atelier';
+import { Disclosure } from '../Disclosure';
 import { I } from '../icons/I';
 import ChipSelect, { type ChipSelectOption } from './ChipSelect';
 import { CollapsedBar } from './CollapsedBar';
@@ -30,6 +33,7 @@ import EnhanceControl from './EnhanceControl';
 import InFlightIndicator from './InFlightIndicator';
 import { hostLabel, shortModelToken } from './modelToken';
 import PromptPicker from '../PromptPicker';
+import TextModelNote from '../TextModelNote';
 import RatioChip from './RatioChip';
 import DurationChip from './DurationChip';
 import type { VideoDurationFrames } from '@atelier/shared';
@@ -147,6 +151,7 @@ function Composer({
   const openPicker = useAtelierStore((state) => state.openPicker);
   const closePicker = useAtelierStore((state) => state.closePicker);
   const [queueExpanded, setQueueExpanded] = useState(false);
+  const queuePanelId = useId();
   const rollQueue = useAtelierStore((state) => state.draft.rollQueue);
   const resolving = useAtelierStore((state) => state.resolving);
   const preparing = useAtelierStore((state) => state.preparing);
@@ -193,6 +198,16 @@ function Composer({
   const probeMutation = useProbeModel();
   const { enhance, undo, editPrompt, status: enhanceStatus, canUndo } = useEnhancePrompt({ prompt, refImageIds: readyRefImageIds, modelId, ratio, onPromptChange });
   const enhancing = enhanceStatus === 'streaming';
+  // AI actions stay enabled without a text model; with none configured at
+  // all, pressing one opens the note under it instead (decision 3).
+  const textModelGate = useTextModelGate();
+  const enhanceButtonRef = useRef<HTMLButtonElement | null>(null);
+  const tellStoryButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [textNote, setTextNote] = useState<{ action: string; anchorRef: RefObject<HTMLButtonElement | null> } | null>(null);
+  const gateTextAction = (action: string, anchorRef: RefObject<HTMLButtonElement | null>, run: () => void) => {
+    if (textModelGate.availability === 'none') setTextNote({ action, anchorRef });
+    else run();
+  };
   useLayoutEffect(() => {
     activeModelIdRef.current = modelId;
   }, [modelId]);
@@ -214,6 +229,21 @@ function Composer({
     : undefined;
   const isI2VMode = selectedModel?.supportsI2V === true;
   const isExtendMode = isI2VMode && extendsTileId !== undefined;
+  // One render snapshot for the conditional parts (banner, ref chips, queue
+  // chip and list, collapsed-bar badges, mode body): they render from it, so a
+  // part mounts or unmounts in a Transition and its <ViewTransition> plays,
+  // while the frame boundary in App.tsx interpolates the footprint. Typing
+  // never touches it: the prompt is not in it. Handlers act on the live
+  // queue and refs (a view transition holds the deferred commit).
+  const noModels = models.length === 0;
+  const liveParts = useMemo(() => ({
+    banner: noModels && !modelsPending ? (error ?? 'Models unavailable') : null,
+    error,
+    rollQueue,
+    refImages,
+    isI2VMode,
+  }), [noModels, modelsPending, error, rollQueue, refImages, isI2VMode]);
+  const parts = useDeferredValue(liveParts);
   // The model to drop back to when leaving animate mode: the last image model
   // the user was on, falling back to the first available image model. Switching
   // to it is what exits video mode (handleModelChange clears the I2V draft).
@@ -295,19 +325,21 @@ function Composer({
     const cloud = models.filter((model) => model.backend === 'cloud');
     const toOption = (model: Model): ChipSelectOption<string> => {
       const offline = model.availability && !model.availability.ok;
-      // Two disabled states, two different hint labels. `Key required` is the
-      // existing UX for BYOK without a configured key — clicking opens the
-      // key manager. `Offline` is the new one — server's health probe says
-      // the upstream host is unreachable; clicking starts an on-demand probe
-      // in handleModelChange below.
+      // Two disabled states, two different hint labels. `Needs your API key`
+      // (behind a lock) is BYOK without a configured key — clicking opens the
+      // key manager. `Offline` means the server's health probe says the
+      // upstream host is unreachable; clicking starts an on-demand probe in
+      // handleModelChange below.
       // Local models advertise their host tag (`comfyui`); cloud models
-      // keep their free-form locator tag (e.g. `google`).
+      // keep their free-form locator tag (e.g. `google`). A locator that only
+      // repeats the group header word (`cloud` under Cloud) is dropped.
+      const group = model.backend === 'local' ? 'Local' : 'Cloud';
       const locator = model.backend === 'local' ? hostLabel(model.tag) : model.tag;
-      let hint: string;
-      if (model.requiresKey) hint = 'Key required';
+      let hint: string | undefined;
+      if (model.requiresKey) hint = 'Needs your API key';
       else if (probingModelId === model.id) hint = 'Checking…';
       else if (offline) hint = 'Offline, check again';
-      else hint = locator;
+      else if (locator.toLowerCase() !== group.toLowerCase()) hint = locator;
       const baseTitle = `${model.backend}, ${locator}, ${model.latency}`;
       const title = offline && model.availability
         ? `${baseTitle}, host offline (${formatCheckedAgo(model.availability.checkedAt)})`
@@ -315,8 +347,9 @@ function Composer({
       return {
         value: model.id,
         label: model.name,
-        hint,
-        group: model.backend === 'local' ? 'Local' : 'Cloud',
+        ...(hint === undefined ? {} : { hint }),
+        ...(model.requiresKey ? { hintIcon: <I.lock /> } : {}),
+        group,
         title,
         disabled: model.requiresKey !== undefined,
         actionable: model.requiresKey === undefined && offline === true,
@@ -345,7 +378,6 @@ function Composer({
 
   useComposerViewportInsets(wrapRef);
 
-  const noModels = models.length === 0;
   const forceExpanded = error != null;
   const collapsed = (isPhone ? !composerExpanded : composerMinimized) && !forceExpanded;
   const minimize = () => {
@@ -408,22 +440,34 @@ function Composer({
       return;
     }
     if (composerExpanded && !previousComposerExpanded.current) {
-      const target = isI2VMode ? motionRef.current : textRef.current;
+      const target = parts.isI2VMode ? motionRef.current : textRef.current;
       runWhenReachable(() => { target?.focus(); }, target);
     } else if (!composerExpanded && previousComposerExpanded.current) {
       collapsedExpandRef.current?.focus();
     }
     previousComposerExpanded.current = composerExpanded;
-  }, [composerExpanded, isPhone, isI2VMode]);
+  }, [composerExpanded, isPhone, parts.isI2VMode]);
 
-  if (noModels) {
+  // The failed-inventory banner stays (from the snapshot) until the deferred
+  // render removes it, so it leaves through its boundary when models arrive.
+  // Pending inventory swaps to the form at once: no transition at load.
+  if (noModels || parts.banner !== null) {
     return (
       <div ref={wrapRef} className={styles.wrap} id="atelier-composer" data-collapsed={collapsed ? 'true' : undefined}>
         <div className={`${styles.composer} ${styles.inventoryState}`}>
-          <div className={modelsPending ? styles.inventoryLoading : styles.banner} role={modelsPending ? 'status' : 'alert'}>
-            <span>{modelsPending ? 'Loading models…' : error ?? 'Models unavailable'}</span>
-            {!modelsPending && <button type="button" className={styles.bannerAction} aria-label="Retry loading models" onClick={onRetryModels}>Retry</button>}
-          </div>
+          {modelsPending && noModels ? (
+            <div className={styles.inventoryLoading} role="status">
+              <span>Loading models…</span>
+            </div>
+          ) : null}
+          {parts.banner !== null ? (
+            <ViewTransition default="none" enter="part-enter" exit="part-exit">
+              <div className={styles.banner} role="alert">
+                <span>{parts.banner}</span>
+                <button type="button" className={styles.bannerAction} aria-label="Retry loading models" onClick={onRetryModels}>Retry</button>
+              </div>
+            </ViewTransition>
+          ) : null}
         </div>
       </div>
     );
@@ -471,7 +515,7 @@ function Composer({
     if (candidate?.availability && !candidate.availability.ok) {
       // ChipSelect renders the option with `aria-disabled` + a styles hook,
       // but its click / keyboard-Enter handlers do NOT gate on `disabled`
-      // (mirrors the BYOK gate: clicking "Key required" opens the BYOK pane
+      // (mirrors the BYOK gate: clicking "Needs your API key" opens the BYOK pane
       // by design). The actual gate lives here and turns the click into an
       // immediate health re-check before deciding whether to select.
       setProbingModelId(candidate.id);
@@ -757,8 +801,8 @@ function Composer({
           ref={collapsedExpandRef}
           prompt={isI2VMode ? (motionPrompt ?? '') : prompt}
           placeholder={isI2VMode ? 'Describe the motion…' : undefined}
-          refCount={isI2VMode ? (i2vSourceUploadId ? 1 : 0) : refImages.length}
-          queueLength={rollQueue.length}
+          refCount={parts.isI2VMode ? (i2vSourceUploadId ? 1 : 0) : parts.refImages.length}
+          queueLength={parts.rollQueue.length}
           canSubmit={canSubmitNow}
           draining={canStop}
           onStop={onStopDraining}
@@ -768,7 +812,7 @@ function Composer({
             setComposerExpanded(true);
             if (!isPhone) {
               runWhenReachable(() => {
-                const target = isI2VMode ? motionRef.current : textRef.current;
+                const target = parts.isI2VMode ? motionRef.current : textRef.current;
                 target?.focus();
               }, wrapRef.current);
             }
@@ -822,7 +866,7 @@ function Composer({
           <I.caret />
         </button>
         <RefImageRow
-          files={refImages}
+          files={parts.refImages}
           maxRefImages={maxRefImages}
           onAdd={enqueueFiles}
           onRemove={(clientId) => {
@@ -834,8 +878,11 @@ function Composer({
           }}
           disabled={disabled}
         />
-        {isI2VMode ? (
-          <div className={styles.videoPanel} data-zone="i2v">
+        {/* The mode body: image and video fields cross-fade in one slot while
+            the frame boundary (App.tsx) carries the footprint change. */}
+        <ViewTransition default="none" update="composer-body">
+        {parts.isI2VMode ? (
+          <div key="i2v" className={styles.videoPanel} data-zone="i2v">
             <div className={styles.sourceRow}>
               {i2vSourceUploadId ? (
                 <div
@@ -871,11 +918,12 @@ function Composer({
                   type="button"
                   className={styles.sourceAdd}
                   aria-label="Add source still"
+                  aria-busy={sourceUploading || undefined}
+                  data-tip="Add source still"
                   disabled={disabled || sourceUploading}
                   onClick={() => { sourceUploadRef.current?.click(); }}
                 >
                   {sourceUploading ? <span className={styles.sourceThumbSpinner} aria-hidden="true" /> : <I.image />}
-                  <span>{sourceUploading ? 'Uploading…' : 'Add source still'}</span>
                 </button>
               )}
               <div className={styles.sourceMeta}>
@@ -885,6 +933,8 @@ function Composer({
                     <span className={styles.composing}>Composing motion…</span>
                   ) : i2vSourceUploadId ? (
                     isExtendMode ? 'Last frame of the previous clip' : 'The frame to animate'
+                  ) : sourceUploading ? (
+                    'Uploading…'
                   ) : (
                     'Required: pick the frame to animate'
                   )}
@@ -934,9 +984,9 @@ function Composer({
               />
             </label>
           </div>
-        ) : null}
-        {!isI2VMode && (
+        ) : (
           <textarea
+            key="image"
             id={COMPOSER_PROMPT_ID}
             ref={textRef}
             aria-label="Prompt"
@@ -952,30 +1002,43 @@ function Composer({
             rows={1}
           />
         )}
-        {error && (
-          <div className={styles.banner} role="alert">
-            <span>{error}</span>
-            <button type="button" className={styles.bannerAction} aria-label="Retry loading models" onClick={onRetryModels}>Retry</button>
-          </div>
-        )}
+        </ViewTransition>
+        {parts.error ? (
+          <ViewTransition default="none" enter="part-enter" exit="part-exit">
+            <div className={styles.banner} role="alert">
+              <span>{parts.error}</span>
+              <button type="button" className={styles.bannerAction} aria-label="Retry loading models" onClick={onRetryModels}>Retry</button>
+            </div>
+          </ViewTransition>
+        ) : null}
 
-        {queueExpanded && rollQueue.length > 0 ? (
-          <RollQueueList
-            rolls={rollQueue}
-            onRemove={removeQueuedRoll}
-            onReorder={reorderQueuedRolls}
-            onClear={clearRollQueue}
-            targetContextLine={targetContextLine}
-            pinnedHeaderRow={promptHasContent ? (
-              <>
-                <span aria-hidden="true">+</span>
-                <span>Current prompt</span>
-                <span>{prompt}</span>
-              </>
-            ) : undefined}
-            variant="inline"
-            ariaLabel="Composer roll-queue"
-          />
+        {parts.rollQueue.length > 0 ? (
+          <ViewTransition default="none" enter="part-enter" exit="part-exit">
+          <Disclosure
+            id={queuePanelId}
+            open={queueExpanded}
+            className={styles.queueDisclosure}
+            contentClassName={styles.queueDisclosureContent}
+          >
+            <RollQueueList
+              rolls={parts.rollQueue}
+              liveRolls={rollQueue}
+              onRemove={removeQueuedRoll}
+              onReorder={reorderQueuedRolls}
+              onClear={clearRollQueue}
+              targetContextLine={targetContextLine}
+              pinnedHeaderRow={promptHasContent ? (
+                <>
+                  <span aria-hidden="true">+</span>
+                  <span>Current prompt</span>
+                  <span>{prompt}</span>
+                </>
+              ) : undefined}
+              variant="inline"
+              ariaLabel="Composer roll-queue"
+            />
+          </Disclosure>
+          </ViewTransition>
         ) : null}
         <div className={styles.footer}>
           <div className={styles.controls} data-zone="controls">
@@ -991,7 +1054,7 @@ function Composer({
                   onClick={() => { if (promptPickerOpen) { closePicker(); } else { openPicker(); } }}
                 >
                   <I.library />
-                  <span className={styles.chipVal}>Library</span>
+                  <span className={styles.chipVal}>Templates</span>
                   <I.caret className={styles.chipCaret} />
                 </button>
                 <PromptPicker
@@ -1004,39 +1067,54 @@ function Composer({
                 />
               </>
             )}
-            {rollQueue.length > 0 ? (
+            {parts.rollQueue.length > 0 ? (
+              <ViewTransition default="none" enter="part-enter" exit="part-exit">
               <button
                 type="button"
                 className={styles.queueChip}
                 aria-expanded={queueExpanded}
-                aria-label={`Roll queue, ${String(rollQueue.length)} ${rollQueue.length === 1 ? 'roll' : 'rolls'}`}
+                aria-controls={queuePanelId}
+                aria-label={`Roll queue, ${String(parts.rollQueue.length)} ${parts.rollQueue.length === 1 ? 'roll' : 'rolls'}`}
                 data-tip="View or edit queued rolls"
                 onClick={() => { setQueueExpanded((open) => !open); }}
               >
                 <I.layers />
-                <span className={styles.queueCount}>{rollQueue.length}</span>
+                <span className={styles.queueCount}>{parts.rollQueue.length}</span>
               </button>
+              </ViewTransition>
             ) : null}
             {!isI2VMode && (
               <EnhanceControl
                 enhancing={enhancing}
                 canUndo={canUndo}
                 disabled={disabled || !prompt.trim() || hasUploadingRefs || hasErrorRefs || refsOverCap}
-                onEnhance={enhance}
+                onEnhance={() => { gateTextAction('Enhance', enhanceButtonRef, enhance); }}
                 onUndo={undo}
+                enhanceRef={enhanceButtonRef}
               />
             )}
             {selectedModel.outputsVideo === true && onTellStory ? (
               <button
+                ref={tellStoryButtonRef}
                 type="button"
                 className={buttons.ai}
                 aria-haspopup="dialog"
                 disabled={disabled || enhancing}
-                onClick={onTellStory}
+                onClick={() => { gateTextAction('Tell Story', tellStoryButtonRef, onTellStory); }}
               >
                 <I.sparkle aria-hidden="true" />
                 Tell Story
               </button>
+            ) : null}
+            {textNote ? (
+              <TextModelNote
+                open
+                action={textNote.action}
+                anchorRef={textNote.anchorRef}
+                escape="top-level"
+                navigateToTextModels={goToTextModels}
+                onClose={() => { setTextNote(null); }}
+              />
             ) : null}
             <div className={styles.selectGroup}>
               <ChipSelect<string>

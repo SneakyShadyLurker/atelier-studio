@@ -3,7 +3,7 @@ import type { PromptTemplate } from '@atelier/shared';
 import { aiFillMeasuredLength, hasAiFillTokens, stripCardNotesToken } from '@atelier/shared/ai-fill';
 import { toPreviewSegments } from './aiFillPreview';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useCallback, useDeferredValue, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useId, useMemo, useRef, useState, ViewTransition } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -12,6 +12,7 @@ import { useIsPromptPickerSheet } from '../../hooks/useIsPhone';
 import { useModalChrome } from '../../hooks/useModalChrome';
 import { useOutsidePointer } from '../../hooks/useOutsidePointer';
 import { useExitTransition } from '../../hooks/useExitTransition';
+import { useTextModelGate } from '../../hooks/useTextModelGate';
 import { useAbortableMutation } from '../../hooks/useAbortableMutation';
 import { resolve, collectVarOccurrences, selectableOptions, applyPinsToTemplateBody } from '../../lib/promptResolver';
 import type { VarOccurrence } from '../../lib/promptResolver';
@@ -21,9 +22,11 @@ import { buildSweepRolls } from '../../lib/buildSweepRolls';
 import { isAbortError } from '../../lib/abort';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { nextSeed } from '../../lib/seed';
+import { goToTextModels } from '../../lib/textModelsNav';
 import { useAtelierStore } from '../../store/atelier';
 import { I } from '../icons/I';
 import ConfirmDialog from '../ConfirmDialog';
+import TextModelNote, { TEXT_MODEL_NOTE_ATTR } from '../TextModelNote';
 import RollQueueList from '../RollQueueList';
 import { StateView } from '../StateView';
 import type { ChipSelectOption } from '../Composer/ChipSelect';
@@ -34,6 +37,8 @@ import BrainstormPhase from './BrainstormPhase';
 import { buildAxisListItems } from './subjectDividers';
 import buttons from '../../styles/buttons.module.css';
 import styles from './index.module.css';
+
+type SweepRolls = ReturnType<typeof buildSweepRolls>['rolls'];
 
 interface PromptPickerProps {
   open: boolean;
@@ -85,11 +90,19 @@ export default function PromptPicker({
   // change makes `result.text` diverge (no effect needed — pure derivation).
   const [simulating, setSimulating] = useState(false);
   const [simulation, setSimulation] = useState<{ readonly forText: string; readonly filled: string } | null>(null);
-  const [brainstorming, setBrainstorming] = useState(false);
+  const [liveBrainstorming, setBrainstorming] = useState(false);
   const [pendingQueueClear, setPendingQueueClear] = useState<PendingQueueClearAction | null>(null);
-  const [pendingSweepConfirm, setPendingSweepConfirm] = useState(false);
+  // The exact rolls a confirmation will queue, captured when it opens, so its
+  // count and the payload never disagree with a still-deferred render.
+  const [pendingSweep, setPendingSweep] = useState<SweepRolls | null>(null);
   const promptLibrary = usePromptLibrary();
-  const draft = useAtelierStore((state) => state.promptPickerDraft);
+  const liveDraft = useAtelierStore((state) => state.promptPickerDraft);
+  // One render snapshot for the picker: the phase (list, refine, brainstorm),
+  // the roll and every handler read it, so a phase change or a roll's
+  // warnings commit in a Transition and their <ViewTransition> boundaries
+  // play. The search query stays urgent (typed input).
+  const livePicker = useMemo(() => ({ draft: liveDraft, brainstorming: liveBrainstorming }), [liveDraft, liveBrainstorming]);
+  const { draft, brainstorming } = useDeferredValue(livePicker);
   const rollQueue = useAtelierStore((state) => state.draft.rollQueue);
   const setPickerTemplate = useAtelierStore((state) => state.setPickerTemplate);
   const setPickerPin = useAtelierStore((state) => state.setPickerPin);
@@ -190,13 +203,27 @@ export default function PromptPicker({
     setSimulating(false);
     setSimulation(null);
   }, [simulateRequest]);
+  // "Set up text models" from a note inside the picker: the picker leaves
+  // through its own exit first, then the view switches.
+  const textModelsAfterCloseRef = useRef(false);
   const handleClose = useCallback(() => {
     resetSimulation();
     setBrainstorming(false);
     onClose();
+    if (textModelsAfterCloseRef.current) {
+      textModelsAfterCloseRef.current = false;
+      goToTextModels();
+    }
   }, [onClose, resetSimulation]);
   // Every dismissal plays the shared exit before handleClose tears down.
   const { closing, requestClose } = useExitTransition(handleClose, open);
+  const navigateToTextModels = () => {
+    textModelsAfterCloseRef.current = true;
+    requestClose();
+  };
+  const textModelGate = useTextModelGate();
+  const brainstormButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [brainstormNoteOpen, setBrainstormNoteOpen] = useState(false);
 
   // Toasts render into the panel, not the portal root: the queue-clear Undo
   // must sit inside the focus trap below to be keyboard-reachable. The
@@ -210,11 +237,19 @@ export default function PromptPicker({
   // the next has taken the shared axisMenuRef.
   useOutsidePointer(outsideRefs, (event) => {
     const target = event.target;
-    if (target instanceof Element && target.closest('[data-axis-menu-root]')) return;
+    if (target instanceof Element && target.closest(`[data-axis-menu-root], [${TEXT_MODEL_NOTE_ATTR}]`)) return;
     requestClose();
-  }, { enabled: open && !isSheet && pendingQueueClear === null && !pendingSweepConfirm });
+  }, { enabled: open && !isSheet && pendingQueueClear === null && pendingSweep === null });
 
   if (!open || !promptLibrary.enabled || !data) return null;
+
+  // `draft` above is the render snapshot. A view transition holds its commit
+  // for about --dur-sheet, so every handler reads the live draft at click time;
+  // a repeat click inside that window would otherwise act on the previous roll.
+  const readLive = () => {
+    const live = useAtelierStore.getState().promptPickerDraft;
+    return { live, template: templates.find((template) => template.id === live.templateId) ?? null };
+  };
 
   const applyTemplate = (template: PromptTemplate) => {
     resetSimulation();
@@ -227,7 +262,7 @@ export default function PromptPicker({
   };
 
   const chooseTemplate = (template: PromptTemplate) => {
-    if (rollQueue.length > 0 && draft.templateId !== template.id) {
+    if (rollQueue.length > 0 && readLive().live.templateId !== template.id) {
       setPendingQueueClear({ type: 'template', template });
       return;
     }
@@ -252,7 +287,7 @@ export default function PromptPicker({
   };
 
   const reRoll = () => {
-    if (draft.lockSeed) return;
+    if (readLive().live.lockSeed) return;
     const useSeed = nextSeed();
     setPickerSeed(useSeed);
     setRollPulse((value) => value + 1);
@@ -269,15 +304,16 @@ export default function PromptPicker({
   // local-resolved text so a later re-roll/pin silently invalidates it. No silent
   // fallback: a failure toasts and the preview stays on the chip view.
   const runSimulation = async (useSeed: number) => {
-    if (!selectedTemplate) return;
-    const local = resolve(selectedTemplate, data.variableLists, data.dimensions, { seed: useSeed, pins: { ...draft.pins } });
+    const { live, template } = readLive();
+    if (!template) return;
+    const local = resolve(template, data.variableLists, data.dimensions, { seed: useSeed, pins: { ...live.pins } });
     const localText = stripCardNotesToken(local.text);
     // Repeat Simulate on a LOCKED seed → identical roll and identical derived
     // ai-fill seeds → identical result; serve the cached fill, don't re-bill.
     // When unlocked, every click advanced the seed (see simulate()), so even an
     // ai-fill-only template — whose local text doesn't change between rolls — must
     // re-resolve to fetch a fresh server fill: re-roll + resolve in one click.
-    if (draft.lockSeed && simulation?.forText === localText) return;
+    if (live.lockSeed && simulation?.forText === localText) return;
     // No fills → the local roll already IS the final prompt; drop any stale fill.
     if (!hasAiFillTokens(local.text)) { setSimulation(null); return; }
     const build = buildAiFillRequest(local.text, data, useSeed, modelId, true);
@@ -320,8 +356,9 @@ export default function PromptPicker({
   // runs while locked, and the AI-fill resolution runs regardless of the lock so
   // even a pinned roll shows its filled final form.
   const simulate = () => {
-    const useSeed = draft.lockSeed ? draft.seed : nextSeed();
-    if (!draft.lockSeed) {
+    const { live } = readLive();
+    const useSeed = live.lockSeed ? live.seed : nextSeed();
+    if (!live.lockSeed) {
       setPickerSeed(useSeed);
       setRollPulse((value) => value + 1);
     }
@@ -359,11 +396,17 @@ export default function PromptPicker({
       .catch(() => { addToast('Could not copy prompt', 'soft'); });
   };
 
-  const fireSweep = () => {
-    if (!selectedTemplate || !draft.sweepKey) return;
-    const { rolls } = buildSweepRolls(
-      selectedTemplate, data.variableLists, data.dimensions, draft.pins, draft.sweepKey, draft.seed,
-    );
+  // The sweep the live draft would queue: the confirmation and the queueing
+  // both decide from it, never from the deferred `sweepCount`.
+  const liveSweepRolls = () => {
+    const { live, template } = readLive();
+    if (!template || !live.sweepKey) return [];
+    return buildSweepRolls(
+      template, data.variableLists, data.dimensions, live.pins, live.sweepKey, live.seed,
+    ).rolls;
+  };
+
+  const fireSweep = (rolls: SweepRolls = liveSweepRolls()) => {
     if (rolls.length === 0) return;
     for (const roll of rolls) stashRoll(roll);
     // Announce via the toast (persistent live region in App) — onClose() unmounts
@@ -374,8 +417,9 @@ export default function PromptPicker({
     requestClose();
   };
   const onSweepPrimary = () => {
-    if (sweepCount > 8) { setPendingSweepConfirm(true); return; }
-    fireSweep();
+    const rolls = liveSweepRolls();
+    if (rolls.length > 8) { setPendingSweep(rolls); return; }
+    fireSweep(rolls);
   };
 
   const panel = (
@@ -389,30 +433,32 @@ export default function PromptPicker({
       data-sheet={isSheet ? 'true' : 'false'}
     >
       <div className={styles.header} data-zone="head">
-        <div>
-          <h2 id={titleId}>{brainstorming ? 'Brainstorm' : 'Templates'}</h2>
-          {selectedTemplate && !brainstorming ? (
+        <div className={styles.headerTitle}>
+          {brainstorming || selectedTemplate ? (
             <button
               type="button"
-              className={styles.backLink}
+              className={buttons.iconAction}
               aria-label="Back to template list"
-              onClick={backToTemplateList}
+              data-tip="Back to template list"
+              onClick={brainstorming ? () => { setBrainstorming(false); } : backToTemplateList}
             >
               <I.chevronLeft />
-              {selectedTemplate.name}
             </button>
-          ) : brainstorming ? (
-            <p>Queue character prompts</p>
-          ) : (
-            <p>Choose template</p>
-          )}
+          ) : null}
+          <h2 id={titleId}>{brainstorming ? 'Brainstorm' : selectedTemplate ? selectedTemplate.name : 'Templates'}</h2>
         </div>
         <button className={buttons.iconAction} type="button" aria-label="Close templates" data-tip="Close templates" onClick={requestClose}>
           <I.close />
         </button>
       </div>
 
+      {/* Three phase bodies, each a part boundary keyed by phase: a phase
+          change cross-fades the outgoing and incoming bodies. The slot keeps
+          an incoming body ahead of the contained toast stack in the DOM (the
+          deferred body mounts after the stack has settled in the panel). */}
+      <div className={styles.phaseSlot}>
       {brainstorming ? (
+        <ViewTransition key="brainstorm" default="none" enter="part-enter" exit="part-exit">
         <BrainstormPhase
           onBack={() => { setBrainstorming(false); }}
           modelOptions={modelOptions}
@@ -420,19 +466,36 @@ export default function PromptPicker({
           onModelChange={onModelChange}
           modelMenuRef={modelMenuRef}
           library={data}
+          navigateToTextModels={navigateToTextModels}
         />
+        </ViewTransition>
       ) : !selectedTemplate ? (
+        <ViewTransition key="list" default="none" enter="part-enter" exit="part-exit">
         <div className={styles.templatePhase}>
           <div className={styles.templateEntry} data-zone="entry">
             <div className={styles.brainstormPin}>
               <button
+                ref={brainstormButtonRef}
                 className={buttons.ai}
                 type="button"
-                onClick={() => { setBrainstorming(true); }}
+                onClick={() => {
+                  if (textModelGate.availability === 'none') setBrainstormNoteOpen(true);
+                  else setBrainstorming(true);
+                }}
               >
                 <I.sparkle />
                 Brainstorm
               </button>
+              {brainstormNoteOpen ? (
+                <TextModelNote
+                  open
+                  action="Brainstorm"
+                  anchorRef={brainstormButtonRef}
+                  escape="nested"
+                  navigateToTextModels={navigateToTextModels}
+                  onClose={() => { setBrainstormNoteOpen(false); }}
+                />
+              ) : null}
             </div>
             <div className={styles.searchRow}>
               <label className="srOnly" htmlFor={searchId}>Search templates</label>
@@ -455,7 +518,7 @@ export default function PromptPicker({
                 className={styles.pickerEmpty}
                 art="empty-picker"
                 title="No templates yet"
-                body="Save a template in the Prompt library and it appears here."
+                body="Save a template in the Prompt Library and it appears here."
               />
             ) : null}
             <ul
@@ -489,7 +552,9 @@ export default function PromptPicker({
             </ul>
           </div>
         </div>
+        </ViewTransition>
       ) : (
+        <ViewTransition key="refine" default="none" enter="part-enter" exit="part-exit">
         <div className={styles.refinePhase}>
           <div className={styles.scrollBody} data-zone="body">
             <div ref={previewRef} className={styles.previewBlock} data-pulse={rollPulse}>
@@ -528,7 +593,7 @@ export default function PromptPicker({
                           data-resolving={simulating ? '' : undefined}
                           data-tip="AI fills at Generate"
                         >
-                          <span className={styles.aiFillSparkle} aria-hidden>✦</span>
+                          <I.sparkle className={styles.aiFillSparkle} aria-hidden />
                           <span className={styles.aiFillChipText}>{seg.value}</span>
                         </span>
                       ),
@@ -562,9 +627,11 @@ export default function PromptPicker({
             ) : null}
 
             {result?.warnings.length ? (
+              <ViewTransition default="none" enter="part-enter" exit="part-exit">
               <div className={styles.warnings} role="status">
                 {result.warnings.map((warning, index) => <p key={`${String(index)}:${warning}`}>{warning}</p>)}
               </div>
+              </ViewTransition>
             ) : null}
 
             {axes.length > 0 ? (
@@ -597,7 +664,7 @@ export default function PromptPicker({
                           {...(draft.sweepKey === item.occurrence.key ? { sweepCount } : {})}
                           onToggleSweep={(key) => {
                             resetSimulation();
-                            if (draft.sweepKey === key) clearPickerSweep();
+                            if (readLive().live.sweepKey === key) clearPickerSweep();
                             else setPickerSweep(key);
                           }}
                           onPin={(key, optionId) => { resetSimulation(); setPickerPin(key, optionId); }}
@@ -636,7 +703,7 @@ export default function PromptPicker({
                   aria-pressed={draft.lockSeed}
                   aria-label="Lock seed"
                   data-tip="Lock the seed to reproduce the exact same roll."
-                  onClick={() => { setPickerLockSeed(!draft.lockSeed); }}
+                  onClick={() => { setPickerLockSeed(!readLive().live.lockSeed); }}
                 >
                   <I.lock />
                 </button>
@@ -666,15 +733,18 @@ export default function PromptPicker({
                 data-tip={draft.lockSeed ? 'Unlock seed to stash another roll' : 'Stash this roll and re-roll'}
                 disabled={draft.lockSeed || !result}
                 onClick={() => {
-                  if (!result) return;
+                  // Resolve the roll being stashed from the live draft, so a
+                  // second click before the deferred render commits stashes
+                  // the next seed rather than this one again.
+                  const { live, template } = readLive();
+                  if (live.lockSeed || !template) return;
+                  const roll = resolve(template, data.variableLists, data.dimensions, { seed: live.seed, pins: { ...live.pins } });
                   stashRoll({
                     id: crypto.randomUUID(),
-                    text: result.text,
-                    seed: draft.seed,
+                    text: roll.text,
+                    seed: live.seed,
                     source: 'template',
-                    ...(draft.templateId
-                      ? { provenance: { templateId: draft.templateId, rollSeed: draft.seed, pins: { ...draft.pins } } }
-                      : {}),
+                    provenance: { templateId: template.id, rollSeed: live.seed, pins: { ...live.pins } },
                   });
                   setPickerSeed(nextSeed());
                   setRollPulse((value) => value + 1);
@@ -724,10 +794,12 @@ export default function PromptPicker({
                       // No provenance either way: a live re-rolling prompt is not
                       // a faithfully-reproducible single roll, and setDraft({prompt})
                       // without provenance clears any stale value (atelier.ts).
+                      const { live, template } = readLive();
+                      if (!template) return;
                       const prompt = applyPinsToTemplateBody(
-                        selectedTemplate.body,
+                        template.body,
                         data.variableLists,
-                        { seed, pins: { ...draft.pins } },
+                        { seed: live.seed, pins: { ...live.pins } },
                       );
                       // A library paste is a new brief: drop the Enhance anchor
                       // so Undo can't swap it for an earlier, unrelated prompt.
@@ -742,11 +814,17 @@ export default function PromptPicker({
             </div>
           </div>
         </div>
+        </ViewTransition>
       )}
+      </div>
     </div>
   );
 
+  // The outer boundary only isolates: a phase change also rewrites the
+  // header, and without it that mutation would belong to the Composer frame
+  // boundary (the picker is its React child) and capture the composer.
   return createPortal(
+    <ViewTransition default="none">
     <div ref={portalRootRef}>
       {isSheet ? (
         <>
@@ -765,15 +843,16 @@ export default function PromptPicker({
         onCancel={() => { setPendingQueueClear(null); }}
       />
       <ConfirmDialog
-        open={pendingSweepConfirm}
-        title={`Queue ${String(sweepCount)} rolls?`}
-        body={`This fires ${String(sweepCount)} generations against your quota.`}
+        open={pendingSweep !== null}
+        title={`Queue ${String(pendingSweep?.length ?? 0)} rolls?`}
+        body={`This fires ${String(pendingSweep?.length ?? 0)} generations against your quota.`}
         confirmLabel="Queue rolls"
         cancelLabel="Cancel"
-        onConfirm={() => { setPendingSweepConfirm(false); fireSweep(); }}
-        onCancel={() => { setPendingSweepConfirm(false); }}
+        onConfirm={() => { const rolls = pendingSweep; setPendingSweep(null); if (rolls) fireSweep(rolls); }}
+        onCancel={() => { setPendingSweep(null); }}
       />
-    </div>,
+    </div>
+    </ViewTransition>,
     document.body,
   );
 }

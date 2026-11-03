@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, mock } from 'bun:test';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import type { LibraryDiagnosisResponse } from '@atelier/shared';
 import { DiagnosisCard } from './index';
 
@@ -26,7 +26,8 @@ describe('DiagnosisCard', () => {
     render(
       <DiagnosisCard mode="library" diagnosis={broken} onFixWithAi={noop} onCancel={noop} />,
     );
-    expect(screen.getByText('BrokenA')).toBeTruthy();
+    // The closed details panel also names it, inert and hidden from AT.
+    expect(within(screen.getByRole('list')).getByText('BrokenA')).toBeTruthy();
     expect(screen.queryByText('OK')).toBeNull();
   });
 
@@ -55,11 +56,22 @@ describe('DiagnosisCard', () => {
     render(
       <DiagnosisCard mode="library" diagnosis={broken} onFixWithAi={noop} onCancel={noop} />,
     );
-    expect(screen.queryByText('Genre')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Show details/i }));
+    const toggle = screen.getByRole('button', { name: /Show details/i });
+    const panel = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+    if (!panel) throw new Error('details panel missing');
+    expect(panel.textContent).toContain('Genre');
+    expect(panel.hasAttribute('inert')).toBe(true);
+    expect(panel.getAttribute('aria-hidden')).toBe('true');
+    fireEvent.click(toggle);
+    expect(panel.getAttribute('data-open')).toBe('true');
+    expect(panel.hasAttribute('inert')).toBe(false);
     expect(screen.getByText('camera')).toBeTruthy();
     expect(screen.getByText('fantasy_location')).toBeTruthy();
     expect(screen.getByText('Genre')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Hide details/i }));
+    expect(document.getElementById(toggle.getAttribute('aria-controls') ?? '')).toBe(panel);
+    expect(panel.hasAttribute('data-open')).toBe(false);
+    expect(panel.hasAttribute('inert')).toBe(true);
   });
 
   test('Cancel button calls the cancel handler', () => {
@@ -81,7 +93,7 @@ describe('DiagnosisCard', () => {
         onCancel={noop}
       />,
     );
-    expect(screen.getByText('BrokenA')).toBeTruthy();
+    expect(within(screen.getByRole('list')).getByText('BrokenA')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Fix Template' })).toBeTruthy();
   });
 

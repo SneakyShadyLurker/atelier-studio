@@ -12,6 +12,7 @@ import Toast from '../src/components/Toast';
 import { fixtureBatches, historyFixture } from './fixtures/batches';
 import { fixtureModels } from './fixtures/models';
 import { flushQueryNotifications } from './fixtures/queryNotifications';
+import { seedTextModelGate } from './fixtures/textModelGate';
 import { collectionKeys } from '../src/api/collections';
 import { APP_VIEW_PINNED, APP_VIEW_UNSORTED, toGenerateRequest, useAtelierStore } from '../src/store/atelier';
 
@@ -83,6 +84,8 @@ function requireValue<T>(value: T | null | undefined, label: string): T {
 function withQueryClient(node: ReactNode, archivedTotalCount = 0) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(collectionKeys.list(), { items: [], summary: { totalCount: historyFixture.items.length, pinnedCount: 0, unsortedCount: historyFixture.items.length, archivedTotalCount, archivedPinnedCount: 0, archivedUnsortedCount: 0 } });
+  // The Composer's AI triggers read the text-model gate; keep it off fetch.
+  seedTextModelGate(client);
   return <QueryClientProvider client={client}>{node}</QueryClientProvider>;
 }
 
@@ -720,7 +723,7 @@ describe('visual scaffold components', () => {
     expect(onClose).toHaveBeenCalled();
 
     rerender(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><></></QueryClientProvider>);
-    await waitFor(() => { expect(document.activeElement).toBe(trigger); });
+    await waitFor(() => { expect(document.activeElement === trigger).toBe(true); });
     trigger.remove();
   });
 
@@ -821,7 +824,7 @@ describe('visual scaffold components', () => {
     // editFromTile hands focus to the composer from the lightbox's unmount
     // cleanup — App unmounts the lightbox in response to onClose. Model that.
     unmount();
-    await waitFor(() => { expect(document.activeElement).toBe(prompt); });
+    await waitFor(() => { expect(document.activeElement === prompt).toBe(true); });
     prompt.remove();
   });
 
@@ -1079,7 +1082,7 @@ describe('visual scaffold components', () => {
       fireEvent.click(archiveButton);
       await Promise.resolve();
     });
-    const emptyArchiveButton = await screen.findByRole<HTMLButtonElement>('button', { name: 'Empty Archive' });
+    const emptyArchiveButton = await screen.findByRole<HTMLButtonElement>('button', { name: 'Empty archive' });
     // The lazy view can commit its header before the scoped archive GET
     // resolves. Wait until its destructive action is actually available.
     await waitFor(() => { expect(emptyArchiveButton.disabled).toBe(false); });
@@ -1174,7 +1177,7 @@ describe('visual scaffold components', () => {
     await waitFor(() => { expect(document.activeElement).not.toBe(hamburger); });
     fireEvent.click(screen.getByRole('button', { name: 'Close menu' }));
 
-    await waitFor(() => { expect(document.activeElement).toBe(hamburger); });
+    await waitFor(() => { expect(document.activeElement === hamburger).toBe(true); });
   });
 
   test('Drawer close does not focus the hidden hamburger on desktop', async () => {

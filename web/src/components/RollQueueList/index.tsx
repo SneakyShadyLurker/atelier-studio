@@ -8,6 +8,12 @@ import styles from './index.module.css';
 
 interface RollQueueListProps {
   rolls: readonly QueuedRoll[];
+  /**
+   * The live queue when `rolls` is a deferred render snapshot (Composer).
+   * Clear snapshots it for Undo, and a reorder runs only while the rendered
+   * rows match it, since the indexes come from the rendered order.
+   */
+  liveRolls?: readonly QueuedRoll[];
   onRemove: (id: string) => void;
   onReorder: (fromIdx: number, toIdx: number) => void;
   onClear: () => void;
@@ -19,6 +25,7 @@ interface RollQueueListProps {
 
 export default function RollQueueList({
   rolls,
+  liveRolls = rolls,
   onRemove,
   onReorder,
   onClear,
@@ -35,6 +42,7 @@ export default function RollQueueList({
   const queueReorder = useVerticalDragReorder<string>({
     ids: queueIds,
     onReorder: (nextIds, movedId) => {
+      if (liveRolls.length !== rolls.length || liveRolls.some((roll, index) => roll.id !== rolls[index]?.id)) return;
       const fromIdx = rolls.findIndex((roll) => roll.id === movedId);
       const toIdx = nextIds.indexOf(movedId);
       if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
@@ -47,7 +55,7 @@ export default function RollQueueList({
     allowKeyboard: true,
   });
   const clear = () => {
-    const snapshot = [...rolls];
+    const snapshot = [...liveRolls];
     // Hold the snapshot's media before the queue lets go of it, until Undo
     // restores it or the toast leaves (its lifetime respects pause).
     const release = holdSubmissionUploads(snapshot.map((roll) => roll.submission));

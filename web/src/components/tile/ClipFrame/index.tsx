@@ -21,6 +21,7 @@ export default function ClipFrame({ src, poster }: ClipFrameProps) {
   const reducedMotion = useReducedMotion();
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState<number | null>(null);
+  const knownDuration = duration !== null && Number.isFinite(duration) && duration > 0;
 
   // Touch devices have no hover — drive playback from viewport visibility,
   // pausing (and rewinding to the poster frame) when the tile scrolls away.
@@ -80,9 +81,10 @@ export default function ClipFrame({ src, poster }: ClipFrameProps) {
         onPause={() => { setPlaying(false); }}
         onLoadedMetadata={(event) => { setDuration(event.currentTarget.duration); }}
       />
-      {duration !== null && Number.isFinite(duration) && duration > 0 && (
-        <span className={styles.duration} aria-hidden="true">{formatClock(duration)}</span>
-      )}
+      {/* Always mounted: the chip fades in once metadata names a length. */}
+      <span className={styles.duration} aria-hidden="true" data-ready={knownDuration ? 'true' : undefined}>
+        {knownDuration ? formatClock(duration) : null}
+      </span>
       <span
         className={styles.playBadge}
         data-testid="play-badge"

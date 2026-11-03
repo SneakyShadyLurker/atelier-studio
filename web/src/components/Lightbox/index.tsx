@@ -1,7 +1,7 @@
 import type { Batch, DoneTile, Model } from '@atelier/shared';
 import { isVideoMime } from '@atelier/shared';
 import type { CSSProperties } from 'react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, ViewTransition } from 'react';
 import { refImageUrl } from '../../api/uploads';
 import { MOTION_PROMPT_SELECTOR, useAnimateFromTile } from '../../hooks/useAnimateFromTile';
 import { useExtendFromTile } from '../../hooks/useExtendFromTile';
@@ -98,15 +98,30 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
   }
   const showingReference = activeRefImageId !== null && !showingMaster;
   const imageFailed = failedImageSrc === fullSrc;
+  // One render snapshot for the conditional chrome (the reference strip and
+  // the error fallback): they and their handlers read it, so each mounts and
+  // unmounts in a Transition through its part boundary.
+  const stripTile = !showingMaster && tile?.refImageIds && tile.refImageIds.length > 0 ? tile : null;
+  const liveChrome = useMemo(
+    () => ({ stripTile, activeRefImageId, imageFailed, showingReference }),
+    [stripTile, activeRefImageId, imageFailed, showingReference],
+  );
+  const chrome = useDeferredValue(liveChrome);
   const thumbSrc = showingMaster || activeRefImageId ? undefined : tile?.thumbUrl;
   const showingVideo = showingMaster || (tile !== undefined && activeRefImageId === null && isVideoMime(tile.mime));
   const fullImageLoaded = !showingVideo && fullSrc !== undefined && loadedImage?.src === fullSrc && loadedImage.loaded;
   // Real decoded pixels of the image actually on screen — the single source of
   // truth for resolution, since the wire Tile carries no width/height and they
-  // vary per provider/ratio. Shown as a placeholder until the full image loads.
-  const naturalDims = fullImageLoaded
-    ? `${String(loadedImage.width)}x${String(loadedImage.height)}`
-    : showingMaster ? 'master' : showingVideo ? 'video' : '…';
+  // vary per provider/ratio. The readout sits in a reserved tabular slot that
+  // stays empty until the full image loads, so the fields after it (the
+  // "1 of 3" position) never move when it decodes.
+  const naturalDims = (
+    <span className={styles.dims} data-slot="dims">
+      {fullImageLoaded
+        ? `${String(loadedImage.width)}×${String(loadedImage.height)}`
+        : showingMaster ? 'master' : showingVideo ? 'video' : ''}
+    </span>
+  );
   const model = modelById.get(batch.modelId);
   const canEdit = model?.supportsReferenceImages === true && !showingVideo && activeRefImageId === null;
   const promptPreview = `${batch.prompt.slice(0, 120)}${batch.prompt.length > 120 ? '…' : ''}`;
@@ -301,11 +316,13 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
             controls
             playsInline
           />
-        ) : imageFailed ? (
-          <div className={styles.imageError} role="status">
-            <span>{showingReference ? 'Reference image unavailable' : 'Full image unavailable'}</span>
-            <button className={styles.btn} type="button" onClick={() => { setFailedImageSrc(null); setImageRetry((value) => value + 1); }}>Retry image</button>
-          </div>
+        ) : chrome.imageFailed ? (
+          <ViewTransition key="error" default="none" enter="part-enter" exit="part-exit">
+            <div className={styles.imageError} role="status">
+              <span>{chrome.showingReference ? 'Reference image unavailable' : 'Full image unavailable'}</span>
+              <button className={styles.btn} type="button" onClick={() => { setFailedImageSrc(null); setImageRetry((value) => value + 1); }}>Retry image</button>
+            </div>
+          </ViewTransition>
         ) : (
           <img
             key={`${fullSrc}:${imageRetry}`}
@@ -380,34 +397,45 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
           />
         )}
       </div>
-      {!showingMaster && tile.refImageIds && tile.refImageIds.length > 0 && (
+      {/* One bottom column: the reference strip sits on top of the toolbar,
+          so a toolbar that wraps (phones) pushes the strip up instead of
+          running under it. */}
+      <div className={styles.dock} data-media={showingVideo ? 'video' : 'image'}>
+      {chrome.stripTile?.refImageIds ? (
+        <ViewTransition default="none" enter="part-enter" exit="part-exit">
         <div className={styles.refs} onMouseDown={(event) => { event.stopPropagation(); }}>
           <button
-            className={`${styles.refThumb} ${!showingReference ? styles.refThumbActive : ''}`}
+            className={`${styles.refThumb} ${!chrome.showingReference ? styles.refThumbActive : ''}`}
             type="button"
-            aria-label={isVideoMime(tile.mime) ? 'View generated video' : 'View generated image'}
-            aria-pressed={!showingReference}
+            aria-label={isVideoMime(chrome.stripTile.mime) ? 'View generated video' : 'View generated image'}
+            aria-pressed={!chrome.showingReference}
             onClick={() => { setActiveRefImageId(null); }}
           >
-            {isVideoMime(tile.mime)
-              ? tile.thumbUrl ? <img src={tile.thumbUrl} alt="" loading="lazy" decoding="async" /> : <I.film aria-hidden="true" />
-              : <img src={tile.thumbUrl ?? tile.url} alt="" loading="lazy" decoding="async" />}
+            {isVideoMime(chrome.stripTile.mime)
+              ? chrome.stripTile.thumbUrl ? <img src={chrome.stripTile.thumbUrl} alt="" loading="lazy" decoding="async" /> : <I.film aria-hidden="true" />
+              : <img src={chrome.stripTile.thumbUrl ?? chrome.stripTile.url} alt="" loading="lazy" decoding="async" />}
           </button>
-          {tile.refImageIds.map((uploadId, index) => (
+          {chrome.stripTile.refImageIds.map((uploadId, index, ids) => (
             <button
               key={uploadId}
-              className={`${styles.refThumb} ${activeRefImageId === uploadId ? styles.refThumbActive : ''}`}
+              className={`${styles.refThumb} ${chrome.activeRefImageId === uploadId ? styles.refThumbActive : ''}`}
               type="button"
-              aria-label={`View reference image ${index + 1} of ${tile.refImageIds?.length ?? 0}`}
-              aria-pressed={activeRefImageId === uploadId}
-              onClick={() => { setActiveRefImageId(uploadId); }}
+              aria-label={`View reference image ${index + 1} of ${ids.length}`}
+              aria-pressed={chrome.activeRefImageId === uploadId}
+              onClick={() => {
+                // The strip renders from the deferred chrome: a previous
+                // tile's strip is still clickable until its exit commits, and
+                // must not select an upload the live tile does not own.
+                if (tile.refImageIds?.includes(uploadId)) setActiveRefImageId(uploadId);
+              }}
             >
               <img src={refImageUrl(uploadId)} alt="" loading="lazy" decoding="async" />
             </button>
           ))}
         </div>
-      )}
-      <div className={styles.bar} data-media={showingVideo ? 'video' : 'image'} onMouseDown={(event) => { event.stopPropagation(); }}>
+        </ViewTransition>
+      ) : null}
+      <div className={styles.bar} onMouseDown={(event) => { event.stopPropagation(); }}>
         <div className={styles.info}>
           <Meta
             lead
@@ -425,13 +453,19 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
                 ]}
           />
         </div>
-        {zoom.canZoom && (
+        {/* The Zoom slot is laid out for every image, so the toolbar keeps
+            one width before and after decode; it is hidden and inert until
+            zoom is worthwhile. */}
+        {!showingVideo && (
           <button
             className={`${buttons.iconAction} ${styles.zoomAction}`}
             type="button"
+            data-slot="zoom"
             aria-label={zoom.isZoomed ? 'Fit image to the screen' : 'Zoom to full resolution'}
             aria-pressed={zoom.isZoomed}
-            data-tip={zoom.isZoomed ? 'Fit' : 'Zoom 1:1'}
+            aria-hidden={zoom.canZoom ? undefined : true}
+            inert={!zoom.canZoom}
+            data-tip={zoom.canZoom ? (zoom.isZoomed ? 'Fit' : 'Zoom 1:1') : undefined}
             onClick={() => { zoom.toggle(); }}
           >
             {zoom.isZoomed ? <I.zoomOut /> : <I.zoomIn />}
@@ -461,6 +495,7 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
           {deleteVariant === 'archive' ? <I.archive /> : <I.trash />}
           {deleteVariant === 'archive' ? 'Archive' : 'Delete'}
         </button>}
+      </div>
       </div>
     </DialogShell>
   );

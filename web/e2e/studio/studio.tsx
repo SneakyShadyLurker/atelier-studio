@@ -7,8 +7,11 @@ import '../../src/styles/global.css';
 
 if (!import.meta.env.DEV) throw new Error('Studio preview is dev-only');
 installOfflineResponses();
-if (new URLSearchParams(window.location.search).get('toast') === '1') {
-  useAtelierStore.getState().addToast('Preview ready', 'success', 60_000, { label: 'Undo', onClick: () => undefined });
+const studioParams = new URLSearchParams(window.location.search);
+if (studioParams.get('toast') === '1') {
+  // `toastMs` shortens the Undo toast's life for the timer-pause specs.
+  const toastMs = Number(studioParams.get('toastMs') ?? 60_000);
+  useAtelierStore.getState().addToast('Preview ready', 'success', toastMs, { label: 'Undo', onClick: () => undefined });
 }
 
 const root = document.getElementById('root');

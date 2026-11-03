@@ -163,20 +163,23 @@ test.describe('bottom-anchored feed', () => {
     await page.setViewportSize({ width: 900, height: 1200 });
     await page.goto('/e2e/harness/index.html?case=feed&seed=1');
     await expect(page.getByText('Prompt 100', { exact: true })).toBeVisible();
-    const { gap, max } = await page.evaluate(() => {
+    const { gap, max, status } = await page.evaluate(() => {
       const el = document.querySelector('[data-testid="canvas-scroller"]');
       const first = document.querySelector('section[data-batch-id]');
-      if (!el || !first) return { gap: -1, max: -1 };
+      const row = el?.querySelector('[role="status"]')?.parentElement;
+      if (!el || !first || !row) return { gap: -1, max: -1, status: -1 };
       return {
         gap: first.getBoundingClientRect().top - el.getBoundingClientRect().top,
         max: el.scrollHeight - el.clientHeight,
+        status: row.getBoundingClientRect().height,
       };
     });
     expect(max).toBeLessThanOrEqual(0);   // precondition: this feed really is too short to scroll
-    // Canvas top padding plus the infinite-scroll sentinel above the feed —
-    // NOT a lone batch floating down the middle of an empty column.
-    expect(gap).toBeGreaterThanOrEqual(0);
-    expect(gap).toBeLessThan(120);
+    // Canvas top padding plus the load-more row above the feed (it reserves
+    // one footprint in every state, InfiniteStatus) — NOT a lone batch
+    // floating down the middle of an empty column.
+    expect(gap).toBeGreaterThanOrEqual(status);
+    expect(gap - status).toBeLessThan(60);
   });
 });
 
@@ -219,8 +222,10 @@ test.describe('a lone batch fits above the composer', () => {
         });
         expect(box.headerTop).toBeGreaterThanOrEqual(box.canvasTop);
         expect(box.tileBottom).toBeLessThanOrEqual(box.composerTop);
-        // Not shrunk to a thumbnail to get there.
-        expect(box.tileHeight).toBeGreaterThanOrEqual(220);
+        // Not shrunk to a thumbnail to get there (the CSS floor is 200px since
+        // the scope title bar took 70px of the 577px window; a 9:16 tile's
+        // frame border renders it ~2px under the cap).
+        expect(box.tileHeight).toBeGreaterThanOrEqual(196);
         // Still aligned under the header, not centred in its empty span.
         expect(Math.abs(box.tileLeft - box.headerLeft)).toBeLessThanOrEqual(1);
       });

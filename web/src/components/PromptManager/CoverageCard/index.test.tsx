@@ -34,16 +34,37 @@ describe('CoverageCard', () => {
 
   test('low-coverage + cleanup sections are collapsed by default', () => {
     render(<CoverageCard open report={report} onJumpToList={noop} onCancel={noop} />);
-    // Collapsed: their detail text is not in the DOM until expanded.
-    expect(screen.queryByText('Steampunk')).toBeNull();
-    expect(screen.queryByText('camera')).toBeNull();
+    // Collapsed: their rows stay mounted but inert and hidden from AT.
+    for (const name of [/Low-coverage lists/, /Cleanup/]) {
+      const toggle = screen.getByRole('button', { name });
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      const panel = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+      expect(panel?.hasAttribute('inert')).toBe(true);
+      expect(panel?.getAttribute('aria-hidden')).toBe('true');
+    }
+    expect(screen.getByText(/Steampunk/).closest('[inert]')).toBeTruthy();
+    expect(screen.getByText(/camera/).closest('[inert]')).toBeTruthy();
+  });
+
+  test('a section toggle flips data-open on its one mounted panel', () => {
+    render(<CoverageCard open report={report} onJumpToList={noop} onCancel={noop} />);
+    const toggle = screen.getByRole('button', { name: /Low-coverage lists/ });
+    const panel = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+    if (!panel) throw new Error('low-coverage panel missing');
+    fireEvent.click(toggle);
+    expect(panel.getAttribute('data-open')).toBe('true');
+    expect(panel.hasAttribute('inert')).toBe(false);
+    fireEvent.click(toggle);
+    expect(document.getElementById(toggle.getAttribute('aria-controls') ?? '')).toBe(panel);
+    expect(panel.hasAttribute('data-open')).toBe(false);
+    expect(panel.hasAttribute('inert')).toBe(true);
   });
 
   test('expanding cleanup reveals orphan + missing entries', () => {
     render(<CoverageCard open report={report} onJumpToList={noop} onCancel={noop} />);
     fireEvent.click(screen.getByRole('button', { name: /Cleanup/i }));
-    expect(screen.getByText(/Steampunk/)).toBeTruthy();
-    expect(screen.getByText(/job/)).toBeTruthy();
+    expect(screen.getByText(/Steampunk/).closest('[inert]')).toBeNull();
+    expect(screen.getByText(/job/).closest('[inert]')).toBeNull();
   });
 
   test('renders nothing when not open', () => {

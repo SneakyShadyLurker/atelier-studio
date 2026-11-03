@@ -378,10 +378,17 @@ interface LightboxSlice {
 interface ToastSlice {
   toasts: readonly ToastMessage[];
   addToast: (text: string, tone?: ToastMessage['tone'], durationMs?: number, action?: ToastAction, onDismiss?: () => void) => string;
+  /** User-action dismissal: plays the exit, then unmounts. */
+  dismissToast: (id: string) => void;
+  /** Programmatic teardown: unmounts at once, no exit. */
   removeToast: (id: string) => void;
-  pauseToast: (id: string) => void;
-  resumeToast: (id: string) => void;
+  pauseToast: (id: string, reason: ToastPauseReason) => void;
+  resumeToast: (id: string, reason: ToastPauseReason) => void;
 }
+
+/** Why an actionable toast's auto-dismiss is held: the pointer is on it, focus
+ *  is in it, or the phone drawer covers the stack. */
+export type ToastPauseReason = 'hover' | 'focus' | 'covered';
 
 export interface TilePreview {
   url: string;
@@ -924,12 +931,14 @@ const createCharacterCardSlice: StateCreator<AtelierState, [], [], CharacterCard
 
 // Auto-dismiss timers live outside the store state (they are runtime handles,
 // not UI state). Tracking remaining/startedAt lets actionable toasts pause on
-// hover/focus (WCAG 2.2.1) and resume on leave so the Undo affordance can't
-// expire out from under the pointer.
+// hover/focus (WCAG 2.2.1) and while the phone drawer covers them, and resume
+// so the Undo affordance can't expire out from under the pointer. Each pause
+// names its reason; the timer re-arms only once every reason is released.
 interface ToastTimerState {
   remainingMs: number;
   startedAt: number;
   handle: number | null;
+  pausedBy: ReadonlySet<ToastPauseReason>;
 }
 const toastTimers = new Map<string, ToastTimerState>();
 
@@ -944,6 +953,13 @@ const createToastSlice: StateCreator<AtelierState, [], [], ToastSlice> = (set, g
   const dismiss = (id: string) => {
     // Two-phase dismiss: flip `leaving` so the renderer plays the fade-out,
     // then unmount after the same CSS duration so the animation can finish.
+    // Idempotent: a toast already leaving (or gone) keeps its one unmount and
+    // its one onDismiss. A user dismissal clears the live auto-dismiss timeout
+    // so it cannot re-run the dismiss mid-fade.
+    const toast = get().toasts.find((entry) => entry.id === id);
+    if (!toast || toast.leaving) return;
+    const timer = toastTimers.get(id);
+    if (timer?.handle != null) window.clearTimeout(timer.handle);
     toastTimers.delete(id);
     fireOnDismiss(id);
     set((state) => ({
@@ -972,9 +988,10 @@ const createToastSlice: StateCreator<AtelierState, [], [], ToastSlice> = (set, g
       const id = `toast-${crypto.randomUUID()}`;
       const effectiveDurationMs = durationMs ?? (tone === 'error' ? 6000 : tone === 'soft' ? 3500 : 2000);
       set((state) => ({ toasts: [...state.toasts, { id, text, tone, ...(action ? { action } : {}), ...(onDismiss ? { onDismiss } : {}) }] }));
-      toastTimers.set(id, { remainingMs: effectiveDurationMs, startedAt: Date.now(), handle: arm(id, effectiveDurationMs) });
+      toastTimers.set(id, { remainingMs: effectiveDurationMs, startedAt: Date.now(), handle: arm(id, effectiveDurationMs), pausedBy: new Set() });
       return id;
     },
+    dismissToast: dismiss,
     removeToast: (id) => {
       const timer = toastTimers.get(id);
       if (timer?.handle != null) window.clearTimeout(timer.handle);
@@ -982,17 +999,28 @@ const createToastSlice: StateCreator<AtelierState, [], [], ToastSlice> = (set, g
       fireOnDismiss(id);
       set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) }));
     },
-    pauseToast: (id) => {
+    pauseToast: (id, reason) => {
       const timer = toastTimers.get(id);
-      if (timer?.handle == null) return;
+      if (!timer) return;
+      const pausedBy = new Set(timer.pausedBy).add(reason);
+      if (timer.handle === null) {
+        toastTimers.set(id, { ...timer, pausedBy });
+        return;
+      }
       window.clearTimeout(timer.handle);
       const elapsed = Date.now() - timer.startedAt;
-      toastTimers.set(id, { ...timer, handle: null, remainingMs: Math.max(0, timer.remainingMs - elapsed) });
+      toastTimers.set(id, { ...timer, pausedBy, handle: null, remainingMs: Math.max(0, timer.remainingMs - elapsed) });
     },
-    resumeToast: (id) => {
+    resumeToast: (id, reason) => {
       const timer = toastTimers.get(id);
-      if (timer?.handle !== null) return;
-      toastTimers.set(id, { ...timer, startedAt: Date.now(), handle: arm(id, timer.remainingMs) });
+      if (!timer?.pausedBy.has(reason)) return;
+      const pausedBy = new Set(timer.pausedBy);
+      pausedBy.delete(reason);
+      if (pausedBy.size > 0 || timer.handle !== null) {
+        toastTimers.set(id, { ...timer, pausedBy });
+        return;
+      }
+      toastTimers.set(id, { ...timer, pausedBy, startedAt: Date.now(), handle: arm(id, timer.remainingMs) });
     },
   };
 };

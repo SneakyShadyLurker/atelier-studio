@@ -8,10 +8,11 @@ export const ARCHIVE_UNDO_TOAST_MS = 5000;
 // archived tiles (the server archives `done` tiles; failed ones are
 // hard-deleted), the toast offers Undo, which hands exactly those IDs back to
 // the existing restore path (HISTORY_WRITE_MUTATION_KEY, library refetch).
-// Undo fires once: the toast closes and a repeat click is ignored.
+// Undo fires once: the toast fades out (dismissToast) and a repeat click is
+// ignored.
 export function useArchiveUndoToast() {
   const addToast = useAtelierStore((state) => state.addToast);
-  const removeToast = useAtelierStore((state) => state.removeToast);
+  const dismissToast = useAtelierStore((state) => state.dismissToast);
   const restore = useRestore();
   const restoreMutate = restore.mutate;
 
@@ -27,7 +28,7 @@ export function useArchiveUndoToast() {
       onClick: () => {
         if (undone) return;
         undone = true;
-        removeToast(toastId);
+        dismissToast(toastId);
         restoreMutate(tileIds);
       },
     });

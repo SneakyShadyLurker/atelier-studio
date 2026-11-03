@@ -2,7 +2,7 @@ import type { Model } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import Composer from './index';
 import { useKeyboard } from '../../hooks/useKeyboard';
 import { useAtelierStore } from '../../store/atelier';
@@ -212,6 +212,27 @@ describe('Composer BYOK model gating', () => {
     expect(flash.getAttribute('aria-disabled')).toBe('true');
   });
 
+  test('a model hint never repeats its group header word', () => {
+    renderComposer();
+    openModelMenu();
+
+    const sunburst = screen.getByRole('option', { name: /GPT Image 2\.5 Sunburst/ });
+    expect(sunburst.textContent).toBe('GPT Image 2.5 Sunburst');
+    expect(screen.getByRole('option', { name: /ZIB Distilled/ }).textContent).toContain('ComfyUI');
+  });
+
+  test('key-required rows say "Needs your API key" behind a lock glyph and stay dimmed', () => {
+    renderComposer();
+    openModelMenu();
+
+    const pro = screen.getByRole('option', { name: /Nano Banana Pro/ });
+    expect(pro.textContent).toBe('Nano Banana ProNeeds your API key');
+    expect(pro.textContent).not.toContain('Key required');
+    const hint = [...pro.querySelectorAll('span')].find((span) => span.textContent === 'Needs your API key');
+    expect(hint?.firstElementChild?.tagName.toLowerCase()).toBe('svg');
+    expect(pro.getAttribute('data-dimmed')).toBe('true');
+  });
+
   test('clicking a gated row opens the BYOK dialog without switching selection', () => {
     const onModelChange = mock();
     renderComposer({ onModelChange });
@@ -235,6 +256,16 @@ describe('Composer BYOK model gating', () => {
   });
 });
 
+// The composer also reads the text-model gate on mount; these cases count
+// only the probe request, so the gate's reads stay pending off the mock.
+function probeOnly(fetchMock: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : input.toString();
+    if (url.endsWith('/text-models') || url.endsWith('/text-providers')) return new Promise<Response>(() => undefined);
+    return fetchMock(input, init);
+  }) as typeof fetch;
+}
+
 describe('Composer offline model re-probe', () => {
   test('clicking an offline row probes and selects it when the refreshed model is healthy', async () => {
     const onModelChange = mock();
@@ -252,7 +283,7 @@ describe('Composer offline model re-probe', () => {
       expect(init?.method).toBe('POST');
       return Promise.resolve(Response.json(refreshedModels));
     });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = probeOnly(fetchMock);
     renderComposer({
       models: initialModels,
       modelById: new Map(initialModels.map((model) => [model.id, model])),
@@ -278,7 +309,7 @@ describe('Composer offline model re-probe', () => {
       },
     ];
     const fetchMock = mock(() => response.promise);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = probeOnly(fetchMock);
     renderComposer({
       models: initialModels,
       modelById: new Map(initialModels.map((model) => [model.id, model])),
@@ -309,7 +340,7 @@ describe('Composer offline model re-probe', () => {
     const onModelChange = mock();
     const initialModels = [cloudModel, offlineReprobeModel];
     const fetchMock = mock(() => Promise.resolve(Response.json(initialModels)));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = probeOnly(fetchMock);
     renderComposer({
       models: initialModels,
       modelById: new Map(initialModels.map((model) => [model.id, model])),
@@ -332,7 +363,7 @@ describe('Composer offline model re-probe', () => {
     const onModelChange = mock();
     const initialModels = [cloudModel, offlineReprobeModel];
     const fetchMock = mock(() => Promise.reject(new Error('network dropped')));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = probeOnly(fetchMock);
     renderComposer({
       models: initialModels,
       modelById: new Map(initialModels.map((model) => [model.id, model])),
@@ -367,7 +398,7 @@ describe('Composer offline model re-probe', () => {
       healthyI2VModel,
     ];
     const fetchMock = mock(() => response.promise);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = probeOnly(fetchMock);
     useAtelierStore.getState().setDraft({
       i2vSourceUploadId: 'source-1',
       i2vSourcePrompt: 'source prompt',
@@ -412,7 +443,7 @@ describe('Composer offline model re-probe', () => {
       healthyI2VModel,
     ];
     const fetchMock = mock(() => response.promise);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = probeOnly(fetchMock);
     const common = {
       models: initialModels,
       modelById: new Map(initialModels.map((model) => [model.id, model])),
@@ -463,7 +494,7 @@ describe('Composer offline model re-probe', () => {
       },
     ];
     const fetchMock = mock(() => response.promise);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = probeOnly(fetchMock);
     useAtelierStore.getState().setDraft({
       i2vSourceUploadId: 'source-1',
       i2vSourcePrompt: 'source prompt',
@@ -726,6 +757,30 @@ describe('Composer enhance', () => {
     expect(screen.getByRole('button', { name: 'Templates' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: 'Clear prompt and reference images' }).hasAttribute('disabled')).toBe(true);
   });
+
+  test('with zero text models, Enhance stays enabled and opens the note anchored to it instead of enhancing', async () => {
+    const requests: string[] = [];
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      requests.push(url);
+      if (url.endsWith('/text-models')) return Promise.resolve(Response.json({ models: [], tasks: [], defaults: { byTask: {} }, writers: {} }));
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as unknown as typeof fetch;
+    const onPromptChange = mock();
+    render(composer({ prompt: 'a cat', onPromptChange }), { wrapper: wrapper() });
+    const enhance = screen.getByRole('button', { name: 'Enhance' });
+    // The gate settles before the press; the button never disables for it.
+    await waitFor(() => { expect(requests.some((url) => url.endsWith('/text-models'))).toBe(true); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(enhance.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(enhance);
+    const note = await screen.findByRole('dialog', { name: 'Enhance needs a text model.' });
+    expect(note.getAttribute('data-anchor-place')).toBe('below-start');
+    expect(note.textContent).toContain('Ask your admin to connect a text model.');
+    expect(requests.some((url) => url.includes('/enhance'))).toBe(false);
+    expect(onPromptChange).not.toHaveBeenCalled();
+    expect(useAtelierStore.getState().toasts).toEqual([]);
+  });
 });
 
 describe('Composer action-bar stability', () => {
@@ -743,11 +798,10 @@ describe('Composer action-bar stability', () => {
     expect(screen.getByRole('button', { name: 'Undo enhance' }).hasAttribute('disabled')).toBe(true);
   });
 
-  test('Library chip drops the "Templates" label but keeps its aria-label', () => {
+  test('the templates chip reads "Templates", matching the picker it opens', () => {
     renderComposer({ promptsEnabled: true });
     const chip = screen.getByRole('button', { name: 'Templates' });
-    expect(chip.textContent).not.toContain('Templates');
-    expect(chip.textContent).toContain('Library');
+    expect(chip.textContent).toBe('Templates');
   });
 
   test('Model chip shows the short family token, not the full name', () => {
@@ -1026,5 +1080,91 @@ describe('Composer ai-fill cap guard', () => {
     renderComposer({ prompt: aiFillPrompt(8) });
     expect(screen.getByRole('button', { name: 'Generate' }).hasAttribute('disabled')).toBe(false);
     expect(screen.queryByText(/ai fills, up to/i)).toBeNull();
+  });
+});
+
+describe('Composer deferred parts snapshot', () => {
+  // The conditional parts (queue chip, banner, ref chips, mode body) render
+  // from one useDeferredValue snapshot, so they mount and unmount in a
+  // Transition, which is what lets their <ViewTransition> boundaries play.
+  // The urgent commit (the Probe's layout effect) still shows the old parts.
+  test('the queue chip appears only through the deferred render', () => {
+    const urgent: boolean[] = [];
+    function Probe() {
+      const length = useAtelierStore((state) => state.draft.rollQueue.length);
+      useLayoutEffect(() => {
+        urgent.push(document.querySelector('button[aria-label^="Roll queue"]') !== null);
+      }, [length]);
+      return null;
+    }
+    render(<>{composerElement()}<Probe /></>, { wrapper: wrapper() });
+    act(() => { useAtelierStore.getState().stashRoll({ id: 'deferred-roll', text: 'queued', seed: 1, source: 'template' }); });
+    expect(urgent).toEqual([false, false]);
+    expect(screen.getByRole('button', { name: 'Roll queue, 1 roll' })).toBeDefined();
+    act(() => { useAtelierStore.getState().removeQueuedRoll('deferred-roll'); });
+    expect(urgent).toEqual([false, false, true]);
+    expect(screen.queryByRole('button', { name: /^Roll queue/ })).toBeNull();
+  });
+
+  test('Clear in the window before a removal commits, then Undo, does not restore the removed roll', () => {
+    act(() => {
+      useAtelierStore.getState().stashRoll({ id: 'kept', text: 'kept roll', seed: 1, source: 'template' });
+      useAtelierStore.getState().stashRoll({ id: 'removed', text: 'removed roll', seed: 2, source: 'template' });
+    });
+    // Clicks Clear in the urgent commit of the removal: the list still shows
+    // the deferred two rows, the live queue already holds one.
+    let shownAtClear: string | null | undefined;
+    function Probe() {
+      const length = useAtelierStore((state) => state.draft.rollQueue.length);
+      useLayoutEffect(() => {
+        if (length !== 1 || shownAtClear !== undefined) return;
+        const list = document.querySelector('[aria-label="Composer roll-queue"]');
+        shownAtClear = list?.querySelectorAll('button[aria-label^="Remove queued roll"]').length.toString();
+        const clear = list?.querySelector<HTMLButtonElement>('button[data-tip="Clear queued rolls"]');
+        if (clear) fireEvent.click(clear);
+      }, [length]);
+      return null;
+    }
+    render(<>{composerElement()}<Probe /></>, { wrapper: wrapper() });
+    act(() => { useAtelierStore.getState().removeQueuedRoll('removed'); });
+    expect(shownAtClear).toBe('2');
+    expect(useAtelierStore.getState().draft.rollQueue).toHaveLength(0);
+    const undo = useAtelierStore.getState().toasts.find((toast) => toast.text === 'Queue cleared')?.action;
+    if (!undo) throw new Error('expected the Queue cleared Undo');
+    act(() => { undo.onClick(); });
+    expect(useAtelierStore.getState().draft.rollQueue.map((roll) => roll.id)).toEqual(['kept']);
+  });
+
+  test('the models banner leaves only through the deferred render when models arrive', () => {
+    const urgent: boolean[] = [];
+    function Probe({ value }: { value: readonly Model[] }) {
+      useLayoutEffect(() => {
+        urgent.push(document.querySelector('[role="alert"]') !== null);
+      }, [value]);
+      return null;
+    }
+    const view = (list: readonly Model[]) => (
+      <>
+        {composerElement({ models: list, modelById: new Map(list.map((model) => [model.id, model])), error: list.length === 0 ? 'Models unavailable' : null })}
+        <Probe value={list} />
+      </>
+    );
+    const { rerender } = render(view([]), { wrapper: wrapper() });
+    expect(screen.getByRole('alert').textContent).toContain('Models unavailable');
+    rerender(view(models));
+    expect(urgent).toEqual([true, true]);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toBeDefined();
+  });
+
+  test('ref chips are keyed by clientId inside their own boundaries', () => {
+    const ref = (clientId: string) => ({ clientId, mime: 'image/png', sizeBytes: 1, previewUrl: `blob:${clientId}`, status: 'ready' as const, serverId: `upload-${clientId}` });
+    useAtelierStore.setState((state) => ({ draft: { ...state.draft, refImages: [ref('a'), ref('b')] } }));
+    renderComposer();
+    const second = screen.getByRole('img', { name: 'Reference image 2' }).closest('div');
+    act(() => { useAtelierStore.setState((state) => ({ draft: { ...state.draft, refImages: [ref('b')] } })); });
+    // The surviving chip is the same node (keyed by clientId), now first.
+    expect(screen.getByRole('img', { name: 'Reference image 1' }).closest('div') === second).toBe(true);
+    expect(screen.queryByRole('img', { name: 'Reference image 2' })).toBeNull();
   });
 });

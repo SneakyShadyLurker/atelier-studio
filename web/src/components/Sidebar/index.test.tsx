@@ -198,7 +198,7 @@ describe('Sidebar inline edit cancellation', () => {
       { wrapper: wrapper() },
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '+ New collection' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'New collection' }));
     const input = screen.getByLabelText('Collection name');
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: 'Draft collection' } });

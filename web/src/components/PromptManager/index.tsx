@@ -1,6 +1,6 @@
 import type { LibraryDiagnosisResponse, PromptTemplate, TagDimension, VariableList } from '@atelier/shared';
 import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useDeferredValue, useEffect, useId, useRef, useState, useSyncExternalStore, ViewTransition, type RefObject } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   useCreateDimension,
@@ -13,6 +13,8 @@ import {
   useReorderTemplates,
 } from '../../hooks/usePromptMutations';
 import { useInferDimensions } from '../../hooks/useInferDimensions';
+import { useTextModelGate } from '../../hooks/useTextModelGate';
+import { goToTextModels } from '../../lib/textModelsNav';
 import { usePromptLibrary } from '../../hooks/usePromptLibrary';
 import { describeError } from '../../lib/errorCopy';
 import { LoadingState, ErrorState, StateView } from '../StateView';
@@ -32,6 +34,7 @@ import DimensionEditor from './DimensionEditor';
 import DimensionProposal from './DimensionProposal';
 import { DiagnosisCard } from './DiagnosisCard';
 import HelpPanel from './HelpPanel';
+import TextModelNote from '../TextModelNote';
 import ListEditor from './ListEditor';
 import SettingsPanel from './SettingsPanel';
 import TemplateEditor from './TemplateEditor';
@@ -137,8 +140,18 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
   type DiagnosisCardOpen =
     | { mode: 'library' }
     | { mode: 'template'; templateName: string };
-  const [diagnosisCardOpen, setDiagnosisCardOpen] = useState<DiagnosisCardOpen | null>(null);
+  const [liveDiagnosisCard, setDiagnosisCardOpen] = useState<DiagnosisCardOpen | null>(null);
+  // The card is inline page content: it renders from a deferred snapshot so
+  // opening, Cancel and Fix with AI mount and unmount it in a Transition
+  // through its part boundary.
+  const diagnosisCardOpen = useDeferredValue(liveDiagnosisCard);
   const queryClient = useQueryClient();
+  // Propose Dimensions and the diagnosis fix stay enabled without a text
+  // model; with none configured at all they open the note under the button.
+  const textModelGate = useTextModelGate();
+  const proposeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const fixButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [textNote, setTextNote] = useState<{ action: string; anchorRef: RefObject<HTMLButtonElement | null> } | null>(null);
   const onAiClick = async () => {
     let fresh: LibraryDiagnosisResponse;
     try {
@@ -327,14 +340,56 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
       .catch((error: unknown) => { addToast(describeError(error, "Couldn't delete the dimension."), 'error'); });
   };
 
+  // An empty resource list shows only its empty state (decision 9): the list
+  // pane would be an empty card beside it, so it stays out until something
+  // other than the empty state renders (the inline name field, a new draft).
+  const templatesEmpty = templates.length === 0 && newTemplateName === null && !selectedTemplate && !inlineEdit.isActive;
+  const listsEmpty = lists.length === 0 && !inlineEdit.isActive;
+  const dimensionsEmpty = dimensions.length === 0 && !inlineEdit.isActive;
+  const proposeButton = (
+    <button
+      type="button"
+      className={btn.ai}
+      ref={proposeButtonRef}
+      onClick={() => {
+        if (textModelGate.availability === 'none') setTextNote({ action: 'Propose Dimensions', anchorRef: proposeButtonRef });
+        else void onAiClick();
+      }}
+      disabled={infer.status === 'analyzing' || infer.status === 'applying'}
+    >
+      <I.sparkle aria-hidden="true" />
+      {aiButtonLabel(infer.status, infer.progress)}
+    </button>
+  );
+
   return (
     <section className={styles.manager} aria-labelledby={managerTitleId}>
       <ManagedViewHeader
         heading="Prompt Library"
         headingId={managerTitleId}
+        backLabel="Back to Unsorted"
         onBack={onBack}
+        titleAction={(
+  <button
+            ref={helpBtnRef}
+            type="button"
+            className={btn.icon}
+            aria-label="How the Prompt Library works"
+            aria-expanded={helpOpen}
+            aria-controls={helpOpen ? helpPanelId : undefined}
+            data-tip="How it works"
+            data-tip-place="below"
+            onClick={() => {
+              // Closing plays the panel's exit, like every other dismissal.
+              if (helpOpen && helpExitRef.current) helpExitRef.current();
+              else setHelpOpen((v) => !v);
+            }}
+          >
+            <I.info />
+          </button>
+        )}
       >
-        <div ref={tabStripRef} className={styles.headerTabs} role="tablist" aria-label="Prompt library sections" onKeyDown={tabRoving.onKeyDown}>
+        <div ref={tabStripRef} className={styles.headerTabs} role="tablist" aria-label="Prompt Library sections" onKeyDown={tabRoving.onKeyDown}>
           {TABS.map((item, index) => (
             <button
               key={item.id}
@@ -354,43 +409,26 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
             </button>
           ))}
         </div>
-        <button
-          ref={helpBtnRef}
-          type="button"
-          className={btn.icon}
-          aria-label="How the prompt library works"
-          aria-expanded={helpOpen}
-          aria-controls={helpOpen ? helpPanelId : undefined}
-          data-tip="How it works"
-          data-tip-place="below"
-          onClick={() => {
-            // Closing plays the panel's exit, like every other dismissal.
-            if (helpOpen && helpExitRef.current) helpExitRef.current();
-            else setHelpOpen((v) => !v);
-          }}
-        >
-          <I.info />
-        </button>
       </ManagedViewHeader>
 
       {promptLibrary.isLoading ? (
-        <LoadingState label="Loading prompt library…" />
+        <LoadingState label="Loading Prompt Library…" />
       ) : promptLibrary.isError ? (
-        <ErrorState message="Couldn’t load the prompt library." onRetry={() => { void promptLibrary.refetch(); }} />
+        <ErrorState message="Couldn’t load the Prompt Library." onRetry={() => { void promptLibrary.refetch(); }} />
       ) : !promptLibrary.enabled || !library ? null : (
         <>
 
         <div className={styles.body} role="tabpanel" id="tabpanel-templates" aria-labelledby="tab-templates" tabIndex={0} hidden={tab !== 'templates'}>
         {tab === 'templates' && (
           <>
+            {!templatesEmpty && (
             <aside className={styles.resourcePane} aria-label="Templates" onKeyDown={templateRoving.onKeyDown}>
-              <div className={styles.paneTitle}>Templates</div>
               <div className={styles.paneNew}>
                 {inlineContext?.kind === 'creating' && inlineContext.tab === 'templates'
                   ? renderInlineInput('Template name')
-                  : (
+                  : templates.length > 0 && (
                     <button type="button" className={btn.secondary} onClick={() => { startCreate('templates'); }}>
-                      + New
+                      <I.plus aria-hidden="true" />New
                     </button>
                     )}
               </div>
@@ -473,6 +511,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
               </ul>
               </div>
             </aside>
+            )}
             {newTemplateName !== null || selectedTemplate ? (
               <TemplateEditor
                 key={newTemplateName !== null ? 'new' : selectedTemplate?.id}
@@ -488,8 +527,8 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
                   selectionStore.adoptCreatedTemplate(created.id);
                 }}
               />
-            ) : templates.length === 0 && !inlineEdit.isActive ? (
-              <div className={styles.editor}>
+            ) : templatesEmpty ? (
+              <div className={styles.emptySpan} data-empty-span="">
                 <StateView
                   art="empty-templates"
                   title="No templates yet"
@@ -511,14 +550,14 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
         <div className={styles.body} role="tabpanel" id="tabpanel-lists" aria-labelledby="tab-lists" tabIndex={0} hidden={tab !== 'lists'}>
         {tab === 'lists' && (
           <>
+            {!listsEmpty && (
             <aside className={styles.resourcePane} aria-label="Lists" onKeyDown={listRoving.onKeyDown}>
-              <div className={styles.paneTitle}>Variable lists</div>
               <div className={styles.paneNew}>
                 {inlineContext?.kind === 'creating' && inlineContext.tab === 'lists'
                   ? renderInlineInput('Variable list name')
-                  : (
+                  : lists.length > 0 && (
                     <button type="button" className={btn.secondary} onClick={() => { startCreate('lists'); }}>
-                      + New
+                      <I.plus aria-hidden="true" />New
                     </button>
                     )}
               </div>
@@ -580,9 +619,10 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
               </ul>
               </div>
             </aside>
+            )}
             {selectedList && <ListEditor key={`${selectedList.id}:${listPruneRevision}`} list={selectedList} dimensions={dimensions} onDelete={() => { setDeleteTarget({ kind: 'list', item: selectedList }); }} />}
-            {lists.length === 0 && !inlineEdit.isActive && (
-              <div className={styles.editor}>
+            {listsEmpty && (
+              <div className={styles.emptySpan} data-empty-span="">
                 <StateView
                   art="empty-lists"
                   title="No variable lists yet"
@@ -624,26 +664,21 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
                   </button>
                 );
               })()}
+              {dimensionsEmpty && proposeButton}
             </div>
+            {!dimensionsEmpty && (
             <aside className={styles.resourcePane} aria-label="Dimensions" onKeyDown={dimensionRoving.onKeyDown}>
-              <div className={styles.paneTitle}>Dimensions</div>
               <div className={styles.paneNew}>
                 {inlineContext?.kind === 'creating' && inlineContext.tab === 'dimensions'
                   ? renderInlineInput('Dimension name')
                   : (
                     <>
-                      <button type="button" className={btn.secondary} onClick={() => { startCreate('dimensions'); }}>
-                        + New
-                      </button>
-                      <button
-                        type="button"
-                        className={btn.ai}
-                        onClick={() => { void onAiClick(); }}
-                        disabled={infer.status === 'analyzing' || infer.status === 'applying'}
-                      >
-                        <I.sparkle aria-hidden="true" />
-                        {aiButtonLabel(infer.status, infer.progress)}
-                      </button>
+                      {dimensions.length > 0 && (
+                        <button type="button" className={btn.secondary} onClick={() => { startCreate('dimensions'); }}>
+                          <I.plus aria-hidden="true" />New
+                        </button>
+                      )}
+                      {proposeButton}
                     </>
                     )}
               </div>
@@ -683,8 +718,9 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
               </ul>
               </div>
             </aside>
-            {dimensions.length === 0 && !inlineEdit.isActive && (
-              <div className={styles.editor}>
+            )}
+            {dimensionsEmpty && (
+              <div className={styles.emptySpan} data-empty-span="">
                 <StateView
                   art="empty-dimensions"
                   title="No dimensions yet"
@@ -695,6 +731,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
                       that share a dimension but no tag can never be rolled together.
                     </>
                   )}
+                  action={{ label: 'New dimension', onClick: () => { startCreate('dimensions'); } }}
                 />
               </div>
             )}
@@ -714,17 +751,24 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
               />
             )}
             {diagnosisCardOpen && diagnosisQuery.data && (
+              <ViewTransition default="none" enter="part-enter" exit="part-exit">
               <div className={styles.dimFullSpan}>
                 <DiagnosisCard
                   {...diagnosisCardOpen}
                   diagnosis={diagnosisQuery.data}
-                  onFixWithAi={(diagnosis: LibraryDiagnosisResponse) => {
+                  fixButtonRef={fixButtonRef}
+                  onFixWithAi={(diagnosis: LibraryDiagnosisResponse, actionLabel: string) => {
+                    if (textModelGate.availability === 'none') {
+                      setTextNote({ action: actionLabel, anchorRef: fixButtonRef });
+                      return;
+                    }
                     setDiagnosisCardOpen(null);
                     infer.analyze({ priorDiagnosis: diagnosis });
                   }}
                   onCancel={() => { setDiagnosisCardOpen(null); }}
                 />
               </div>
+              </ViewTransition>
             )}
             {coverageQuery.data && (
               <CoverageCard
@@ -775,7 +819,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
         <ConfirmDialog
           open
           title={`Delete ${deleteTarget.kind}?`}
-          body="This removes it from the prompt library for this user."
+          body="This removes it from the Prompt Library for this user."
           confirmLabel={`Delete ${deleteTarget.kind}`}
           cancelLabel="Cancel"
           danger
@@ -793,6 +837,16 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
         exitRef={helpExitRef}
         onClose={() => { setHelpOpen(false); }}
       />
+      {textNote !== null && (
+        <TextModelNote
+          open
+          action={textNote.action}
+          anchorRef={textNote.anchorRef}
+          escape="top-level"
+          navigateToTextModels={goToTextModels}
+          onClose={() => { setTextNote(null); }}
+        />
+      )}
       <div className="srOnly" aria-live="polite" aria-atomic="true">{liveAnnouncement}</div>
     </section>
   );

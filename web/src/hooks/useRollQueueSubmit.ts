@@ -439,7 +439,7 @@ export function useRollQueueSubmit({
       activeItem = { key: pressKey, text: preparedRequest.prompt, provenance: preparedRequest.provenance, submission };
     } else if (activePrompt.length > 0) {
       if (libraryPending && (activePrompt.includes('{{var::') || hasAiFillTokens(activePrompt))) {
-        addToast('Prompt library still loading — try again in a moment.', 'soft');
+        addToast('Prompt Library still loading — try again in a moment.', 'soft');
       } else {
         const resolved = resolveComposerPrompt(activePrompt, library, nextSeed());
         if (resolved.warnings.length > 0) {

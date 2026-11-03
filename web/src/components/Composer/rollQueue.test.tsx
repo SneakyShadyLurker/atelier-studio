@@ -87,9 +87,22 @@ describe('Composer roll-queue chip', () => {
       ]},
     }));
     render(<Composer {...baseProps} />, { wrapper: wrapper() });
-    expect(screen.queryByText('expanded prompt')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /roll queue, 1 roll/i }));
-    expect(screen.getByText('expanded prompt')).toBeTruthy();
+    const chip = screen.getByRole('button', { name: /roll queue, 1 roll/i });
+    const panel = document.getElementById(chip.getAttribute('aria-controls') ?? '');
+    if (!panel) throw new Error('queue panel missing');
+    // Collapsed: the list stays mounted inside an inert, hidden panel.
+    expect(screen.queryByRole('region', { name: /composer roll-queue/i })).toBeNull();
+    expect(panel.textContent).toContain('expanded prompt');
+    expect(panel.hasAttribute('inert')).toBe(true);
+    expect(panel.getAttribute('aria-hidden')).toBe('true');
+    fireEvent.click(chip);
+    expect(panel.getAttribute('data-open')).toBe('true');
+    expect(panel.hasAttribute('inert')).toBe(false);
+    expect(screen.getByRole('region', { name: /composer roll-queue/i })).toBeTruthy();
+    fireEvent.click(chip);
+    expect(document.getElementById(chip.getAttribute('aria-controls') ?? '')).toBe(panel);
+    expect(panel.hasAttribute('data-open')).toBe(false);
+    expect(panel.hasAttribute('inert')).toBe(true);
   });
 
   test('expanded queue shows target context, current prompt, row seeds, and keyboard reorder', () => {

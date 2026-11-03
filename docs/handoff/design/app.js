@@ -192,6 +192,8 @@ const css = `
     --text-lg: 1.125rem;
     --text-xl: 1.375rem;
     --text-display: 2rem;
+    --cadence-loop: 1600ms;
+    --cadence-loop-fast: 700ms;
 }
 
 .app {

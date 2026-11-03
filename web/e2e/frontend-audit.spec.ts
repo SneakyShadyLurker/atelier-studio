@@ -55,7 +55,7 @@ test.describe('harness production styles', () => {
 test.describe('queue-clear Undo inside the open picker', () => {
   test('Enter activates hosted Undo without dismissing the nested confirmation', async ({ page }) => {
     await openRefine(page);
-    const picker = page.getByRole('dialog', { name: 'Templates' });
+    const picker = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Close templates' }) });
     await picker.getByRole('button', { name: 'Stash & roll' }).click();
     await picker.getByRole('button', { name: 'Clear', exact: true }).click();
     await picker.getByRole('button', { name: 'Stash & roll' }).click();
@@ -83,7 +83,7 @@ test.describe('queue-clear Undo inside the open picker', () => {
 
   test('renders inside the picker panel and is reachable by keyboard and pointer', async ({ page }) => {
     await openRefine(page);
-    const picker = page.getByRole('dialog', { name: 'Templates' });
+    const picker = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Close templates' }) });
     await picker.getByRole('button', { name: 'Stash & roll' }).click();
     await picker.getByRole('button', { name: 'Stash & roll' }).click();
     await expect(picker.locator('[data-zone="foot"] ul').first()).toContainText('2 stashed');
@@ -119,7 +119,7 @@ test.describe('queue-clear Undo inside the open picker', () => {
 
   test('a later stash merges with the restored queue', async ({ page }) => {
     await openRefine(page);
-    const picker = page.getByRole('dialog', { name: 'Templates' });
+    const picker = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Close templates' }) });
     await picker.getByRole('button', { name: 'Stash & roll' }).click();
     await picker.getByRole('button', { name: 'Clear', exact: true }).click();
     await picker.getByRole('button', { name: 'Stash & roll' }).click();
@@ -129,7 +129,7 @@ test.describe('queue-clear Undo inside the open picker', () => {
 
   test('follows the replaced panel across desktop → phone → desktop and stays keyboard-reachable', async ({ page }) => {
     await openRefine(page);
-    const picker = page.getByRole('dialog', { name: 'Templates' });
+    const picker = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Close templates' }) });
     await picker.getByRole('button', { name: 'Stash & roll' }).click();
     await picker.getByRole('button', { name: 'Clear', exact: true }).click();
     // Both locators re-resolve, so they always address the CURRENT panel node.
@@ -181,7 +181,7 @@ test.describe('queue-clear Undo inside the open picker', () => {
 
   test('closing the picker hands the toast back to the app root', async ({ page }) => {
     await openRefine(page);
-    const picker = page.getByRole('dialog', { name: 'Templates' });
+    const picker = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Close templates' }) });
     await picker.getByRole('button', { name: 'Stash & roll' }).click();
     await picker.getByRole('button', { name: 'Clear', exact: true }).click();
     await expect(picker.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();

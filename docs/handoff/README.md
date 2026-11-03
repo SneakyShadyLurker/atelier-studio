@@ -32,7 +32,7 @@ The UI is one page with three regions:
 └─────────────┴───────────────────────────────────────────┘
 ```
 
-- **Sidebar** (left, fixed 240px): brand mark + version, generation history list, clear-all action, footer status line.
+- **Sidebar** (left, fixed 240px): brand mark and title, generation history list, clear-all action, footer status line.
 - **Canvas** (main): vertically stacked **batches**. Each batch is one prompt+model+settings+timestamp + a grid of **tiles**.
 - **Composer** (floating, anchored bottom-center, max-width 920px, 24px from bottom): prompt textarea + model/ratio/count chips + Generate button.
 
@@ -71,27 +71,26 @@ The sidebar is a sheet laid on the table: `var(--bg-elev)` on `var(--bg)` with a
 
 **Header** — `min-height: var(--app-header-h)` (56px), 18px sides; flex row with gap 10; bottom border `1px solid var(--line)`.
 - **Brand mark**: the engraved capital A in its plate (`web/src/assets/atelier-mark.png`, 128×128 source) shown at 22×22 with `--radius-control`. See Brand mark.
-- **Title** "Atelier": sans `--text-md`, weight 500, letter-spacing -0.01em.
-- **Version** `v1.0`: the small-caps label (`type.module.css .label`), margin-left auto.
+- **Title** "Atelier": sans `--text-md`, weight 500, letter-spacing -0.01em, margin-right auto. The brand stands alone: no version or other label beside it.
 
-**Section header**: padding 14px 18px 8px, the small-caps label: sans `--text-xs` 500, `font-variant-caps: all-small-caps`, `letter-spacing: 0.04em`, `var(--ink-3)`, from sentence-case text ("Library", "Recent"). Right side hosts an "Archive all" archive icon (only shown when batches exist) — clearing history archives every live item rather than hard-deleting it.
+**Section header**: padding 14px 18px 8px, the small-caps label: sans `--text-xs` 500, `font-variant-caps: all-small-caps`, `letter-spacing: 0.04em`, `var(--ink-3)`, from sentence-case text ("Library", or the history section's scope title). Right side hosts an "Archive all" archive icon (only shown when batches exist) — clearing history archives every live item rather than hard-deleting it.
 
-**History list**: flex 1, vertically scrollable. Empty state: `--text-xs` copy in `var(--ink-3)` reading "Nothing here yet. Your generations will appear here."
+**History list**: flex 1, vertically scrollable, with the 14px scroll-edge fade (top edge open at rest, see Canvas). Rows drop in once per batch id (`seenBatches`), never on a virtual remount. Empty state: `--text-xs` copy in `var(--ink-3)` reading "Nothing here yet. Your generations will appear here."
 
-**History item**: 10px padding, `--radius-control`, grid `32px 1fr` with 10px gap, 1px transparent border. Hover: `background: var(--bg-sunk)`. Active (currently-viewed batch): same bg + `border-color: var(--line-2)`.
+**History item**: 10px padding, `--radius-control`, grid `32px 1fr` with 10px gap, 1px transparent border. Hover: `background: var(--bg-sunk)`. Active (the current batch: the one last generated or chosen on the rail, not the one in view): same bg plus the 2px `--ink` selected bar (`railActiveBar`), `aria-current="true"` and a "Current batch" tip.
 - **Thumbnail**: 32×32, `--radius-tile`, overflow hidden. Shows the first ready image of the batch, `object-fit: cover`. With no image ready it shows the plate at rest: `var(--bg-sunk)` with `box-shadow: var(--plate-mark)`.
 - **Prompt text**: `--text-xs`, `-webkit-line-clamp: 2`, line-height 1.35.
 - **Meta line**: a `Meta` list (`{count}×`, `{ratio}`, `{modelLabel}`): sans `--text-xs`, `var(--ink-3)`, tabular figures, fields separated by a 10px gap, no punctuation.
 
-**Footer**: top border `1px solid var(--line)`, 10px 14px padding, `var(--ink-3)`. Contains a 6×6 green dot (`var(--good)`) with a 3px ring of `--good` at 18%, then a `Meta` list "{N} models", "{M} backends", then the API keys and theme icon buttons.
+**Footer**: top border `1px solid var(--line)`, 10px 14px padding, `var(--ink-3)`. Contains a 6×6 green dot (`var(--good)`) with a 3px ring of `--good` at 18%, then a `Meta` list "{N} models", "{M} backends", then the API keys and theme icon buttons (26×26 `buttons.iconAction`, 44px under the touch gate).
 
 #### Library rail
 
-A second section above the history section. Main, Archive, and Prompt Library all keep the same Library rail *chrome* (position, row geometry, section header, active-bar, keyboard model); full-screen managed views hide the feed list below the rail, but the rail itself remains present. Collapsing, restructuring, or jumping the rail chrome between modes is not an option in v1. The rail *content* adapts to context: in Archive, rows route to archive-scoped views and use archived counts, collection rows with no archived content are hidden (gated like Pinned), and "+ New collection" is omitted — Archive is a terminal 30-day deletion bin, not a place to organize live work.
+A second section above the history section. Main, Archive, and Prompt Library all keep the same Library rail *chrome* (position, row geometry, section header, active-bar, keyboard model); full-screen managed views hide the feed list below the rail, but the rail itself remains present. Collapsing, restructuring, or jumping the rail chrome between modes is not an option in v1. The rail *content* adapts to context: in Archive, rows route to archive-scoped views and use archived counts, collection rows with no archived content are hidden (gated like Pinned), and New collection is omitted — Archive is a terminal 30-day deletion bin, not a place to organize live work.
 
 **Library section header** — the same small-caps label as the history section. Right side hosts the **search icon-toggle** (lucide `search`, 14×14, 2px stroke). Click expands an inline search input below the section header on desktop; mobile shows a full-width search row that is always expanded.
 
-**Library row**: 36px tall on desktop, 44px on mobile (HIG/MD touch target). 10px horizontal padding, `--radius-control`, 1px transparent border. Layout: leading 14×14 folder glyph in `var(--ink-3)`, name, trailing count as a sans tabular numeral (`--text-xs`, `var(--ink-3)`).
+**Library row**: 36px tall, 44px on touch devices (HIG/MD touch target). 10px horizontal padding, `--radius-control`, 1px transparent border. Layout: leading 14×14 folder glyph in `var(--ink-3)`, name, trailing count as a sans tabular numeral (`--text-xs`, `var(--ink-3)`).
 - **Hover**: `background: var(--bg-sunk)`, no accent.
 - **Active**: 2px left accent bar in `var(--ink)` via `::before` pseudo-element (absolutely positioned; **no layout shift** between active and inactive states — Linear/VS Code pattern). `aria-current="page"` + `aria-pressed="true"`.
 
@@ -99,30 +98,28 @@ A second section above the history section. Main, Archive, and Prompt Library al
 
 | Row | Shown when |
 |---|---|
-| `All` | Always |
+| `Unsorted` | Always (main: the default scope; Archive: the archived-unsorted scope) |
 | `Pinned` | Main: `summary.pinnedCount > 0`; Archive: `summary.archivedPinnedCount > 0` |
-| `Unsorted` | Main: visible as the default scope; Archive: visible as the archived-unsorted scope |
 | `<name>` | Main: one per user collection, sorted by `sort_order, name`. Archive: only collections with `archivedCount > 0` |
-| `+ New collection` | Main only (dashed `var(--line-2)` border); omitted in Archive |
+| New collection (plus glyph) | Main only (dashed `var(--line-2)` border); omitted in Archive |
 
 **Inline create + rename + delete** (no modal, no context menu):
-- `+ New collection` row: click → swaps in place to `<input>` with visually-hidden `<label>Collection name</label>`. Enter or blur commits; Esc cancels.
+- New collection row (plus glyph and label): click → swaps in place to `<input>` with visually-hidden `<label>Collection name</label>`. Enter or blur commits; Esc cancels.
 - Double-click on a collection row name → swaps to inline rename input (same pattern). Enter/blur commits; Esc cancels.
 - Hover on a collection row reveals a right-side `╳` (lucide `x`). Click → `ConfirmDialog` ("Delete collection? Batches will return to Unsorted.") → idempotent DELETE; batches' `collection_id` is set NULL by FK cascade.
 
-**Per-scope history label** (the history section title changes per active scope):
+**Per-scope history label** (the history section title changes per active scope): it is the scope title, `scopeTitle(view, collections)` in `web/src/lib/viewChrome.ts`, the same words as the active rail row and the Canvas title.
 
 Labels are sentence-case source text rendered in small caps.
 
 | view | Section label | Empty-state copy |
 |---|---|---|
-| `history` | `Recent` | "Nothing here yet. Your generations will appear here." |
+| `unsorted` | `Unsorted` | "Nothing here yet. Your generations will appear here." with no batches at all, otherwise "Everything is in a collection. Nice!" |
 | `pinned` | `Pinned` | "No pinned batches yet. Click the star on any generation to pin it." |
-| `unsorted` | `Unsorted` | "Everything is in a collection. Nice!" |
-| `collection: <name>` | `In <Name>` | "No generations in `<Name>` yet. Move batches here from the Move menu." |
+| `collection: <name>` | `<Name>` | "No generations in `<Name>` yet. Move batches here from the Move menu." |
 | any + `q !== ''` and no matches | (unchanged) | `"No prompts match \"<q>\"."` |
 
-When `useCollections()` returns `items: []`, the rail renders only `All` + `+ New collection` plus a one-line microcopy in `var(--ink-3)`, sans `--text-xs`: *"Group related batches into collections."*
+When `useCollections()` returns `items: []`, the rail renders only `Unsorted` + New collection plus a one-line microcopy in `var(--ink-3)`, sans `--text-xs`: *"Group related batches into collections."*
 
 **Pin star on history items**: A 14×14 lucide `star` button in the top-right of each history item card. Hover-revealed when unpinned (opacity 0 default; 1 on item-card hover or star focus); always visible when pinned (filled via `data-pinned="true"` → CSS `fill: currentColor`). Click stops propagation and toggles `pinned` server-side.
 
@@ -130,11 +127,11 @@ When `useCollections()` returns `items: []`, the rail renders only `All` + `+ Ne
 
 **Live region**: a single rail-level `aria-live="polite"` region announces count changes (e.g. "Logo concepts, 13 batches"), debounced 300ms so rapid changes don't spam screen readers.
 
-**Mobile (≤767px)**: rail rows expand to 44px min height; search is always-expanded as a full-width row with 16px font (avoids iOS auto-zoom). The drawer header gains a `Cancel` text button in non-idle inline-input states (creating / renaming / searching) — clears the active state and returns to idle.
+**Mobile (≤767px)**: search is always-expanded as a full-width row with 16px font (avoids iOS auto-zoom). The drawer header gains a `Cancel` text button in non-idle inline-input states (creating / renaming / searching) — clears the active state and returns to idle.
 
 ### Canvas
 
-**Container (`.canvas`)**: the table (`var(--bg)`), vertical scroll, padding `28px 36px 180px` (the bottom 180 reserves space under the floating composer).
+**Container (`.canvas`)**: the table (`var(--bg)`), vertical scroll with a 14px fade at both edges; where scroll-driven animations exist the top fade opens at scroll 0 and returns over the first 28px of scroll, padding `28px 36px 180px` (the bottom 180 reserves space under the floating composer).
 
 **Empty state**: `StateView` (`web/src/components/StateView`), a flex column with gap 18px. Passive Canvas states centre above a stable bottom reserve: 241px on desktop and 77px plus the safe-area inset on phone. Composer resizing and view remounts leave the artwork in place. Populated feeds and actionable history errors retain the live Composer reserve so their controls remain reachable by scrolling. The plate, heading and body fade in together over `--dur-overlay`; the navigation stage owns spatial motion.
 - **Plate**: the `empty-canvas` etching (360px wide on desktop, 240px on phone) inside `.plate`: `var(--bg-sunk)`, `box-shadow: var(--plate-mark)`, `--radius-tile`, 24px padding (16px on phone). See The plate and etched art.
@@ -146,7 +143,7 @@ When `useCollections()` returns `items: []`, the rail renders only `All` + `+ Ne
 
 **Container (`.batch`)**: a sheet laid on the table: `var(--bg-elev)`, `var(--shadow-1)`, `--radius-panel`, 16px padding and a 28px top margin between batches (12px and 20px on phone; no margin on the first batch). The sheet's edge marks the break between batches; there is no divider rule. Entrance once per batch id (`seenBatches`), never replayed.
 
-**Header**: flex row, baseline-aligned, 14px gap, 8px bottom margin; no rule under it.
+**Header**: flex row, baseline-aligned, 14px gap, 8px bottom margin; no rule under it. Below 768px the prompt takes the first row alone and the meta line and actions share the second, centred on each other.
 - **Prompt**: the batch heading is data, so it sets in the sans: `--text-md`, weight 500, line-height 1.45, color `var(--ink)`, flex 1, single-line ellipsis. The full prompt opens in the `BatchPrompt` prose card (`--bg`, 1px `--line-2`, `--radius-panel`, `--shadow-photo`).
 - **Meta cluster**: a `Meta` list with `lead` (sans `--text-xs`, `var(--ink-3)`, tabular figures, 10px gaps, no separators): model name (first field in `var(--ink-2)`), ratio, an optional sequence or story chip (`Part 2 of 3, 0:10`, `Part 2 of 3, stitching…`, `Story failed`; 1px `--line`, `--radius-control`, `var(--ink-2)`), the queue state while queued (`Queued, 3 ahead`, `Queued, next`), relative time ("just now", "5m ago", "2h ago", or locale date), then, when `batch.collectionId` is set, a borderless folder-glyph + collection-name button that opens the Move popover, and the template provenance (sparkle + template name, seed in its tooltip). The relative-time field is hidden below 768px to prevent meta wrap on phones.
 - **Actions**: 28×28 `buttons.iconAction` buttons (transparent at rest, `var(--ink-3)`; hover `var(--bg-sunk)` fill, `var(--ink)`): a filled pin star only while pinned (`aria-pressed`, "Unpin batch"), Play master on a sequence tail with a ready master, **Archive batch**, and **More** (⋯) opening the `OverflowMenu` with Copy prompt, Re-roll, Move and the rest. The archive button uses the archive (box-with-slot) icon, not a trash icon — main-feed removals are soft deletes that move tiles to the Archive view for 30 days before permanent deletion.
@@ -177,13 +174,13 @@ Anchored to the batch-header Move icon. Opens on Move-icon click OR collection-m
 - `role="dialog"`, `aria-label="Move to collection"`.
 - Header label "Move to collection" in the small-caps label (the menu group label).
 - `<ul role="list">` of rows. **`(Unsorted)` is ALWAYS the first list item.** Each row is a `<button>` with the same geometry as Library rail rows. ✓ (lucide `check`) marks the row matching `batch.collectionId` — including the `null` / Unsorted case.
-- Divider, then a `+ New collection` row.
+- Divider, then a New collection row (plus glyph and label).
 
 **Behaviour**:
 - Click a collection row → `useMoveBatch` with that id → popover closes; the optimistic cache update flips ✓ to the new row before the server response.
 - Click `(Unsorted)` row → `useMoveBatch` with `collectionId: null` → popover closes.
 - Double-click on a collection row name → swap to inline rename input within the popover (sr-only `<label>`, Enter commits, Esc cancels). The focus trap continues to apply; focus returns to the row button on commit/cancel.
-- `+ New collection`: click → inline input below; Enter commits via `useCreateCollection` AND immediately follows with `useMoveBatch({ batchId, collectionId: newId })` so the batch lands in the freshly-created collection; popover closes. Esc cancels.
+- New collection: click → inline input below; Enter commits via `useCreateCollection` AND immediately follows with `useMoveBatch({ batchId, collectionId: newId })` so the batch lands in the freshly-created collection; popover closes. Esc cancels.
 
 **Focus + dismiss**:
 - Focus trap reuses the Lightbox recipe (no library). Tab cycles within the popover; Shift+Tab cycles backward.
@@ -211,7 +208,7 @@ Replaces the image while `status === 'loading'`. Aspect ratio matches the reques
 
 **The plate wipe** inside the frame (`web/src/components/tile/LoadingTile`), monochrome until the image arrives:
 1. **Plate** (`.loading`): `var(--bg-sunk)` with `box-shadow: var(--plate-mark)`.
-2. **Wipe** (`.loading::after`): an oversized layer tilted 20° carrying one `var(--scrim-scan)` band (42% → 50% → 58%), crossing the plate diagonally with `atelier-sweep` every 1.6s, linear. Under reduced motion it holds still and swaps to `atelier-pulse`.
+2. **Wipe** (`.loading::after`): an oversized layer tilted 20° carrying one `var(--scrim-scan)` band (42% → 50% → 58%), crossing the plate diagonally with `atelier-sweep` every `--cadence-loop` (1.6s), linear. Under reduced motion it holds still and swaps to `atelier-pulse`.
 3. **Status line** (`.text`): bottom-left on a triple `--scrim-on-image` backing, `--radius-control`, 4px 6px padding, sans `--text-2xs` 500 in white with `--shadow-text-on-image`. Content: a 60×1px progress bar with a sweeping `--accent` fill, then a `Meta` list `{modelName}`, `{elapsed}s`. Elapsed updates once a second (sub-second updates churn React state with no UX gain).
 
 **Queued tile**: the plate at rest (the same mat and plate mark, no wipe) with the queue state bottom-left (`Queued, 3 ahead` or `Queued, next`) on the same backing.
@@ -230,7 +227,7 @@ The veil persists through the loading→done handoff (see "Fresh-completion reve
 - **Icon**: alert-triangle, color `var(--danger)`.
 - **Title** "Generation failed": the small-caps label in `var(--danger)`.
 - **Message**: sans `--text-xs`, `var(--ink-2)`, line-height 1.5. The error string from the backend (or the mock's reason).
-- **Actions**: two compact buttons (Retry, Dismiss) — sans `--text-xs` 500 with an icon, `1px solid var(--line-2)`, `--radius-control`, 5px 9px padding (44px tall under `hover: none`). Hover: invert to `var(--ink)` bg, `var(--bg)` text.
+- **Actions**: two compact buttons (Retry, Dismiss) — sans `--text-xs` 500 with an icon, `1px solid var(--line-2)`, `--radius-control`, 5px 9px padding (44px tall on touch devices). Hover: invert to `var(--ink)` bg, `var(--bg)` text.
 - **Phone** (`width < 768px`): no image footprint and no stripes; the tile is as tall as its content: icon and title on one line, the message, then the actions in one row.
 
 **Behavior**: Retry calls generate again with a new random seed (preserves prompt/model/ratio); Dismiss removes that single tile. If all tiles in a batch are dismissed, the batch is removed.
@@ -241,7 +238,7 @@ Image-to-video (animate a still into a clip of user-chosen length — 5 / 10 / 1
 
 **Animate action.** A first-class tile-overlay action (film glyph, alongside Download/Archive/Expand) and a Lightbox bottom-bar action, shown only on image tiles when an I2V model is available. Clicking it shows an on-glass pending spinner while the still is fetched + uploaded as the source, then opens the Composer in video mode (shared `useAnimateFromTile` hook). Reachable on touch (always-visible overlay), not hover-only.
 
-**Composer (video mode).** When the selected model does I2V: the generic prompt textarea and the Library/Enhance controls are hidden, and a `.videoPanel` animates in (opacity + 6px rise, `--dur-sheet`). It holds (1) the **source still as a 64px framed thumbnail** — click to replace, corner `×` to clear, an overlay spinner during a replace that keeps the prior frame until the new one resolves (never an id string), and (2) the **motion prompt** as the single hero textarea. The motion prompt is **required** (Generate stays disabled, statusline reads "Describe the motion to animate", until set). The count chip locks to ×1 and a **Duration** chip (`DurationChip`, 5 / 10 / 15 s off `VIDEO_DURATION_FRAMES`) picks the clip length; Generate is labelled **"Animate"** and the statusline shows the `~12 min` render estimate (a flat display hint, `web/src/lib/i2v.ts`, not scaled by duration). A quiet **"‹ Images"** exit chip (the composer `.chip` vocabulary, `chevronLeft` glyph, `aria-label`/tooltip "Back to image generation") sits in the panel's top-right corner — clicking it restores the last image model the user was on (falling back to the first image model) which is what leaves video mode, so the exit is discoverable without adding new chrome. The bottom-row Model chip remains an equivalent exit.
+**Composer (video mode).** When the selected model does I2V: the generic prompt textarea and the Templates/Enhance controls are hidden, and a `.videoPanel` animates in (opacity + 6px rise, `--dur-sheet`). It holds (1) the **source still as a 64px framed thumbnail** — click to replace, corner `×` to clear, an overlay spinner during a replace that keeps the prior frame until the new one resolves (never an id string), and (2) the **motion prompt** as the single hero textarea. The motion prompt is **required** (Generate stays disabled, statusline reads "Describe the motion to animate", until set). The count chip locks to ×1 and a **Duration** chip (`DurationChip`, 5 / 10 / 15 s off `VIDEO_DURATION_FRAMES`) picks the clip length; Generate is labelled **"Animate"** and the statusline shows the `~12 min` render estimate (a flat display hint, `web/src/lib/i2v.ts`, not scaled by duration). A quiet **"‹ Images"** exit chip (the composer `.chip` vocabulary, `chevronLeft` glyph, `aria-label`/tooltip "Back to image generation") sits in the panel's top-right corner — clicking it restores the last image model the user was on (falling back to the first image model) which is what leaves video mode, so the exit is discoverable without adding new chrome. The bottom-row Model chip remains an equivalent exit.
 
 **Tile (Video).** A done clip renders via `ClipFrame`: `<video muted playsInline loop preload="none">` + a centred glass play badge. On pointer devices it **autoplays muted on hover** (paused + rewound to the poster on leave); on touch it plays while in view (IntersectionObserver, paused off-screen) — the energy-correct pattern, never audio, never off-screen. The badge fades out while playing; a clip-duration chip (`0:05`, top-left on `--scrim-control` glass, sans tabular numerals, `--radius-control`) appears once metadata loads; the overlay index token carries a film glyph so video reads as video at a glance in a mixed grid. `prefers-reduced-motion` keeps a static poster + badge. Entrance: `clip-in` (fade + blur + scale, `--dur-reveal`).
 
@@ -275,11 +272,11 @@ Three chips: Model (grouped by `<optgroup>` for Local/Cloud), Ratio (1:1, 4:5, 3
 
 **Help line**: under the footer, a `Meta` list (`--text-xs`, `var(--ink-3)`): "⌘ ↵ to generate" with the keys as `.kbd` caps (mono `--text-2xs` 500 on `var(--bg-sunk)`, 1px `--line-2`, `--radius-control`), then the polite status message. The shortcut field is hidden on touch-only devices (`hover: none` and `pointer: coarse`).
 
-**Generate button (`.go`)**: `var(--ink)` bg, `var(--bg)` text, `--radius-control`, padding `8px 14px 8px 16px`, fixed 11.75em width, sans `--text-sm`; the label is the plain verb "Generate" ("Animate", "Extend" in video modes), never an arrow. Hover `var(--ink-2)`; press `scale(0.98)`. Disabled (no prompt or no available model inventory): opacity 0.4. A failed background inventory refresh retains cached models. On phone it fills the dock, 44px tall, `--text-md`. Stays *enabled* while generations are in flight: multi-flight is the rule, and a batch submitted at capacity queues (see § Concurrency cap).
+**Generate button (`.go`)**: `var(--ink)` bg, `var(--bg)` text, `--radius-control`, padding `8px 14px 8px 16px`, fixed 11.75em width (sized to its label when the desktop composer is narrower than 560px, so the toolbar beside the open rail at 820px keeps two rows), sans `--text-sm`; the label is the plain verb "Generate" ("Animate", "Extend" in video modes), never an arrow. Hover `var(--ink-2)`; press `scale(0.98)`. Disabled (no prompt or no available model inventory): opacity 0.4. A failed background inventory refresh retains cached models. On phone it fills the dock in `--text-md`; on touch devices it is 44px tall. Stays *enabled* while generations are in flight: multi-flight is the rule, and a batch submitted at capacity queues (see § Concurrency cap).
 
 **Composer command dock (project-side extension)**
 
-Enhance/Undo are post-launch additions never present in the prototype. The shipped footer is a two-zone command bar, not the prototype's single chip row: a `.controls` zone (Library, the Enhance segmented control, Model, Ratio, Count) that may wrap internally, and a fixed-width `.dock` sibling (Clear, Generate) separated by a hairline `var(--line)` divider. Generate is bottom-anchored inside the dock and is spatially invariant across every state — if the controls wrap, the card grows upward, away from it. The Enhance control is a segmented `[Enhance │ ↺]` whose revert segment is always in the DOM (dimmed until an enhance is undoable), so it can never insert/remove and cause a reflow. The Library chip shows icon + `Library` (no `Templates` label); the Model chip shows a short family token (`GPT` / `Banana` / `Local`) with the full name in the dropdown, batch header, and hover title. Ref/local hints render on one reserved-height `.statusline` in the help line below the footer, with the in-flight pill at its right. All other Composer tokens are unchanged from the spec above.
+Enhance/Undo are post-launch additions never present in the prototype. The shipped footer is a two-zone command bar, not the prototype's single chip row: a `.controls` zone (Templates, the Enhance segmented control, Model, Ratio, Count) that may wrap internally, and a fixed-width `.dock` sibling (Clear, Generate) separated by a hairline `var(--line)` divider. Generate is bottom-anchored inside the dock and is spatially invariant across every state — if the controls wrap, the card grows upward, away from it. The Enhance control is a segmented `[Enhance │ ↺]` whose revert segment is always in the DOM (dimmed until an enhance is undoable), so it can never insert/remove and cause a reflow. The prompt-library chip shows icon + `Templates`; the Model chip shows a short family token (`GPT` / `Banana` / `Local`) with the full name in the dropdown, batch header, and hover title. Ref/local hints render on one reserved-height `.statusline` in the help line below the footer, with the in-flight pill at its right. All other Composer tokens are unchanged from the spec above.
 
 **Submit shortcut**: ⌘+Enter / Ctrl+Enter from anywhere in the textarea.
 
@@ -320,11 +317,13 @@ Geometry and clamping live in `web/src/lib/imageZoom.ts` (pure, unit-tested); ge
 
 **Stack**: toasts stack in a grid (8px gap) that hangs 16px above the Composer card, centred on it, through native anchor positioning on `--atelier-composer`; without anchor support or a mounted Composer it rests top-centre of the content column. Confirmations land next to the surface the user just acted on. The stack never takes the pointer; a toast with an action does.
 
-**Toast (`web/src/components/Toast`)**: an ink sheet: `var(--ink)` bg, `var(--bg)` text, `--radius-panel`, padding 9px 16px, sans `--text-xs` 500 in sentence case, line-height 1.3, with a 14×14 check glyph in `--good-on-ink`. Error toasts fill `var(--danger)`; soft toasts are a `var(--bg-elev)` sheet with a 1px `--line` edge. It rises `var(--m-shift)` with `--ease-tactile` over `--dur-settle` and leaves fading 2px down over `--dur-overlay` `--ease-exit`. Auto-dismiss: 2000ms (soft 3500ms, error 6000ms, actionable toasts set their own). An action (Undo) is an outlined button in the toast's own colour, `--radius-control`, 44px tall under `hover: none`. Identical (text, tone) toasts without an action dedupe.
+**Toast (`web/src/components/Toast`)**: an ink sheet: `var(--ink)` bg, `var(--bg)` text, `--radius-panel`, padding 9px 16px, sans `--text-xs` 500 in sentence case, line-height 1.3, with a 14×14 check glyph in `--good-on-ink`. Error toasts fill `var(--danger)`; soft toasts are a `var(--bg-elev)` sheet with a 1px `--line` edge. It rises `var(--m-shift)` with `--ease-tactile` over `--dur-settle` and leaves fading 2px down over `--dur-overlay` `--ease-exit`. Auto-dismiss: 2000ms (soft 3500ms, error 6000ms, actionable toasts set their own). An action (Undo) is an outlined button in the toast's own colour, `--radius-control`, at least 44×44 on touch devices. Identical (text, tone) toasts without an action dedupe. While the phone drawer is open the stack fades out over `--dur-overlay`, each visible toast goes inert and `aria-hidden` (the polite and assertive live regions stay exposed), and every toast holds its timer; closing the drawer brings them back with the time they had left. An actionable toast raised while the drawer covers the stack is announced through the polite live region and stays there (its visible copy drops its own status role), so it is announced once.
 
 Trigger toasts on: download success ("Downloaded"), main-feed soft-delete ("Archived" — single tile, batch, or full clear-all), prompt copy ("Prompt copied"), archive restore ("Restored"), archive permanent delete ("Deleted").
 
 ## Interactions & Behavior
+
+**Touch**: every touch target is at least 44×44 on a touch device, decided by capability (`@media (hover: none), (any-pointer: coarse)`), never by viewport width, so iPad (with or without a keyboard) and touch laptops get the same floor as phones.
 
 ### Submit flow
 1. User types prompt, optionally changes model/ratio/count.
@@ -369,7 +368,7 @@ All "remove" actions in the main feed UI are soft deletes — the affected tiles
 - **Lightbox** in history view: shows an **Archive** button with the archive icon — same soft-delete semantics. In archive view the same slot shows **Delete** with the trash icon (see Archive view below).
 
 ### Archive view
-A separate view (entered from the persistent sidebar Archive button) lists archived tiles. Each tile carries an identity block below the image — a truncated one-line prompt (full text via the shared `BatchPrompt` prose reveal, hover/focus/touch) plus a `Meta` list of the model label and "Archived {date}" — and the same prompt feeds the tile's `aria-label`/`alt` and the archive lightbox. Each tile has two actions: **Restore** (move back to history; uses the re-roll icon) and **Delete permanently** (hard delete from disk; uses the trash icon). A header **Empty Archive** button (`.danger` vocabulary — it is an irreversible purge) clears everything via a `ConfirmDialog`. The view opens under `ManagedViewHeader` (secondary back button, serif `--text-xl` title, scope as a small-caps label); archive tiles compose the feed tile shell. The empty state is `StateView` with the `empty-archive` etching in a plate.
+A separate view (entered from the persistent sidebar Archive button) lists archived tiles. Each tile carries an identity block below the image — a truncated one-line prompt (full text via the shared `BatchPrompt` prose reveal, hover/focus/touch) plus a `Meta` list of the model label and "Archived {date}" — and the same prompt feeds the tile's `aria-label`/`alt` and the archive lightbox. Each tile has two actions: **Restore** (move back to history; uses the re-roll icon) and **Delete permanently** (hard delete from disk; uses the trash icon). A header **Empty archive** button (`.danger` vocabulary — it is an irreversible purge) clears everything via a `ConfirmDialog`; it stays rendered and disabled while the archive is empty. The view opens under `ManagedViewHeader` (secondary "Back to Unsorted" button, the arrow alone below 768px, serif `--text-xl` title standing alone, no count beside it); archive tiles compose the feed tile shell. The empty state is `StateView` with the `empty-archive` etching in a plate.
 
 ### Keyboard
 - `⌘/Ctrl + Enter` (anywhere in textarea): submit
@@ -521,7 +520,7 @@ Same byte-parity contract as the glass tokens: these live in both `tokens.css :r
 - `--scrim*`: ink-tinted overlays, `rgba(27,29,32,x)` at alphas 0.4, 0.32, 0.55, 0.6, 0.7, 0.85 and 0.06 (scan).
 - `--plate-mark`, `--etch-ink`: the plate frame and the art-mask tint (see the dark table).
 - Motion: `--dur-*`, `--ease-*` and `--m-*` (see Easing).
-- `--serif`: display face for four moments only: StateView heading, ManagedViewHeader title, dialog title, PromptPicker header.
+- `--serif`: display face for four moments only: StateView heading, ManagedViewHeader title, dialog title, PromptPicker header ("Templates", the selected template's name in the refine phase, "Brainstorm"; the refine and Brainstorm titles carry a back icon button beside them, never a line under them).
 
 **Typography**
 
@@ -533,7 +532,7 @@ One superfamily, self-hosted variable WOFF2 (see Assets):
 
 Ramp (`--text-*`, every `font-size` uses one; `web/test/typeScale.test.ts`): `2xs` 0.6875rem, `xs` 0.75, `sm` 0.8125, `md` 0.9375 (body), `base` 1 (phone inputs), `lg` 1.125 (dialog title, picker header), `xl` 1.375 (managed-view title), `display` 2 (StateView heading).
 
-Labels are sans `--text-xs` 500 in real small caps (`font-variant-caps: all-small-caps`, `letter-spacing: 0.04em`, `--ink-3`) from sentence-case text, never tracked uppercase. Meta is a list (`<Meta items>`, `web/src/components/Meta`), not a `·`-joined string. Shared primitives: `web/src/styles/type.module.css` (`.label`, `.meta`, `.numeral`, `.kbd`).
+Labels are sans `--text-xs` 500 in real small caps (`font-variant-caps: all-small-caps`, `letter-spacing: 0.04em`, `--ink-3`) from sentence-case text, never tracked uppercase. No subtitles: a title or heading stands alone, with no small-caps or muted fragment, identifier, count or instruction under or beside it; field labels, dialog and empty-state body copy and one-sentence panel notes are not subtitles. Meta is a list (`<Meta items>`, `web/src/components/Meta`), not a `·`-joined string. Shared primitives: `web/src/styles/type.module.css` (`.label`, `.meta`, `.numeral`, `.kbd`).
 
 **Radius** (by hierarchy)
 
@@ -558,30 +557,37 @@ Pick by the element's role, not by size: content panels (Text models providers, 
 - Curves: `--ease-out` `cubic-bezier(.2,.8,.2,1)` (enter, colour), `--ease-exit` `cubic-bezier(.4,0,1,1)` (exits accelerate away), `--ease-tactile` `cubic-bezier(.2,.8,.2,1)` (monotonic small-control transforms and toast landing, without overshoot), `--ease-view` `cubic-bezier(.22,1,.36,1)` (view transitions).
 - Durations: `--dur-hover` 120ms, `--dur-overlay` 160ms (popover enter, every overlay exit), `--dur-transform` 200ms, `--dur-view` 220ms, `--dur-sheet` 240ms, `--dur-dialog` 240ms, `--dur-settle` 280ms, `--dur-entrance` 380ms (tile entrance, once), `--dur-rise` 420ms, `--dur-reveal` 500ms, `--dur-reduced` 80ms (every animation under reduced motion).
 - Amplitudes: `--m-shift` 6px, `--m-scale` 0.97, `--m-blur` 6px; press scales `--m-press` 0.98, `--m-press-icon` 0.94, `--m-press-row` 0.985.
+- Loop cadences: `--cadence-loop` 1600ms (plate wipe, sweeps, pulses, scans), `--cadence-loop-fast` 700ms (spinners, the finishing sheen). Every `infinite` animation reads one of them; two loops that run together and must not phase-lock use `calc(var(--cadence-loop) * 1.25)`, a slower scan `* 1.5`. They sit outside `--dur-*` because reduced motion does not shorten a loop: its owner stops it or swaps it to `atelier-pulse`.
 
 ## Motion
 
 One system, read from tokens (see Easing). Shared keyframes live in `web/src/styles/motion.css` and take their amplitude from `--m-shift`, `--m-scale` and `--m-blur`, never from literals. Exits accelerate away on `--ease-exit`; `useExitTransition` stamps `data-closing` and unmounts after `--dur-overlay` (read by `web/src/lib/overlayDuration.ts`), because the CSS `overlay` transition is Chromium-only.
 
-Overlay surfaces share native CSS transitions and `@starting-style` in `styles/surface.module.css`, so closing during entry and reopening during exit continue from the current pose. The sidebar animates its grid allocation alongside its transform. Composer keeps both forms mounted in an intrinsic grid reveal; the hidden form is inert and aria-hidden. Image tiles keep their mat until native load/decode readiness, and cached remounts skip developing. Historical Archive cards have no mount entrance. The Lightbox reserves its fitted batch-ratio frame before media arrives and contains differing image ratios inside that frame. Toast keeps one portal mount across modal hosts, using native `moveBefore` when available and retaining CSS animation progress and focus across the fallback move.
+Overlay surfaces share native CSS transitions and `@starting-style` in `styles/surface.module.css`, so closing during entry and reopening during exit continue from the current pose. An owner tunes its surface only by declaring `--surface-from`, `--surface-to` or `--surface-duration` on the element itself; the shared file declares its defaults and its resting pose (`opacity: 1; transform: none`) at zero specificity and registers the three as non-inherited, so an override, or an owner's own resting opacity or transform, holds whatever order the composed stylesheets load in. The batch prompt card is an overlay too: it composes `fade` and fades out through `useExitTransition` on every close. The sidebar animates its grid allocation alongside its transform. Composer keeps both forms mounted in an intrinsic grid reveal; the hidden form is inert and aria-hidden. Image tiles keep their mat until native load/decode readiness, and cached remounts skip developing. Historical Archive cards have no mount entrance. The Lightbox reserves its fitted batch-ratio frame before media arrives and contains differing image ratios inside that frame. Toast keeps one portal mount across modal hosts, using native `moveBefore` when available and retaining CSS animation progress and focus across the fallback move.
 
 | Surface | Enter | Exit | Owner |
 |---|---|---|---|
-| Popover (OverflowMenu, MovePopover, AxisDropdown, ChipSelect) | opacity and `translateY(var(--m-shift))` → 0, `--dur-overlay` `--ease-out` | fades, settling 2px, `--dur-overlay` `--ease-exit` | `styles/menuShell.module.css` |
-| Sheet (phone form of an overlay) | `translateY(100%)` → 0, `--dur-sheet` `--ease-out`; backdrop fade | slides back down, `--dur-overlay` `--ease-exit` | `styles/sheet.module.css` |
+| Popover (OverflowMenu, MovePopover, AxisDropdown, ChipSelect, TextModelNote) | opacity and `translateY(var(--m-shift))` → 0, `--dur-overlay` `--ease-out` | fades, settling 2px, `--dur-overlay` `--ease-exit` | `styles/menuShell.module.css` |
+| Sheet (phone form of an overlay; the phone chip menu; the phone drawer) | `translateY(100%)` → 0 (the drawer `translateX(-100%)` → 0), `--dur-sheet` `--ease-out`; backdrop fade on the same beat | slides back out, `--dur-overlay` `--ease-exit`; the backdrop fades on the same beat | `styles/sheet.module.css`; drawer `components/Sidebar` with the scrim in `App` |
 | Dialog (`DialogShell`) | card `scale(var(--m-scale))` and opacity → 1, `--dur-dialog` `--ease-out`; scrim fade `--dur-overlay` | card scales to 0.985 and fades, `--dur-overlay` `--ease-exit` | `styles/dialog.module.css` |
-| Viewer (Lightbox) | backdrop fade `--dur-sheet`; frame `scale(var(--m-scale))` → 1, `--dur-entrance` | frame fades and scales to `var(--m-scale)`, `--dur-overlay` | `components/Lightbox` |
-| Toast | rises `var(--m-shift)`, `--dur-settle` `--ease-tactile` | fades 2px down, `--dur-overlay` `--ease-exit` | `components/Toast` |
+| Viewer (Lightbox) | backdrop fade `--dur-sheet`; frame `scale(var(--m-scale))` → 1, `--dur-entrance` | frame fades and scales to `var(--m-scale)`, `--dur-overlay` `--ease-exit` | `components/Lightbox` |
+| Toast | rises `var(--m-shift)`, `--dur-settle` `--ease-tactile` | fades 2px down, `--dur-overlay` `--ease-exit`, after its timer or a user action (Undo calls the store's `dismissToast`, which clears the live timer and unmounts once; `removeToast` is instant programmatic teardown). An actionable toast's timer holds while it is hovered, focused or covered by the phone drawer, and resumes once every reason is released | `components/Toast`, toast slice in `store/atelier.ts` |
 | Tile | once per batch: opacity and `translateY(var(--m-shift))`, `--dur-entrance` | | `components/tile/shell.module.css` |
 | Image develop | fresh, unseen image: decoded pixels fade in from `grayscale(1) blur(var(--m-blur))`, `--dur-reveal`; cached and historical images use readiness without developing | | `components/tile/ImageTile` |
 | State view | plate, heading and body fade in together, `--dur-overlay` | | `components/StateView` |
 | Composer navigation | opacity only, `--dur-overlay` `--ease-out` | opacity only, `--dur-overlay` `--ease-exit` | independent React `<ViewTransition>` in `App.tsx` |
+| Tile exit (feed and Archive) | | the leaving tile's snapshot runs `atelier-shrink-out`, `--dur-overlay` `--ease-exit`; an Undo-restored tile in a seen batch (or a tile a failed Archive action brings back) fades in on `atelier-tile-in`, `--dur-overlay` `--ease-out` | React `<ViewTransition>` in `components/Batch`, `components/Archive`; classes in `styles/motion.css` |
+| Grid reflow | survivors and tiles moving to another virtual row interpolate position and size over `--dur-view` `--ease-view`; the picture is the live element, so a tile completing in the same commit shows its own entrance | | `.tile-move` group in `styles/motion.css` |
+| Batch removal | the rows below move up over `--dur-view` `--ease-view`, also when a tile removal only shrinks the batch (rows sit in flow inside one translated window, so they move in the same commit) | the removed batch row shrinks out like a tile | React `<ViewTransition>` per row in `components/Canvas` |
+| Conditional part (banner, chip, badge, strip, phase body, state, card, report section) | the part's new snapshot runs `atelier-drop-in`, `--dur-overlay` `--ease-out` | the old snapshot runs `atelier-drop-out`, `--dur-overlay` `--ease-exit`; the live element behind it is already final and takes input | unnamed React `<ViewTransition>` per part, classes `.part-enter` / `.part-exit` in `styles/motion.css` |
+| Composer footprint | the frame's group interpolates size and position over `--dur-sheet` `--ease-out`, both pictures hung from its bottom edge and clipped to it; the image and video bodies cross-fade on the same beat | the same, reversed | `update="composer-frame"` in `App.tsx`, `update="composer-body"` in `components/Composer` |
+| Disclosure (height-auto reveal) | grid track `0fr` → `1fr` over `--dur-sheet` `--ease-out`, opacity over `--dur-overlay`; reduced motion keeps the fade only; text that switches while open gets one disclosure per text, so the old closes as the new opens | the same transition reversed; the closed panel stays mounted, inert and `aria-hidden` | `components/Disclosure`, `styles/disclosure.module.css` |
 
-Press: `scale(var(--m-press))` (0.98) on buttons, `--m-press-icon` (0.94) on icon actions, `--m-press-row` (0.985) on role-button rows, over `--dur-transform` `--ease-tactile`. Hover changes colour and border over `--dur-hover`; buttons do not lift.
+Press: `scale(var(--m-press))` (0.98) on buttons, `--m-press-icon` (0.94) on icon actions, `--m-press-row` (0.985) on role-button rows, over `--dur-transform` `--ease-tactile`. Every control's transform channel is declared at rest, never only under `:active`, so the release eases back as well as the press. Hover changes colour and border over `--dur-hover`; buttons do not lift. Disabled: hover rules skip `:disabled`, and one shared rule in `styles/buttons.module.css` gives every disabled (or `aria-busy`) icon, star and tile action `opacity: 0.4` and the `not-allowed` cursor, with no hover change and no press.
 
-**View transitions.** The view stage in `web/src/App.tsx` is one keyed React `<ViewTransition>` (`default="none"`, `exit="view-exit"`). Its enter class comes from `viewNavDirection()` in `web/src/lib/viewNav.ts`: Canvas into Archive, Prompt Library or Text models is `deeper` (fades in from `translateX(var(--m-shift))`), a managed view back to Canvas is `back` (from the opposite side), everything else is `lateral` (opacity only); the old view fades out in place. All run over `--dur-view` `--ease-view`. Composer has an independent enter/exit-only boundary that fades its fixed frame when entering or leaving a managed view; draft edits, expansion and feed-scope changes leave that boundary live. `:root { view-transition-name: none; }` keeps the sidebar, toasts and top-layer overlays out of both captures, and `::view-transition { pointer-events: none; }` keeps input live during the swap. Feed entrances do not replay (`seenBatches`).
+**View transitions.** The view stage in `web/src/App.tsx` is one keyed React `<ViewTransition>` (`default="none"`, `exit="view-exit"`). Its enter class comes from `viewNavDirection()` in `web/src/lib/viewNav.ts`: Canvas into Archive, Prompt Library or Text models is `deeper` (fades in from `translateX(var(--m-shift))`), a managed view back to Canvas is `back` (from the opposite side), everything else is `lateral` (opacity only); the old view fades out in place. All run over `--dur-view` `--ease-view`. Composer has an independent boundary that fades its fixed frame when entering or leaving a managed view and interpolates its footprint when a part enters or leaves or the mode body swaps (Composer footprint above); draft edits, expansion and feed-scope changes leave that boundary live. Conditional parts are unnamed `part-enter` / `part-exit` boundaries fed by their surface's deferred snapshot (Conditional part above). The toast stack anchors to the live frame, so it re-anchors at the final geometry. Canvas batch rows, feed tiles and Archive tiles each have a boundary too (`tile-move` / `tile-exit` / `tile-enter`, see Tile exit, Grid reflow and Batch removal above), fed by one deferred snapshot per surface; those and the conditional parts are the only other captures. Feed boundaries are unnamed, so a batch shown in two scopes travels with the stage on a view swap; Archive tiles are named `tile-<id>` and shared, so a tile that changes virtual row moves as one group. React waits for a running view transition and batches the Transitions committed meanwhile into the next one (a burst of removals plays as one step after the first). `:root { view-transition-name: none; }` keeps the sidebar, toasts and top-layer overlays out of every capture (only their listed parts are captured, and only while they enter or leave), and `::view-transition { pointer-events: none; }` keeps input live during the swap. Feed entrances do not replay (`seenBatches`), and placeholder rows from the previous scope are replaced by a keyed remount of the row list, not by row exits and entrances.
 
-**Reduced motion.** One rule set at the end of `motion.css`: under `prefers-reduced-motion: reduce` every `--m-*` amplitude collapses (`0px` or `1`), every `--dur-*` becomes `--dur-reduced` (80ms; `--dur-transform` 0ms), every `--ease-*` becomes `linear`, and the `::view-transition-old/new(*)` pseudos shorten to match. Each animation above becomes a short linear opacity change and presses hold still, with no per-surface rule. Owners handle only what a token cannot reach: sheets swap the slide for a fade, and looping loaders (the plate wipe, spinners) swap to `atelier-pulse` or stop.
+**Reduced motion.** One rule set at the end of `motion.css`: under `prefers-reduced-motion: reduce` every `--m-*` amplitude collapses (`0px` or `1`), every `--dur-*` becomes `--dur-reduced` (80ms; `--dur-transform` 0ms), every `--ease-*` becomes `linear`, the `::view-transition-old/new(*)` pseudos shorten to match, and `::view-transition-group(*)` takes `animation: none` so no captured geometry interpolates (React does not honour reduced motion itself). The `--cadence-*` loop tokens are deliberately left alone. Each animation above becomes a short linear opacity change and presses hold still, with no per-surface rule. Owners handle only what a token cannot reach: sheets swap the slide for a fade, and looping loaders (the plate wipe, spinners) swap to `atelier-pulse` or stop.
 
 ## Assets
 

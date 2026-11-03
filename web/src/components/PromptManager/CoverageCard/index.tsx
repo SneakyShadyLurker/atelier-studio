@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import type { LibraryCoverageResponse } from '@atelier/shared';
 import { useExitTransition } from '../../../hooks/useExitTransition';
 import { DialogShell } from '../../DialogShell';
+import { Disclosure } from '../../Disclosure';
 import { I } from '../../icons/I';
 import { Meta } from '../../Meta';
 import styles from './index.module.css';
@@ -19,6 +20,8 @@ export function CoverageCard({ open, report, onJumpToList, onCancel }: CoverageC
   const titleId = useId();
   const [lowOpen, setLowOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  const lowId = useId();
+  const cleanupId = useId();
 
   const cleanupCount = report.orphanTags.length + report.missingDimensions.length;
 
@@ -63,12 +66,13 @@ export function CoverageCard({ open, report, onJumpToList, onCancel }: CoverageC
               type="button"
               className={styles.sectionHead}
               aria-expanded={lowOpen}
+              aria-controls={lowId}
               onClick={() => { setLowOpen((s) => !s); }}
             >
               <span className={styles.sectionLabel}>Low-coverage lists ({report.lowCoverageLists.length})</span>
               <I.caret />
             </button>
-            {lowOpen && (
+            <Disclosure id={lowId} open={lowOpen}>
               <div className={styles.rows}>
                 {report.lowCoverageLists.map((l) => (
                   <span key={`${l.listName}-${l.dim}`} className={styles.low}>
@@ -76,7 +80,7 @@ export function CoverageCard({ open, report, onJumpToList, onCancel }: CoverageC
                   </span>
                 ))}
               </div>
-            )}
+            </Disclosure>
           </div>
 
           {/* (3) Cleanup — collapsed, --danger */}
@@ -85,12 +89,13 @@ export function CoverageCard({ open, report, onJumpToList, onCancel }: CoverageC
               type="button"
               className={styles.sectionHead}
               aria-expanded={cleanupOpen}
+              aria-controls={cleanupId}
               onClick={() => { setCleanupOpen((s) => !s); }}
             >
               <span className={styles.sectionLabel}>Cleanup ({cleanupCount})</span>
               <I.caret />
             </button>
-            {cleanupOpen && (
+            <Disclosure id={cleanupId} open={cleanupOpen}>
               <div className={styles.rows}>
                 {report.orphanTags.map((o) => (
                   <span key={`orphan-${o.dim}-${o.label}`} className={styles.cleanupRow}>
@@ -103,7 +108,7 @@ export function CoverageCard({ open, report, onJumpToList, onCancel }: CoverageC
                   </span>
                 ))}
               </div>
-            )}
+            </Disclosure>
           </div>
         </div>
 

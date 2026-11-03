@@ -89,15 +89,8 @@
   cursor: not-allowed;
 }
 
-/* Touch capability, not viewport width, mandates the 44px floor: the
-   width < 768px block alone misses iPad landscape and touch laptops. */
-@media (hover: none) {
-  .row {
-    min-height: 44px;
-  }
-}
-
-@media (width < 768px) {
+/* The touch gate, not viewport width, mandates the 44px floor. */
+@media (hover: none), (any-pointer: coarse) {
   .row {
     min-height: 44px;
   }

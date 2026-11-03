@@ -37,6 +37,7 @@ describe('AdvancedSection', () => {
     const group = screen.getByRole('group', { name: 'Advanced variables' });
     expect(group.textContent).toContain('axis controls');
     expect(group.hasAttribute('inert')).toBe(false);
+    expect(group.getAttribute('data-open')).toBe('true');
   });
 
   test('clicking again collapses', () => {
@@ -50,5 +51,6 @@ describe('AdvancedSection', () => {
     expect(screen.getByText('axis controls').closest('[role="group"]')).toBe(panel);
     expect(panel.hasAttribute('inert')).toBe(true);
     expect(panel.getAttribute('aria-hidden')).toBe('true');
+    expect(panel.hasAttribute('data-open')).toBe(false);
   });
 });

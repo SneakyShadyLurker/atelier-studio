@@ -8,7 +8,7 @@ The Prompt Library is gated by `PROMPT_LIBRARY_USERS` (default empty). Non-liste
 
 ## The data model
 
-Six tables back the prompt library, all keyed off `user_id`:
+Six tables back the Prompt Library, all keyed off `user_id`:
 
 ```
 prompt_templates(id, user_id, name, body, sort_order, …)

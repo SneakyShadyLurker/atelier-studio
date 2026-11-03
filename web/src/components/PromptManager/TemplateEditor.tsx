@@ -3,17 +3,21 @@ import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
 import { aiFillMeasuredLength, hasAiFillTokens } from '@atelier/shared/ai-fill';
 import type { PromptTemplate, VariableList } from '@atelier/shared';
 import { describeError } from '../../lib/errorCopy';
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { useCreateTemplate, usePatchTemplate, useTemplatePatchPending } from '../../hooks/usePromptMutations';
 import { useAtelierStore } from '../../store/atelier';
 import { useDraftTemplate } from '../../hooks/useDraftTemplate';
 import { useIsPhone } from '../../hooks/useIsPhone';
+import { useTextModelGate } from '../../hooks/useTextModelGate';
 import { runWhenReachable } from '../../lib/focus';
+import { goToTextModels } from '../../lib/textModelsNav';
 import { I } from '../icons/I';
+import { Disclosure } from '../Disclosure';
 import { Meta } from '../Meta';
 import InlineFieldChrome from './InlineFieldChrome';
 import MoreMenu from './MoreMenu';
 import DescribeTemplateDialog from '../DescribeTemplateDialog';
+import TextModelNote from '../TextModelNote';
 import styles from './index.module.css';
 import btn from '../../styles/buttons.module.css';
 import { usePromptDraftStore, type TemplateDraft } from './draftStore';
@@ -46,9 +50,16 @@ type TemplateHeadAction = 'draft' | 'delete';
 
 export default function TemplateEditor({ template, initialName = '', variableLists, onCreated, onDelete }: TemplateEditorProps) {
   const isPhone = useIsPhone();
+  // Draft stays enabled without a text model; with none configured at all it
+  // opens the note under the pressed control (phone: the surviving More).
+  const textModelGate = useTextModelGate();
+  const draftButtonRef = useRef<HTMLButtonElement | null>(null);
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [textNoteAnchor, setTextNoteAnchor] = useState<RefObject<HTMLButtonElement | null> | null>(null);
   const nameId = useId();
   const bodyId = useId();
   const bodyHelpId = useId();
+  const refsPanelId = useId();
   const addToast = useAtelierStore((state) => state.addToast);
   const createTemplate = useCreateTemplate();
   const patchTemplate = usePatchTemplate();
@@ -181,14 +192,18 @@ export default function TemplateEditor({ template, initialName = '', variableLis
           }}
         />
         <div className={styles.headActions}>
-          {/* Phone (design 5, Prompt library editors): the head is one row,
+          {/* Phone (design 5, Prompt Library editors): the head is one row,
               title + Save + More; Draft and Delete live behind More and the
               meter moves into the body. */}
           {!isPhone && (
             <button
               type="button"
+              ref={draftButtonRef}
               className={btn.ai}
-              onClick={draftHook.draft}
+              onClick={() => {
+                if (textModelGate.availability === 'none') setTextNoteAnchor(draftButtonRef);
+                else draftHook.draft();
+              }}
               disabled={!trimmedName || busy}
               data-tip={!trimmedName ? 'Name the template first' : 'Generate or continue the prompt body with the text model assigned to this task'}
             >
@@ -208,12 +223,16 @@ export default function TemplateEditor({ template, initialName = '', variableLis
             <MoreMenu<TemplateHeadAction>
               triggerLabel="More template actions"
               menuLabel="Template actions"
+              triggerRef={moreButtonRef}
               items={[
                 { action: 'draft', label: busy ? 'Drafting…' : 'Draft Template', icon: <I.sparkle />, disabled: !trimmedName || busy },
                 ...(onDelete ? [{ action: 'delete' as const, label: 'Delete template', icon: <I.trash />, danger: true, disabled: busy }] : []),
               ]}
               onSelect={(action) => {
-                if (action === 'draft') draftHook.draft();
+                // The menu has already closed (instant selection), so the
+                // note opens after it, anchored to the More button.
+                if (action === 'draft' && textModelGate.availability === 'none') setTextNoteAnchor(moreButtonRef);
+                else if (action === 'draft') draftHook.draft();
                 else onDelete?.();
               }}
             />
@@ -250,6 +269,7 @@ export default function TemplateEditor({ template, initialName = '', variableLis
           type="button"
           className={styles.disclosureToggle}
           aria-expanded={refsOpen}
+          aria-controls={refsPanelId}
           disabled={busy}
           onClick={() => { setRefsOpen((v) => !v); }}
         >
@@ -258,7 +278,7 @@ export default function TemplateEditor({ template, initialName = '', variableLis
           </span>
           Referenced lists, {tokens.length}
         </button>
-        {refsOpen && (
+        <Disclosure id={refsPanelId} open={refsOpen}>
           <div className={styles.tokenPanel}>
             {tokens.length === 0 ? (
               <p className={styles.microcopy}>No variable-list tokens found.</p>
@@ -272,12 +292,22 @@ export default function TemplateEditor({ template, initialName = '', variableLis
               </div>
             )}
           </div>
-        )}
+        </Disclosure>
         {unknownTokens.length > 0 && (
           <p className={styles.warning}>Unknown list: {unknownTokens.join(', ')}</p>
         )}
       </div>
     </form>
+    {textNoteAnchor !== null && (
+      <TextModelNote
+        open
+        action="Draft Template"
+        anchorRef={textNoteAnchor}
+        escape="top-level"
+        navigateToTextModels={goToTextModels}
+        onClose={() => { setTextNoteAnchor(null); }}
+      />
+    )}
     {draftHook.dialogMode !== null && (
       <DescribeTemplateDialog
         mode={draftHook.dialogMode}

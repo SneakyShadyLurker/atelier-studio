@@ -254,7 +254,7 @@ describe('MovePopover', () => {
   test('+ New collection creates and immediately moves the batch into the new collection', async () => {
     const { calls } = renderBatch(batch());
     await openMove();
-    fireEvent.click(screen.getByRole('button', { name: '+ New collection' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New collection' }));
     const input = screen.getByLabelText('Collection name');
     fireEvent.change(input, { target: { value: 'Mood board' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -296,7 +296,7 @@ describe('MovePopover', () => {
     expect(screen.queryByRole('dialog', { name: 'Move to collection' })).toBeNull();
     expect(bgHost.hasAttribute('inert')).toBe(false);
     // Focus restore is deferred a macrotask (must run after inert cleanup).
-    await waitFor(() => { expect(document.activeElement).toBe(more); });
+    await waitFor(() => { expect(document.activeElement === more).toBe(true); });
   });
 
   test('clicking outside closes the popover', async () => {

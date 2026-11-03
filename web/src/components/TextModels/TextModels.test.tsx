@@ -175,7 +175,7 @@ describe('Text models view', () => {
     expect(container.querySelector('[data-zone="head"]')?.contains(heading)).toBe(true);
     const body = container.querySelector('[data-zone="body"]');
     expect(body?.textContent).toContain('Kimi K3');
-    fireEvent.click(screen.getByRole('button', { name: 'Back to feed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Unsorted' }));
     expect(onBack).toHaveBeenCalled();
   });
 

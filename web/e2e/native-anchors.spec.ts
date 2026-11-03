@@ -533,7 +533,7 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
       // An inline row changes the panel's height; CSS re-resolves on its own.
       await page.evaluate(() => { (window as unknown as HarnessWindow).atelierHarness.growCollections(); });
       await expect(moveDialog(page).getByRole('button', { name: 'Harness collection 31', exact: true })).toHaveCount(1);
-      const create = moveDialog(page).getByRole('button', { name: '+ New collection' });
+      const create = moveDialog(page).getByRole('button', { name: 'New collection' });
       await page.keyboard.press('End');
       await frames(page);
       const lastCollection = moveDialog(page).getByRole('button', { name: 'Harness collection 31', exact: true });
@@ -1088,7 +1088,7 @@ test.describe('edges · phone portrait', () => {
 
 // ── Composer, Prompt Picker, their nested menus and the toast stack ──
 
-const picker = (page: Page) => page.getByRole('dialog', { name: 'Templates' });
+const picker = (page: Page) => page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Close templates' }) });
 const libraryChip = (page: Page) => page.getByRole('button', { name: 'Templates', exact: true });
 const composerWrap = (page: Page) => page.locator('#atelier-composer');
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });

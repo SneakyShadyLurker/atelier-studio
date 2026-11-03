@@ -13,6 +13,9 @@ export interface ChipSelectOption<TValue extends string | number> {
   value: TValue;
   label: string;
   hint?: string;
+  // Decorative glyph drawn before the hint text (e.g. the lock on a
+  // key-required model row).
+  hintIcon?: ReactNode;
   group?: string;
   // Override the rendered header for the group. Defaults to `group` when omitted;
   // pass '' to keep the divider but suppress the header text.
@@ -292,7 +295,7 @@ export default function ChipSelect<TValue extends string | number>({
                     }}
                   >
                     <span className={styles.menuOptionLabel}>{opt.label}</span>
-                    {opt.hint && <span className={styles.menuOptionHint}>{opt.hint}</span>}
+                    {opt.hint && <span className={styles.menuOptionHint}>{opt.hintIcon}{opt.hint}</span>}
                     {selected && <I.check className={styles.menuOptionCheck} />}
                   </div>
                 );

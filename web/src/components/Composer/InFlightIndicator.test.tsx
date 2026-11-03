@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { cleanup, render, screen } from '@testing-library/react';
+import { useLayoutEffect } from 'react';
 import type { Batch, Model } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { historyKeys } from '../../api/history';
@@ -229,4 +230,36 @@ describe('InFlightIndicator', () => {
     expect(container.querySelector('[aria-live="polite"]')?.textContent).toContain('All slots busy — new batches will queue');
   });
 
+});
+
+describe('InFlightIndicator deferred pill', () => {
+  // The pill mounts and unmounts from a deferred snapshot (its part boundary
+  // plays in that Transition); the live region announces in the urgent commit.
+  test('the live region announces before the pill follows in the deferred render', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [null] });
+    const urgent: { live: string; pill: boolean }[] = [];
+    function Probe({ preparing }: { preparing: number }) {
+      useLayoutEffect(() => {
+        urgent.push({
+          live: document.querySelector('[aria-live="polite"]')?.textContent ?? '',
+          pill: document.querySelector('[aria-label="Preparing 2 more…"]') !== null,
+        });
+      }, [preparing]);
+      return null;
+    }
+    const view = (preparing: number) => (
+      <QueryClientProvider client={client}>
+        <InFlightIndicator pool="shared" cap={4} modelById={modelById} preparing={preparing} aiFillActive={noActive} labelById={labelById} />
+        <Probe preparing={preparing} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(view(0));
+    rerender(view(2));
+    expect(urgent.at(-1)).toEqual({ live: 'Preparing 2 more…', pill: false });
+    expect(screen.getByLabelText('Preparing 2 more…')).toBeTruthy();
+    rerender(view(0));
+    expect(urgent.at(-1)).toEqual({ live: '', pill: true });
+    expect(screen.queryByLabelText('Preparing 2 more…')).toBeNull();
+  });
 });

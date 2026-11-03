@@ -1,5 +1,8 @@
 import { isVideoMime, type DoneTile } from '@atelier/shared';
-import { useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode, type Ref } from 'react';
+import { useTextModelGate } from '../../../hooks/useTextModelGate';
+import { goToTextModels } from '../../../lib/textModelsNav';
+import TextModelNote from '../../TextModelNote';
 import { I } from '../../icons/I';
 import ClipFrame from '../ClipFrame';
 import { Meta } from '../../Meta';
@@ -60,13 +63,15 @@ interface TileActionButtonProps {
    *  state across the returned promise and ignores re-entrant clicks. */
   busy?: boolean;
   onAction: () => Promise<boolean>;
+  buttonRef?: Ref<HTMLButtonElement> | undefined;
 }
 
-function TileActionButton({ label, tip, busyTip = 'Preparing…', icon, disabled, busy: externalBusy, onAction }: TileActionButtonProps) {
+function TileActionButton({ label, tip, busyTip = 'Preparing…', icon, disabled, busy: externalBusy, onAction, buttonRef }: TileActionButtonProps) {
   const [pending, setPending] = useState(false);
   const busy = externalBusy ?? pending;
   return (
     <button
+      ref={buttonRef}
       type="button"
       className={buttons.tileAction}
       aria-label={label}
@@ -87,6 +92,41 @@ function TileActionButton({ label, tip, busyTip = 'Preparing…', icon, disabled
     >
       {busy ? <span className={styles.actionSpinner} aria-hidden="true" /> : icon}
     </button>
+  );
+}
+
+/** Tile-level Tell Story runs the storytelling text task, so with no text model
+ *  configured it opens the text-model note under itself (decision 3). Its own
+ *  component so only tiles that offer the action subscribe to the gate. */
+function TellStoryAction({ label, disabled, onTellStory }: { label: string; disabled: boolean; onTellStory: () => Promise<boolean> }) {
+  const gate = useTextModelGate();
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
+  return (
+    <>
+      <TileActionButton
+        label={label}
+        tip="Tell Story"
+        icon={<I.sparkle />}
+        disabled={disabled}
+        buttonRef={buttonRef}
+        onAction={() => {
+          if (gate.availability !== 'none') return onTellStory();
+          setNoteOpen(true);
+          return Promise.resolve(false);
+        }}
+      />
+      {noteOpen ? (
+        <TextModelNote
+          open
+          action="Tell Story"
+          anchorRef={buttonRef}
+          escape="top-level"
+          navigateToTextModels={goToTextModels}
+          onClose={() => { setNoteOpen(false); }}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -180,7 +220,7 @@ function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen 
               <TileActionButton label={`Extend video ${index + 1}`} tip="Extend" icon={<I.extend />} disabled={disabled} busy={extending} onAction={onExtend} />
             )}
             {canTellStory && onTellStory && (
-              <TileActionButton label={`Tell story from ${isVideo ? 'video' : 'image'} ${index + 1}`} tip="Tell Story" icon={<I.sparkle />} disabled={disabled} onAction={onTellStory} />
+              <TellStoryAction label={`Tell story from ${isVideo ? 'video' : 'image'} ${index + 1}`} disabled={disabled} onTellStory={onTellStory} />
             )}
             {canCreateCard && onCreateCard && !isVideo && (
               <TileActionButton label={`Create character card from image ${index + 1}`} tip="Character card" busyTip="Writing card…" icon={<I.card />} disabled={disabled} busy={creatingCard} onAction={onCreateCard} />

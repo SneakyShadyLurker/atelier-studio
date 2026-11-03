@@ -11,14 +11,14 @@ describe('toast pause/resume timers', () => {
     const store = useAtelierStore.getState();
     const id = store.addToast('Archived', 'success', 40, { label: 'Undo', onClick: () => undefined });
     // Pause synchronously, well within the 40ms window.
-    useAtelierStore.getState().pauseToast(id);
+    useAtelierStore.getState().pauseToast(id, 'hover');
     await sleep(90);
     // Paused: still present and not yet animating out.
     const paused = useAtelierStore.getState().toasts.find((t) => t.id === id);
     expect(paused).toBeDefined();
     expect(paused?.leaving).toBeFalsy();
     // Resume: the ~40ms remainder elapses and the toast flips to leaving.
-    useAtelierStore.getState().resumeToast(id);
+    useAtelierStore.getState().resumeToast(id, 'hover');
     await sleep(90);
     expect(useAtelierStore.getState().toasts.find((t) => t.id === id)?.leaving).toBe(true);
   });

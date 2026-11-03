@@ -22,6 +22,7 @@
   justify-items: center;
   gap: 8px;
   pointer-events: none;
+  transition: opacity var(--dur-overlay) var(--ease-out);
 }
 
 /* anchor() takes its fallback when no Composer is mounted: the stack then
@@ -59,6 +60,18 @@
   pointer-events: auto;
 }
 
+/* The phone drawer covers the stack: it fades out and gives up the pointer
+   (the host also sets inert and aria-hidden, and holds every timer) so the
+   drawer's rows stay reachable; it fades back on close. */
+.stack[data-covered='true'] {
+  opacity: 0;
+  transition-timing-function: var(--ease-exit);
+}
+
+.stack[data-covered='true'] .toastActionable {
+  pointer-events: none;
+}
+
 .action {
   border: 1px solid currentColor;
   border-radius: var(--radius-control);
@@ -85,8 +98,9 @@
   outline-offset: 2px;
 }
 
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .action {
+    min-width: 44px;
     min-height: 44px;
   }
 }

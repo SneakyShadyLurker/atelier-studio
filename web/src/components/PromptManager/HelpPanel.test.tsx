@@ -12,7 +12,7 @@ describe('HelpPanel', () => {
 
   test('open: dialog has the supplied id and the help copy', () => {
     render(<HelpPanel open panelId="help-x" onClose={mock(() => undefined)} />);
-    const dialog = screen.getByRole('dialog', { name: 'How the prompt library works' });
+    const dialog = screen.getByRole('dialog', { name: 'How the Prompt Library works' });
     expect(dialog.getAttribute('id')).toBe('help-x');
     expect(dialog.textContent).toMatch(/Templates/);
     expect(dialog.textContent).toMatch(/Dimensions/);

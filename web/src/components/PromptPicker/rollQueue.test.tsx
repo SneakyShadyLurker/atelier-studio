@@ -336,4 +336,35 @@ describe('PromptPicker stash & roll', () => {
     });
     expect(useAtelierStore.getState().promptPickerDraft.seed).not.toBe(initialSeed);
   });
+
+  test('two clicks before the picker re-renders stash two distinct rolls', () => {
+    useAtelierStore.setState((state) => ({
+      ...state,
+      promptPickerDraft: { ...state.promptPickerDraft, templateId: template.id, lockSeed: false, seed: 1234 },
+      draft: { ...state.draft, rollQueue: [] },
+    }));
+    renderPicker();
+    const stash = screen.getByRole('button', { name: /stash & roll/i });
+    // One act scope: the second click lands on the render that the first
+    // click's seed change has not replaced yet (the deferred-snapshot window).
+    act(() => {
+      fireEvent.click(stash);
+      fireEvent.click(stash);
+    });
+    const seeds = useAtelierStore.getState().draft.rollQueue.map((roll) => roll.seed);
+    expect(seeds).toHaveLength(2);
+    expect(seeds[0]).toBe(1234);
+    expect(new Set(seeds).size).toBe(2);
+  });
+
+  test('Lock seed toggles from the live draft, not the rendered one', () => {
+    seedTemplate();
+    renderPicker();
+    const lock = screen.getByRole('button', { name: 'Lock seed' });
+    act(() => {
+      fireEvent.click(lock);
+      fireEvent.click(lock);
+    });
+    expect(useAtelierStore.getState().promptPickerDraft.lockSeed).toBe(false);
+  });
 });

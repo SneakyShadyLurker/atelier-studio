@@ -10,7 +10,7 @@ import {
   appViewEquals,
   useAtelierStore,
 } from '../../store/atelier';
-import { FEED_VIRTUALIZER_ANCHORING, measureFeedScrollMargin } from '../../lib/feedAnchor';
+import { FEED_VIRTUALIZER_ANCHORING, measureFeedScrollMargin, settleFeedScrollMargin, type FeedMarginState } from '../../lib/feedAnchor';
 import { markBatchesSeen, useSeenBatches } from '../../lib/seenBatches';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { describeError } from '../../lib/errorCopy';
@@ -28,7 +28,7 @@ import { useTogglePin } from '../../hooks/useTogglePin';
 import { useVerticalDragReorder } from '../../hooks/useVerticalDragReorder';
 import { runWhenReachable } from '../../lib/focus';
 import ConfirmDialog from '../ConfirmDialog';
-import { InfiniteStatus } from '../InfiniteStatus';
+import { InfiniteStatus, useStatusFootprint } from '../InfiniteStatus';
 import { Meta } from '../Meta';
 import { StateView } from '../StateView';
 import { I } from '../icons/I';
@@ -252,7 +252,9 @@ function Sidebar({
   const feedRef = useRef<HTMLDivElement | null>(null);
   const virtualListRef = useRef<HTMLDivElement | null>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
-  const measuredMarginRef = useRef<number | null>(null);
+  const marginStateRef = useRef<FeedMarginState>({ margin: null, owed: 0 });
+  // The history status row's footprint, on the render it commits in.
+  const statusFootprint = useStatusFootprint(hasNextPage);
   const getBatchKey = useCallback((index: number) => batches[index]?.id ?? index, [batches]);
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is the shared virtualization primitive used by Canvas.
   const feedVirtualizer = useVirtualizer({
@@ -340,7 +342,7 @@ function Sidebar({
     const list = virtualListRef.current;
     if (!scroller || !list) return;
     const measure = () => {
-      setScrollMargin(measureFeedScrollMargin(scroller, list, measuredMarginRef));
+      setScrollMargin(measureFeedScrollMargin(scroller, list, marginStateRef.current, feedVirtualizer));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -349,7 +351,12 @@ function Sidebar({
     const leading = list.previousElementSibling;
     if (leading) observer.observe(leading);
     return () => { observer.disconnect(); };
-  }, [batches.length, hasNextPage, isFetchingNextPage, isFetchNextPageError, historyReadOnly, hideFeed, error]);
+  }, [feedVirtualizer, batches.length, statusFootprint, hasNextPage, isFetchingNextPage, isFetchNextPageError, historyReadOnly, hideFeed, error]);
+  const feedIsScrolling = feedVirtualizer.isScrolling;
+  useLayoutEffect(() => {
+    const scroller = feedRef.current;
+    if (scroller && !feedIsScrolling) settleFeedScrollMargin(scroller, marginStateRef.current, feedVirtualizer);
+  }, [feedVirtualizer, feedIsScrolling]);
   const [inlineState, setInlineState] = useState<InlineState>(IDLE);
   const [inlineContext, setInlineContext] = useState<InlineContext | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);

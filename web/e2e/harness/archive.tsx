@@ -1,4 +1,5 @@
 import type { ArchivedTile } from '@atelier/shared';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import Archive from '../../src/components/Archive';
 import styles from '../../src/App.module.css';
@@ -49,15 +50,31 @@ function scriptedAction(kind: 'restore' | 'delete'): (tileId: string) => unknown
   };
 }
 
-const root = document.getElementById('root');
-if (root) {
-  createRoot(root).render(
+// `?paged=1` shows the first half and loads the rest as one last page,
+// `pageDelay` ms after the bottom sentinel asks for it.
+const paged = params.get('paged') === '1';
+const pageDelay = Number(params.get('pageDelay') ?? '0');
+const firstPage = paged ? Math.ceil(items.length / 2) : items.length;
+
+function ArchiveHarness() {
+  const [shown, setShown] = useState(firstPage);
+  const [fetching, setFetching] = useState(false);
+  const hasNextPage = shown < items.length;
+  const onLoadMore = () => {
+    if (!hasNextPage || fetching) return;
+    setFetching(true);
+    window.setTimeout(() => { setShown(items.length); setFetching(false); }, pageDelay);
+  };
+  return (
     <div className={styles.app}>
       <main className={styles.main} style={{ gridColumn: '-2 / -1', gridRow: 1 }}>
         <div className={styles.viewSwap}>
           <Archive
-            items={items}
+            items={items.slice(0, shown)}
             total={items.length}
+            hasNextPage={hasNextPage}
+            isFetchingNextPage={fetching}
+            onLoadMore={onLoadMore}
             isLoading={params.get('loading') === '1'}
             isError={false}
             onRetry={noop}
@@ -69,6 +86,9 @@ if (root) {
           />
         </div>
       </main>
-    </div>,
+    </div>
   );
 }
+
+const root = document.getElementById('root');
+if (root) createRoot(root).render(<ArchiveHarness />);

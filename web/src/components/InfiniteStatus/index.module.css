@@ -2,8 +2,8 @@
    box while empty, and the row reserves the visible Retry button (5px padding
    and a 1px border around one line; the touch floor below), so neither a
    fetch nor a failed one moves the feed. The end state renders no sentinel
-   and no Retry, so it keeps only the hairline and its
-   label (see `.root[data-state="end"]`). */
+   and no Retry, so it keeps only the hairline and its label
+   (`.root[data-footprint="end"]`, set in the deferred render). */
 .root {
   composes: label from '../../styles/type.module.css';
   --retry-h: calc(1lh + 12px);
@@ -16,7 +16,7 @@
   min-height: calc(36px + 1px + 8px + 1lh + 8px + 1px + 8px + var(--retry-h));
 }
 
-.root[data-state="end"] {
+.root[data-footprint="end"] {
   min-height: 0;
   padding-block: 12px;
 }

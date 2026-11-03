@@ -509,6 +509,11 @@ test('the last history page lands without moving the reader in either feed', asy
   const done = canvas.getByRole('status').filter({ hasText: /^Start, \d+ batches$/ });
   await expect(canvas.locator('[data-index]').first()).toBeAttached();
   await page.evaluate(() => document.fonts.ready);
+  // Let the first older page settle, then take the Canvas over from its
+  // landing pin with a real gesture, as a reader would.
+  await expect(canvas.getByRole('status').filter({ hasText: 'Loading more' })).toHaveCount(0);
+  await canvas.hover();
+  await page.mouse.wheel(0, -200);
   await page.waitForTimeout(500);
   // Each pass scrolls both feeds to the top (the sentinel fetches the next
   // older page) and samples one row per feed every frame while it lands.
@@ -557,6 +562,67 @@ test('the last history page lands without moving the reader in either feed', asy
       expect(spread, JSON.stringify(passes)).toBeLessThanOrEqual(2);
     }
   }
+});
+
+// A reader pinned at the end is already held by the browser's clamp when the
+// divider above shrinks; the feed must not subtract that shrink again.
+test('a reader at the end stays at the end when the last history page lands', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/e2e/studio/index.html?paged=1&batches=40&pageDelay=1500');
+  const canvas = page.getByTestId('canvas-scroller');
+  await expect(canvas.getByRole('status').filter({ hasText: 'Loading more' })).toBeAttached();
+  // A real gesture ends the Canvas landing pin, so only the feed's own
+  // anchoring keeps the reader at the end (then back to the end by script).
+  await canvas.hover();
+  await page.mouse.wheel(0, -200);
+  await page.waitForTimeout(150);
+  const fromEnd = () => page.evaluate(() => ['canvas-scroller', 'sidebar-feed'].map((id) => {
+    const scroller = document.querySelector(`[data-testid="${id}"]`);
+    if (!(scroller instanceof HTMLElement)) throw new Error(`missing ${id}`);
+    return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+  }));
+  await page.evaluate(() => {
+    for (const id of ['canvas-scroller', 'sidebar-feed']) {
+      const scroller = document.querySelector(`[data-testid="${id}"]`);
+      if (scroller instanceof HTMLElement) scroller.scrollTop = scroller.scrollHeight;
+    }
+  });
+  await expect.poll(async () => (await fromEnd()).every((distance) => distance <= 1)).toBe(true);
+  await expect(canvas.getByRole('status').filter({ hasText: /^Start, \d+ batches$/ })).toBeAttached();
+  await page.waitForTimeout(400);
+  for (const distance of await fromEnd()) expect(distance).toBeLessThanOrEqual(1);
+});
+
+// Archive's footer sits below its deferred grid: the end footprint must
+// shrink in the commit that appends the last page, not one before it, or a
+// reader at the bottom is clamped and the grid drops.
+test('the Archive last page lands without moving a reader at the bottom', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/e2e/harness/archive.html?paged=1&pageDelay=500');
+  const grid = page.locator('[data-virtualized="archive"]');
+  await expect(grid.locator('[data-index]').first()).toBeAttached();
+  await page.evaluate(() => document.fonts.ready);
+  const spread = await grid.evaluate(async (element) => {
+    const scroller = element.parentElement;
+    if (!scroller) throw new Error('missing scroller');
+    scroller.scrollTop = scroller.scrollHeight;
+    for (let frame = 0; frame < 2; frame += 1) await new Promise((resolve) => requestAnimationFrame(resolve));
+    const bottom = scroller.getBoundingClientRect().bottom;
+    const rows = Array.from(element.querySelectorAll<HTMLElement>('[data-index]'));
+    const row = rows.filter((candidate) => candidate.getBoundingClientRect().top < bottom - 40).at(-1);
+    if (!row) throw new Error('no visible row');
+    const index = row.dataset.index;
+    const samples: number[] = [];
+    const until = performance.now() + 1500;
+    while (performance.now() < until) {
+      const current = element.querySelector<HTMLElement>(`[data-index="${String(index)}"]`);
+      if (current) samples.push(current.getBoundingClientRect().top);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    return Math.max(...samples) - Math.min(...samples);
+  });
+  await expect(page.getByRole('status').filter({ hasText: /^End, \d+ archived$/ })).toBeAttached();
+  expect(spread).toBeLessThanOrEqual(2);
 });
 
 test.describe('layout stability (T9)', () => {

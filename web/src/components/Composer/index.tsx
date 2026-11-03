@@ -1,10 +1,11 @@
 import { MAX_TILE_COUNT, VAR_TOKEN_PATTERN } from '@atelier/shared';
 import type { Model, Ratio } from '@atelier/shared';
 import { AI_FILL_MAX_SLOTS, hasAiFillTokens, parseAiFillTokens } from '@atelier/shared/ai-fill';
-import { memo, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, ViewTransition, type RefObject } from 'react';
+import { addTransitionType, memo, startTransition, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, ViewTransition, type RefObject } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { textModelsOpts } from '../../api/textModels';
 import { refImageUrl, uploadRefImage } from '../../api/uploads';
+import { COMPOSER_BODY_UPDATE, COMPOSER_PARTS_TRANSITION } from '../../lib/composerMotion';
 import { beginSourceHandoff, supersedeSourceHandoffs } from '../../lib/composerSourceHandoff';
 import { isModelAvailable } from '../../lib/effectiveModel';
 import { I2V_ESTIMATED_LABEL } from '../../lib/i2v';
@@ -234,7 +235,10 @@ function Composer({
   // part mounts or unmounts in a Transition and its <ViewTransition> plays,
   // while the frame boundary in App.tsx interpolates the footprint. Typing
   // never touches it: the prompt is not in it. Handlers act on the live
-  // queue and refs (a view transition holds the deferred commit).
+  // queue and refs (a view transition holds the deferred commit). The commit
+  // carries COMPOSER_PARTS_TRANSITION, the only type the frame and mode body
+  // animate for (useDeferredValue cannot carry a type), so a batch entering
+  // the feed never captures the Composer and Generate stays pressable.
   const noModels = models.length === 0;
   const liveParts = useMemo(() => ({
     banner: noModels && !modelsPending ? (error ?? 'Models unavailable') : null,
@@ -243,7 +247,13 @@ function Composer({
     refImages,
     isI2VMode,
   }), [noModels, modelsPending, error, rollQueue, refImages, isI2VMode]);
-  const parts = useDeferredValue(liveParts);
+  const [parts, setParts] = useState(liveParts);
+  useEffect(() => {
+    startTransition(() => {
+      addTransitionType(COMPOSER_PARTS_TRANSITION);
+      setParts(liveParts);
+    });
+  }, [liveParts]);
   // The model to drop back to when leaving animate mode: the last image model
   // the user was on, falling back to the first available image model. Switching
   // to it is what exits video mode (handleModelChange clears the I2V draft).
@@ -880,7 +890,7 @@ function Composer({
         />
         {/* The mode body: image and video fields cross-fade in one slot while
             the frame boundary (App.tsx) carries the footprint change. */}
-        <ViewTransition default="none" update="composer-body">
+        <ViewTransition default="none" update={COMPOSER_BODY_UPDATE}>
         {parts.isI2VMode ? (
           <div key="i2v" className={styles.videoPanel} data-zone="i2v">
             <div className={styles.sourceRow}>

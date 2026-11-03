@@ -86,6 +86,26 @@ describe('RollQueueList', () => {
     expect(onReorder).toHaveBeenCalledWith(0, 1);
   });
 
+  test('a reorder from rows that no longer match the live queue is ignored', () => {
+    const onReorder = mock();
+    render(
+      <RollQueueList
+        rolls={rolls}
+        liveRolls={rolls.slice(1)}
+        onRemove={mock()}
+        onReorder={onReorder}
+        onClear={mock()}
+        variant="panel"
+      />,
+    );
+
+    const firstRow = screen.getAllByRole('listitem')[0];
+    if (!firstRow) throw new Error('expected a queue row');
+    firstRow.focus();
+    fireEvent.keyDown(firstRow, { key: 'ArrowDown', altKey: true });
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
   test('clear snapshots the queue, shows Undo, and restores from the toast action', () => {
     useAtelierStore.setState((state) => ({ ...state, draft: { ...state.draft, rollQueue: rolls } }));
     const onClear = () => { useAtelierStore.getState().clearRollQueue(); };

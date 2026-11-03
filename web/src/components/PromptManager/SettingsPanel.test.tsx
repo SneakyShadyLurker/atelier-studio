@@ -320,7 +320,7 @@ describe('PromptManager settings tab', () => {
     expect(panel.querySelector('[data-zone="head"]')).toBeTruthy();
     expect(panel.querySelector('[data-zone="body"]')).toBeTruthy();
     // The create affordances of the other tabs never appear here.
-    expect(screen.queryByRole('button', { name: '+ New' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New' })).toBeNull();
   });
 });
 

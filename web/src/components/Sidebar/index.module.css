@@ -39,11 +39,9 @@
   font-weight: 500;
   letter-spacing: -0.01em;
   font-size: var(--text-md);
-}
-
-.version {
-  composes: label from '../../styles/type.module.css';
-  margin-left: auto;
+  /* The brand stands alone; the trailing collapse/close control sits at the
+     far end. */
+  margin-right: auto;
 }
 
 .closeBtn {
@@ -65,7 +63,11 @@
     background: transparent;
     border-radius: var(--radius-control);
     color: var(--ink-3);
-    transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+    transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+  }
+
+  .collapseBtn:active {
+    transform: scale(var(--m-press-icon));
   }
 
   .collapseBtn:hover {
@@ -115,7 +117,7 @@
   align-items: center;
   gap: 8px;
   text-align: left;
-  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
   /* opacity-only on purpose: libRow re-mounts on rename/create commit because
      the conditional input ↔ button swap changes element type, and a translate
      on every commit reads as jarring "row jumped down" instead of "row
@@ -125,6 +127,10 @@
 
 .libRow:hover {
   background: var(--bg-sunk);
+}
+
+.libRow:active {
+  transform: scale(var(--m-press-row));
 }
 
 .libRow:focus-visible,
@@ -345,12 +351,7 @@
 
 .searchRow {
   padding: 0 18px 6px;
-  animation: search-in var(--dur-sheet) var(--ease-out) both;
-}
-
-@keyframes search-in {
-  from { opacity: 0; transform: translateY(-2px); }
-  to { opacity: 1; transform: translateY(0); }
+  animation: global(atelier-drop-in) var(--dur-sheet) var(--ease-out) both;
 }
 
 .searchInput {
@@ -394,8 +395,24 @@
 .list {
   flex: 1;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 0 8px 18px;
   min-height: 0;
+  /* Scroll-edge fade declared on the scroller itself: the gradient reads the
+     scroller-scoped --scroll-fade-top, which the :root --scroll-fade-mask
+     token cannot carry (custom properties resolve before inheritance). */
+  --scroll-fade-top: 14px;
+  mask-image: linear-gradient(to bottom, transparent 0, black var(--scroll-fade-top), black calc(100% - 14px), transparent 100%);
+}
+
+/* At rest the first row sits unmasked; the top fade grows over the first 28px
+   of scroll. Without scroll-driven animations the static 14px fade stays. */
+@supports (animation-timeline: scroll()) {
+  .list {
+    animation: global(atelier-scroll-edge) linear both;
+    animation-timeline: scroll(self block);
+    animation-range: 0 28px;
+  }
 }
 
 .virtualList {
@@ -418,35 +435,24 @@
   min-height: 0;
 }
 
-.empty {
-  padding: 18px 18px;
+.list > .railState {
+  /* The rail's empty and error states: the StateView owner compacted to the
+     rail (no plate floor, the rail's small sans copy). Their part boundary
+     owns the fade, so the state's own entrance is off. */
+  min-height: 0;
+  flex: none;
+  padding: 18px;
+  gap: 10px;
+  align-items: flex-start;
+  text-align: start;
+  animation: none;
+}
+
+.list > .railState h2 {
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  line-height: 1.5;
   color: var(--ink-3);
-  font-size: var(--text-xs);
-}
-
-.retry {
-  margin-top: 10px;
-  border: 1px solid var(--line-2);
-  background: var(--bg);
-  border-radius: var(--radius-control);
-  padding: 6px 10px;
-  color: var(--ink);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  transition: background var(--dur-hover) var(--ease-out);
-}
-
-.retry:hover {
-  background: var(--bg-elev);
-}
-
-.retry:active {
-  transform: scale(var(--m-press));
-}
-
-.retry:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 .itemShell {
@@ -466,11 +472,17 @@
   grid-template-areas: "thumb text";
   gap: 10px;
   align-items: start;
-  transition: background var(--dur-hover) var(--ease-out);
+  transition: background var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
   border: 1px solid transparent;
   background: transparent;
   color: inherit;
-  animation: global(atelier-drop-in) var(--dur-settle) var(--ease-out) both;
+  /* backwards, not both: a held end pose would override the press transform. */
+  animation: global(atelier-drop-in) var(--dur-settle) var(--ease-out) backwards;
+}
+
+/* A seen row (virtual remount, reopened drawer) replays no entrance. */
+.item[data-seen='true'] {
+  animation: none;
 }
 
 .item:focus-visible {
@@ -478,18 +490,15 @@
   outline-offset: 2px;
 }
 
+/* Selected state is the managed-row vocabulary: the global 2px --ink
+   railActiveBar plus the sunk fill. */
 .item:hover,
 .itemActive {
   background: var(--bg-sunk);
 }
 
-.itemActive {
-  border-color: var(--line-2);
-}
-
 .item:active {
   transform: scale(var(--m-press-row));
-  transition: transform var(--dur-hover) var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -513,6 +522,12 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  opacity: 0;
+  transition: opacity var(--dur-overlay) var(--ease-out);
+}
+
+.thumb img[data-loaded='true'] {
+  opacity: 1;
 }
 
 .thumbEmpty {
@@ -565,7 +580,7 @@
 /* Touch devices have no hover — keep hover-revealed actions always visible and
    reachable without keyboard. Capability-gated (not max-width) so iPad landscape
    and touch laptops at >=768px are covered, where a hover-reveal is dead UI. */
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .itemStar {
     opacity: 1;
   }
@@ -585,6 +600,20 @@
   opacity: 1;
 }
 
+/* The shared disabled look (buttons.module.css) dims a star rather than
+   showing it: a read-only unpinned star stays hidden at rest on hover
+   devices and reveals dimmed. */
+@media (hover: hover) {
+  .itemShell .itemStar:disabled:not([data-pinned='true']) {
+    opacity: 0;
+  }
+}
+
+.itemShell:hover .itemStar:disabled,
+.itemShell:focus-within .itemStar:disabled {
+  opacity: 0.4;
+}
+
 .footer {
   border-top: 1px solid var(--line);
   padding: 10px 14px;
@@ -601,46 +630,10 @@
   line-height: 1.4;
 }
 
-.themeBtn {
-  width: 24px;
-  height: 24px;
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: var(--radius-control);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ink-3);
+/* Footer actions compose buttons.iconAction (size, hover, press, touch
+   floor); this rule only keeps them from shrinking beside the meta line. */
+.footerBtn {
   flex-shrink: 0;
-  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
-}
-
-.themeBtn:hover,
-.themeBtn:focus-visible {
-  background: var(--bg-sunk);
-  color: var(--ink);
-  border-color: var(--line);
-}
-
-.settingsBtn {
-  width: 24px;
-  height: 24px;
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: var(--radius-control);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ink-3);
-  flex-shrink: 0;
-  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
-}
-
-.settingsBtn:hover,
-.settingsBtn:focus-visible {
-  background: var(--bg-sunk);
-  color: var(--ink);
-  border-color: var(--line);
 }
 
 .dot {
@@ -663,7 +656,11 @@
   align-items: center;
   gap: 8px;
   text-align: left;
-  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-left-color var(--dur-hover) var(--ease-out);
+  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-left-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.archiveBtn:active {
+  transform: scale(var(--m-press-row));
 }
 
 .archiveBtn:hover,
@@ -693,7 +690,7 @@
   transition: background var(--dur-hover) var(--ease-out);
 }
 
-/* Neutral for every management row (Prompt library, Text models, Archive):
+/* Neutral for every management row (Prompt Library, Text models, Archive):
    none of them is destructive, so the hover stays in ink on the mat. */
 .archiveBtn:hover .archiveChip {
   background: color-mix(in oklch, var(--ink) 8%, transparent);
@@ -719,6 +716,25 @@
   font-size: var(--text-xs);
 }
 
+/* Touch floors, on capability (the touch gate), after every base rule they
+   raise. The phone block below keeps phone geometry only. */
+@media (hover: none), (any-pointer: coarse) {
+  .collapseBtn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .searchInput,
+  .libRow,
+  .libNameInput {
+    height: 44px;
+  }
+
+  .archiveBtn {
+    min-height: 44px;
+  }
+}
+
 @media (width < 768px) {
   .sidebar {
     position: fixed;
@@ -732,12 +748,16 @@
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
     transform: translateX(-100%);
-    transition: transform var(--dur-sheet) var(--ease-out);
+    /* Sheet grammar: the drawer closes on the overlay beat and the exit
+       curve, and opens over --dur-sheet on the entry curve (the transition
+       of the state being entered applies). */
+    transition: transform var(--dur-overlay) var(--ease-exit);
     box-shadow: var(--shadow-3);
   }
 
   .sidebar[data-open='true'] {
     transform: translateX(0);
+    transition: transform var(--dur-sheet) var(--ease-out);
   }
 
   .closeBtn {
@@ -753,17 +773,11 @@
     margin: -10px -10px -10px 0;
   }
 
-  .libRow,
-  .libNameInput {
-    height: 44px;
-  }
-
   .searchRow {
     padding-bottom: 8px;
   }
 
   .searchInput {
-    height: 44px;
     font-size: var(--text-base);
   }
 
@@ -781,12 +795,6 @@
 
   .libNameInput {
     font-size: var(--text-base);
-  }
-
-  .themeBtn,
-  .settingsBtn {
-    width: 44px;
-    height: 44px;
   }
 }
 
@@ -812,5 +820,6 @@
   .sidebar[data-open='true'] {
     opacity: 1;
     pointer-events: auto;
+    transition: opacity var(--dur-reduced) linear;
   }
 }

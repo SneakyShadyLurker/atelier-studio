@@ -6,6 +6,11 @@
   animation: global(atelier-img-in) var(--dur-reveal) var(--ease-out) both;
 }
 
+/* A seen frame (feed tile or Archive) remounts without replaying the develop. */
+:global([data-seen='true']) .media {
+  animation: none;
+}
+
 .playBadge {
   position: absolute;
   top: 50%;
@@ -23,14 +28,13 @@
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   pointer-events: none;
-  transition: opacity var(--dur-overlay) var(--ease-out), transform var(--dur-overlay) var(--ease-out);
+  transition: opacity var(--dur-overlay) var(--ease-out);
 }
 
 /* While the clip is actually playing the centre badge would just obscure the
    motion — fade it out so the preview reads as live video, not a thumbnail. */
 .playBadge[data-playing='true'] {
   opacity: 0;
-  transform: translate(-50%, -50%) scale(0.85);
 }
 
 .playBadge :global(svg) {
@@ -58,6 +62,12 @@
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-overlay) var(--ease-out);
+}
+
+.duration[data-ready='true'] {
+  opacity: 1;
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -65,13 +75,5 @@
     background: var(--scrim-strong);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .media {
-    animation-duration: var(--dur-reduced);
-    animation-name: global(atelier-fade-in);
-    filter: none;
   }
 }

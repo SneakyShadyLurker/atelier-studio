@@ -1,7 +1,7 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useIsMutating } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { PropsWithChildren } from 'react';
+import { useLayoutEffect, type PropsWithChildren, type ReactNode } from 'react';
 import type { AdminModel, AdminProvider, TestReport } from '@atelier/shared';
 import { useAtelierStore } from '../../store/atelier';
 import EditModelDialog from './EditModelDialog';
@@ -55,6 +55,8 @@ function setup(options: {
   startTest?: boolean;
   test?: () => Response | Promise<Response>;
   patch?: () => Response;
+  /** Rendered beside the dialog, inside the query client. */
+  probe?: ReactNode;
 } = {}) {
   const calls: Call[] = [];
   const model = options.model ?? SCOUT;
@@ -76,13 +78,16 @@ function setup(options: {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   }
   render(
-    <EditModelDialog
-      provider={options.provider ?? OLLAMA}
-      model={model}
-      imageLabel={(id) => (id === 'gpt-image-2.5-sunburst' ? 'GPT Image 2.5 Sunburst' : id)}
-      startTest={options.startTest ?? false}
-      onClose={onClose}
-    />,
+    <>
+      <EditModelDialog
+        provider={options.provider ?? OLLAMA}
+        model={model}
+        imageLabel={(id) => (id === 'gpt-image-2.5-sunburst' ? 'GPT Image 2.5 Sunburst' : id)}
+        startTest={options.startTest ?? false}
+        onClose={onClose}
+      />
+      {options.probe}
+    </>,
     { wrapper: Wrapper },
   );
   return { calls, onClose };
@@ -101,9 +106,19 @@ afterEach(() => {
 });
 
 describe('Edit model: capabilities', () => {
+  test('the model id is a read-only field, not a line under the title', () => {
+    setup();
+    const id = field('Model id');
+    expect(id.value).toBe('llama4:scout');
+    expect(id.readOnly).toBe(true);
+    const title = screen.getByRole('heading', { name: 'Edit model' });
+    expect(title.nextElementSibling?.tagName).not.toBe('P');
+    expect(title.nextElementSibling?.contains(id)).toBe(true);
+  });
+
   test('the form starts from the model, and Save sends only what changed', async () => {
     const { calls, onClose } = setup();
-    expect(screen.getByRole('dialog', { name: 'Edit model' }).textContent).toContain('llama4:scout');
+    expect(field('Model id').value).toBe('llama4:scout');
     expect(field('Display name').value).toBe('Llama 4 Scout');
     expect(field('Image input').checked).toBe(true);
     expect(field('Max images').value).toBe('4');
@@ -247,6 +262,45 @@ describe('Edit model: Test model', () => {
     expect(field('None').checked).toBe(true);
     expect(screen.getByText('Kept your change to JSON output.')).toBeTruthy();
     expect(chip('Medium').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  test('Apply on the old report, clicked as a re-test starts, keeps the admin\'s edit and stays unapplied', async () => {
+    const second = deferred<Response>();
+    let runs = 0;
+    const stale = { armed: false, clicked: false };
+    function Probe() {
+      const running = useIsMutating();
+      useLayoutEffect(() => {
+        if (!stale.armed || stale.clicked || running === 0) return;
+        const apply = screen.queryByRole<HTMLButtonElement>('button', { name: 'Apply findings' });
+        if (!apply || apply.disabled) return;
+        stale.clicked = true;
+        fireEvent.click(apply);
+      }, [running]);
+      return null;
+    }
+    setup({ probe: <Probe />, test: () => { runs += 1; return runs === 1 ? Response.json(REPORT) : second.promise; } });
+    fireEvent.click(button('Test model'));
+    await screen.findByRole('group', { name: 'Confirmed by the test' });
+    // The admin changes JSON output after the first report.
+    fireEvent.click(field('None'));
+
+    // Clicks the still-rendered Apply in the commit that shows the re-test as
+    // running: TestReport's deferred body still shows the old report with
+    // Apply enabled, as it would behind a running view transition.
+    stale.armed = true;
+    await act(async () => {
+      fireEvent.click(button('Test model'));
+      // React Query reports the pending mutation on a later tick.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(stale.clicked).toBe(true);
+    await act(async () => { second.resolve(Response.json(REPORT)); await second.promise; });
+
+    expect(field('None').checked).toBe(true);
+    expect(screen.queryByText('Applied. Save to keep them.')).toBeNull();
+    // The incoming report is not blocked by a stale applied note.
+    await waitFor(() => { expect(button('Apply findings').disabled).toBe(false); });
   });
 
   test('advertised values apply only when ticked', async () => {

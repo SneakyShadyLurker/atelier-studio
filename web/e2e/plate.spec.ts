@@ -205,7 +205,7 @@ test('an empty Archive centres its state below the header', async ({ page }) => 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/e2e/harness/archive.html?count=0');
   await expect(page.getByRole('heading', { name: 'Nothing archived' })).toBeVisible();
-  const headerBottom = await page.getByRole('button', { name: 'Back to feed' }).evaluate((element) =>
+  const headerBottom = await page.getByRole('button', { name: 'Back to Unsorted' }).evaluate((element) =>
     element.closest('header')?.getBoundingClientRect().bottom ?? element.getBoundingClientRect().bottom);
   const slack = await verticalSlack(page, 'Nothing archived', headerBottom, 900);
   expect(slack.above).toBeGreaterThan(60);

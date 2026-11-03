@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { tabbableInside } from '../../hooks/useFocusTrap';
@@ -203,5 +203,137 @@ describe('Toast host placement', () => {
 
     rerender(<Shell panelOpen layout="sheet" />);
     expect(panel().contains(onlyUndo())).toBe(true);
+  });
+});
+
+describe('phone drawer covers the stack', () => {
+  const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+  const originalMatchMedia = window.matchMedia.bind(window);
+
+  function installPhone(): void {
+    window.matchMedia = mock((query: string) => ({
+      matches: query === '(width < 768px)',
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => true,
+    }));
+  }
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+  });
+
+  function stack(): HTMLElement {
+    // Undo → its toast → the portalled stack.
+    const element = onlyUndo().parentElement?.parentElement;
+    if (!element) throw new Error('missing toast stack');
+    return element;
+  }
+
+  test('a toast added while the drawer is open stays paused, hidden and inert until it closes', async () => {
+    installPhone();
+    act(() => { useAtelierStore.setState({ sidebarOpen: true }); });
+    render(<Toast />);
+    act(() => {
+      useAtelierStore.getState().addToast('Archived', 'success', 40, { label: 'Undo', onClick: () => undefined });
+    });
+
+    // The stack fades; the visible toast itself is inert and hidden, so the
+    // stack's live regions stay exposed.
+    const toast = (): HTMLElement => {
+      const element = onlyUndo().parentElement;
+      if (!element) throw new Error('missing toast');
+      return element;
+    };
+    expect(stack().getAttribute('data-covered')).toBe('true');
+    expect(toast().inert).toBe(true);
+    expect(toast().getAttribute('aria-hidden')).toBe('true');
+    await act(async () => { await sleep(90); });
+    expect(useAtelierStore.getState().toasts[0]?.leaving).toBeFalsy();
+
+    act(() => { useAtelierStore.setState({ sidebarOpen: false }); });
+    expect(stack().getAttribute('data-covered')).toBeNull();
+    expect(toast().inert).toBe(false);
+    expect(toast().getAttribute('aria-hidden')).toBeNull();
+    await act(async () => { await sleep(90); });
+    expect(useAtelierStore.getState().toasts[0]?.leaving).toBe(true);
+  });
+
+  test('a plain error raised under the drawer is announced and waits to be seen', async () => {
+    installPhone();
+    act(() => { useAtelierStore.setState({ sidebarOpen: true }); });
+    render(<Toast />);
+    act(() => { useAtelierStore.getState().addToast("Couldn't save the collection.", 'error', 40); });
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain("Couldn't save the collection.");
+    expect(alert.closest('[inert], [aria-hidden="true"]')).toBeNull();
+    await act(async () => { await sleep(90); });
+    expect(useAtelierStore.getState().toasts[0]?.leaving).toBeFalsy();
+
+    act(() => { useAtelierStore.setState({ sidebarOpen: false }); });
+    await act(async () => { await sleep(90); });
+    expect(useAtelierStore.getState().toasts[0]?.leaving).toBe(true);
+  });
+
+  test('an actionable toast raised under the drawer is announced politely, and only once after it closes', () => {
+    installPhone();
+    render(<Toast />);
+    // Already on screen (and announced by its own status role) before the cover.
+    act(() => {
+      useAtelierStore.getState().addToast('Queue cleared', 'soft', 5000, { label: 'Undo', onClick: () => undefined });
+    });
+    act(() => { useAtelierStore.setState({ sidebarOpen: true }); });
+    act(() => {
+      useAtelierStore.getState().addToast('Character card ready', 'success', 5000, { label: 'View', onClick: () => undefined });
+    });
+
+    const politeRegion = (): HTMLElement => {
+      const element = document.querySelector<HTMLElement>('.srOnly[aria-live="polite"]');
+      if (!element) throw new Error('missing polite live region');
+      return element;
+    };
+    // Exposed live announcers (live regions and status/alert roles) carrying the text.
+    const announcers = (text: string): HTMLElement[] =>
+      Array.from(document.querySelectorAll<HTMLElement>('[aria-live], [role="status"], [role="alert"]'))
+        .filter((element) => element.closest('[aria-hidden="true"], [inert]') === null && element.textContent.includes(text));
+
+    expect(politeRegion().textContent).toContain('Character card ready');
+    expect(politeRegion().closest('[inert], [aria-hidden="true"]')).toBeNull();
+    // The toast that was visible before the cover is not repeated.
+    expect(politeRegion().textContent).not.toContain('Queue cleared');
+
+    act(() => { useAtelierStore.setState({ sidebarOpen: false }); });
+    expect(announcers('Character card ready')).toHaveLength(1);
+    expect(announcers('Queue cleared')).toHaveLength(1);
+    // The uncovered toast stays reachable.
+    const view = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === 'View');
+    expect(view?.closest('[aria-hidden="true"], [inert]')).toBeNull();
+  });
+
+  test('opening the drawer pauses a toast already on screen; the desktop rail never covers it', async () => {
+    installPhone();
+    render(<Toast />);
+    act(() => {
+      useAtelierStore.getState().addToast('Archived', 'success', 60, { label: 'Undo', onClick: () => undefined });
+    });
+    act(() => { useAtelierStore.setState({ sidebarOpen: true }); });
+    await act(async () => { await sleep(120); });
+    expect(useAtelierStore.getState().toasts[0]?.leaving).toBeFalsy();
+    act(() => { useAtelierStore.setState({ sidebarOpen: false }); });
+    await act(async () => { await sleep(120); });
+    expect(useAtelierStore.getState().toasts[0]?.leaving).toBe(true);
+
+    cleanup();
+    act(() => { useAtelierStore.setState(initialAtelierState, true); });
+    window.matchMedia = originalMatchMedia;
+    act(() => { useAtelierStore.setState({ sidebarOpen: true }); });
+    render(<Toast />);
+    addUndoToast();
+    expect(stack().getAttribute('data-covered')).toBeNull();
   });
 });

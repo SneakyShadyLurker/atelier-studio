@@ -13,7 +13,7 @@ export type LibraryRow =
   | { kind: 'pinned'; label: 'Pinned'; count: number; view: AppView }
   | { kind: 'unsorted'; label: 'Unsorted'; count: number; view: AppView }
   | { kind: 'collection'; collection: Collection; count: number; view: AppView }
-  | { kind: 'new'; label: '+ New collection' };
+  | { kind: 'new'; label: 'New collection' };
 
 interface RowSummary {
   unsortedCount: number;
@@ -58,6 +58,6 @@ export function buildLibraryRows(
     });
   }
   // No "create an organizing bucket" affordance inside a deletion queue.
-  if (!isArchive) next.push({ kind: 'new', label: '+ New collection' });
+  if (!isArchive) next.push({ kind: 'new', label: 'New collection' });
   return next;
 }

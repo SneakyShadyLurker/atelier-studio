@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { cleanup, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import { InfiniteStatus } from '../src/components/InfiniteStatus';
 
 let lastObserver: MockObserver | null = null;
@@ -140,5 +141,33 @@ describe('InfiniteStatus', () => {
     const status = screen.getByRole('status');
     const button = screen.getByRole('button', { name: /load more/i });
     expect(status.contains(button)).toBe(false);
+  });
+
+  test('every state lays out the same status line and reserves the Retry row', () => {
+    // happy-dom computes no layout: the structure is pinned here, the equal
+    // heights in e2e/ui-polish.spec.ts.
+    const states = [
+      { hasNextPage: true, isFetchingNextPage: false, isFetchNextPageError: false },
+      { hasNextPage: true, isFetchingNextPage: true, isFetchNextPageError: false },
+      { hasNextPage: true, isFetchingNextPage: false, isFetchNextPageError: true },
+      { hasNextPage: false, isFetchingNextPage: false, isFetchNextPageError: false },
+    ];
+    const roots = states.map((state) => {
+      const { container, unmount } = render(
+        <InfiniteStatus {...state} fetchNextPage={mock(noop)} itemCount={20} endLabel="End, 20 batches" />,
+      );
+      const root = container.firstElementChild;
+      const status = screen.getByRole('status');
+      const shape = { className: root?.className, statusInRoot: root?.contains(status) === true };
+      unmount();
+      return shape;
+    });
+    expect(roots.every((root) => root.statusInRoot)).toBe(true);
+    expect(new Set(roots.map((root) => root.className)).size).toBe(1);
+    const css = readFileSync(new URL('../src/components/InfiniteStatus/index.module.css', import.meta.url), 'utf8');
+    const rootRule = /\.root \{[^}]*\}/.exec(css)?.[0] ?? '';
+    expect(rootRule).toContain('min-height: calc(');
+    expect(rootRule).toContain('var(--retry-h)');
+    expect(/\.status \{[^}]*min-height: 1lh;/.test(css)).toBe(true);
   });
 });

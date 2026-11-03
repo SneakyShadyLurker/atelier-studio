@@ -20,11 +20,6 @@
   margin: 0 0 6px;
 }
 
-.paneTitle {
-  composes: label from '../../styles/type.module.css';
-  margin: 0 0 6px;
-}
-
 .microcopy code {
   padding: 1px 5px;
   border-radius: var(--radius-control);
@@ -130,6 +125,14 @@
   min-width: 0;
 }
 
+/* An empty tab renders no list pane (decision 9): its empty state takes both
+   columns instead of leaving the rail column blank. */
+.emptySpan {
+  composes: editor;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 .resourcePane,
 .editor {
   min-height: 0;
@@ -144,10 +147,6 @@
   flex-direction: column;
   overflow: hidden;
   padding: 14px;
-}
-
-.paneTitle {
-  flex: 0 0 auto;
 }
 
 .paneNew {
@@ -287,6 +286,13 @@
   border-radius: var(--radius-control);
   font: inherit;
   cursor: pointer;
+  transition: border-color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.chipButton:active,
+.chipSelected:active,
+.chipExcluded:active {
+  transform: scale(var(--m-press));
 }
 
 .resourceBtn:hover {
@@ -438,6 +444,8 @@
   font-variant-numeric: tabular-nums;
   padding: 0 6px;
   text-align: center;
+  /* On the resting rule so the clamp flash fades out as well as in. */
+  transition: background var(--dur-transform) var(--ease-out);
 }
 
 .weightInput[data-tuned='true'] {
@@ -447,7 +455,6 @@
 
 .weightInput[data-flash-clamp='true'] {
   background: var(--scrim-tile);
-  transition: background var(--dur-transform) var(--ease-out);
 }
 
 .weightInput:focus-visible {
@@ -625,7 +632,7 @@
   outline-offset: 2px;
 }
 
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .chipButton,
   .chipSelected,
   .chipExcluded {
@@ -671,7 +678,7 @@
   outline-offset: 2px;
 }
 
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .parentSelect {
     min-height: 44px;
   }
@@ -684,7 +691,9 @@
 
 .optionRow {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto auto 36px;
+  /* The grip and remove tracks size to their buttons, which take the 44px
+     floor under the touch gate. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   gap: 8px;
   align-items: center;
   animation: global(atelier-drop-in) var(--dur-overlay) var(--ease-out) both;
@@ -692,7 +701,7 @@
 
 .tagRow {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 36px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   animation: global(atelier-drop-in) var(--dur-overlay) var(--ease-out) both;
@@ -705,8 +714,15 @@
   }
 }
 
-.tagPanel {
+/* The option row's tag disclosure takes a full row; its row gap moves inside
+   the clipped content so a closed panel adds no space (disclosure owner). */
+.tagDisclosure {
   grid-column: 1 / -1;
+  margin-top: -8px;
+}
+
+.tagDisclosureContent {
+  padding-top: 8px;
 }
 
 .tagGroup {
@@ -741,10 +757,11 @@
     overflow-y: auto;
   }
 
+  /* 6px keeps all four tabs inside a 390px strip; narrower phones scroll
+     behind the edge fade. */
   .tab,
   .tabActive {
-    min-height: 44px;
-    padding: 0 12px;
+    padding: 0 6px;
   }
 
   .body,
@@ -777,8 +794,16 @@
   /* Option rows: grip, name, weight and the row's More; Tags and Remove sit
      behind More. The weight's hint stays visually hidden, as on desktop. */
   .optionRow {
-    grid-template-columns: 28px minmax(0, 1fr) 52px 44px;
+    grid-template-columns: auto minmax(0, 1fr) 52px auto;
     gap: 6px;
+  }
+
+  .tagDisclosure {
+    margin-top: -6px;
+  }
+
+  .tagDisclosureContent {
+    padding-top: 6px;
   }
 
   .field input,
@@ -849,6 +874,22 @@
   .tabActive {
     flex: none;
     white-space: nowrap;
+  }
+}
+
+/* Touch floors on capability, after the base and phone rules they raise. */
+@media (hover: none), (any-pointer: coarse) {
+  .tab,
+  .tabActive {
+    min-height: 44px;
+  }
+
+  .gripBtn {
+    width: 44px;
+  }
+
+  .weightInput {
+    height: 44px;
   }
 }
 
@@ -1035,6 +1076,7 @@
   color: var(--ink-2);
   font: inherit;
   cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-out);
 }
 
 .disclosureToggle:hover { color: var(--ink); }

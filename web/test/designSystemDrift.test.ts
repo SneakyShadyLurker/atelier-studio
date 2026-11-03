@@ -27,6 +27,34 @@ function webSources(): string[] {
   return listFiles('web/src/**/*.{ts,tsx}').filter((path) => !/\.test\.tsx?$/.test(path));
 }
 
+function stripCssComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
+/** Every animation* and transition* declaration, comments stripped. */
+function motionDeclarations(css: string): string[] {
+  return [...stripCssComments(css).matchAll(/(?:^|[;{\s])((?:animation|transition)(?:-[a-z-]+)?\s*:[^;{}]*)/g)]
+    .map((match) => (match[1] ?? '').trim());
+}
+
+/** The bodies of every @keyframes rule, comments stripped. */
+function keyframeBodies(css: string): string[] {
+  const text = stripCssComments(css);
+  const bodies: string[] = [];
+  for (const match of text.matchAll(/@keyframes\s+[\w-]+\s*\{/g)) {
+    let depth = 1;
+    let at = match.index + match[0].length;
+    const start = at;
+    while (at < text.length && depth > 0) {
+      if (text[at] === '{') depth += 1;
+      else if (text[at] === '}') depth -= 1;
+      at += 1;
+    }
+    bodies.push(text.slice(start, at - 1));
+  }
+  return bodies;
+}
+
 describe('design system drift guards', () => {
   test('shared button variants own icon, tile, and star action vocabularies', () => {
     const buttons = read('web/src/styles/buttons.module.css');
@@ -360,14 +388,84 @@ describe('design system drift guards', () => {
     }
   });
 
-  test('the view stage is the only view-transition capture', () => {
+  test('view-transition captures are the view stage, the Composer frame, batch rows, the feed column and empty state, Archive rows, tiles and listed parts', () => {
     const motion = read('web/src/styles/motion.css');
     expect(motion).toMatch(/:root \{\s*view-transition-name: none;\s*\}/);
     expect(motion).toMatch(/::view-transition \{\s*pointer-events: none;\s*\}/);
     const app = read('web/src/App.tsx');
     expect(app).toContain('<ViewTransition key={stageKey} default="none"');
-    expect(app).not.toContain('startViewTransition');
-    expect(app).not.toContain('viewTransitionName');
+    expect(app).toContain('<ViewTransition default="none" enter="composer-enter" exit="composer-exit" update="composer-frame">');
+    // Feed tiles and batch rows stay unnamed (React's own names), so a batch
+    // that two feed scopes share never pairs across a view swap.
+    const batch = read('web/src/components/Batch/index.tsx');
+    expect(batch).toMatch(/<ViewTransition\s+key=\{tile\.id\}\s+default="tile-move"\s+exit="tile-exit"/);
+    const canvas = read('web/src/components/Canvas/index.tsx');
+    expect(canvas).toMatch(/<ViewTransition\s+default="tile-move"\s+exit="tile-exit"/);
+    // The feed column and the empty state are sibling boundaries, so removing
+    // the last batch exits the column and the empty state enters.
+    expect(canvas).toContain(`<ViewTransition key="feed" default="none" exit={placeholder ? 'none' : 'tile-exit'}>`);
+    expect(canvas).toContain('<ViewTransition key="empty" default="none" enter="part-enter">');
+    for (const source of [batch, canvas]) expect(source).not.toMatch(/<ViewTransition[^>]*\bname=/);
+    const archive = read('web/src/components/Archive/index.tsx');
+    expect(archive).toMatch(/<ViewTransition\s+key=\{tile\.id\}\s+name=\{`tile-\$\{tile\.id\}`\}\s+share="tile-move"/);
+    // Each virtual row is an exit-only boundary: deleting a row would
+    // otherwise take its sole tile's exit with it.
+    expect(archive).toContain('<ViewTransition key={virtualRow.key} default="none" exit="tile-exit">');
+    for (const cls of ['tile-move', 'tile-exit', 'tile-enter', 'part-enter', 'part-exit', 'composer-frame', 'composer-body']) expect(motion).toContain(`(.${cls})`);
+    // Conditional parts (T8b): unnamed enter/exit boundaries with no update
+    // animation, each fed by its surface's deferred snapshot or a Transition.
+    const partOwners = [
+      'web/src/components/Composer/index.tsx',
+      'web/src/components/Composer/RefImageRow.tsx',
+      'web/src/components/Composer/InFlightIndicator.tsx',
+      'web/src/components/Composer/CollapsedBar.tsx',
+      'web/src/components/PromptPicker/index.tsx',
+      'web/src/components/Lightbox/index.tsx',
+      'web/src/components/Sidebar/index.tsx',
+      'web/src/components/PromptManager/index.tsx',
+      'web/src/components/PromptManager/SettingsPanel.tsx',
+      'web/src/components/TextModels/ProviderForm.tsx',
+      'web/src/components/TextModels/TestReport.tsx',
+    ];
+    for (const path of [...partOwners, 'web/src/components/Batch/index.tsx']) {
+      const source = read(path);
+      expect(source, path).toContain('default="none" enter="part-enter" exit="part-exit"');
+      expect(source, path).not.toMatch(/<ViewTransition[^>]*\bname=/);
+    }
+    // The listed owners are the only captures; React alone starts transitions
+    // and names boundaries.
+    const owners = ['web/src/App.tsx', 'web/src/components/Batch/index.tsx', 'web/src/components/Canvas/index.tsx', 'web/src/components/Archive/index.tsx', ...partOwners];
+    for (const path of webSources()) {
+      const source = read(path);
+      expect(source, path).not.toContain('startViewTransition');
+      expect(source, path).not.toContain('viewTransitionName');
+      if (!owners.includes(path)) expect(source, path).not.toMatch(/<ViewTransition\b/);
+    }
+  });
+
+  test('tile exits have no hand-rolled timing left (ViewTransition owns them)', () => {
+    const retired = /startLeaving|tileLeaving|cancel-out|pendingCancelRef|data-canceling/;
+    for (const path of [...webSources(), ...webStylesheets()]) {
+      expect(read(path), path).not.toMatch(retired);
+    }
+  });
+
+  test('no subtitles: headings stand alone, with no small-caps or muted line beside them', () => {
+    for (const path of webStylesheets()) {
+      const found = [...read(path).matchAll(/\.(?:subtitle|paneTitle|kicker|version|backLink)\b/g)].map((match) => match[0]);
+      const subtitles = path === 'web/src/components/PromptManager/index.module.css'
+        ? found.filter((name) => name !== '.kicker')
+        : found;
+      expect({ path, subtitles }).toEqual({ path, subtitles: [] });
+    }
+    // The PromptManager kicker is the visible label of the inline name field.
+    const kickerUsers = webSources().filter((path) => /\bstyles\.kicker\b/.test(read(path)));
+    expect(kickerUsers).toEqual(['web/src/components/PromptManager/InlineFieldChrome.tsx']);
+    expect(read('web/src/components/ManagedViewHeader/index.tsx')).not.toMatch(/\blabel\??:/);
+    const picker = read('web/src/components/PromptPicker/index.tsx');
+    const header = picker.slice(picker.indexOf('data-zone="head"'), picker.indexOf('aria-label="Close templates"'));
+    expect(header.length).toBeGreaterThan(0);
+    expect(header).not.toMatch(/<p[\s>]/);
   });
 
   test('radius reads only the role tokens; the legacy alias names are gone', () => {
@@ -377,5 +475,114 @@ describe('design system drift guards', () => {
     for (const path of [...webStylesheets(), 'docs/handoff/design/app.js', 'docs/handoff/design/index.html']) {
       expect({ path, legacy: legacy.exec(read(path))?.[0] ?? null }).toEqual({ path, legacy: null });
     }
+  });
+  test('looping animations run on the --cadence-* tokens, never a literal duration', () => {
+    for (const path of webStylesheets()) {
+      const loops = motionDeclarations(read(path))
+        .filter((decl) => /^animation(?:-duration)?\s*:/.test(decl) && /\binfinite\b/.test(decl))
+        .filter((decl) => !decl.includes('var(--cadence-'));
+      expect({ path, loops }).toEqual({ path, loops: [] });
+    }
+  });
+
+  test('motion declarations carry no literal blur or scale amplitude', () => {
+    // Only @keyframes bodies and animation*/transition* declarations are
+    // inspected: backdrop-filter, a resting filter, --glass-blur and @supports
+    // probes are not motion. The LoadingTile preview ladder (blur 16/12/8/4/2px,
+    // overscan scale(1.06)) is a deliberate exception.
+    const allowlist = new Map([['web/src/components/tile/LoadingTile/index.module.css', ['scale(1.06)']]]);
+    const literal = /blur\(\d+(?:\.\d+)?px\)|scale\((?:0|1)\.\d+\)/g;
+    for (const path of webStylesheets()) {
+      const allowed = allowlist.get(path) ?? [];
+      const css = read(path);
+      const found = [...keyframeBodies(css), ...motionDeclarations(css)]
+        .flatMap((text) => [...text.matchAll(literal)].map((match) => match[0]))
+        .filter((hit) => !allowed.includes(hit));
+      expect({ path, found }).toEqual({ path, found: [] });
+    }
+  });
+
+  test('reduced motion stops view-transition geometry and leaves loop cadences to their owners', () => {
+    const motion = read('web/src/styles/motion.css');
+    const reduced = motion.slice(motion.lastIndexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(reduced).toMatch(/::view-transition-group\(\*\) \{\s*animation: none;\s*\}/);
+    expect(stripCssComments(reduced)).not.toContain('--cadence-');
+    const tokens = read('web/src/styles/tokens.css');
+    expect(tokens).toContain('--cadence-loop: 1600ms;');
+    expect(tokens).toContain('--cadence-loop-fast: 700ms;');
+  });
+  test('press transitions live on the resting rule, so a release eases back', () => {
+    const offenders = webStylesheets().flatMap((path) => cssBlocks(stripCssComments(read(path)))
+      .filter((block) => /:active[^{]*\{/.test(block))
+      .filter((block) => /(?:^|[;{\s])transition(?:-[a-z-]+)?\s*:/.test(block.slice(block.lastIndexOf('{'))))
+      .map((block) => `${path}: ${block.slice(0, block.lastIndexOf('{')).trim().split('\n').at(-1) ?? ''}`));
+    expect(offenders).toEqual([]);
+  });
+
+  test('picker and roll-queue close and remove controls compose the shared icon action', () => {
+    const queue = read('web/src/components/RollQueueList/index.module.css');
+    expect(queue).toMatch(/\.remove \{\s*composes: iconAction from '[^']*buttons\.module\.css';/);
+    const picker = read('web/src/components/PromptPicker/index.module.css');
+    expect(picker).toMatch(/\.menuClose \{\s*composes: iconAction from '[^']*buttons\.module\.css';/);
+  });
+
+  test('scroll-edge fades: the :root token or the scroller-local gradient on the registered stop', () => {
+    // Custom properties resolve before inheritance, so a stop that varies per
+    // scroller must sit in a gradient declared on the scroller itself.
+    expect(read('web/src/styles/global.css')).toMatch(/@property --scroll-fade-top \{\s*syntax: '<length>';\s*inherits: false;\s*initial-value: 14px;\s*\}/);
+    expect(read('web/src/styles/motion.css')).toMatch(/@keyframes atelier-scroll-edge \{\s*from \{ --scroll-fade-top: 0px; \}\s*to \{ --scroll-fade-top: 14px; \}\s*\}/);
+    const local = 'mask-image: linear-gradient(to bottom, transparent 0, black var(--scroll-fade-top), black calc(100% - 14px), transparent 100%);';
+    const offenders: string[] = [];
+    for (const path of webStylesheets()) {
+      const css = stripCssComments(read(path));
+      for (const match of css.matchAll(/(?:^|[\s;{])(?:-webkit-)?mask-image\s*:\s*([^;}]*)/g)) {
+        const value = (match[1] ?? '').trim();
+        // Vertical scroll fades only; the horizontal tab-strip fade is its own rule.
+        if (!value.includes('linear-gradient(to bottom')) continue;
+        if (value === 'var(--scroll-fade-mask)') continue;
+        if (`mask-image: ${value};` === local) continue;
+        offenders.push(`${path}: ${value}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+    for (const [path, selector] of [
+      ['web/src/components/Sidebar/index.module.css', '.list'],
+      ['web/src/components/Canvas/index.module.css', '.canvas'],
+    ] as const) {
+      const css = stripCssComments(read(path));
+      const rule = cssBlocks(css).find((block) => block.trimStart().startsWith(`${selector} {`)) ?? '';
+      expect(rule).toContain('--scroll-fade-top: 14px;');
+      expect(rule).toContain(local);
+      const supports = css.slice(css.indexOf('@supports (animation-timeline: scroll())'));
+      expect(supports).toMatch(new RegExp(`\\${selector} \\{\\s*animation: global\\(atelier-scroll-edge\\) linear both;\\s*animation-timeline: scroll\\(self block\\);\\s*animation-range: 0 28px;`));
+    }
+  });
+
+  test('every member of the shared disabled dim transitions opacity, so its entry delay holds', () => {
+    // transition-delay only delays properties in the element's own transition
+    // list; a member without opacity there would dim instantly on every
+    // navigation's read-only blip.
+    const css = read('web/src/styles/buttons.module.css');
+    for (const selector of ['.iconAction', '.tileAction']) {
+      const base = new RegExp(`(^|\\n)(?:[^{}\\n]*,\\s*\\n)*\\${selector}(?:,\\s*\\n[^{}\\n]*)*\\s*\\{([^}]*)\\}`).exec(css);
+      expect(base, `${selector} base rule`).not.toBeNull();
+      expect(base?.[2] ?? '', `${selector} transition list`).toMatch(/transition:[^;]*\bopacity\b/);
+    }
+  });
+
+  test('surface.module.css declares its resting pose only at zero specificity', () => {
+    // Every module composing the surface carries its own copy; a resting
+    // opacity or transform on a class selector would let a later copy reset
+    // an owner's resting pose on the same element.
+    const css = stripCssComments(read('web/src/styles/surface.module.css'));
+    const offenders: string[] = [];
+    for (const match of css.matchAll(/(^|\})\s*([^{}@]+)\{([^{}]*?)(?=\}|@starting-style)/g)) {
+      const head = (match[2] ?? '').trim();
+      const body = match[3] ?? '';
+      if (head.startsWith(':where(') || head.includes('[data-closing')) continue;
+      if (/(?:^|[\s;])(?:opacity|transform)\s*:/.test(body)) offenders.push(head);
+    }
+    expect(offenders).toEqual([]);
+    expect(css).toMatch(/:where\(\.surface\) \{\s*opacity: 1;\s*transform: none;\s*\}/);
   });
 });

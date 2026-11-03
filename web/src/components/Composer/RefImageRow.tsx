@@ -1,3 +1,4 @@
+import { ViewTransition } from 'react';
 import type { RefImageDraft } from '../../store/atelier';
 import { I } from '../icons/I';
 import styles from './index.module.css';
@@ -55,9 +56,12 @@ export function RefImageRow({
       {files.map((ref, index) => {
         const hasError = ref.status === 'error' && Boolean(ref.error);
         const errorId = `ref-error-${ref.clientId}`;
+        // Each chip is its own part boundary, keyed by clientId, so an added
+        // or removed chip drops in or lifts out (the Composer's snapshot
+        // drives it); siblings keep their nodes.
         return (
+          <ViewTransition key={ref.clientId} default="none" enter="part-enter" exit="part-exit">
           <div
-            key={ref.clientId}
             className={`${styles.refChip} ${ref.status === 'uploading' ? styles.refChipUploading : ''} ${ref.status === 'error' ? styles.refChipError : ''}`}
             data-tip={ref.error}
           >
@@ -77,6 +81,7 @@ export function RefImageRow({
               <I.close />
             </button>
           </div>
+          </ViewTransition>
         );
       })}
     </div>

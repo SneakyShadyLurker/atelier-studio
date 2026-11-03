@@ -1,8 +1,8 @@
 import type { Batch, Model, Tile } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { allDoneBatch } from '../../../test/fixtures/batches';
 import { refImageUrl } from '../../api/uploads';
 import { initialAtelierState, useAtelierStore } from '../../store/atelier';
@@ -98,6 +98,51 @@ describe('Lightbox reference images', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Archive expanded image' }));
     expect(onDownload).toHaveBeenCalledWith(generatedTile);
     expect(onDelete).toHaveBeenCalledWith(generatedTile);
+  });
+
+  test('a previous tile\'s strip, still shown from the deferred chrome, cannot select its reference on the new tile', async () => {
+    const plainTile: Extract<Tile, { status: 'done' }> = { ...generatedTile, id: 'generated-without-refs', refImageIds: [] };
+    const twoTiles: Batch = { ...allDoneBatch, tiles: [generatedTile, plainTile] };
+    useAtelierStore.setState({ lightbox: { batchId: twoTiles.id, tileId: generatedTile.id } });
+    let clickedStale = false;
+    function Probe() {
+      const tileId = useAtelierStore((state) => state.lightbox?.tileId);
+      useLayoutEffect(() => {
+        if (tileId !== plainTile.id || clickedStale) return;
+        const stale = screen.queryByRole('button', { name: 'View reference image 1 of 2' });
+        if (!stale) return;
+        clickedStale = true;
+        fireEvent.click(stale);
+      }, [tileId]);
+      return null;
+    }
+    render(
+      <>
+        <Lightbox
+          batch={twoTiles}
+          modelById={new Map([[imageModel.id, imageModel]])}
+          triggerKey={generatedTile.id}
+          deleteVariant="archive"
+          onClose={mock()}
+          onDownload={mock()}
+          onDelete={mock()}
+        />
+        <Probe />
+      </>,
+      { wrapper: wrapper() },
+    );
+
+    // Awaited: the new tile's image suspends the render, and the deferred
+    // chrome commits once act settles it.
+    await act(() => {
+      useAtelierStore.getState().setLightboxTile(plainTile.id);
+      return Promise.resolve();
+    });
+
+    expect(clickedStale).toBe(true);
+    expect(screen.queryByRole('button', { name: /^View reference image/ })).toBeNull();
+    expect(screen.queryByAltText(/^Expanded reference image/)).toBeNull();
+    expect(screen.getByAltText(/^Expanded generated image/)).toBeTruthy();
   });
 
   test('a failed full image offers retry and clears the error when the source changes', () => {

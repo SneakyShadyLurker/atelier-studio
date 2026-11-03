@@ -306,12 +306,12 @@ describe('ConfirmDialog', () => {
 
     rerender(<Harness open={false} />);
     // Restore is deferred a macrotask (must run after the inert cleanup).
-    await waitFor(() => { expect(document.activeElement).toBe(trigger); });
+    await waitFor(() => { expect(document.activeElement === trigger).toBe(true); });
   });
 });
 
 describe('Archive view', () => {
-  test('renders empty state and disables Empty Archive when there are no items', () => {
+  test('renders empty state and disables Empty archive when there are no items', () => {
     const onPurgeAll = mock();
     render(
       <Archive
@@ -330,8 +330,8 @@ describe('Archive view', () => {
 
     expect(screen.getByText('Nothing archived')).toBeTruthy();
     expect(document.querySelector('[data-etching="empty-archive"]')).not.toBeNull();
-    expect(screen.getByText('Deleted images live here for 30 days before they are removed permanently.')).toBeTruthy();
-    const emptyArchive = screen.getByRole('button', { name: 'Empty Archive' });
+    expect(screen.getByText('Archived images stay here for 30 days before they are deleted permanently.')).toBeTruthy();
+    const emptyArchive = screen.getByRole('button', { name: 'Empty archive' });
     expect(emptyArchive.hasAttribute('disabled')).toBe(true);
     fireEvent.click(emptyArchive);
     expect(onPurgeAll).not.toHaveBeenCalled();
@@ -357,7 +357,7 @@ describe('Archive view', () => {
       />,
     );
 
-    expect(screen.getByText('1 item')).toBeTruthy();
+    expect(screen.queryByText('1 item')).toBeNull();
     const image = screen.getByRole('img', { name: `${archivedDone.prompt} — generated with ${archivedDone.modelLabel}` });
     expect(image.getAttribute('src')).toBe('/api/img/tile-archive-1/thumb');
     fireEvent.error(image);
@@ -399,7 +399,7 @@ describe('Archive view', () => {
     expect(onPermanentDelete).toHaveBeenCalledWith(archivedDone.id);
   });
 
-  test('enabled Empty Archive calls purge callback', () => {
+  test('enabled Empty archive calls purge callback', () => {
     const onPurgeAll = mock();
     render(
       <Archive
@@ -416,11 +416,11 @@ describe('Archive view', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Empty Archive' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Empty archive' }));
     expect(onPurgeAll).toHaveBeenCalled();
   });
 
-  test('Back to feed button calls onBack', () => {
+  test('Back to Unsorted button calls onBack', () => {
     const onBack = mock();
     render(
       <Archive
@@ -437,7 +437,7 @@ describe('Archive view', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to feed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Unsorted' }));
     expect(onBack).toHaveBeenCalled();
   });
 

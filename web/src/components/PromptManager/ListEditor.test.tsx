@@ -6,12 +6,14 @@ import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
 import { MAX_OPTIONS_PER_LIST } from '@atelier/shared';
 import { promptKeys } from '../../api/prompts';
 import ListEditor from './ListEditor';
+import { seedTextModelGate } from '../../../test/fixtures/textModelGate';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; mock.restore(); cleanup(); });
 
 function wrap(ui: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  seedTextModelGate(client);
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 function list(options: { id: string; value: string; weight?: number }[] = []): VariableList {
@@ -418,5 +420,31 @@ describe('ListEditor — AI Draft List', () => {
     expect(f).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeDefined();
     expect(screen.getByText(/up to 10 starter entries/)).toBeDefined();
+  });
+});
+
+describe('ListEditor — tags disclosure', () => {
+  const dims = [{
+    id: 'dim-1',
+    name: 'Milieu',
+    tags: [{ id: 'tag-wild', dimensionId: 'dim-1', label: 'wild-outdoor', sortOrder: 0 }],
+  }];
+
+  test('the tag panel opens and closes on one mounted, inert-when-closed panel', () => {
+    wrap(<ListEditor list={list([{ id: 'o1', value: 'red' }])} dimensions={dims} />);
+    const show = screen.getByRole('button', { name: 'Show tags for red' });
+    const panel = document.getElementById(show.getAttribute('aria-controls') ?? '');
+    if (!panel) throw new Error('tag panel missing');
+    expect(panel.hasAttribute('inert')).toBe(true);
+    expect(panel.getAttribute('aria-hidden')).toBe('true');
+    fireEvent.click(show);
+    expect(panel.getAttribute('data-open')).toBe('true');
+    expect(panel.hasAttribute('inert')).toBe(false);
+    const chip = screen.getByRole('button', { name: /^wild-outdoor: / });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide tags for red' }));
+    expect(panel.hasAttribute('data-open')).toBe(false);
+    expect(panel.hasAttribute('inert')).toBe(true);
+    expect(panel.contains(chip)).toBe(true);
+    expect(screen.queryByRole('button', { name: /^wild-outdoor: / })).toBeNull();
   });
 });

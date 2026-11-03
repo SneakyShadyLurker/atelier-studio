@@ -27,6 +27,7 @@ import { useHistory } from '../../src/hooks/useHistory';
 import { APP_VIEW_UNSORTED, initialAtelierState, useAtelierStore } from '../../src/store/atelier';
 import ModerationNotice from '../../src/components/ModerationNotice';
 import FailedTile from '../../src/components/tile/FailedTile';
+import { InfiniteStatus } from '../../src/components/InfiniteStatus';
 import Toast from '../../src/components/Toast';
 import { useTooltipDismiss } from '../../src/hooks/useTooltipDismiss';
 import { useKeyboard } from '../../src/hooks/useKeyboard';
@@ -612,6 +613,26 @@ function FrontendHistoryRefreshCase() {
   );
 }
 
+/* The load-more row in each of its states, side by side, so a spec can
+   compare their footprints (layout stability: no state moves the feed). */
+function InfiniteStatusCase() {
+  const states = {
+    idle: { hasNextPage: true, isFetchingNextPage: false, isFetchNextPageError: false },
+    loading: { hasNextPage: true, isFetchingNextPage: true, isFetchNextPageError: false },
+    error: { hasNextPage: true, isFetchingNextPage: false, isFetchNextPageError: true },
+    end: { hasNextPage: false, isFetchingNextPage: false, isFetchNextPageError: false },
+  } as const;
+  return (
+    <main style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
+      {Object.entries(states).map(([name, state]) => (
+        <div key={name} data-infinite-state={name} style={{ width: 220 }}>
+          <InfiniteStatus {...state} fetchNextPage={() => undefined} itemCount={12} endLabel="Start, 12 batches" />
+        </div>
+      ))}
+    </main>
+  );
+}
+
 const kase = new URLSearchParams(window.location.search).get('case');
 const root = document.getElementById('harness');
 const CASES: Record<string, () => React.JSX.Element> = {
@@ -630,16 +651,23 @@ const CASES: Record<string, () => React.JSX.Element> = {
   'frontend-i2v': FrontendI2VCase,
   'frontend-save-template': FrontendSaveTemplateCase,
   'frontend-history-refresh': FrontendHistoryRefreshCase,
+  'infinite-status': InfiniteStatusCase,
 };
 const Case = (kase === null ? undefined : CASES[kase]) ?? DialogCase;
-const NEEDS_QUERY_CLIENT = new Set(['feed', 'plate', 'phone-feed', 'picker', 'library', 'edit', 'frontend-i2v', 'frontend-save-template', 'frontend-history-refresh']);
+const NEEDS_QUERY_CLIENT = new Set(['feed', 'tile-actions', 'plate', 'phone-feed', 'picker', 'library', 'edit', 'frontend-i2v', 'frontend-save-template', 'frontend-history-refresh']);
 if (root) {
   const queryClient = new QueryClient();
   if (kase === 'frontend-i2v' || kase === 'frontend-save-template' || kase === 'frontend-history-refresh') useAtelierStore.setState(initialAtelierState, true);
   if (kase === 'frontend-history-refresh') seedHistoryRefresh(queryClient);
   if (kase === 'frontend-i2v') {
-    useAtelierStore.getState().setDraft({ modelId: I2V_MODEL.id, motionPrompt: 'Slow camera orbit' });
-    useAtelierStore.getState().setComposerExpanded(false);
+    // `source=1` opens the composer on a chosen source still (touch-floor specs).
+    const withSource = new URLSearchParams(window.location.search).get('source') === '1';
+    useAtelierStore.getState().setDraft({
+      modelId: I2V_MODEL.id,
+      motionPrompt: 'Slow camera orbit',
+      ...(withSource ? { i2vSourceUploadId: '00000000-0000-4000-8000-0000000000aa' } : {}),
+    });
+    useAtelierStore.getState().setComposerExpanded(withSource);
   }
   // The picker reads its library through TanStack Query; seeding the cache is
   // how the harness stays API-free.

@@ -29,8 +29,8 @@
 }
 
 /* Designed leave — the viewer earned an elaborate entrance; the exit mirrors
-   it at ~2/3 duration (Material's exit-faster rule). The component holds
-   data-closing for LB_EXIT_MS before unmounting. */
+   it at ~2/3 duration on the exit curve (Material's exit-faster rule).
+   useExitTransition holds data-closing for --dur-overlay before unmounting. */
 .backdrop[data-closing='true'] {
   pointer-events: none;
 }
@@ -39,6 +39,7 @@
   opacity: 0;
   transform: scale(var(--m-scale));
   transition-duration: var(--dur-overlay);
+  transition-timing-function: var(--ease-exit);
 }
 
 .frame {
@@ -131,11 +132,30 @@
   transition: none;
 }
 
-.refs {
+/* The bottom column: the reference strip above the toolbar. It is centred
+   by auto margins across the full window (not left: 50%, which would cap
+   its shrink-to-fit width at half the window), and each child is bounded by
+   it, so a long strip scrolls and a wrapping toolbar pushes the strip up. */
+.dock {
   position: fixed;
-  bottom: 76px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 28px;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: fit-content;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: calc(var(--z-lightbox) + 1);
+}
+
+.dock[data-media='video'] {
+  bottom: 12px;
+}
+
+.refs {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -145,10 +165,15 @@
   backdrop-filter: blur(20px);
   border: 1px solid var(--glass-on-dark-8);
   border-radius: var(--radius-panel);
-  z-index: calc(var(--z-lightbox) + 1);
+  /* A long reference strip scrolls inside the column instead of running
+     past both edges. */
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .refThumb {
+  /* A long strip scrolls; its thumbnails keep their size instead of squeezing. */
+  flex-shrink: 0;
   width: 32px;
   height: 32px;
   padding: 0;
@@ -202,7 +227,7 @@
   outline-offset: 2px;
 }
 
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .refThumb {
     width: 44px;
     height: 44px;
@@ -223,10 +248,6 @@
 }
 
 .bar {
-  position: fixed;
-  bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -236,11 +257,7 @@
   backdrop-filter: blur(20px);
   border: 1px solid var(--glass-on-dark-8);
   border-radius: var(--radius-panel);
-  z-index: calc(var(--z-lightbox) + 1);
-}
-
-.bar[data-media='video'] {
-  bottom: 12px;
+  max-width: 100%;
 }
 
 .info {
@@ -268,6 +285,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The decoded size: a tabular slot wide enough for {w}×{h}, empty until the
+   full image loads. */
+.dims {
+  display: inline-block;
+  min-width: 9ch;
+  font-variant-numeric: tabular-nums;
 }
 
 .info > .caption > li:first-child {
@@ -302,6 +327,12 @@
 .animateAction,
 .zoomAction {
   color: var(--glass-on-dark-85);
+}
+
+/* Laid out but unseen until zoom is worthwhile (the slot keeps the toolbar
+   width constant across decode); the element is also inert and aria-hidden. */
+.zoomAction[aria-hidden='true'] {
+  visibility: hidden;
 }
 
 .zoomAction[aria-pressed='true'] {
@@ -424,20 +455,17 @@
     max-height: calc(100dvh - 220px);
   }
 
-  .bar[data-media='video'] {
+  .dock {
+    bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .dock[data-media='video'] {
     bottom: calc(8px + env(safe-area-inset-bottom));
   }
 
   .close {
     top: calc(12px + env(safe-area-inset-top));
     right: 12px;
-    width: 44px;
-    height: 44px;
-  }
-
-  .nav {
-    width: 44px;
-    height: 44px;
   }
 
   .prev {
@@ -449,9 +477,7 @@
   }
 
   .bar {
-    bottom: calc(12px + env(safe-area-inset-bottom));
     flex-wrap: wrap;
-    max-width: calc(100vw - 24px);
     gap: 4px;
   }
 
@@ -462,8 +488,13 @@
     border-bottom: 1px solid var(--glass-on-dark-10);
   }
 
-  .refs {
-    bottom: calc(76px + env(safe-area-inset-bottom));
+}
+
+/* Touch floor on capability (the touch gate), after the base rule. */
+@media (hover: none), (any-pointer: coarse) {
+  .close {
+    width: 44px;
+    height: 44px;
   }
 }
 

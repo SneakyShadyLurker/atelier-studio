@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type {
   AdminModel,
   AdminProvider,
+  TestReport as TestReportData,
   TextModelCapabilities,
   TextReasoningEffort,
 } from '@atelier/shared';
@@ -263,9 +264,11 @@ export default function EditModelDialog({ provider, model, imageLabel, startTest
     test.mutate({ providerId: provider.id, modelId: model.id });
   };
 
-  const apply = () => {
-    if (testState.kind !== 'report') return;
-    const { report } = testState;
+  // `report` is the one TestReport renders (its deferred snapshot). Apply it
+  // only while it is still the live report: a click during a re-test or a
+  // refresh would merge an old report against the new baseline.
+  const apply = (report: TestReportData) => {
+    if (testState.kind !== 'report' || testState.report !== report) return;
     const result = applyFindings(draft, baselineRef.current, report.proposed, report.advertised, chosen);
     setDraft(result.draft);
     setSaveError(null);
@@ -326,7 +329,20 @@ export default function EditModelDialog({ provider, model, imageLabel, startTest
         <div className={`${dialogStyles.dialog} ${form.dialog} ${styles.dialog}`}>
           <div className={dialogStyles.handle} aria-hidden="true" />
           <h2 id={titleId} className={dialogStyles.title}>Edit model</h2>
-          <p className={styles.subtitle}>{model.modelId}</p>
+
+          <Field id={`${fieldId}-model-id`} label="Model id" error={undefined}>
+            {() => (
+              <div className={form.inputBox}>
+                <input
+                  id={`${fieldId}-model-id`}
+                  className={form.machineInput}
+                  value={model.modelId}
+                  readOnly
+                  spellCheck={false}
+                />
+              </div>
+            )}
+          </Field>
 
           <Field id={`${fieldId}-name`} label="Display name" error={errors.displayName}>
             {(described) => (

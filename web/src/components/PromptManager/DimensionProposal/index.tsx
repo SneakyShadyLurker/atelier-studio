@@ -10,6 +10,7 @@ import { usePromptImageContext } from '../../../hooks/usePromptImageContext';
 import { diagnoseSelectionOpts } from '../../../api/diagnoseSelection';
 import { I } from '../../icons/I';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { isReducedMotionPreferred } from '../../../hooks/useReducedMotion';
 import styles from './index.module.css';
 import btn from '../../../styles/buttons.module.css';
 import {
@@ -695,7 +696,7 @@ export default function DimensionProposal({ data, applyCoherenceFailures, busy, 
     const candidates = document.querySelectorAll<HTMLElement>('[data-conflict]');
     for (const el of candidates) {
       if (el.getAttribute('data-conflict') === templateName) {
-        el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        el.scrollIntoView({ block: 'start', behavior: isReducedMotionPreferred() ? 'auto' : 'smooth' });
         return;
       }
     }
@@ -704,10 +705,7 @@ export default function DimensionProposal({ data, applyCoherenceFailures, busy, 
   return (
     <div className={styles.panel}>
       <header className={styles.header}>
-        <div>
-          <p className={styles.kicker}>AI proposal</p>
-          <h3>{bundles.length} changes from snapshot {data.baseSnapshotHash}</h3>
-        </div>
+        <h3>{bundles.length} changes from snapshot {data.baseSnapshotHash}</h3>
       </header>
       {conflicts.length > 0 ? (
         <div className={styles.conflictGroup}>

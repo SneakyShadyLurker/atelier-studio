@@ -66,7 +66,7 @@
   composes: plate;
   width: 96px;
   aspect-ratio: 3 / 2;
-  animation: global(atelier-pulse) 1.6s ease-in-out infinite;
+  animation: global(atelier-pulse) var(--cadence-loop) ease-in-out infinite;
 }
 
 /* Icon-only states (view error fallbacks): the glyph alone, no medallion. */
@@ -103,7 +103,7 @@
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
-  /* Template tokens sit on the mat (design 5, Prompt library editors). */
+  /* Template tokens sit on the mat (design 5, Prompt Library editors). */
   background: var(--bg-sunk);
   border-radius: var(--radius-control);
   padding: 1px 5px;

@@ -190,6 +190,70 @@ describe('atelier UI store', () => {
     expect(useAtelierStore.getState().toasts[0]).toMatchObject({ text: 'Saved', tone: 'soft' });
   });
 
+  test('a toast stays paused until every pause reason is released', async () => {
+    const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+    const store = useAtelierStore.getState();
+    const id = store.addToast('Archived', 'success', 40, { label: 'Undo', onClick: () => undefined });
+    store.pauseToast(id, 'hover');
+    store.pauseToast(id, 'covered');
+    // The pointer leaves while the drawer still covers the stack.
+    store.resumeToast(id, 'hover');
+    await sleep(90);
+    expect(useAtelierStore.getState().toasts.find((toast) => toast.id === id)?.leaving).toBeFalsy();
+    // Releasing a reason that was never held changes nothing.
+    store.resumeToast(id, 'focus');
+    await sleep(90);
+    expect(useAtelierStore.getState().toasts.find((toast) => toast.id === id)?.leaving).toBeFalsy();
+    store.resumeToast(id, 'covered');
+    await sleep(90);
+    expect(useAtelierStore.getState().toasts.find((toast) => toast.id === id)?.leaving).toBe(true);
+  });
+
+  test('dismissToast plays the exit once: the live auto-dismiss timer is cleared', async () => {
+    const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+    const onDismiss = mock();
+    const store = useAtelierStore.getState();
+    const id = store.addToast('Archived', 'success', 40, { label: 'Undo', onClick: () => undefined }, onDismiss);
+    store.dismissToast(id);
+    expect(useAtelierStore.getState().toasts.find((toast) => toast.id === id)?.leaving).toBe(true);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    // The original 40ms timer must not re-run the dismiss mid-fade.
+    let changes = 0;
+    const unsubscribe = useAtelierStore.subscribe((next, prev) => {
+      // Count only this toast's transitions; an earlier test's fade may still unmount.
+      if (next.toasts.find((toast) => toast.id === id) !== prev.toasts.find((toast) => toast.id === id)) changes += 1;
+    });
+    await sleep(90);
+    expect(changes).toBe(0);
+    await sleep(200);
+    unsubscribe();
+    expect(useAtelierStore.getState().toasts).toHaveLength(0);
+    expect(changes).toBe(1);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  test('dismissToast is idempotent while the toast is leaving', async () => {
+    const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+    const onDismiss = mock();
+    const store = useAtelierStore.getState();
+    const id = store.addToast('Archived', 'success', 5000, { label: 'Undo', onClick: () => undefined }, onDismiss);
+    store.dismissToast(id);
+    let changes = 0;
+    const unsubscribe = useAtelierStore.subscribe((next, prev) => {
+      // Count only this toast's transitions; an earlier test's fade may still unmount.
+      if (next.toasts.find((toast) => toast.id === id) !== prev.toasts.find((toast) => toast.id === id)) changes += 1;
+    });
+    store.dismissToast(id);
+    expect(changes).toBe(0);
+    await sleep(300);
+    unsubscribe();
+    // One unmount, one onDismiss; a dismiss after removal is a no-op too.
+    expect(changes).toBe(1);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    store.dismissToast(id);
+    expect(useAtelierStore.getState().toasts).toHaveLength(0);
+  });
+
 });
 
 describe('axis sweep store state', () => {

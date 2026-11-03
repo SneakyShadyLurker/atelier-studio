@@ -1,7 +1,7 @@
 import type { ArchivedTile } from '@atelier/shared';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import Archive, { archiveRowKey } from './index';
+import Archive from './index';
 
 const originalMatchMedia = window.matchMedia.bind(window);
 
@@ -67,8 +67,8 @@ describe('Archive header', () => {
         onOpenTile={noop}
       />,
     );
-    expect(screen.getByText('3 items')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Back to feed' }));
+    expect(screen.queryByText('3 items')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Unsorted' }));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 });
@@ -97,54 +97,57 @@ describe('Archive tile semantics', () => {
     expect(screen.getAllByRole('button', { name: /Open archived image:/ }).length).toBeLessThan(items.length);
   });
 
-  test('virtual rows use tile identity keys', () => {
-    expect(archiveRowKey([archivedTile, { ...archivedTile, id: 'tile-2' }], 0)).toBe('tile-1:tile-2');
-    expect(archiveRowKey(undefined, 3)).toBe(3);
-  });
+  // The exit is the tile's <ViewTransition> (motion.css .tile-exit), driven by
+  // the deferred row snapshot: the action hides the tile at once, in either
+  // motion mode, and nothing waits on a timer.
+  for (const reduced of [false, true]) {
+    test(`an action hides the tile at once with no timer (reduced motion: ${String(reduced)})`, () => {
+      const onRestore = mock(() => undefined);
+      const setTimeoutMock = mock(() => 1) as unknown as typeof window.setTimeout;
+      const originalSetTimeout = window.setTimeout.bind(window);
+      window.matchMedia = mock((query: string) => ({
+        matches: reduced && query.includes('prefers-reduced-motion'),
+        media: query,
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        dispatchEvent: () => true,
+      }));
+      try {
+        render(
+          <Archive
+            items={[archivedTile, { ...archivedTile, id: 'tile-2', prompt: 'A second archived image' }]}
+            total={2}
+            isLoading={false}
+            isError={false}
+            hasNextPage={false}
+            isFetchingNextPage={false}
+            onLoadMore={noop}
+            onRetry={noop}
+            onRestore={onRestore}
+            onPermanentDelete={noop}
+            onPurgeAll={noop}
+            onBack={noop}
+            onOpenTile={noop}
+          />,
+        );
+        window.setTimeout = setTimeoutMock;
 
-  test('reduced motion skips the tile-leave timeout', () => {
-    const onRestore = mock(() => undefined);
-    const setTimeoutMock = mock(() => 1) as unknown as typeof window.setTimeout;
-    const originalSetTimeout = window.setTimeout.bind(window);
-    window.setTimeout = setTimeoutMock;
-    window.matchMedia = mock((query: string) => ({
-      matches: query.includes('prefers-reduced-motion'),
-      media: query,
-      onchange: null,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      dispatchEvent: () => true,
-    }));
-    try {
-      render(
-        <Archive
-          items={[archivedTile]}
-          total={1}
-          isLoading={false}
-          isError={false}
-          hasNextPage={false}
-          isFetchingNextPage={false}
-          onLoadMore={noop}
-          onRetry={noop}
-          onRestore={onRestore}
-          onPermanentDelete={noop}
-          onPurgeAll={noop}
-          onBack={noop}
-          onOpenTile={noop}
-        />,
-      );
+        const [restore] = screen.getAllByRole('button', { name: 'Restore' });
+        if (!restore) throw new Error('missing Restore');
+        fireEvent.click(restore);
 
-      fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
-
-      expect(onRestore).toHaveBeenCalledWith('tile-1');
-      expect(setTimeoutMock).not.toHaveBeenCalled();
-      expect(screen.queryByRole('button', { name: /Open archived image:/ }) === null).toBe(true);
-    } finally {
-      window.setTimeout = originalSetTimeout;
-    }
-  });
+        expect(onRestore).toHaveBeenCalledWith('tile-1');
+        expect(setTimeoutMock).not.toHaveBeenCalled();
+        expect(screen.queryByRole('button', { name: `Open archived image: ${archivedTile.prompt}` }) === null).toBe(true);
+        expect(screen.queryByRole('button', { name: 'Open archived image: A second archived image' }) === null).toBe(false);
+      } finally {
+        window.setTimeout = originalSetTimeout;
+      }
+    });
+  }
 
   test('renders archived video tiles as video with a play badge', () => {
     renderArchive([{
@@ -171,19 +174,6 @@ describe('Archive failed actions', () => {
   // pretty-prints its React-owned object graph on every waitFor retry, which
   // alone outlasted the test timeout and stalled the tests after it.
   const frameShown = () => screen.queryByRole('button', { name: frameName }) !== null;
-
-  function setReducedMotion(reduced: boolean): void {
-    window.matchMedia = mock((query: string) => ({
-      matches: reduced && query.includes('prefers-reduced-motion'),
-      media: query,
-      onchange: null,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      dispatchEvent: () => true,
-    }));
-  }
 
   function renderWithActions(
     onRestore: (tileId: string) => unknown,
@@ -227,34 +217,30 @@ describe('Archive failed actions', () => {
   const flushMicrotasks = async () => { await act(async () => { await Promise.resolve(); }); };
 
   for (const action of ['restore', 'delete'] as const) {
-    for (const reduced of [true, false]) {
-      test(`${action} rejection before the exit settles restores the tile and allows retry (reduced motion: ${String(reduced)})`, async () => {
-        setReducedMotion(reduced);
-        const handler = mock(() => Promise.reject(new Error('server said no')));
-        renderWithActions(
-          action === 'restore' ? handler : noop,
-          action === 'delete' ? handler : noop,
-        );
+    test(`${action} rejection restores the pending tile and allows retry`, async () => {
+      const handler = mock(() => Promise.reject(new Error('server said no')));
+      renderWithActions(
+        action === 'restore' ? handler : noop,
+        action === 'delete' ? handler : noop,
+      );
 
-        triggers[action]();
-        await flushMicrotasks();
+      triggers[action]();
+      await flushMicrotasks();
 
-        expect(handler).toHaveBeenCalledTimes(1);
-        await waitFor(() => {
-          expect(frameShown()).toBe(true);
-        });
-        // The retry below only reaches the handler once leaving/hidden cleared.
-        triggers[action]();
-        await flushMicrotasks();
-        expect(handler).toHaveBeenCalledTimes(2);
-        await waitFor(() => {
-          expect(frameShown()).toBe(true);
-        });
+      expect(handler).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(frameShown()).toBe(true);
       });
-    }
+      // The retry below only reaches the handler once the pending id cleared.
+      triggers[action]();
+      await flushMicrotasks();
+      expect(handler).toHaveBeenCalledTimes(2);
+      await waitFor(() => {
+        expect(frameShown()).toBe(true);
+      });
+    });
 
-    test(`${action} rejection after the exit animation brings the hidden tile back`, async () => {
-      setReducedMotion(false);
+    test(`${action} rejection after the tile left brings it back`, async () => {
       const pending = deferred();
       const handler = mock(() => pending.promise);
       renderWithActions(
@@ -279,8 +265,7 @@ describe('Archive failed actions', () => {
     });
   }
 
-  test('a successful restore keeps the tile hidden after the exit animation', async () => {
-    setReducedMotion(false);
+  test('a successful restore keeps the tile hidden', async () => {
     const onRestore = mock(() => Promise.resolve());
     renderWithActions(onRestore, noop);
 
@@ -289,13 +274,12 @@ describe('Archive failed actions', () => {
       expect(frameShown()).toBe(false);
     }, { timeout: 1_000 });
     expect(onRestore).toHaveBeenCalledWith('tile-1');
-    // Still gone once the resolved action and any trailing timers have run.
+    // Still gone once the resolved action has settled.
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(frameShown()).toBe(false);
   });
 
   test('a rejection after unmount does not write state', async () => {
-    setReducedMotion(false);
     const pending = deferred();
     const originalError = console.error;
     const errors: unknown[] = [];

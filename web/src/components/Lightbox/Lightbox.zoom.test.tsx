@@ -162,6 +162,38 @@ afterEach(() => {
   useAtelierStore.setState(initialAtelierState, true);
 });
 
+describe('Lightbox resolution readout', () => {
+  test('the decoded size reads {w}×{h} with the multiplication sign', () => {
+    renderLightbox(allDoneBatch);
+
+    expect(screen.getByText('2400×1600')).toBeTruthy();
+    expect(screen.queryByText('2400x1600')).toBeNull();
+  });
+});
+
+describe('Lightbox toolbar slots', () => {
+  test('lays out the zoom slot, hidden and inert, when the image is not zoomable', () => {
+    const proto = HTMLImageElement.prototype as unknown as Record<string, unknown>;
+    Object.defineProperty(proto, 'naturalWidth', { configurable: true, get: () => FIT_WIDTH });
+    renderLightbox(allDoneBatch);
+
+    // Not offered, so not in the accessibility tree or the focus order, but
+    // its box keeps the toolbar the width it has for a zoomable image.
+    expect(screen.queryByRole('button', { name: 'Zoom to full resolution' })).toBeNull();
+    const zoom = document.querySelector('[data-slot="zoom"]');
+    expect(zoom).not.toBeNull();
+    expect(zoom?.getAttribute('aria-hidden')).toBe('true');
+    expect(zoom?.hasAttribute('inert')).toBe(true);
+  });
+
+  test('the decoded size sits in its own slot and never reads as an ellipsis', () => {
+    renderLightbox(allDoneBatch);
+    expect(document.querySelector('[data-slot="dims"]')?.textContent).toBe('2400×1600');
+    expect(screen.queryByText('…')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Zoom to full resolution' }).getAttribute('data-slot')).toBe('zoom');
+  });
+});
+
 describe('Lightbox zoom', () => {
   test('offers 1:1 once the image is decoded and known to be downsampled', () => {
     const { image } = renderLightbox(allDoneBatch);

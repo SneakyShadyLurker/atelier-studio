@@ -1,6 +1,8 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { AdminModel, AdminProvider } from '@atelier/shared';
 import { describeError } from '../../lib/errorCopy';
+import { runWhenReachable } from '../../lib/focus';
+import { takeTextModelsArrivalFocus } from '../../lib/textModelsNav';
 import { useAtelierStore } from '../../store/atelier';
 import { useDeleteModel, useTextProviders, useTextRouting } from '../../hooks/useTextProviders';
 import ConfirmDialog from '../ConfirmDialog';
@@ -33,6 +35,13 @@ interface TextModelsProps {
 
 export default function TextModels({ onBack }: TextModelsProps) {
   const headingId = useId();
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  // Arriving from a TextModelNote's "Set up text models" lands focus here.
+  useEffect(() => {
+    if (!takeTextModelsArrivalFocus()) return;
+    const heading = headingRef.current;
+    runWhenReachable(() => { heading?.focus(); }, heading);
+  }, []);
   const admin = useTextProviders();
   const routing = useTextRouting(admin.enabled);
   const deleteModel = useDeleteModel();
@@ -112,7 +121,7 @@ export default function TextModels({ onBack }: TextModelsProps) {
   return (
     <section className={styles.view} aria-labelledby={headingId}>
       <div className={styles.head} data-zone="head">
-        <ManagedViewHeader heading="Text models" headingId={headingId} onBack={onBack}>
+        <ManagedViewHeader heading="Text models" headingId={headingId} headingRef={headingRef} backLabel="Back to Unsorted" onBack={onBack}>
           <button className={btn.secondary} type="button" onClick={addProvider}>
             <I.plus aria-hidden="true" />
             Add provider

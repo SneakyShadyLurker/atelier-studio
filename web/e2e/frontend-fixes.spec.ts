@@ -89,7 +89,7 @@ test.describe('frontend input regressions', () => {
     await page.getByRole('button', { name: 'Prompt Library', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Prompt Library', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Editorial portrait', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Back to feed', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Prompt Library', exact: true })).toHaveCount(0);
     if (await expand.isVisible()) await expand.click();
     await expect(prompt).toBeVisible();

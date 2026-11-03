@@ -64,7 +64,7 @@ On a fresh installation, the Text models view is empty:
 
 <img src="assets/admin-panel.webp" alt="The Text models view on a fresh installation, showing 'No text model yet' and an Add provider button" width="900">
 
-Click **Back to feed** at the top to return to your images.
+Click **Back to Unsorted** at the top to return to your images.
 
 ## 3. Connect a text model
 

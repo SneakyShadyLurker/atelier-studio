@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
+import { Disclosure } from '../Disclosure';
 import { I } from '../icons/I';
 import styles from './index.module.css';
 
@@ -23,19 +24,15 @@ export default function AdvancedSection({ count, children }: AdvancedSectionProp
         <span>Advanced, {count} variable{count === 1 ? '' : 's'}</span>
         <I.caret className={styles.advancedCaret} />
       </button>
-      <div
+      <Disclosure
         id={panelId}
         role="group"
         aria-label="Advanced variables"
-        className={styles.advancedPanel}
-        data-open={open ? 'true' : undefined}
-        inert={!open}
-        aria-hidden={!open}
+        open={open}
+        contentClassName={styles.advancedContent}
       >
-        <div className={styles.advancedClip}>
-          <div className={styles.advancedContent}>{children}</div>
-        </div>
-      </div>
+        {children}
+      </Disclosure>
     </div>
   );
 }

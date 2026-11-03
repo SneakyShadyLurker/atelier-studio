@@ -12,7 +12,7 @@ import { resolveEffectiveModel } from './lib/effectiveModel';
 import { buildHistoricalRequest, isRetiredHistoricalModel, RETIRED_MODEL_TOAST, type HistoricalReplay } from './lib/historicalGeneration';
 import { findI2VModel } from './lib/i2v';
 import { modelSelectionPatch, promptPickerAvailable, VIDEO_DRAFT_RESET } from './lib/modelSelection';
-import { shouldShowComposer } from './lib/viewChrome';
+import { scopeTitle, shouldShowComposer } from './lib/viewChrome';
 import { viewNavDirection, type ViewNavDirection } from './lib/viewNav';
 import Canvas, { type CanvasHandle } from './components/Canvas';
 import Composer from './components/Composer';
@@ -667,16 +667,16 @@ function AppContent() {
   const feedInert = isPhone && composerExpanded && shouldShowComposer(view);
 
   // Scoped fallback for the lazy full-screen views (Archive, PromptManager):
-  // a render or chunk-load error in one of them stays contained — the feed and
-  // composer keep their state, and "Back to feed" remounts the view fresh via
-  // the viewSwap key change.
+  // a render or chunk-load error in one of them stays contained — the image
+  // list and composer keep their state, and "Back to Unsorted" remounts the view
+  // fresh via the viewSwap key change.
   const viewErrorFallback = (
     <StateView
       role="status"
       glyph={<I.alert width={22} height={22} />}
       title="This view hit an error"
-      body="The rest of Atelier is unaffected — head back to the feed."
-      action={{ label: 'Back to feed', onClick: () => { selectView(APP_VIEW_UNSORTED); } }}
+      body="The rest of Atelier is unaffected — go back to Unsorted."
+      action={{ label: 'Back to Unsorted', onClick: () => { selectView(APP_VIEW_UNSORTED); } }}
     />
   );
   const handleCanvasReset = useCallback(() => {
@@ -687,9 +687,9 @@ function AppContent() {
     <StateView
       role="status"
       glyph={<I.alert width={22} height={22} />}
-      title="Feed unavailable"
-      body="The image feed hit an error — click to reload."
-      action={{ label: 'Reload feed', onClick: handleCanvasReset }}
+      title="Images unavailable"
+      body="The image list hit an error — reload it."
+      action={{ label: 'Reload images', onClick: handleCanvasReset }}
     />
   );
   const composerErrorFallback = (
@@ -704,7 +704,8 @@ function AppContent() {
   // Lightbox is lazy() + has the most complex render logic (pointer-gesture
   // math, blob fetch); without this boundary a render or chunk-load error
   // escapes to the root boundary and tears down the whole SPA, losing composer
-  // draft + feed scroll. Closing returns to the feed with all state intact;
+  // draft + scroll position. Closing keeps the underlying view with all state
+  // intact, so the label names that view's scope;
   // resetKeys=[lightbox.tileId] clears a latched error when the user navigates
   // to a different tile, without remounting the viewer per tile step.
   const lightboxErrorFallback = (
@@ -713,7 +714,7 @@ function AppContent() {
       glyph={<I.alert width={22} height={22} />}
       title="Image view unavailable"
       body="The viewer hit an error — the rest of Atelier is unaffected."
-      action={{ label: 'Back to feed', onClick: () => { setLightboxPermanentDeleteTileId(null); closeLightbox(); } }}
+      action={{ label: `Back to ${scopeTitle(view, collectionsQuery.data?.items ?? EMPTY_COLLECTIONS)}`, onClick: () => { setLightboxPermanentDeleteTileId(null); closeLightbox(); } }}
     />
   );
 
@@ -793,7 +794,7 @@ function AppContent() {
           {view.kind === 'archive' ? (
             // Keyed by the archive sub-scope: the viewSwap key is only
             // view.kind, so without this an Archive error would latch the
-            // boundary across every archive scope until "Back to feed".
+            // boundary across every archive scope until "Back to Unsorted".
             <ErrorBoundary key={`archive-${view.scope.kind}-${view.scope.kind === 'collection' ? view.scope.id : ''}`} fallback={viewErrorFallback}>
             <Archive
               items={archiveQuery.items}
@@ -877,7 +878,7 @@ function AppContent() {
               the Composer subtree and losing local interaction state.
             */}
             <ErrorBoundary resetKeys={[composerResetKey]} fallback={composerErrorFallback}>
-              <ViewTransition default="none" enter="composer-enter" exit="composer-exit">
+              <ViewTransition default="none" enter="composer-enter" exit="composer-exit" update="composer-frame">
               <Composer
                 models={models}
                 modelById={modelById}

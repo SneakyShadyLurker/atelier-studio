@@ -1,11 +1,37 @@
 /* Interruptible overlay motion. CSS retains the current pose on reversal;
-   useExitTransition still owns the mounted lifetime and native top layer. */
-.surface {
-  --surface-from: translateY(var(--m-shift));
-  --surface-to: translateY(calc(var(--m-shift) / 3));
-  --surface-duration: var(--dur-overlay);
+   useExitTransition still owns the mounted lifetime and native top layer.
+
+   Owners tune a surface only through --surface-from, --surface-to and
+   --surface-duration declared on the element itself, and they must win
+   whatever the stylesheet order: every module that composes this file carries
+   its own copy of these rules, so a copy loaded later would otherwise reset an
+   earlier owner's override (the phone chip sheet entered in --dur-overlay
+   that way). So the base declares no defaults (the var() fallbacks below
+   are the defaults), the resting pose and the variants' defaults sit at zero
+   specificity (:where), so an owner's own opacity or transform wins too, and
+   the three properties do not inherit, so a surface nested in another never
+   picks up its host's values. */
+@property --surface-from {
+  syntax: '*';
+  inherits: false;
+}
+
+@property --surface-to {
+  syntax: '*';
+  inherits: false;
+}
+
+@property --surface-duration {
+  syntax: '*';
+  inherits: false;
+}
+
+:where(.surface) {
   opacity: 1;
   transform: none;
+}
+
+.surface {
   transition: opacity var(--surface-duration, var(--dur-overlay)) var(--ease-out),
     transform var(--surface-duration, var(--dur-overlay)) var(--ease-out);
 
@@ -25,18 +51,27 @@
 
 .fade {
   composes: surface;
+}
+
+:where(.fade) {
   --surface-from: none;
   --surface-to: none;
 }
 
 .drop {
   composes: surface;
+}
+
+:where(.drop) {
   --surface-from: translateY(calc(-1 * var(--m-shift)));
   --surface-to: translateY(calc(var(--m-shift) / -3));
 }
 
 .scale {
   composes: surface;
+}
+
+:where(.scale) {
   --surface-from: scale(var(--m-scale));
   --surface-to: scale(calc((1 + var(--m-scale)) / 2));
 }

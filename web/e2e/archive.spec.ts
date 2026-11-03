@@ -7,10 +7,11 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test('keeps the header visible while scrolling to the last archived item', async ({ page }, testInfo) => {
       await page.goto('/e2e/harness/archive.html');
       const header = page.locator('header');
-      const emptyButton = page.getByRole('button', { name: 'Empty Archive' });
+      const emptyButton = page.getByRole('button', { name: 'Empty archive' });
       const grid = page.locator('[data-virtualized="archive"]');
       const scroller = grid.locator('..');
-      await expect(page.getByText('80 items', { exact: true })).toBeVisible();
+      // Empty archive enables once the 80 fixture items have loaded (the header carries no count).
+      await expect(emptyButton).toBeEnabled();
       await page.evaluate(() => document.fonts.ready);
       const headerBefore = await header.boundingBox();
       const buttonBefore = await emptyButton.boundingBox();

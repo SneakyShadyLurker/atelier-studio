@@ -58,7 +58,7 @@ describe('MovePopover closing', () => {
     unsorted.focus();
     fireEvent.keyDown(unsorted, { key: 'Escape' });
     fireEvent.click(unsorted);
-    fireEvent.click(screen.getByRole('button', { name: '+ New collection' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New collection' }));
 
     expect(screen.queryByRole('textbox', { name: 'Collection name' })).toBeNull();
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });

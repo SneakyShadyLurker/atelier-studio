@@ -1,14 +1,12 @@
 import { isVideoMime, type ArchivedTile } from '@atelier/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { motionDurationMs } from '../../lib/overlayDuration';
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState, ViewTransition } from 'react';
 import { getRatioDefinition } from '../../lib/ratios';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { InfiniteStatus } from '../InfiniteStatus';
 import { I } from '../icons/I';
 import { ManagedViewHeader } from '../ManagedViewHeader';
 import { StateView, LoadingState, ErrorState } from '../StateView';
-import { useReducedMotion } from '../../hooks/useReducedMotion';
 import ConfirmDialog from '../ConfirmDialog';
 import BatchPrompt from '../Batch/BatchPrompt';
 import ClipFrame from '../tile/ClipFrame';
@@ -41,7 +39,7 @@ function EmptyArchive() {
     <StateView
       art="empty-archive"
       title="Nothing archived"
-      body="Deleted images live here for 30 days before they are removed permanently."
+      body="Archived images stay here for 30 days before they are deleted permanently."
     />
   );
 }
@@ -85,10 +83,6 @@ function ArchiveImage({ tile }: { tile: ArchivedTile }) {
   );
 }
 
-export function archiveRowKey(row: readonly ArchivedTile[] | undefined, index: number): string | number {
-  return row?.map((tile) => tile.id).join(':') ?? index;
-}
-
 function chunkRows<T>(items: readonly T[], size: number): T[][] {
   const rows: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -114,12 +108,16 @@ function Archive({
   onBack,
   onOpenTile,
 }: ArchiveProps) {
-  const [leavingIds, setLeavingIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Tiles whose Restore or Delete is in flight: filtered out at once (their
+  // exit is the tile boundary's, below) and brought back if the action fails.
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Tiles a failed action brought back: they re-enter with `tile-enter`. Every
+  // other insertion (first load, pagination, a tile scrolling into the
+  // rendered window) is historical and has no entrance.
+  const [revealedIds, setRevealedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const archiveRef = useRef<HTMLDivElement | null>(null);
   const [gridCols, setGridCols] = useState(1);
-  const reducedMotion = useReducedMotion();
   // Derive (don't store-via-effect): the confirm only renders while its tile
   // is still in `items`. If the list changes underneath (pagination refetch,
   // cross-tab mutation, eviction) the dialog auto-unmounts instead of letting
@@ -127,17 +125,11 @@ function Archive({
   const pendingDeleteTile = pendingDelete !== null
     ? items.find((tile) => tile.id === pendingDelete) ?? null
     : null;
-  const timers = useRef(new Map<string, number>());
   const mountedRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
-    const pendingTimers = timers.current;
-    return () => {
-      mountedRef.current = false;
-      for (const timer of pendingTimers.values()) window.clearTimeout(timer);
-      pendingTimers.clear();
-    };
+    return () => { mountedRef.current = false; };
   }, []);
 
   useEffect(() => {
@@ -161,21 +153,18 @@ function Archive({
     return () => { observer.disconnect(); };
   }, []);
 
-  // A failed action must not hide the tile forever: cancel any pending exit
-  // timer and drop the tile from both leaving and hidden so the user can retry.
+  // A failed action must not hide the tile forever: drop it from the pending
+  // set so it returns (through the same deferred snapshot, so it enters) and
+  // the user can retry. The action's own error toast speaks.
   const revealTile = (tileId: string) => {
     if (!mountedRef.current) return;
-    const timer = timers.current.get(tileId);
-    if (timer !== undefined) window.clearTimeout(timer);
-    timers.current.delete(tileId);
-    const without = (current: ReadonlySet<string>) => {
+    setPendingIds((current) => {
       if (!current.has(tileId)) return current;
       const next = new Set(current);
       next.delete(tileId);
       return next;
-    };
-    setLeavingIds(without);
-    setHiddenIds(without);
+    });
+    setRevealedIds((current) => new Set(current).add(tileId));
   };
 
   const runAction = (tileId: string, action: (id: string) => unknown) => {
@@ -191,38 +180,32 @@ function Archive({
     }
   };
 
-  const startLeaving = (tileId: string, action: (id: string) => unknown) => {
-    if (leavingIds.has(tileId) || hiddenIds.has(tileId)) return;
-    if (reducedMotion) {
-      setHiddenIds((current) => new Set(current).add(tileId));
-      runAction(tileId, action);
-      return;
-    }
-    setLeavingIds((current) => new Set(current).add(tileId));
-    // Track the CSS exit duration (.tileLeaving animates for var(--dur-sheet))
-    // so the unmount can't clip the animation; the shared reader falls back to
-    // 240 when the token isn't resolvable (e.g. happy-dom).
-    const exitMs = motionDurationMs('--dur-sheet', 240);
-    const timer = window.setTimeout(() => {
-      setHiddenIds((current) => new Set(current).add(tileId));
-      setLeavingIds((current) => {
-        const next = new Set(current);
-        next.delete(tileId);
-        return next;
-      });
-      timers.current.delete(tileId);
-    }, exitMs);
-    timers.current.set(tileId, timer);
+  const removeTile = (tileId: string, action: (id: string) => unknown) => {
+    if (pendingIds.has(tileId)) return;
+    setPendingIds((current) => new Set(current).add(tileId));
+    setRevealedIds((current) => {
+      if (!current.has(tileId)) return current;
+      const next = new Set(current);
+      next.delete(tileId);
+      return next;
+    });
     runAction(tileId, action);
   };
 
-  const visibleItems = useMemo(() => items.filter((tile) => !hiddenIds.has(tile.id)), [items, hiddenIds]);
-  const virtualRowsData = useMemo(() => chunkRows(visibleItems, gridCols), [gridCols, visibleItems]);
+  const visibleItems = useMemo(() => items.filter((tile) => !pendingIds.has(tile.id)), [items, pendingIds]);
+  // One render snapshot of the rows: a removal or a failure's return commits
+  // in a Transition, which is what the tile boundaries animate. Rows keep
+  // their index keys, so the removed tile's <ViewTransition> is the top of
+  // what React deletes (React runs exit/enter only for a boundary above every
+  // DOM node of the change), the tiles left in its row move as an update, and
+  // a tile that re-chunks into the row above pairs with itself through its
+  // shared name.
+  const liveRows = useMemo(() => chunkRows(visibleItems, gridCols), [gridCols, visibleItems]);
+  const virtualRowsData = useDeferredValue(liveRows);
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual's useVirtualizer is the canonical virtualization primitive; React Compiler escape hatch.
   const rowVirtualizer = useVirtualizer({
     count: virtualRowsData.length,
     getScrollElement: () => archiveRef.current,
-    getItemKey: (index) => archiveRowKey(virtualRowsData[index], index),
     estimateSize: () => ARCHIVE_ROW_ESTIMATE,
     initialRect: { width: 0, height: 720 },
     overscan: 3,
@@ -238,15 +221,27 @@ function Archive({
   const virtualGridHeight = virtualizedHeight(virtualRows.length > 0, rowVirtualizer.getTotalSize(), virtualRowsData.length * ARCHIVE_ROW_ESTIMATE);
 
   const renderTile = (tile: ArchivedTile) => {
-    const isLeaving = leavingIds.has(tile.id);
     const archivedDate = archiveDateFormatter.format(tile.archivedAt);
     return (
-      <div key={tile.id} className={`${styles.tile} ${isLeaving ? styles.tileLeaving : ''}`}>
+      // Same capture as a feed tile (motion.css .tile-*), named so a survivor
+      // that re-chunks into another virtual row moves as one group (share).
+      <ViewTransition
+        key={tile.id}
+        name={`tile-${tile.id}`}
+        share="tile-move"
+        default="tile-move"
+        exit="tile-exit"
+        enter={revealedIds.has(tile.id) ? 'tile-enter' : 'none'}
+      >
+      <div className={styles.tile}>
         <div className={styles.media}>
           <button
             className={styles.frame}
             type="button"
             aria-label={`Open archived image: ${tile.prompt}`}
+            // Archived media was seen in the feed: a virtual remount (scroll,
+            // re-chunked rows) must not replay the video develop.
+            data-seen="true"
             style={{ aspectRatio: tileAspectRatio(tile) }}
             onClick={() => { onOpenTile(tile); }}
           >
@@ -265,7 +260,7 @@ function Archive({
                 data-tip="Restore"
                 onClick={(event) => {
                   event.stopPropagation();
-                  startLeaving(tile.id, onRestore);
+                  removeTile(tile.id, onRestore);
                 }}
               >
                 <I.reroll />
@@ -295,6 +290,7 @@ function Archive({
           />
         </div>
       </div>
+      </ViewTransition>
     );
   };
 
@@ -303,11 +299,11 @@ function Archive({
       <ManagedViewHeader
         heading="Archive"
         headingId="atelier-archive-heading"
-        label={`${total} item${total === 1 ? '' : 's'}`}
+        backLabel="Back to Unsorted"
         onBack={onBack}
       >
         <button className={`${buttons.danger} ${styles.emptyButton}`} type="button" disabled={total === 0} onClick={onPurgeAll}>
-          Empty Archive
+          Empty archive
         </button>
       </ManagedViewHeader>
 
@@ -327,8 +323,13 @@ function Archive({
             {renderRows.map((virtualRow) => {
               const row = virtualRowsData[virtualRow.index] ?? [];
               return (
+                // Exit only: a row React deletes (its sole tile removed, the
+                // last tile of all included) would take that tile's boundary
+                // with it, and React runs exit only for the top boundary of
+                // a deleted subtree. Tiles that stay or re-chunk carry their
+                // own captures, so the row never animates an update.
+                <ViewTransition key={virtualRow.key} default="none" exit="tile-exit">
                 <div
-                  key={virtualRow.key}
                   data-index={virtualRow.index}
                   ref={rowVirtualizer.measureElement}
                   className={styles.virtualRow}
@@ -339,6 +340,7 @@ function Archive({
                 >
                   {row.map(renderTile)}
                 </div>
+                </ViewTransition>
               );
             })}
           </div>
@@ -365,7 +367,7 @@ function Archive({
           onConfirm={() => {
             const id = pendingDeleteTile.id;
             setPendingDelete(null);
-            startLeaving(id, onPermanentDelete);
+            removeTile(id, onPermanentDelete);
           }}
           onCancel={() => { setPendingDelete(null); }}
         />

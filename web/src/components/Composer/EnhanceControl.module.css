@@ -88,11 +88,6 @@
 }
 
 @media (width < 768px) {
-  .seg .enhance,
-  .seg .revert {
-    min-height: 44px;
-  }
-
   .seg .enhance {
     min-width: 0;
     padding: 0 14px;
@@ -107,11 +102,12 @@
   }
 }
 
-@media (any-pointer: coarse) {
-  /* Touch floor for iPad, which keeps the desktop label above 767px but is
-     still touch. Height only — the label stays visible (width-gated below). */
+@media (hover: none), (any-pointer: coarse) {
+  /* The touch gate, not width, sets the floor: phones and iPad (which keeps
+     the desktop label above 767px). The label stays width-gated above. */
   .seg .enhance,
   .seg .revert {
+    min-width: 44px;
     min-height: 44px;
   }
 }

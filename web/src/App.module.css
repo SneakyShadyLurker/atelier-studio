@@ -118,12 +118,15 @@
     z-index: calc(var(--z-drawer) - 1);
     opacity: 0;
     pointer-events: none;
-    transition: opacity var(--dur-sheet) var(--ease-out);
+    /* Paired with the drawer (Sidebar .sidebar): out on the overlay beat and
+       the exit curve, in over --dur-sheet on the entry curve. */
+    transition: opacity var(--dur-overlay) var(--ease-exit);
   }
 
   .backdrop[data-open='true'] {
     opacity: 1;
     pointer-events: auto;
+    transition: opacity var(--dur-sheet) var(--ease-out);
   }
 }
 

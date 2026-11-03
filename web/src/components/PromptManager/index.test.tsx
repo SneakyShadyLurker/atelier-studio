@@ -809,7 +809,7 @@ describe('PromptManager', () => {
 
   test('a new template with a cleared name resumes its unsaved body', async () => {
     renderManager();
-    fireEvent.click(await screen.findByRole('button', { name: '+ New' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'New' }));
     const rail = within(screen.getByRole('tabpanel', { name: 'Templates' })).getByRole('complementary', { name: 'Templates' });
     const inlineName = await within(rail).findByRole<HTMLInputElement>('textbox', { name: 'Template name' });
     fireEvent.change(inlineName, { target: { value: 'First name' } });
@@ -817,7 +817,7 @@ describe('PromptManager', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Body' }), { target: { value: 'Keep this body' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Template name' }), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Editorial portrait' }));
-    fireEvent.click(screen.getByRole('button', { name: '+ New' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
     expect(screen.getByRole('form', { name: 'Create template' })).toBeTruthy();
     expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Template name' }).value).toBe('');
     expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Body' }).value).toBe('Keep this body');
@@ -838,17 +838,14 @@ describe('PromptManager', () => {
     renderManager(emptyLibrary);
 
     const panel = await screen.findByRole('tabpanel', { name: 'Templates' });
-    const rail = within(panel).getByRole('complementary', { name: 'Templates' });
-    const editor = rail.nextElementSibling;
-    expect(editor).toBeInstanceOf(HTMLElement);
-    if (!(editor instanceof HTMLElement)) throw new Error('Missing editor column');
-    expect(within(editor).getByRole('heading', { name: 'No templates yet' })).toBeTruthy();
-    expect(within(editor).getByText(/A template is a reusable prompt with slots/)).toBeTruthy();
-    fireEvent.click(within(editor).getByRole('button', { name: 'New template' }));
+    expect(within(panel).getByRole('heading', { name: 'No templates yet' })).toBeTruthy();
+    expect(within(panel).getByText(/A template is a reusable prompt with slots/)).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: 'New template' }));
 
+    const rail = within(panel).getByRole('complementary', { name: 'Templates' });
     const input = within(rail).getByRole('textbox', { name: 'Template name' });
     expect(document.activeElement).toBe(input);
-    expect(within(rail).queryByRole('button', { name: '+ New' })).toBeNull();
+    expect(within(rail).queryByRole('button', { name: 'New' })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'No templates yet' })).toBeNull();
   });
 
@@ -861,7 +858,7 @@ describe('PromptManager', () => {
 
   test('back to feed button is present and invokes onBack', async () => {
     const { onBack } = renderManager();
-    fireEvent.click(await screen.findByRole('button', { name: 'Back to feed' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to Unsorted' }));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
@@ -878,8 +875,8 @@ describe('PromptManager', () => {
     renderManagerLoading();
 
     expect(await screen.findByRole('heading', { name: 'Prompt Library' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Back to feed' })).toBeTruthy();
-    expect(screen.getByText('Loading prompt library…')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back to Unsorted' })).toBeTruthy();
+    expect(screen.getByText('Loading Prompt Library…')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Import from text' })).toBeNull();
   });
 
@@ -1004,13 +1001,13 @@ describe('PromptManager', () => {
 
   test('help is an on-demand dialog toggled by the header info button', async () => {
     renderManager();
-    const toggle = await screen.findByRole('button', { name: 'How the prompt library works' });
+    const toggle = await screen.findByRole('button', { name: 'How the Prompt Library works' });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByRole('dialog', { name: 'How the prompt library works' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'How the Prompt Library works' })).toBeNull();
 
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    const dialog = screen.getByRole('dialog', { name: 'How the prompt library works' });
+    const dialog = screen.getByRole('dialog', { name: 'How the Prompt Library works' });
     expect(toggle.getAttribute('aria-controls')).toBe(dialog.getAttribute('id'));
     expect(dialog.textContent).toMatch(/Templates/);
 
@@ -1019,28 +1016,28 @@ describe('PromptManager', () => {
     expect(dialog.getAttribute('data-closing')).toBe('true');
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByRole('dialog', { name: 'How the prompt library works' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'How the Prompt Library works' })).toBeNull();
   });
 
   test('the ⓘ toggle can close the open help panel via pointerdown then click', async () => {
     renderManager();
-    const toggle = await screen.findByRole('button', { name: 'How the prompt library works' });
+    const toggle = await screen.findByRole('button', { name: 'How the Prompt Library works' });
     fireEvent.click(toggle);
-    const dialog = screen.getByRole('dialog', { name: 'How the prompt library works' });
+    const dialog = screen.getByRole('dialog', { name: 'How the Prompt Library works' });
     fireEvent.pointerDown(toggle);
     fireEvent.click(toggle);
     // The toggle dismisses through the same exit as Escape and the scrim.
     expect(dialog.getAttribute('data-closing')).toBe('true');
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
-    expect(screen.queryByRole('dialog', { name: 'How the prompt library works' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'How the Prompt Library works' })).toBeNull();
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
   });
 
   test('a stale persisted help pref does not auto-open the modal on mount', async () => {
     window.localStorage.setItem('atelier.promptHelpExpanded', '1');
     renderManager();
-    await screen.findByRole('button', { name: 'How the prompt library works' });
-    expect(screen.queryByRole('dialog', { name: 'How the prompt library works' })).toBeNull();
+    await screen.findByRole('button', { name: 'How the Prompt Library works' });
+    expect(screen.queryByRole('dialog', { name: 'How the Prompt Library works' })).toBeNull();
   });
 
   test('tabs render inside the managed-view header, not as a standalone band', () => {
@@ -1049,14 +1046,14 @@ describe('PromptManager', () => {
     if (!section) throw new Error('managed section not found');
     const headerEl = section.querySelector('header');
     if (!headerEl) throw new Error('managed-view header not found');
-    const tablist = within(headerEl).getByRole('tablist', { name: 'Prompt library sections' });
+    const tablist = within(headerEl).getByRole('tablist', { name: 'Prompt Library sections' });
     expect(within(tablist).getAllByRole('tab')).toHaveLength(4);
-    expect(within(headerEl).getByRole('button', { name: 'How the prompt library works' })).toBeTruthy();
+    expect(within(headerEl).getByRole('button', { name: 'How the Prompt Library works' })).toBeTruthy();
   });
 
   test('tabs are wired to tabpanels and use horizontal roving focus', async () => {
     renderManager();
-    const tablist = screen.getByRole('tablist', { name: 'Prompt library sections' });
+    const tablist = screen.getByRole('tablist', { name: 'Prompt Library sections' });
     const tabs = within(tablist).getAllByRole('tab');
     expect(tabs.map((tabButton) => tabButton.getAttribute('tabindex'))).toEqual(['0', '-1', '-1', '-1']);
 
@@ -1095,6 +1092,62 @@ describe('PromptManager', () => {
     expect(screen.getByText(/Dimensions keep random rolls coherent/)).toBeTruthy();
     expect(screen.queryAllByText(/No dimensions yet/)).toHaveLength(1);
     expect(document.querySelector('[data-etching="empty-dimensions"]')).not.toBeNull();
+  });
+
+  test('an empty tab offers one New control: the empty state action, not the pane button', async () => {
+    renderManager(emptyLibrary);
+    const newControls = () => screen.queryAllByRole('button', { name: /^New\b/ }).map((button) => button.textContent);
+
+    expect(await screen.findByRole('heading', { name: 'No templates yet' })).toBeTruthy();
+    expect(newControls()).toEqual(['New template']);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Variable lists' }));
+    expect(await screen.findByRole('heading', { name: 'No variable lists yet' })).toBeTruthy();
+    expect(newControls()).toEqual(['New list']);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Dimensions' }));
+    expect(await screen.findByRole('heading', { name: 'No dimensions yet' })).toBeTruthy();
+    expect(newControls()).toEqual(['New dimension']);
+    fireEvent.click(screen.getByRole('button', { name: 'New dimension' }));
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Dimension name' }));
+  });
+
+  test('an empty tab collapses its list pane so the empty state is the only column', async () => {
+    renderManager(emptyLibrary);
+    const cases = [
+      ['Templates', 'Templates', 'No templates yet', 'New template', 'Template name'],
+      ['Variable lists', 'Lists', 'No variable lists yet', 'New list', 'Variable list name'],
+      ['Dimensions', 'Dimensions', 'No dimensions yet', 'New dimension', 'Dimension name'],
+    ] as const;
+    for (const [tabName, paneName, heading, action, inputName] of cases) {
+      fireEvent.click(await screen.findByRole('tab', { name: tabName }));
+      const panel = await screen.findByRole('tabpanel', { name: tabName });
+      expect(await within(panel).findByRole('heading', { name: heading })).toBeTruthy();
+      expect(within(panel).queryByRole('complementary', { name: paneName })).toBeNull();
+      const empty = within(panel).getByRole('heading', { name: heading }).closest('[data-empty-span]');
+      expect(empty?.parentElement).toBe(panel);
+      // Creating brings the pane back: it owns the inline name field.
+      fireEvent.click(within(panel).getByRole('button', { name: action }));
+      const pane = within(panel).getByRole('complementary', { name: paneName });
+      expect(within(pane).getByRole('textbox', { name: inputName })).toBeTruthy();
+      fireEvent.keyDown(within(pane).getByRole('textbox', { name: inputName }), { key: 'Escape' });
+    }
+  });
+
+  test('an empty Dimensions tab keeps Propose Dimensions reachable beside the coverage header', async () => {
+    renderManager(emptyLibrary);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Dimensions' }));
+    const panel = await screen.findByRole('tabpanel', { name: 'Dimensions' });
+    expect(await within(panel).findByRole('heading', { name: 'No dimensions yet' })).toBeTruthy();
+    expect(within(panel).getByRole('button', { name: /Propose Dimensions/ })).toBeTruthy();
+  });
+
+  test('a populated pane shows the New button with a plus glyph', async () => {
+    renderManager();
+    const rail = within(await screen.findByRole('tabpanel', { name: 'Templates' })).getByRole('complementary', { name: 'Templates' });
+    const button = within(rail).getByRole('button', { name: 'New' });
+    expect(button.textContent).toBe('New');
+    expect(button.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
   });
 
   const twoOptionLibrary: PromptLibraryResponse = {

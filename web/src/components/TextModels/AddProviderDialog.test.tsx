@@ -93,7 +93,42 @@ describe('Add provider: presets', () => {
     expect((within(protocol).getByRole<HTMLInputElement>('radio', { name: 'Anthropic' })).checked).toBe(true);
     // Anthropic has one fixed output-limit field.
     expect(screen.queryByRole('group', { name: 'Output limit field' })).toBeNull();
-    expect(screen.queryByText('Optional for this preset.')).toBeNull();
+    // The key hint's panel closes but stays mounted, inert and hidden from AT.
+    expect(screen.getByText('Optional for this preset.').closest('[inert]')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  test('preset hints reveal through disclosures that stay mounted and inert while closed', () => {
+    setup();
+    const keyHint = screen.getByText('Optional for this preset.');
+    const keyPanel = keyHint.closest('[aria-hidden]');
+    const customHint = screen.getByText(/Any other server that speaks the OpenAI chat API/);
+    const customPanel = customHint.closest('[aria-hidden]');
+    const openAiPanel = screen.getByText(/OpenAI's own API/).closest('[aria-hidden]');
+    if (!keyPanel || !customPanel || !openAiPanel) throw new Error('hint panels missing');
+    for (const panel of [keyPanel, customPanel, openAiPanel]) {
+      expect(panel.hasAttribute('inert')).toBe(true);
+      expect(panel.getAttribute('aria-hidden')).toBe('true');
+      expect(panel.hasAttribute('data-open')).toBe(false);
+    }
+    expect(field('API key').getAttribute('aria-describedby')).toBeNull();
+    fireEvent.click(preset('Custom OpenAI-compatible'));
+    for (const panel of [keyPanel, customPanel]) {
+      expect(panel.getAttribute('data-open')).toBe('true');
+      expect(panel.hasAttribute('inert')).toBe(false);
+    }
+    expect(field('Base URL').getAttribute('aria-describedby')).toBe(customHint.id);
+    expect(field('API key').getAttribute('aria-describedby')).toBe(keyHint.id);
+    // Switching presets swaps panels, not the text inside one open panel: the
+    // old hint's panel closes while the new one opens, so the field's height
+    // interpolates between the two texts (D6).
+    fireEvent.click(preset('OpenAI'));
+    expect(screen.getByText('Optional for this preset.')).toBe(keyHint);
+    expect(keyPanel.hasAttribute('data-open')).toBe(false);
+    expect(keyPanel.hasAttribute('inert')).toBe(true);
+    expect(customPanel.hasAttribute('data-open')).toBe(false);
+    expect(customPanel.hasAttribute('inert')).toBe(true);
+    expect(openAiPanel.getAttribute('data-open')).toBe('true');
+    expect(field('Base URL').getAttribute('aria-describedby')).toBe(screen.getByText(/OpenAI's own API/).id);
   });
 
   test('a Custom preset leaves the address empty and keeps a name the admin typed', () => {

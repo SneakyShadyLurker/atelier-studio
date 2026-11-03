@@ -22,7 +22,7 @@
 /* Touch capability (not viewport width) mandates the 44px floor — covers iPad
    landscape and touch laptops at >=768px. Visual size stays compact on pointer
    devices; only the hit area grows. */
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .emptyButton {
     display: inline-flex;
     align-items: center;
@@ -73,11 +73,6 @@
 .tile:has(.frame:focus-visible) {
   border-color: var(--line-2);
   box-shadow: var(--shadow-2);
-}
-
-.tileLeaving {
-  pointer-events: none;
-  animation: global(atelier-shrink-out) var(--dur-sheet) var(--ease-out) both;
 }
 
 .frame {
@@ -197,7 +192,7 @@
   }
 }
 
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .overlay {
     opacity: 0.7;
   }
@@ -206,27 +201,13 @@
     opacity: 1;
   }
 
+  /* The shell's resting transform transition eases the release. */
   .tile:active {
     transform: scale(var(--m-press-row));
-    transition: transform var(--dur-hover) var(--ease-out);
-  }
-}
-
-@media (hover: none) and (prefers-reduced-motion: reduce) {
-  .tile:active {
-    transform: none;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile {
-    animation-duration: var(--dur-reduced);
-    animation-name: global(atelier-fade-in);
-  }
-
-  /* .tileLeaving needs no rule: under reduced motion Archive hides the tile
-     at once, and motion.css already collapses atelier-shrink-out to opacity. */
-
   .frame img.imageLoaded {
     animation-duration: var(--dur-reduced);
     animation-name: global(atelier-fade-in);

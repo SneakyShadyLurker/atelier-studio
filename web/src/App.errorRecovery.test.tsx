@@ -106,7 +106,7 @@ afterEach(() => {
 });
 
 describe('App canvas error recovery', () => {
-  test('reload feed resets the active history query before clearing the Canvas boundary', async () => {
+  test('reload images resets the active history query before clearing the Canvas boundary', async () => {
     installMatchMedia();
     if (window.location.origin === 'null') window.location.href = 'http://localhost/';
     let historyCalls = 0;
@@ -137,7 +137,7 @@ describe('App canvas error recovery', () => {
 
     render(<App />, { wrapper: wrapper(client) });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Reload feed' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reload images' }));
 
     expect(resetQueries).toHaveBeenCalledWith({ queryKey: historyKeys.scoped(APP_VIEW_UNSORTED, '') });
     await waitFor(() => { expect(screen.getByTestId('canvas-recovered').textContent).toBe('clean-history'); });

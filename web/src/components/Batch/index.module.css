@@ -73,8 +73,11 @@
    activation are truncation-gated in the component. Hoverable: the pointer
    can move onto it to read and scroll a long prompt in place. Without anchor
    positioning the card rests top-centre, still readable and still dismissed
-   the same way. */
+   the same way. Overlay grammar: it composes surface.fade, entering on the
+   hover beat and fading out on data-closing (useExitTransition). */
 .promptTip {
+  composes: fade from '../../styles/surface.module.css';
+  --surface-duration: var(--dur-hover);
   position: fixed;
   inset: 12px 0 auto;
   margin: 0 auto;
@@ -95,7 +98,6 @@
   border: 1px solid var(--line-2);
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-photo);
-  animation: global(atelier-fade-in) var(--dur-hover) var(--ease-out);
 }
 
 /* Zero-size stand-in for the pointer: BatchPrompt writes the pointer's client
@@ -142,12 +144,6 @@
   align-self: start;
   margin: 12px;
   max-height: calc(100% - 24px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .promptTip {
-    animation: none;
-  }
 }
 
 /* Model, ratio, chips, time and collection as a Meta list
@@ -240,11 +236,13 @@
     /* A lone tile spans two tracks, so on a short window the 72dvh cap alone
        lets it outgrow the room above the composer and the end-anchored feed
        clips its header. Also cap it by that room: the window minus the
-       composer's reserved height and the canvas padding (14px), inter-batch
-       gap (28px), sheet padding (2 x 16px), batch header (36px) and composer
-       gap (24px) above and below it.
-       220px keeps very short windows from shrinking it to a thumbnail. */
-    --tile-cap: min(72dvh, max(220px, calc(100dvh - var(--composer-top, 156px) - 136px)));
+       scope title bar (--app-header-h plus its 14px margin), the composer's
+       reserved height and the canvas padding (14px), inter-batch gap (28px),
+       sheet padding (2 x 16px), batch header (36px) and composer gap (24px)
+       above and below it.
+       200px keeps very short windows from shrinking it to a thumbnail (it was
+       220px before the scope title bar took 70px of a 577px-tall window). */
+    --tile-cap: min(72dvh, max(200px, calc(100dvh - var(--app-header-h) - 14px - var(--composer-top, 156px) - 136px)));
     /* A capped lone tile is narrower than its span; keep it under the batch
        header's left edge instead of centring it in the empty span. */
     margin-inline: 0 auto;
@@ -264,10 +262,13 @@
     margin-top: 0;
   }
 
+  /* The prompt takes the first row alone; the meta line and the actions
+     share the second, centred on each other so the icons sit on the meta
+     line rather than hanging below it. */
   .header {
     flex-wrap: wrap;
     row-gap: 8px;
-    align-items: flex-start;
+    align-items: center;
   }
 
   .prompt {

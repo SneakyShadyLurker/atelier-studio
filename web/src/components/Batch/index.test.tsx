@@ -2,9 +2,10 @@ import type { Batch, Tile } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { PropsWithChildren } from 'react';
+import { useLayoutEffect, type PropsWithChildren } from 'react';
 import { historyKeys } from '../../api/history';
 import { doneTile, loadingTile } from '../../../test/fixtures/tiles';
+import { seedTextModelGate } from '../../../test/fixtures/textModelGate';
 import { fixtureModels } from '../../../test/fixtures/models';
 import { APP_VIEW_UNSORTED, useAtelierStore } from '../../store/atelier';
 import BatchView from './index';
@@ -187,6 +188,54 @@ describe('BatchView grid sizing variables', () => {
   });
 });
 
+describe('BatchView deferred snapshot', () => {
+  // The whole batch renders from one useDeferredValue snapshot, so a removal
+  // commits in a Transition (which is what activates the tile <ViewTransition>
+  // boundaries) and the header, grid and handlers never disagree.
+  test('an urgent batch update reaches the DOM only through the deferred render', () => {
+    const modelById = new Map(fixtureModels.map((model) => [model.id, model]));
+    const urgentCounts: (string | undefined)[] = [];
+    function Probe({ value }: { value: Batch }) {
+      useLayoutEffect(() => {
+        const grid = document.querySelector<HTMLElement>('[data-testid="batch-grid"]');
+        urgentCounts.push(grid?.dataset.tileCount);
+      }, [value]);
+      return null;
+    }
+    const onTileAction = mock();
+    const view = (value: Batch) => (
+      <>
+        <BatchView
+          batch={value}
+          modelById={modelById}
+          activeView={APP_VIEW_UNSORTED}
+          promptsEnabled={false}
+          onBatchAction={mock()}
+          onTileAction={onTileAction}
+          onOpenTile={mock()}
+          q=""
+        />
+        <Probe value={value} />
+      </>
+    );
+    const { rerender, container } = render(view(batch), { wrapper: wrap() });
+    const survivor = batch.tiles[1];
+    if (!survivor) throw new Error('fixture batch needs two tiles');
+    const next: Batch = { ...batch, tiles: [survivor] };
+
+    rerender(view(next));
+
+    // The urgent commit (the Probe's layout effect) still showed two tiles;
+    // the deferred render then committed the removal as one snapshot.
+    expect(urgentCounts).toEqual(['2', '2']);
+    const grid = container.querySelector<HTMLElement>('[data-testid="batch-grid"]');
+    expect(grid?.dataset.tileCount).toBe('1');
+    expect(container.querySelectorAll('button[aria-label^="Open image"]')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Archive tile' }));
+    expect(onTileAction).toHaveBeenCalledWith('delete', next, survivor);
+  });
+});
+
 describe('BatchView tile memoization (SSE re-render path)', () => {
   test('an SSE-style single-tile flip keeps unchanged sibling DOM identity', () => {
     // SSE hot path: only one tile in `batch.tiles` flips status; the others
@@ -321,6 +370,37 @@ describe('BatchView tile memoization (SSE re-render path)', () => {
     expect(onOpenTile).toHaveBeenCalledWith(segment, clip);
     fireEvent.click(screen.getByRole('button', { name: 'Download tile' }));
     expect(onTileAction).toHaveBeenCalledWith('download', segment, clip);
+  });
+
+  test('tile Tell Story opens the text-model note instead of the story when no text model exists', async () => {
+    const videoModel = { ...firstModel, id: 'minimax-h3-i2v', name: 'MiniMax H3 I2V', supportsI2V: true, outputsVideo: true, maxCountPerBatch: 1 };
+    const modelById = new Map([...fixtureModels.map((model) => [model.id, model] as const), [videoModel.id, videoModel] as const]);
+    const clip: Tile = { id: 'clip-1', status: 'done', seed: 1, url: '/clip.mp4', ext: 'mp4', mime: 'video/mp4', completedAt: Date.now() - 120_000 };
+    const standalone: Batch = { ...batch, id: 'video-batch', modelId: videoModel.id, modelLabel: videoModel.name, tiles: [clip] };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedTextModelGate(client, { models: { models: [], tasks: [], defaults: { byTask: {} }, writers: {} } });
+    const onTellStoryTile = mock(() => Promise.resolve(true));
+    render(
+      <BatchView
+        batch={standalone}
+        modelById={modelById}
+        activeView={APP_VIEW_UNSORTED}
+        promptsEnabled={false}
+        onBatchAction={mock()}
+        onTileAction={mock()}
+        onOpenTile={mock()}
+        onTellStoryTile={onTellStoryTile}
+        q=""
+      />,
+      { wrapper: wrapperFor(client) },
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Tell story from video 1' });
+    fireEvent.click(trigger);
+
+    const note = await screen.findByRole('dialog', { name: 'Tell Story needs a text model.' });
+    expect(note).toBeTruthy();
+    expect(onTellStoryTile).not.toHaveBeenCalled();
   });
 });
 

@@ -43,14 +43,17 @@ async function* successfulStream(): AsyncGenerator<StoryPlanSseEvent> {
 }
 
 describe('StoryDialog', () => {
-  test('renders the source line for every mode', () => {
+  test('renders the source as the first read-only field for every mode', () => {
     for (const [mode, label] of [
       ['i2v', 'From this image'],
       ['extend', 'Continuing this video'],
       ['t2v', 'From scratch'],
     ] as const) {
       const view = render(<StoryDialog source={source(mode)} onClose={mock()} />, { wrapper: wrapper() });
-      expect(screen.getByText(label)).toBeTruthy();
+      const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'Source' });
+      expect(field.value).toBe(label);
+      expect(field.readOnly).toBe(true);
+      expect(screen.getByRole('heading', { name: 'Tell Story' }).nextElementSibling?.contains(field)).toBe(true);
       view.unmount();
     }
   });

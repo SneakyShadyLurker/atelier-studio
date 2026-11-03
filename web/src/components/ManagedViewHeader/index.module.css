@@ -20,8 +20,8 @@
   border-bottom: 1px solid var(--line);
 }
 
-/* Title and scope: the managed view's serif display moment, then its scope
-   as a small-caps label (type.module.css). */
+/* Title: the view's serif display moment. It stands alone; no scope or
+   count label sits beside it. */
 .titleGroup {
   display: flex;
   align-items: baseline;
@@ -40,10 +40,8 @@
   font-weight: 500;
   line-height: 1.2;
   text-wrap: balance;
-}
-
-.label {
-  composes: label from '../../styles/type.module.css';
+  /* User-chosen collection names can be one long token; wrap rather than clip. */
+  overflow-wrap: anywhere;
 }
 
 /* The secondary button (buttons.module.css) owns border, hover, focus ring,
@@ -62,7 +60,7 @@
 }
 
 .backButton:hover .backIcon {
-  transform: scaleX(-1) translateX(2px);
+  transform: scaleX(-1) translateX(calc(var(--m-shift) / 3));
 }
 
 .actions {
@@ -73,6 +71,15 @@
   min-width: 0;
   max-width: 100%;
   gap: 10px;
+}
+
+/* Desktop: the title action reads as the last of the actions (their 10px
+   gap, not the header's 14px). */
+.titleAction {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-inline-start: -4px;
 }
 
 @media (width >= 768px) {
@@ -87,9 +94,45 @@
     padding-left: 46px;
   }
 
+  /* The wrapped actions row sits below the fixed hamburger, so it takes
+     back the 46px clearance the title row needs. */
   .actions {
-    flex-basis: 100%;
+    flex-basis: calc(100% + 46px);
+    max-width: none;
     margin-top: 8px;
+    margin-inline-start: -46px;
+    order: 1;
+  }
+
+  /* Phone: the title action stays on the title row, ahead of the wrapped
+     actions row (DOM and tab order are unchanged); the title shrinks and
+     wraps beside it rather than pushing it down. */
+  .titleAction {
+    margin-inline-start: 0;
+  }
+
+  .header:has(> .titleAction) > .titleGroup {
+    flex-basis: 0;
+  }
+
+  /* Phone: Back is the arrow alone in a 44px square so the title keeps one
+     line beside the hamburger and the title action; the visually hidden
+     label stays the accessible name and the tip says it on hover. */
+  .header > .backButton {
+    position: relative;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .backLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 

@@ -1,7 +1,7 @@
 import type { TagDimension, VariableList } from '@atelier/shared';
 import { MAX_OPTIONS_PER_LIST } from '@atelier/shared';
 import { describeError } from '../../lib/errorCopy';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import type { ReplaceOptionInput } from '../../api/prompts';
 import {
   useListMutationPending,
@@ -11,10 +11,14 @@ import {
 } from '../../hooks/usePromptMutations';
 import { useDraftList } from '../../hooks/useDraftList';
 import { useIsPhone } from '../../hooks/useIsPhone';
+import { useTextModelGate } from '../../hooks/useTextModelGate';
+import { goToTextModels } from '../../lib/textModelsNav';
 import { useAtelierStore } from '../../store/atelier';
+import { Disclosure } from '../Disclosure';
 import { I } from '../icons/I';
 import { useRowReorder } from './useRowReorder';
 import DescribeListDialog from '../DescribeListDialog';
+import TextModelNote from '../TextModelNote';
 import InlineFieldChrome from './InlineFieldChrome';
 import MoreMenu from './MoreMenu';
 import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
@@ -111,6 +115,12 @@ type OptionRowAction = 'tags' | 'remove';
 
 export default function ListEditor({ list, dimensions, onDelete }: ListEditorProps) {
   const isPhone = useIsPhone();
+  // Draft stays enabled without a text model; with none configured at all it
+  // opens the note under the pressed control (phone: the surviving More).
+  const textModelGate = useTextModelGate();
+  const draftButtonRef = useRef<HTMLButtonElement | null>(null);
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [textNoteAnchor, setTextNoteAnchor] = useState<RefObject<HTMLButtonElement | null> | null>(null);
   const formId = useId();
   const nameId = useId();
   const addToast = useAtelierStore((state) => state.addToast);
@@ -335,10 +345,11 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
           }}
         />
         <div className={styles.headActions}>
-          {/* Phone (design 5, Prompt library editors): the head is one row,
+          {/* Phone (design 5, Prompt Library editors): the head is one row,
               title + Save + More; Draft and Delete live behind More. */}
           {!isPhone && (
             <button
+              ref={draftButtonRef}
               className={btn.ai}
               type="button"
               data-tip={
@@ -348,7 +359,10 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
                   : 'Generate ~20 more entries with the text model assigned to this task'
               }
               disabled={!trimmedName || busy || drafts.length >= MAX_OPTIONS_PER_LIST}
-              onClick={() => { draftList.draft(); }}
+              onClick={() => {
+                if (textModelGate.availability === 'none') setTextNoteAnchor(draftButtonRef);
+                else draftList.draft();
+              }}
             >
               <I.sparkle aria-hidden="true" />
               {drafting ? 'Drafting…' : 'Draft List'}
@@ -361,12 +375,16 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
             <MoreMenu<ListHeadAction>
               triggerLabel="More list actions"
               menuLabel="Variable list actions"
+              triggerRef={moreButtonRef}
               items={[
                 { action: 'draft', label: drafting ? 'Drafting…' : 'Draft List', icon: <I.sparkle />, disabled: !trimmedName || busy || drafts.length >= MAX_OPTIONS_PER_LIST },
                 ...(onDelete ? [{ action: 'delete' as const, label: 'Delete list', icon: <I.trash />, danger: true, disabled: busy }] : []),
               ]}
               onSelect={(action) => {
-                if (action === 'draft') draftList.draft();
+                // The menu has already closed (instant selection), so the
+                // note opens after it, anchored to the More button.
+                if (action === 'draft' && textModelGate.availability === 'none') setTextNoteAnchor(moreButtonRef);
+                else if (action === 'draft') draftList.draft();
                 else onDelete?.();
               }}
             />
@@ -429,6 +447,7 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
                     className={btn.secondary}
                     type="button"
                     aria-expanded={draft.expanded}
+                    aria-controls={`${formId}-tags-${draft.key}`}
                     aria-label={`${draft.expanded ? 'Hide' : 'Show'} tags for ${draft.value || `option ${index + 1}`}`}
                     onClick={() => {
                       updateDraft(draft.key, (row) => ({ ...row, expanded: !row.expanded }));
@@ -488,7 +507,13 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
                     <I.close />
                   </button>
                 )}
-                {draft.expanded && (
+                <Disclosure
+                  id={`${formId}-tags-${draft.key}`}
+                  open={draft.expanded}
+                  lazy
+                  className={styles.tagDisclosure}
+                  contentClassName={styles.tagDisclosureContent}
+                >
                   <div className={styles.tagPanel}>
                     {dimensions.length === 0 ? (
                       <p className={styles.microcopy}>Create dimensions before assigning tags.</p>
@@ -523,12 +548,22 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
                       </fieldset>
                     ))}
                   </div>
-                )}
+                </Disclosure>
               </div>
             ))}
           </div>
         )}
       </div>
+      {textNoteAnchor !== null && (
+        <TextModelNote
+          open
+          action="Draft List"
+          anchorRef={textNoteAnchor}
+          escape="top-level"
+          navigateToTextModels={goToTextModels}
+          onClose={() => { setTextNoteAnchor(null); }}
+        />
+      )}
       {draftList.dialogMode !== null && (
         <DescribeListDialog
           {...(draftList.clarifyQuestion !== null ? { question: draftList.clarifyQuestion } : {})}

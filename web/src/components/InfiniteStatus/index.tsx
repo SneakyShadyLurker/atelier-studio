@@ -48,7 +48,7 @@ export function InfiniteStatus({
   return (
     <div className={styles.root} data-error={isFetchNextPageError ? 'true' : undefined}>
       <div className={styles.hairline} data-state={state} aria-hidden="true" />
-      <div role="status" aria-live="polite">
+      <div role="status" aria-live="polite" className={styles.status}>
         {state === 'loading' ? 'Loading more' : isFetchNextPageError ? 'Could not load more' : state === 'end' ? endLabel : ''}
       </div>
       {hasNextPage ? (

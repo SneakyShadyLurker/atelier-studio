@@ -50,9 +50,14 @@ button {
    the row press (--m-press-row on the tactile transform channel) so every
    clickable acknowledges touch. Reduced motion collapses it in motion.css. */
 @media (hover: hover) {
+  /* The channel rests on the element so the release eases back too; :where()
+     keeps it below every component's own transition list. */
+  :where([role='button']:not(button)) {
+    transition: transform var(--dur-transform) var(--ease-tactile);
+  }
+
   [role='button']:not(button):active {
     transform: scale(var(--m-press-row));
-    transition: transform var(--dur-transform) var(--ease-tactile);
   }
 }
 
@@ -75,9 +80,20 @@ button {
   border-radius: 1px;
 }
 
-/* 14px top/bottom fade on scrolling lists (PromptPicker, PromptManager). */
+/* 14px top/bottom fade on scrolling lists (PromptPicker, PromptManager,
+   TextModels). */
 :root {
   --scroll-fade-mask: linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%);
+}
+
+/* The batch feeds (Sidebar rail, Canvas) declare the same gradient on the
+   scroller with this registered stop, so a scroll-driven animation can open
+   the top edge at rest (motion.css atelier-scroll-edge). Not inherited: each
+   scroller owns its own value. */
+@property --scroll-fade-top {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 14px;
 }
 
 /* Content-column inset for body-portaled overlays (PromptPicker popover, toast
@@ -170,10 +186,16 @@ div[data-toast-host='contained'] {
 .bootstrapState button {
   min-height: 40px;
   padding: 8px 16px;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--line-control);
   border-radius: var(--radius-control);
   background: var(--ink);
   color: var(--bg);
+}
+
+@media (hover: none), (any-pointer: coarse) {
+  .bootstrapState button {
+    min-height: 44px;
+  }
 }
 
 .bootstrapMark {
@@ -182,7 +204,7 @@ div[data-toast-host='contained'] {
   border: 1px solid var(--line-2);
   border-radius: 50%;
   border-top-color: var(--ink);
-  animation: atelier-spin 900ms linear infinite;
+  animation: atelier-spin var(--cadence-loop-fast) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

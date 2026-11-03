@@ -1,10 +1,21 @@
+/* One footprint for idle, loading, error and end: the status line keeps its
+   line box while empty, and the row reserves the visible Retry button
+   (5px padding and a 1px border around one line; the touch floor below), so
+   neither a fetch nor a failed one moves the feed. */
 .root {
   composes: label from '../../styles/type.module.css';
+  --retry-h: calc(1lh + 12px);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
   padding: 18px 12px;
+  /* padding, hairline, status line, sentinel, Retry, with their gaps */
+  min-height: calc(36px + 1px + 8px + 1lh + 8px + 1px + 8px + var(--retry-h));
+}
+
+.status {
+  min-height: 1lh;
 }
 
 .hairline {
@@ -20,7 +31,7 @@
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, transparent 0%, var(--ink-3) 50%, transparent 100%);
-  animation: global(atelier-sweep) 1.2s linear infinite;
+  animation: global(atelier-sweep) var(--cadence-loop) linear infinite;
 }
 
 .sentinel {
@@ -61,6 +72,18 @@
 .fallbackButton:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* Touch floor on capability (the touch gate), for the shown button only. */
+@media (hover: none), (any-pointer: coarse) {
+  .root {
+    --retry-h: max(44px, calc(1lh + 12px));
+  }
+
+  .fallbackButton:focus-visible,
+  .root[data-error="true"] .fallbackButton {
+    min-height: 44px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

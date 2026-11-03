@@ -147,6 +147,8 @@
   justify-content: center;
   width: 28px;
   height: 28px;
+  /* No UA padding: it would squeeze the 14px glyph below 28px sizes. */
+  padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
@@ -177,9 +179,9 @@
   height: 28px;
 }
 
-.iconAction:hover,
+.iconAction:hover:where(:not(:disabled, [aria-busy='true'])),
 .iconAction:focus-visible,
-.starBtn:hover,
+.starBtn:hover:where(:not(:disabled, [aria-busy='true'])),
 .starBtn:focus-visible {
   background: var(--bg-sunk);
   color: var(--ink);
@@ -192,8 +194,8 @@
   outline-offset: 2px;
 }
 
-.iconAction:active,
-.starBtn:active {
+.iconAction:active:where(:not(:disabled, [aria-busy='true'])),
+.starBtn:active:where(:not(:disabled, [aria-busy='true'])) {
   transform: scale(var(--m-press-icon));
 }
 
@@ -228,10 +230,11 @@
   transition: background-color var(--dur-hover) var(--ease-out),
     color var(--dur-hover) var(--ease-out),
     border-color var(--dur-hover) var(--ease-out),
+    opacity var(--dur-hover) var(--ease-out),
     transform var(--dur-transform) var(--ease-tactile);
 }
 
-.tileAction:hover,
+.tileAction:hover:where(:not(:disabled, [aria-busy='true'])),
 .tileAction:focus-visible {
   background: var(--scrim-strong);
   color: var(--glass-on-dark-100);
@@ -243,25 +246,34 @@
   box-shadow: 0 0 0 2px var(--scrim-strong);
 }
 
-.tileAction:active {
+.tileAction:active:where(:not(:disabled, [aria-busy='true'])) {
   transform: scale(var(--m-press-icon));
 }
 
-@media (width < 768px) {
-  .primary,
-  .secondary,
-  .danger,
-  .ai {
-    min-height: 44px;
-  }
+/* One disabled look for the icon-action family: no hover change (the hover
+   rules above skip it), no press, and the not-allowed cursor. A busy action
+   (aria-busy, e.g. a pin or archive in flight) reads the same way. */
+.iconAction:disabled,
+.starBtn:disabled,
+.tileAction:disabled,
+.iconAction[aria-busy='true'],
+.starBtn[aria-busy='true'],
+.tileAction[aria-busy='true'] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  /* Entering the dim waits one overlay beat: history actions go read-only for
+     a frame or two on every view navigation, and that blip must not flash the
+     batch header. Leaving uses the resting rule, so it restores at once. */
+  transition-delay: var(--dur-overlay);
 }
 
 /* Reduced motion needs no rule here: motion.css collapses --dur-hover to
    --dur-reduced, --dur-transform to 0ms and every --m-press* scale to 1. */
 
-@media (hover: none) {
-  /* Touch capability, not viewport width, is what mandates the 44px floor —
-     the width < 768px block above misses iPad landscape and touch laptops. */
+@media (hover: none), (any-pointer: coarse) {
+  /* The touch gate (no hover, or any coarse pointer), never viewport width,
+     mandates the 44px floor: it covers phones, iPad with or without a
+     keyboard, and touch laptops. */
   .primary,
   .secondary,
   .danger,
@@ -293,10 +305,9 @@
     background: var(--scrim-tile);
   }
 
-  .tileAction:active {
+  .tileAction:active:where(:not(:disabled, [aria-busy='true'])) {
     background: var(--scrim-strong);
     transform: scale(var(--m-press-icon));
-    transition: transform var(--dur-transform) var(--ease-tactile);
   }
 }
 

@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import type { Batch, Model } from '@atelier/shared';
-import { memo } from 'react';
+import { memo, useDeferredValue, useMemo, ViewTransition } from 'react';
 import { historyOpts } from '../../api/history';
 import type { ActiveModelCounts } from '../../lib/historyAggregation';
 import styles from './index.module.css';
@@ -59,21 +59,34 @@ function InFlightIndicator({
       : `Preparing ${preparing} more…`
     : `${fullNames ?? ''} ${verb} filling the prompt…`);
   const liveText = atCap ? label : showPreparing ? preparingLabel : '';
+  // The pill renders from a deferred snapshot so it mounts, swaps and
+  // unmounts in a Transition through its part boundary; the live region
+  // above stays urgent so announcements are never delayed.
+  const liveChip = useMemo(() => (showPreparing
+    ? { kind: 'preparing' as const, label: preparingLabel, preparing, backendLabel }
+    : tileVisible
+      ? { kind: 'tile' as const, label, count, cap, queueText, atCap }
+      : null), [showPreparing, preparingLabel, preparing, backendLabel, tileVisible, label, count, cap, queueText, atCap]);
+  const chip = useDeferredValue(liveChip);
   return (
     <>
       <span className="srOnly" aria-live="polite">{liveText}</span>
-      {showPreparing ? (
-        <span className={`${styles.inFlight} ${styles.inFlightPreparing}`} aria-label={preparingLabel}>
-          {preparing > 0 ? <span aria-hidden="true">{preparing}</span> : null}
-          <span aria-hidden="true" className={styles.inFlightQueue}>
-            {preparing > 0 ? backendLabel ?? 'preparing' : backendLabel}
+      {chip?.kind === 'preparing' ? (
+        <ViewTransition key="preparing" default="none" enter="part-enter" exit="part-exit">
+          <span className={`${styles.inFlight} ${styles.inFlightPreparing}`} aria-label={chip.label}>
+            {chip.preparing > 0 ? <span aria-hidden="true">{chip.preparing}</span> : null}
+            <span aria-hidden="true" className={styles.inFlightQueue}>
+              {chip.preparing > 0 ? chip.backendLabel ?? 'preparing' : chip.backendLabel}
+            </span>
           </span>
-        </span>
-      ) : tileVisible ? (
-        <span className={`${styles.inFlight} ${atCap ? styles.inFlightAtCap : ''}`} aria-label={label}>
-          <span aria-hidden="true">{count}/{cap}</span>
-          {queueText ? <span aria-hidden="true" className={styles.inFlightQueue}>{queueText}</span> : null}
-        </span>
+        </ViewTransition>
+      ) : chip?.kind === 'tile' ? (
+        <ViewTransition key="tile" default="none" enter="part-enter" exit="part-exit">
+          <span className={`${styles.inFlight} ${chip.atCap ? styles.inFlightAtCap : ''}`} aria-label={chip.label}>
+            <span aria-hidden="true">{chip.count}/{chip.cap}</span>
+            {chip.queueText ? <span aria-hidden="true" className={styles.inFlightQueue}>{chip.queueText}</span> : null}
+          </span>
+        </ViewTransition>
       ) : null}
     </>
   );

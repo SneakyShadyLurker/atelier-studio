@@ -4,6 +4,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import Sidebar from '../src/components/Sidebar';
+import { flushSeenBatches, getSeenBatches, markBatchSeen, resetSeenBatches, SEEN_BATCHES_STORAGE_KEY } from '../src/lib/seenBatches';
 import { APP_VIEW_ARCHIVE, APP_VIEW_PINNED, APP_VIEW_PROMPTS, APP_VIEW_UNSORTED, collectionView, type AppView, useAtelierStore } from '../src/store/atelier';
 
 const models: readonly Model[] = [{
@@ -84,6 +85,8 @@ function renderSidebar({
   q = '',
   isPhone = false,
   promptsEnabled = false,
+  error = null,
+  onRetry,
 }: {
   response?: CollectionsResponse;
   view?: AppView;
@@ -91,6 +94,8 @@ function renderSidebar({
   q?: string;
   isPhone?: boolean;
   promptsEnabled?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 } = {}) {
   installMatchMedia(isPhone);
   useAtelierStore.setState({ view, q, toasts: [] });
@@ -118,6 +123,8 @@ function renderSidebar({
       archivedCount={0}
       promptsEnabled={promptsEnabled}
       onSelect={onSelect}
+      error={error}
+      {...(onRetry ? { onRetry } : {})}
       onSelectView={(nextView) => { useAtelierStore.setState({ view: nextView }); }}
         onClear={() => undefined}
     />,
@@ -129,6 +136,9 @@ function renderSidebar({
 afterEach(() => {
   cleanup();
   mock.restore();
+  flushSeenBatches();
+  sessionStorage.clear();
+  resetSeenBatches();
   useAtelierStore.setState({ view: APP_VIEW_UNSORTED, q: '', activeBatchId: null, byokOpen: false, toasts: [] });
 });
 
@@ -361,17 +371,17 @@ describe('Sidebar scoped history affordances', () => {
   test('per-scope labels and empty states follow the active view', async () => {
     renderSidebar({ view: APP_VIEW_PINNED, items: [] });
     expect(await screen.findByRole('heading', { name: 'Pinned' })).toBeTruthy();
-    expect(screen.getByText('No pinned batches yet. Click the star on any generation to pin it.')).toBeTruthy();
+    expect(await screen.findByText('No pinned batches yet. Click the star on any generation to pin it.')).toBeTruthy();
 
     cleanup();
     renderSidebar({ view: APP_VIEW_UNSORTED, items: [] });
     expect(await screen.findByRole('heading', { name: 'Unsorted' })).toBeTruthy();
-    expect(screen.getByText('Everything is in a collection. Nice!')).toBeTruthy();
+    expect(await screen.findByText('Everything is in a collection. Nice!')).toBeTruthy();
 
     cleanup();
     renderSidebar({ view: collectionView('collection-logo'), items: [], q: 'forest' });
-    expect(await screen.findByRole('heading', { name: 'In Logo concepts' })).toBeTruthy();
-    expect(screen.getByText('No prompts match "forest".')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Logo concepts' })).toBeTruthy();
+    expect(await screen.findByText('No prompts match "forest".')).toBeTruthy();
   });
 
   test('mobile cancel exits create and rename states without committing drafts', async () => {
@@ -399,5 +409,67 @@ describe('Sidebar scoped history affordances', () => {
     fireEvent.click(renameCancel);
     expect(screen.queryByLabelText('Collection name')).toBeNull();
     expect(globalThis.fetch).not.toHaveBeenCalledWith('/api/collections/collection-logo', expect.objectContaining({ method: 'PATCH' }));
+  });
+});
+
+describe('Sidebar rail states', () => {
+  // The empty and error states render through the StateView owner (inside a
+  // part boundary keyed by state, fed by a deferred snapshot).
+  test('the empty state is a StateView carrying the scope copy', async () => {
+    renderSidebar({ view: APP_VIEW_PINNED, items: [] });
+    const feed = await screen.findByTestId('sidebar-feed');
+    // StateView's title is the state's h2.
+    expect(await within(feed).findByRole('heading', { name: /^No pinned batches yet\./ })).toBeTruthy();
+  });
+
+  test('the error state is a StateView whose Retry action calls back', async () => {
+    const onRetry = mock();
+    renderSidebar({ items: [], error: 'History unavailable', onRetry });
+    const feed = await screen.findByTestId('sidebar-feed');
+    expect(await within(feed).findByRole('heading', { name: 'History unavailable' })).toBeTruthy();
+    fireEvent.click(within(feed).getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Sidebar rail current batch', () => {
+  test('the active rail row is marked current with the 2px bar and a "Current batch" tip', async () => {
+    renderSidebar({ items: [batch(), batch({ id: 'batch-other', prompt: 'Harbour at dusk' })] });
+
+    const active = await screen.findByRole('button', { name: /Open batch: Logo mark/ });
+    const other = screen.getByRole('button', { name: /Open batch: Harbour at dusk/ });
+    expect(active.getAttribute('aria-current')).toBe('true');
+    expect(active.getAttribute('data-tip')).toBe('Current batch');
+    expect(active.classList.contains('railActiveBar')).toBe(true);
+    expect(other.getAttribute('aria-current')).toBeNull();
+    expect(other.getAttribute('data-tip')).toBeNull();
+    expect(other.classList.contains('railActiveBar')).toBe(false);
+  });
+});
+
+describe('Sidebar rail entrance gating', () => {
+  test('the rail marks the batch ids it renders as seen', async () => {
+    renderSidebar({ items: [batch(), batch({ id: 'batch-other', prompt: 'Harbour at dusk' })] });
+
+    await screen.findByRole('button', { name: /Open batch: Harbour at dusk/ });
+    await waitFor(() => {
+      expect(getSeenBatches().has('batch-logo')).toBe(true);
+      expect(getSeenBatches().has('batch-other')).toBe(true);
+    });
+  });
+
+  test('a row keeps the seen state it mounted with', async () => {
+    sessionStorage.setItem(SEEN_BATCHES_STORAGE_KEY, JSON.stringify({ ids: ['batch-old'] }));
+    resetSeenBatches();
+    renderSidebar({ items: [batch({ id: 'batch-old', prompt: 'Old harbour' }), batch()] });
+
+    const fresh = await screen.findByRole('button', { name: /Open batch: Logo mark/ });
+    const old = screen.getByRole('button', { name: /Open batch: Old harbour/ });
+    expect(old.getAttribute('data-seen')).toBe('true');
+    // The rail's own mark (and any later one) re-renders the row with
+    // seen=true; the entrance that started at mount must keep playing.
+    await waitFor(() => { expect(getSeenBatches().has('batch-logo')).toBe(true); });
+    markBatchSeen('batch-logo');
+    expect(fresh.getAttribute('data-seen')).toBeNull();
   });
 });

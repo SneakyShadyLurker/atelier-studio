@@ -1,0 +1,44 @@
+/* Shell (portal root, surface, popover, sheet, backdrop and their motion)
+   lives in styles/menuShell.module.css; only the width, the padding and the
+   note's copy are local. */
+.portalRoot {
+  composes: portalRoot from '../../styles/menuShell.module.css';
+}
+
+.panel {
+  composes: panel from '../../styles/menuShell.module.css';
+  gap: 10px;
+}
+
+.popover {
+  composes: popover from '../../styles/menuShell.module.css';
+  --menu-width: 260px;
+  padding: 12px;
+}
+
+.sheet {
+  composes: sheet from '../../styles/menuShell.module.css';
+  display: flex;
+  flex-direction: column;
+  --sheet-pad: 16px;
+  --sheet-pad-bottom: 18px;
+}
+
+.backdrop {
+  composes: backdrop from '../../styles/menuShell.module.css';
+}
+
+.panel:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.sentence {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink);
+}
+
+.action {
+  align-self: flex-start;
+}

@@ -84,9 +84,15 @@ function renderComposer(overrides: Partial<Parameters<typeof Composer>[0]> = {})
   return { ...view, rerenderComposer: (next: Partial<Parameters<typeof Composer>[0]>) => { view.rerender(composer(next)); } };
 }
 
+// Restored here, not only in each test's `finally`: bun abandons a test that
+// times out without running its `finally`, and a leaked phone matchMedia mock
+// then fails every later test in the file.
+const realMatchMedia = window.matchMedia.bind(window);
+
 afterEach(() => {
   cleanup();
   mock.restore();
+  window.matchMedia = realMatchMedia;
   useAtelierStore.setState(initialAtelierState, true);
 });
 
@@ -167,7 +173,11 @@ describe('Composer I2V mode', () => {
       useAtelierStore.getState().setComposerExpanded(false);
       const view = renderComposer();
       fireEvent.click(screen.getByRole('button', { name: 'Expand composer' }));
-      await waitFor(() => { expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Motion prompt' })); });
+      await waitFor(() => {
+        // Compare identity without Bun formatting happy-dom's DOM graph on
+        // the first poll, before the queued focus microtask has run.
+        expect(document.activeElement === screen.getByRole('textbox', { name: 'Motion prompt' })).toBe(true);
+      });
       const model = screen.getByRole('button', { name: 'Model' });
       act(() => { model.focus(); });
       await act(async () => { view.rerenderComposer({ modelId: imageModel.id }); await Promise.resolve(); });
@@ -175,7 +185,7 @@ describe('Composer I2V mode', () => {
     } finally { window.matchMedia = matchMedia; }
   });
 
-    test('phone expansion focuses the motion field and makes the stable collapsed trigger inert', async () => {
+  test('phone expansion focuses the motion field and makes the stable collapsed trigger inert', async () => {
     const matchMedia = window.matchMedia.bind(window);
     window.matchMedia = mock((query: string) => ({
       matches: query === '(width < 768px)', media: query, onchange: null,
@@ -187,7 +197,11 @@ describe('Composer I2V mode', () => {
       const trigger = screen.getByRole('button', { name: 'Expand composer' });
       act(() => { trigger.focus(); });
       fireEvent.click(trigger);
-      await waitFor(() => { expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Motion prompt' })); });
+      await waitFor(() => {
+        // Preserve the focus assertion without formatting a failed DOM diff
+        // while the expansion's focus microtask is still queued.
+        expect(document.activeElement === screen.getByRole('textbox', { name: 'Motion prompt' })).toBe(true);
+      });
       expect(trigger.isConnected).toBe(true);
       expect(trigger.closest('[inert][aria-hidden="true"]')).not.toBeNull();
     } finally { window.matchMedia = matchMedia; }

@@ -107,23 +107,29 @@ describe('TilePlaceholder Cancel button', () => {
     expect(btn.tagName).toBe('BUTTON');
   });
 
-  test('click fires cancelTile after the --dur-sheet animation delay (non-reduced-motion)', async () => {
-    render(
-      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
-      { wrapper },
-    );
-    const btn = screen.getByLabelText('Cancel generation');
-    act(() => { fireEvent.click(btn); });
-    const tile = btn.closest('[data-canceling="true"]');
-    expect(tile).not.toBeNull();
-    expect(calls).toEqual([]);
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
-    expect(calls).toEqual([{ url: '/api/history/b1/t1', method: 'DELETE' }]);
-  });
+  // The exit is the Batch tile boundary's (motion.css .tile-exit), driven by
+  // useCancel's optimistic removal, so the DELETE goes out at once: no
+  // animation delay, nothing pending, in either motion mode.
+  for (const reduced of [false, true]) {
+    test(`click sends exactly one DELETE at once (reduced motion: ${String(reduced)})`, async () => {
+      setReducedMotion(reduced);
+      render(
+        <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
+        { wrapper },
+      );
+      fireEvent.click(screen.getByLabelText('Cancel generation'));
+      // Microtasks only (useCancel awaits cancelQueries before the request):
+      // no timer has to run for the cancel to leave.
+      await act(async () => {
+        for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      });
+      expect(calls).toEqual([{ url: '/api/history/b1/t1', method: 'DELETE' }]);
+    });
+  }
 
-  test('unmount during the animation window still sends the cancel', async () => {
-    // A virtualized scroll-out or a view switch unmounts the tile mid-animation;
-    // dropping the pending send silently let the generation finish.
+  test('unmount right after the click still sends the cancel once', async () => {
+    // A virtualized scroll-out or a view switch can unmount the tile at once;
+    // the cancel already left with the click.
     const { unmount } = render(
       <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
       { wrapper },
@@ -136,30 +142,20 @@ describe('TilePlaceholder Cancel button', () => {
     expect(calls).toEqual([{ url: '/api/history/b1/t1', method: 'DELETE' }]);
   });
 
-  test('tile completing during the animation window suppresses cancelTile', async () => {
+  test('a tile already terminal in cache skips the DELETE', async () => {
+    // The feed renders a deferred snapshot, so a tile can still show its
+    // Cancel button after the cache recorded it done.
     const client = createClient();
-    seedTile(client, 'loading');
+    seedTile(client, 'done');
     render(
       <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
       { wrapper: wrapperFor(client) },
     );
 
     fireEvent.click(screen.getByLabelText('Cancel generation'));
-    seedTile(client, 'done');
 
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(calls).toEqual([]);
-  });
-
-  test('click fires cancelTile after the short reduced-motion fade when prefers-reduced-motion is reduce', async () => {
-    setReducedMotion(true);
-    render(
-      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
-      { wrapper },
-    );
-    act(() => { fireEvent.click(screen.getByLabelText('Cancel generation')); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
-    expect(calls).toEqual([{ url: '/api/history/b1/t1', method: 'DELETE' }]);
   });
 
   test('Esc key on the tile cancels', async () => {
@@ -169,7 +165,7 @@ describe('TilePlaceholder Cancel button', () => {
     );
     const btn = screen.getByLabelText('Cancel generation');
     act(() => { fireEvent.keyDown(btn, { key: 'Escape' }); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(calls).toEqual([{ url: '/api/history/b1/t1', method: 'DELETE' }]);
   });
 
@@ -181,7 +177,7 @@ describe('TilePlaceholder Cancel button', () => {
     const btn = screen.getByLabelText('Cancel generation');
     act(() => { fireEvent.click(btn); });
     act(() => { fireEvent.click(btn); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(calls).toEqual([{ url: '/api/history/b1/t1', method: 'DELETE' }]);
   });
 

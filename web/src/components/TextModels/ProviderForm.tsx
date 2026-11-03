@@ -1,9 +1,10 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useDeferredValue, useId, useMemo, useState, ViewTransition, type ReactNode } from 'react';
 import type { ConnectionReport, TextProtocol, TextTokenField } from '@atelier/shared';
 import { TEXT_TOKEN_FIELDS, validateTextProviderBaseUrl } from '@atelier/shared';
 import { ApiError } from '../../api/client';
 import { describeError } from '../../lib/errorCopy';
 import { isRecord } from '../../lib/guards';
+import { Disclosure } from '../Disclosure';
 import styles from './AddProviderDialog.module.css';
 
 // The provider form shared by "Add a provider" and "Edit provider": name,
@@ -75,11 +76,55 @@ function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
 }
 
-/** The test report in sentences: `role="status"` for a pass, `role="alert"` for a failure. */
+const NO_RESULT: ConnectionState = { kind: 'idle' };
+
+type ProbeState<R> =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'running' }
+  | { readonly kind: 'error'; readonly message: string }
+  | { readonly kind: 'report'; readonly report: R };
+
+/**
+ * A re-test keeps the last settled result on screen, marked busy, until the
+ * next one lands: the report's shell stays mounted (no exit and re-entry, no
+ * height collapse) and only its content changes. A first run, with nothing
+ * settled yet, shows `state` itself; going idle (stale) drops the result.
+ */
+export function useHeldWhileRunning<S extends ProbeState<unknown>>(state: S): { readonly shown: S; readonly busy: boolean } {
+  const [held, setHeld] = useState<S | null>(null);
+  // Compared by content: owners may rebuild the state object every render.
+  const same = (a: S | null, b: S) => a !== null && a.kind === b.kind
+    && (a.kind === 'report' ? b.kind === 'report' && a.report === b.report
+      : a.kind === 'error' ? b.kind === 'error' && a.message === b.message : true);
+  if ((state.kind === 'report' || state.kind === 'error') && !same(held, state)) setHeld(state);
+  if (state.kind === 'idle' && held !== null) setHeld(null);
+  return state.kind === 'running' && held !== null ? { shown: held, busy: true } : { shown: state, busy: false };
+}
+
+/**
+ * The test report in sentences: `role="status"` for a pass, `role="alert"` for
+ * a failure. It renders from a deferred snapshot inside a part boundary, so a
+ * result drops in when a test settles and lifts out when it goes stale; a
+ * re-test keeps it in place, busy (useHeldWhileRunning).
+ */
 export function ConnectionResult({ state }: { state: ConnectionState }) {
+  const { shown: live, busy: liveBusy } = useHeldWhileRunning(state);
+  const liveSnapshot = useMemo(
+    () => ({ shown: live.kind === 'running' ? NO_RESULT : live, busy: liveBusy }),
+    [live, liveBusy],
+  );
+  const { shown, busy } = useDeferredValue(liveSnapshot);
+  const body = connectionBody(shown, busy);
+  return body === null ? null : (
+    <ViewTransition default="none" enter="part-enter" exit="part-exit">{body}</ViewTransition>
+  );
+}
+
+function connectionBody(state: ConnectionState, busy: boolean): ReactNode {
   if (state.kind === 'idle' || state.kind === 'running') return null;
+  const ariaBusy = busy || undefined;
   if (state.kind === 'error') {
-    return <div role="alert" className={`${styles.report} ${styles.reportFail}`}><p className={styles.reportLine}>{state.message}</p></div>;
+    return <div role="alert" aria-busy={ariaBusy} className={`${styles.report} ${styles.reportFail}`}><p className={styles.reportLine}>{state.message}</p></div>;
   }
   const { report } = state;
   const lines = report.checks.map((check) => (
@@ -87,7 +132,7 @@ export function ConnectionResult({ state }: { state: ConnectionState }) {
   ));
   if (report.ok) {
     return (
-      <div role="status" aria-live="polite" className={styles.report}>
+      <div role="status" aria-live="polite" aria-busy={ariaBusy} className={styles.report}>
         <p className={styles.reportHead}>
           Connection works.
           {report.listedCount !== undefined && ` ${plural(report.listedCount, 'model')} listed.`}
@@ -97,7 +142,7 @@ export function ConnectionResult({ state }: { state: ConnectionState }) {
     );
   }
   return (
-    <div role="alert" className={`${styles.report} ${styles.reportFail}`}>
+    <div role="alert" aria-busy={ariaBusy} className={`${styles.report} ${styles.reportFail}`}>
       <p className={styles.reportHead}>The connection test failed.</p>
       <ul className={styles.checks}>{lines}</ul>
       {report.listUnsupported === true && (
@@ -165,6 +210,12 @@ interface ProviderFieldsProps {
   readonly errors: DraftErrors;
   /** One plain line under the address (the preset's hint). */
   readonly urlHint?: string | undefined;
+  /**
+   * Every hint `urlHint` can switch between. Each gets its own disclosure, so
+   * a switch closes one while the next opens and the height interpolates
+   * between the two texts instead of snapping inside one open panel.
+   */
+  readonly urlHints?: readonly string[] | undefined;
   /** The key row: entry on Add, saved-key controls on Edit. */
   readonly keySlot: ReactNode;
   readonly disabled: boolean;
@@ -177,7 +228,7 @@ const PROTOCOLS: readonly { readonly value: TextProtocol; readonly label: string
   { value: 'anthropic', label: 'Anthropic' },
 ];
 
-export function ProviderFields({ draft, errors, urlHint, keySlot, disabled, onChange, onBlurUrl }: ProviderFieldsProps) {
+export function ProviderFields({ draft, errors, urlHint, urlHints, keySlot, disabled, onChange, onBlurUrl }: ProviderFieldsProps) {
   const nameId = useId();
   const nameErrorId = useId();
   const urlId = useId();
@@ -233,7 +284,16 @@ export function ProviderFields({ draft, errors, urlHint, keySlot, disabled, onCh
           />
         </div>
         {errors.baseUrl !== undefined && <p id={urlErrorId} className={styles.fieldError}>{errors.baseUrl}</p>}
-        {urlHint !== undefined && <p id={urlHintId} className={styles.fieldHint}>{urlHint}</p>}
+        {/* The preset's hint reveals in place (disclosure owner), so the
+            centred Add dialog grows and re-centres continuously. One panel
+            per hint: switching presets closes the old text's panel while the
+            new one opens (both on the same track transition), so the field
+            interpolates between their heights. */}
+        {(urlHints ?? (urlHint === undefined ? [] : [urlHint])).map((hint) => (
+          <Disclosure key={hint} open={hint === urlHint}>
+            <p id={hint === urlHint ? urlHintId : undefined} className={styles.fieldHint}>{hint}</p>
+          </Disclosure>
+        ))}
       </div>
 
       {keySlot}

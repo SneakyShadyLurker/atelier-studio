@@ -24,14 +24,16 @@ function draftDone(payload: unknown): Response {
 
 describe('TemplateEditor — AI Draft Template integration', () => {
   test('native name length and restored over-length names share the server limit', () => {
-    const fetch = mock(() => Response.json({}));
+    const fetch = mock((_input: RequestInfo | URL) => Response.json({}));
     globalThis.fetch = fetch as unknown as typeof globalThis.fetch;
     wrap(<TemplateEditor template={null} variableLists={[]} initialName={'x'.repeat(65)} />);
     const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Template name' });
     expect(input.maxLength).toBe(64);
     fireEvent.change(screen.getByRole('textbox', { name: /body/i }), { target: { value: 'Prompt' } });
     expect(screen.getByRole<HTMLButtonElement>('button', { name: /save template/i }).disabled).toBe(true);
-    expect(fetch).not.toHaveBeenCalled();
+    // Only the text-model gate's reads may go out; nothing is drafted or saved.
+    const urls = fetch.mock.calls.map(([input]) => (typeof input === 'string' ? input : input instanceof URL ? input.href : input.url));
+    expect(urls.filter((url) => !url.endsWith('/text-models') && !url.endsWith('/text-providers'))).toEqual([]);
   });
   test('AI button visible in data-zone="head" next to Save template', () => {
     wrap(<TemplateEditor template={null} variableLists={[]} initialName="MyTpl" />);
@@ -121,5 +123,67 @@ describe('TemplateEditor — AI Draft Template integration', () => {
     });
     expect(capturedUrl).not.toContain('/unsaved');
     expect(capturedUrl).not.toContain('/unsaved/draft');
+  });
+});
+
+describe('TemplateEditor — no text model', () => {
+  const realMatchMedia = window.matchMedia.bind(window);
+  afterEach(() => { window.matchMedia = realMatchMedia; });
+
+  test('phone More → Draft Template opens the note anchored to the More button, not the describe dialog', async () => {
+    window.matchMedia = mock((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: mock(() => undefined),
+      removeEventListener: mock(() => undefined),
+      addListener: mock(() => undefined),
+      removeListener: mock(() => undefined),
+      dispatchEvent: mock(() => true),
+    }));
+    const requests: string[] = [];
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      requests.push(url);
+      if (url.endsWith('/text-models')) return Promise.resolve(Response.json({ models: [], tasks: [], defaults: { byTask: {} }, writers: {} }));
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as unknown as typeof fetch;
+    wrap(<TemplateEditor template={null} variableLists={[]} initialName="MyTpl" />);
+    await waitFor(() => { expect(requests.some((url) => url.endsWith('/text-models'))).toBe(true); });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const more = screen.getByRole('button', { name: 'More template actions' });
+    more.focus();
+    fireEvent.click(more);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Draft Template' }));
+
+    const note = await screen.findByRole('dialog', { name: 'Draft Template needs a text model.' });
+    expect(screen.queryByRole('heading', { name: /describe the template/i })).toBeNull();
+    await waitFor(() => { expect(note.contains(document.activeElement)).toBe(true); });
+    fireEvent.keyDown(document.activeElement ?? document, { key: 'Escape' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull(); });
+    await waitFor(() => { expect(document.activeElement === more).toBe(true); });
+  });
+});
+
+describe('TemplateEditor — Referenced lists disclosure', () => {
+  test('the closed panel stays mounted and inert; the toggle flips data-open on the same panel', () => {
+    wrap(<TemplateEditor template={null} variableLists={[]} initialName="MyTpl" />);
+    fireEvent.change(screen.getByRole('textbox', { name: /body/i }), { target: { value: 'A {{var::lighting}} study' } });
+    const toggle = screen.getByRole('button', { name: /Referenced lists, 1/ });
+    const panel = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+    if (!panel) throw new Error('Referenced lists panel missing');
+    expect(panel.textContent).toContain('lighting');
+    expect(panel.hasAttribute('inert')).toBe(true);
+    expect(panel.getAttribute('aria-hidden')).toBe('true');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(panel.getAttribute('data-open')).toBe('true');
+    expect(panel.hasAttribute('inert')).toBe(false);
+    fireEvent.click(toggle);
+    expect(document.getElementById(toggle.getAttribute('aria-controls') ?? '')).toBe(panel);
+    expect(panel.hasAttribute('data-open')).toBe(false);
+    expect(panel.hasAttribute('inert')).toBe(true);
   });
 });

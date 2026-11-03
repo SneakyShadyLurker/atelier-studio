@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { useExitTransition } from '../../hooks/useExitTransition';
 import { behindModal } from '../../hooks/useTooltipDismiss';
 import styles from './index.module.css';
 
@@ -31,7 +32,10 @@ function clearTimer(ref: { current: number | null }): void {
 // coordinates (pointer mode, written imperatively so a mousemove never
 // renders) or the prompt (element mode). CSS (index.module.css .promptTip)
 // flips and clamps the card. Everything here is interaction: truncation, the
-// dwell, the travel grace onto the card, Escape and dismissal.
+// dwell, the travel grace onto the card, Escape and dismissal. Every close
+// (blur, Escape, grace, scroll) plays the overlay fade: the card composes
+// surface.fade and stays mounted, closed for assistive tech, through
+// useExitTransition's beat.
 function BatchPromptImpl({ prompt, className }: { prompt: string; className?: string }) {
   const tipId = useId();
   // Per instance, so repeated headers cannot cross-bind.
@@ -52,6 +56,15 @@ function BatchPromptImpl({ prompt, className }: { prompt: string; className?: st
   const [mode, setMode] = useState<TipMode | null>(null);
   const [truncated, setTruncated] = useState(false);
   const open = mode !== null;
+  // The mode the card is drawn in, kept through its exit so the card and its
+  // anchor stay put while it fades.
+  const [shown, setShown] = useState<TipMode | null>(null);
+  if (mode !== null && shown !== mode) setShown(mode);
+  const { closing, requestClose, cancelClose } = useExitTransition(() => { setShown(null); });
+  useLayoutEffect(() => {
+    if (mode !== null) cancelClose();
+    else if (shown !== null) requestClose();
+  }, [cancelClose, mode, requestClose, shown]);
 
   const close = useCallback(() => {
     clearTimer(timerRef);
@@ -237,7 +250,7 @@ function BatchPromptImpl({ prompt, className }: { prompt: string; className?: st
     <div
       ref={anchorRef}
       className={className ? `${styles.prompt} ${className}` : styles.prompt}
-      style={mode === 'element' ? anchor : undefined}
+      style={shown === 'element' ? anchor : undefined}
       tabIndex={truncated ? 0 : undefined}
       aria-describedby={open ? tipId : undefined}
       onMouseEnter={handleEnter}
@@ -262,16 +275,18 @@ function BatchPromptImpl({ prompt, className }: { prompt: string; className?: st
       }}
     >
       <span ref={textRef} className={styles.promptText}>{prompt}</span>
-      {open && createPortal(
+      {shown !== null && createPortal(
         <>
-          {mode === 'pointer' ? <div ref={cursorRef} className={styles.promptCursor} style={anchor} aria-hidden="true" /> : null}
+          {shown === 'pointer' ? <div ref={cursorRef} className={styles.promptCursor} style={anchor} aria-hidden="true" /> : null}
           <div
             ref={cardRef}
             id={tipId}
             className={styles.promptTip}
             style={anchor}
-            data-anchor={mode}
+            data-anchor={shown}
             data-anchored="name"
+            data-closing={closing ? 'true' : undefined}
+            aria-hidden={open ? undefined : 'true'}
             role="tooltip"
             onPointerEnter={() => {
               overPromptRef.current = false;

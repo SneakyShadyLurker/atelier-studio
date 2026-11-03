@@ -33,18 +33,13 @@
   letter-spacing: 0;
 }
 
-.kicker {
-  composes: label from '../../../styles/type.module.css';
-  margin: 0 0 4px;
-}
-
 .warning,
 .skipped {
   margin: 0;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
+  border: 1px solid var(--danger);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--danger) 8%, var(--bg-elev));
+  background: var(--danger-soft);
   color: var(--ink-2);
   font-size: var(--text-sm);
   line-height: 1.45;
@@ -152,9 +147,9 @@
   display: grid;
   gap: 8px;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line));
+  border: 1px solid var(--danger);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--danger) 10%, var(--bg-elev));
+  background: var(--danger-soft);
   color: var(--ink);
 }
 

@@ -2,11 +2,10 @@ import type { Batch, Model } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { createRef, type PropsWithChildren } from 'react';
+import { createRef, useLayoutEffect, type PropsWithChildren } from 'react';
 import Canvas, { canvasBatchKey, type CanvasHandle } from './index';
+import { flushSeenBatches, getSeenBatches, resetSeenBatches, SEEN_BATCHES_STORAGE_KEY } from '../../lib/seenBatches';
 import { APP_VIEW_UNSORTED, useAtelierStore } from '../../store/atelier';
-
-const SEEN_BATCHES_STORAGE_KEY = 'atelier.seenBatches.v1';
 
 const originalMatchMedia = window.matchMedia.bind(window);
 
@@ -82,7 +81,9 @@ function wrapper() {
 
 afterEach(() => {
   cleanup();
+  flushSeenBatches();
   sessionStorage.clear();
+  resetSeenBatches();
   window.matchMedia = originalMatchMedia;
   useAtelierStore.setState({ composerExpanded: false });
 });
@@ -137,6 +138,16 @@ describe('Canvas virtualization', () => {
     expect(container.querySelector('section[data-batch-id="batch-1"]')?.getAttribute('data-seen')).toBe('true');
   });
 
+  test('a row keeps the seen state it mounted with after the feed marks it', () => {
+    installPhone(false);
+    const batches = [batchAt(1)];
+
+    const { container } = render(<Canvas {...canvasProps} batches={batches} modelById={new Map([[model.id, model]])} />, { wrapper: wrapper() });
+
+    expect(getSeenBatches().has('batch-1')).toBe(true);
+    expect(container.querySelector('section[data-batch-id="batch-1"]')?.getAttribute('data-seen')).toBeNull();
+  });
+
   test('marks the oldest row as first so later rows keep their chapter spacing', () => {
     installPhone(false);
     const batches = [batchAt(1), batchAt(2)];
@@ -164,6 +175,42 @@ describe('Canvas virtualization', () => {
 
   test('uses a string placeholder key when the virtualizer index is not hydrated', () => {
     expect(canvasBatchKey([], 7)).toBe('placeholder-7');
+  });
+});
+
+describe('Canvas deferred placeholder rows', () => {
+  test('a placeholder row stays read-only after the live flag clears, until its replacement commits', () => {
+    installPhone(false);
+    const modelById = new Map([[model.id, model]]);
+    const stale = [batchAt(1)];
+    const fresh = [batchAt(2)];
+    // What the urgent commit shows: the deferred feed still holds the
+    // placeholder row while the live `readOnlyActions` is already false.
+    const urgent: { readonly batchId: string | undefined; readonly disabled: boolean | undefined }[] = [];
+    function Probe({ value }: { value: readonly Batch[] }) {
+      useLayoutEffect(() => {
+        const row = document.querySelector<HTMLElement>('[data-batch-id]');
+        const archive = row?.querySelector<HTMLButtonElement>('button[aria-label="Archive batch"]');
+        urgent.push({ batchId: row?.dataset.batchId, disabled: archive?.disabled });
+      }, [value]);
+      return null;
+    }
+    const view = (batches: readonly Batch[], readOnlyActions: boolean) => (
+      <>
+        <Canvas {...canvasProps} batches={batches} modelById={modelById} readOnlyActions={readOnlyActions} />
+        <Probe value={batches} />
+      </>
+    );
+    const { rerender, container } = render(view(stale, true), { wrapper: wrapper() });
+
+    rerender(view(fresh, false));
+
+    expect(urgent).toEqual([
+      { batchId: 'batch-1', disabled: true },
+      { batchId: 'batch-1', disabled: true },
+    ]);
+    const archive = container.querySelector<HTMLButtonElement>('[data-batch-id="batch-2"] button[aria-label="Archive batch"]');
+    expect(archive?.disabled).toBe(false);
   });
 });
 

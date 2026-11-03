@@ -465,7 +465,7 @@ describe('PromptPicker empty states', () => {
     renderPicker({ library: { templates: [], variableLists: [], dimensions: [] } });
 
     expect(screen.getByRole('heading', { name: 'No templates yet' })).toBeTruthy();
-    expect(screen.getByText('Save a template in the Prompt library and it appears here.')).toBeTruthy();
+    expect(screen.getByText('Save a template in the Prompt Library and it appears here.')).toBeTruthy();
     expect(document.querySelector('[data-etching="empty-picker"]')).not.toBeNull();
     // Brainstorm stays reachable from the empty picker.
     expect(screen.getByRole('button', { name: /Brainstorm/i })).toBeTruthy();
@@ -499,6 +499,20 @@ describe('PromptPicker back-to-list', () => {
     const searchAgain: HTMLInputElement = screen.getByPlaceholderText('Search templates...');
     expect(searchAgain.value).toBe('Constraint');
     expect(screen.getByRole('button', { name: /Constraint portrait/i })).toBeTruthy();
+  });
+
+  test('the refine header titles the selected template with a back control beside it and no subtitle', () => {
+    renderPicker();
+    fireEvent.click(screen.getByRole('button', { name: /Constraint portrait/i }));
+    const heading = screen.getByRole('heading', { level: 2 });
+    expect(heading.textContent).toBe('Constraint portrait');
+    expect(screen.getByRole('dialog', { name: 'Constraint portrait' })).toBeTruthy();
+    const header = heading.closest('[data-zone="head"]');
+    expect(header?.querySelector('p')).toBeNull();
+    const back = screen.getByRole('button', { name: 'Back to template list' });
+    expect(header?.contains(back)).toBe(true);
+    fireEvent.click(back);
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Templates');
   });
 });
 
@@ -1464,5 +1478,42 @@ describe('axis sweep — footer + overload guard', () => {
     await waitFor(() => {
       expect(useAtelierStore.getState().draft.rollQueue).toHaveLength(9);
     });
+  });
+
+  test('switching to a larger axis and pressing the primary before the picker re-renders still asks first', async () => {
+    const list = (name: string, count: number): VariableList => ({
+      id: `list-${name}`, name, sortOrder: 0, createdAt: 1, updatedAt: 1,
+      options: Array.from({ length: count }, (_v, i) => ({
+        id: `${name}-${String(i)}`, listId: `list-${name}`, value: `${name} ${String(i)}`, tagIds: [], sortOrder: i, weight: 1,
+      })),
+    });
+    const twoAxes: PromptLibraryResponse = {
+      templates: [{ ...template, body: '{{var::small}} {{var::large}} portrait' }],
+      variableLists: [list('small', 2), list('large', 9)],
+      dimensions: [],
+    };
+    renderPicker({ library: twoAxes });
+    fireEvent.click(screen.getByText('Constraint portrait'));
+    expandAdvanced();
+    await screen.findByLabelText(/choose small value/i);
+    fireEvent.click(nthToggle(0));
+    const primary = screen.getByRole('button', { name: /sweep this axis into 2 queued rolls/i });
+    // act flushes the deferred render before it returns, so the final DOM
+    // cannot show a commit that read the old count; the mutation records'
+    // old values can.
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, characterDataOldValue: true });
+    // One act scope: the primary still renders the 2-roll sweep while the
+    // live draft has already switched to the 9-option axis.
+    act(() => {
+      fireEvent.click(nthToggle(1));
+      fireEvent.click(primary);
+    });
+    const records = observer.takeRecords();
+    observer.disconnect();
+    expect(useAtelierStore.getState().draft.rollQueue).toHaveLength(0);
+    expect(await screen.findByText(/Queue 9 rolls\?/i)).toBeTruthy();
+    const staleTitle = records.some((record) => record.type === 'characterData' && /Queue 2 rolls/i.test(record.oldValue ?? ''));
+    expect(staleTitle, 'the confirmation never shows the old sweep count').toBe(false);
   });
 });

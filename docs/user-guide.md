@@ -10,7 +10,7 @@ or [Deployment](deployment.md).
    screen. The chip shows a short family name, such as `GPT`, `Banana` or
    `Mock`; hover it for the full model name. The menu groups the models
    available on this installation into Local and Cloud, and marks models that
-   need your own key as **Key required**.
+   need your own key with a lock and **Needs your API key**.
 2. Enter a prompt describing the picture you want.
 3. Choose an aspect ratio with the ratio chip (for example `1:1`) and the number
    of images with the count chip (`×1` to `×4`). The available choices depend
@@ -71,13 +71,13 @@ files in `DATA_DIR`.
 ## Organise your work
 
 The **Library** sidebar contains your collections, **Unsorted** work and
-**Pinned** batches. Create a collection with **+ New collection**, then drag
+**Pinned** batches. Create a collection with **New collection**, then drag
 a batch into it. Pin a batch to make it easier to find, and use search to look
 for prompt text.
 
 Archiving removes work from the active views. Open **Archive** to restore
 archived results, or delete them permanently. Archived work is retained for
-30 days before expiry; permanent deletion and **Empty Archive** cannot be
+30 days before expiry; permanent deletion and **Empty archive** cannot be
 undone. Download anything you want to keep before permanently deleting it.
 
 Your history lives on the server. Changing browser, or clearing browser storage,
@@ -88,7 +88,7 @@ history; the server does not merge usernames automatically.
 
 The operator enables **Prompt Library** for selected users. If it is missing,
 ask the operator to add your exact signed-in username to `PROMPT_LIBRARY_USERS`.
-New installations do not include the operator's personal prompt library.
+New installations do not include the operator's personal Prompt Library.
 
 - **Templates** hold reusable prompt text.
 - **Variable lists** provide alternatives for parts of a template.

@@ -1,4 +1,4 @@
-import type { Batch, Collection, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse, TextRoutingResponse } from '@atelier/shared';
+import type { AdminProvider, Batch, Collection, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse, TextModelsResponse, TextRoutingResponse } from '@atelier/shared';
 
 // Local SVG stills keep the preview deterministic and completely offline.
 function still(primary: string, secondary: string, accent: string, motif: number): string {
@@ -18,6 +18,8 @@ export const models: readonly Model[] = [
   { id: 'gpt-image-2.5-sunburst', name: 'GPT Image', backend: 'cloud', pool: 'shared', tag: 'cloud', latency: 'slow', supportedRatios: ['1:1', '4:5', '3:4'], defaultRatio: '1:1', supportsReferenceImages: true, concurrencyCapPerUser: 4, maxCountPerBatch: 4 },
   { id: 'krea-2-test-alpha', name: 'Test Alpha', backend: 'local', pool: 'local', tag: 'comfyui', latency: 'slow', supportedRatios: ['1:1', '4:5', '3:4'], defaultRatio: '3:4', supportsReferenceImages: true, concurrencyCapPerUser: 1, maxCountPerBatch: 1, availability: { ok: true, checkedAt: now } },
 ];
+
+const videoModel: Model = { id: 'studio-i2v', name: 'Studio Motion', backend: 'local', pool: 'local', tag: 'comfyui', latency: 'slow', supportedRatios: ['16:9'], defaultRatio: '16:9', supportsI2V: true, outputsVideo: true, concurrencyCapPerUser: 1, maxCountPerBatch: 1, availability: { ok: true, checkedAt: now } };
 
 export const collections: readonly Collection[] = [
   { id: 'campaign', name: 'Campaign studies', count: 2, archivedCount: 0, createdAt: now - 200_000 },
@@ -75,6 +77,47 @@ export const promptLibrary: PromptLibraryResponse = {
   }],
 };
 
+// One provider with one model, so the Text models view renders a model row
+// (and its switch) under `textAdmin=1&textProvider=1`.
+const textProvider: AdminProvider = {
+  id: 'provider-preview',
+  name: 'Preview provider',
+  protocol: 'openai-compatible',
+  baseUrl: 'https://text.example.invalid/v1',
+  preset: null,
+  auth: 'none',
+  tokenField: 'max_completion_tokens',
+  listModels: false,
+  enabled: true,
+  listedCount: null,
+  warnings: [],
+  models: [{
+    id: 'text-model-preview',
+    providerId: 'provider-preview',
+    modelId: 'preview-writer',
+    displayName: 'Preview writer',
+    enabled: false,
+    screenRequests: false,
+    sortOrder: 0,
+    status: 'available',
+    verifiedAt: null,
+    lastTest: null,
+    usage: { isDefault: false, tasks: [], writers: [], userPicks: 0 },
+    vision: false,
+    maxImages: null,
+    structuredOutput: 'json_object',
+    reasoningLevels: [],
+    reasoningDefault: null,
+    temperature: null,
+    topP: null,
+    fixedOutputTokens: null,
+    latencyProfile: 'standard',
+    promptVariant: 'generic',
+  }],
+  createdAt: 1,
+  updatedAt: 1,
+};
+
 const libraryDiagnosis: LibraryDiagnosisResponse = {
   templates: promptLibrary.templates.map((template) => ({ templateName: template.name, satisfiable: true })),
   librarySnapshotHash: 'offline-library',
@@ -103,28 +146,117 @@ export function installOfflineResponses(): void {
   const emptyHistory = motionParams.get('emptyHistory') === '1';
   const historyError = motionParams.get('historyError') === '1';
   const textAdmin = motionParams.get('textAdmin') === '1';
+  // Zero configured text models: the state the AI actions' note answers.
+  // Without it `/text-models` 404s, which the gate reads as unknown.
+  const noTextModels = motionParams.get('noTextModels') === '1';
+  const withTextProvider = motionParams.get('textProvider') === '1';
+  // `emptyLibrary=1` answers an empty Prompt Library (every tab's empty state).
+  const emptyLibrary = motionParams.get('emptyLibrary') === '1';
+  // `video=1` adds an image-to-video model (the Composer's mode swap).
+  const withVideo = motionParams.get('video') === '1';
+  const inventory: readonly Model[] = withVideo ? [...models, videoModel] : models;
+  // `modelsFail=N` fails the first N model inventory requests (the query
+  // retries twice, so 3 reaches the Composer's banner) and answers every
+  // later one (its Retry).
+  let modelsFailures = Number(motionParams.get('modelsFail') ?? 0);
+  // `refs=1` gives the newest batch's first tile two reference images (the
+  // Lightbox reference strip); `refCount=N` gives it N instead (the largest
+  // model reference cap is 10).
+  const withRefs = motionParams.get('refs') === '1';
+  const refCount = Number(motionParams.get('refCount') ?? 2);
+  // `batches=N` prepends N older Unsorted batches so the rail and the canvas
+  // overflow (scroll-edge fade and entrance-replay specs).
+  const extra = Number(motionParams.get('batches') ?? 0);
+  const feedItems: readonly Batch[] = extra > 0
+    ? [...Array.from({ length: extra }, (_, index): Batch => ({
+      id: `studio-extra-${String(index + 1)}`,
+      prompt: `Archive study ${String(index + 1)}, overcast harbour light`,
+      ratio: '1:1',
+      modelId: 'gpt-image-2.5-sunburst',
+      modelLabel: 'GPT Image',
+      status: 'done',
+      collectionId: null,
+      pinned: false,
+      createdAt: now - 3_600_000 - (extra - index) * 60_000,
+      tiles: [0, 1].map((tileIndex) => ({
+        id: `studio-extra-tile-${String(index + 1)}-${String(tileIndex + 1)}`,
+        status: 'done' as const,
+        url: stills[(index + tileIndex) % stills.length] ?? stills[0],
+        ext: 'png' as const,
+        mime: 'image/png' as const,
+        seed: 100 + index * 2 + tileIndex,
+        completedAt: now - 3_600_000 - (extra - index) * 60_000,
+      })),
+    })), ...batches]
+    : batches;
+  const feedWithRefs: readonly Batch[] = withRefs
+    ? feedItems.map((batch) => (batch.id !== 'studio-batch-4' ? batch : {
+      ...batch,
+      tiles: batch.tiles.map((tile, index) => (index === 0 ? { ...tile, refImageIds: Array.from({ length: refCount }, (_, ref) => `studio-ref-${String(ref + 1)}`) } : tile)),
+    }))
+    : feedItems;
+  const feed = feedWithRefs;
+  // `writable=1` keeps tile and batch archive, and Undo's restore, in memory,
+  // so the feed's removal and return motion can run against the real App.
+  // Each write answers after `writeDelay` ms (default 400), like a network
+  // round trip: an instant answer lands its toast and refetch inside the
+  // removal's view transition, and React skips a transition that a
+  // synchronous store update interrupts while it prepares.
+  const writable = motionParams.get('writable') === '1';
+  const writeDelay = Number(motionParams.get('writeDelay') ?? 400);
+  const archived = new Set<string>();
+  const written = (): Promise<Response> => new Promise((resolve) => {
+    window.setTimeout(() => { resolve(new Response(null, { status: 204 })); }, writeDelay);
+  });
   const offlineFetch = Object.assign((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
     if (method === 'POST' && url.pathname === '/api/prompts/library-diagnosis') return Promise.resolve(json(libraryDiagnosis));
     if (method === 'POST' && url.pathname === '/api/prompts/library-coverage') return Promise.resolve(json(libraryCoverage));
+    if (writable) {
+      const tileRoute = /^\/api\/history\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+      const batchRoute = /^\/api\/history\/([^/]+)$/.exec(url.pathname);
+      const restoreRoute = /^\/api\/archive\/([^/]+)\/restore$/.exec(url.pathname);
+      if (method === 'DELETE' && tileRoute?.[2]) {
+        archived.add(tileRoute[2]);
+        return written();
+      }
+      if (method === 'DELETE' && batchRoute?.[1]) {
+        for (const tile of feed.find((batch) => batch.id === batchRoute[1])?.tiles ?? []) archived.add(tile.id);
+        return written();
+      }
+      if (method === 'POST' && restoreRoute?.[1]) {
+        archived.delete(restoreRoute[1]);
+        return written();
+      }
+    }
     if (method !== 'GET') return Promise.resolve(json({ error: 'Preview is read only' }, 405));
-    if (textAdmin && url.pathname === '/api/text-providers') return Promise.resolve(json({ providers: [] }));
+    if (textAdmin && url.pathname === '/api/text-providers') return Promise.resolve(json({ providers: withTextProvider ? [textProvider] : [] }));
     if (textAdmin && url.pathname === '/api/text-routing') return Promise.resolve(json({
       defaults: { byTask: {} }, writers: {}, imageModels: models.map(({ id, name }) => ({ id, label: name })),
     } satisfies TextRoutingResponse));
+    if (noTextModels && url.pathname === '/api/text-models') return Promise.resolve(json({
+      models: [], tasks: [], defaults: { byTask: {} }, writers: {},
+    } satisfies TextModelsResponse));
+    if (url.pathname === '/api/models' && modelsFailures > 0) {
+      modelsFailures -= 1;
+      return Promise.resolve(json({ error: 'Models unavailable' }, 503));
+    }
     if (url.pathname === '/api/models') return modelsDelay > 0
-      ? new Promise((resolve) => { window.setTimeout(() => { resolve(json(models)); }, modelsDelay); })
-      : Promise.resolve(json(models));
+      ? new Promise((resolve) => { window.setTimeout(() => { resolve(json(inventory)); }, modelsDelay); })
+      : Promise.resolve(json(inventory));
     if (url.pathname === '/api/collections') return Promise.resolve(json(library));
-    if (url.pathname === '/api/prompts') return Promise.resolve(json(promptLibrary));
+    if (url.pathname === '/api/prompts') return Promise.resolve(json(emptyLibrary ? { templates: [], variableLists: [], dimensions: [] } : promptLibrary));
     if (url.pathname === '/api/history') {
       if (historyError) return Promise.resolve(json({ error: 'History unavailable' }, 503));
       if (emptyHistory) return Promise.resolve(json({ items: [], nextCursor: null }));
       const scope = url.searchParams.get('collectionId');
       const pinned = url.searchParams.get('pinned');
       const query = (url.searchParams.get('q') ?? '').toLowerCase();
-      const items = batches.filter((batch) => (scope === null || (scope === 'null' ? batch.collectionId === null : batch.collectionId === scope))
+      const live = feed
+        .map((batch) => (archived.size === 0 ? batch : { ...batch, tiles: batch.tiles.filter((tile) => !archived.has(tile.id)) }))
+        .filter((batch) => batch.tiles.length > 0);
+      const items = live.filter((batch) => (scope === null || (scope === 'null' ? batch.collectionId === null : batch.collectionId === scope))
         && (pinned !== 'true' || batch.pinned)
         && (!query || batch.prompt.toLowerCase().includes(query)));
       const historyItems = delayedMedia ? items.map((batch) => ({ ...batch, tiles: batch.tiles.map((tile) => ({ ...tile, url: `/e2e/motion-image.svg?id=${tile.id}` })) })) : items;

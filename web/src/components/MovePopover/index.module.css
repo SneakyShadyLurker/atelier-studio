@@ -89,7 +89,7 @@
   font-size: var(--text-xs);
 }
 
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .input {
     font-size: var(--text-base);
   }

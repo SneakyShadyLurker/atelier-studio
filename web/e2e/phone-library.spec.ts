@@ -56,9 +56,31 @@ test.describe('phone prompt library editors', () => {
     await expect(more).toBeFocused();
   });
 
-  test('the tab strip scrolls with an edge fade and keeps the active tab in view', async ({ page }) => {
+  test('all four tabs sit fully inside the strip at 390px, beside the help button on the title row', async ({ page }) => {
     await openLibrary(page);
-    const strip = page.getByRole('tablist', { name: 'Prompt library sections' });
+    const strip = page.getByRole('tablist', { name: 'Prompt Library sections' });
+    expect(await strip.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+    const stripBox = await box(strip);
+    for (const name of ['Templates', 'Variable lists', 'Dimensions', 'Settings']) {
+      const tab = await box(page.getByRole('tab', { name }));
+      expect(tab.x, `${name} starts inside the strip`).toBeGreaterThanOrEqual(stripBox.x - 0.5);
+      expect(tab.x + tab.width, `${name} ends inside the strip`).toBeLessThanOrEqual(stripBox.x + stripBox.width + 0.5);
+      // The touch gate gives every tab the 44px floor.
+      expect(tab.height, `${name} touch floor`).toBeGreaterThanOrEqual(44);
+    }
+    // Help left the strip for the title row and keeps its touch target.
+    const help = await box(page.getByRole('button', { name: 'How the Prompt Library works' }));
+    const title = await box(page.getByRole('heading', { name: 'Prompt Library' }));
+    expect(help.width).toBeGreaterThanOrEqual(44);
+    expect(help.height).toBeGreaterThanOrEqual(44);
+    expect(help.y + help.height).toBeLessThanOrEqual(stripBox.y + 0.5);
+    expect(centreY(help)).toBeLessThan(title.y + title.height);
+  });
+
+  test('a narrower phone scrolls the tab strip with an edge fade and keeps the active tab in view', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 });
+    await openLibrary(page);
+    const strip = page.getByRole('tablist', { name: 'Prompt Library sections' });
     const geometry = await strip.evaluate((el) => ({
       overflows: el.scrollWidth > el.clientWidth,
       mask: getComputedStyle(el).maskImage || getComputedStyle(el).getPropertyValue('-webkit-mask-image'),

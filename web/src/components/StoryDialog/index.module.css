@@ -2,11 +2,6 @@
   max-width: 520px;
 }
 
-.source {
-  composes: label from '../../styles/type.module.css';
-  margin: 2px 0 18px;
-}
-
 /* The outline field is the shared dialog field (dialog.module.css .field*);
    only its larger size and reading type are local. */
 .outline {

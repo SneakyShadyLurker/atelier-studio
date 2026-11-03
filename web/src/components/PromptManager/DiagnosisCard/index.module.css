@@ -75,6 +75,16 @@
   color: var(--ink-2);
 }
 
+/* The card's flex gap moves inside the clipped content, so the closed
+   details panel adds no space (disclosure owner). */
+.detailsDisclosure {
+  margin-top: -12px;
+}
+
+.detailsDisclosureContent {
+  padding-top: 12px;
+}
+
 .pair {
   display: flex;
   align-items: center;
@@ -96,7 +106,7 @@
 }
 
 .dimension {
-  color: var(--accent);
+  color: var(--ink-2);
   font-weight: 600;
 }
 

@@ -50,4 +50,9 @@ export const FEED_VIRTUALIZER_ANCHORING = {
   followOnAppend: true,
   scrollEndThreshold: FEED_SCROLL_END_THRESHOLD_PX,
   scrollPaddingEnd: FEED_SCROLL_PADDING_END_PX,
+  // A batch removal re-anchors the feed, and the scroll it fires would
+  // flushSync a re-render while React's view transition for that removal is
+  // still capturing; React then skips the transition (the Batch tile and
+  // Canvas row boundaries). Plain batched updates keep the reflow animated.
+  useFlushSync: false,
 } as const;

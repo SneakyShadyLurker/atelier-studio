@@ -56,3 +56,59 @@ export const FEED_VIRTUALIZER_ANCHORING = {
   // Canvas row boundaries). Plain batched updates keep the reflow animated.
   useFlushSync: false,
 } as const;
+
+/** Per-feed margin bookkeeping: the last measured margin and a shift still owed to the reader. */
+export interface FeedMarginState {
+  margin: number | null;
+  owed: number;
+}
+
+/** The virtualizer surface the margin shift goes through. */
+export interface FeedScrollSurface {
+  readonly isScrolling: boolean;
+  scrollBy: (delta: number) => void;
+}
+
+/** The project's touch gate (touch floors use the same query in CSS). */
+const TOUCH_GATE = '(hover: none), (any-pointer: coarse)';
+
+/**
+ * Where a feed's virtual list starts inside its scroller (TanStack's
+ * `scrollMargin`), measured after each commit. When the content above the list
+ * (the history status row) changes height, the reader is owed a scroll shift of
+ * the same amount so the row under them holds still. `anchorTo: 'end'` cannot
+ * cover this: it re-anchors only when the row set changes, and it resolves the
+ * anchor with the margin of that same render, before this measurement has
+ * caught up. The first measurement only records the margin.
+ */
+export function measureFeedScrollMargin(
+  scroller: HTMLElement,
+  list: HTMLElement,
+  state: FeedMarginState,
+  virtualizer: FeedScrollSurface,
+): number {
+  const margin = list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+  if (state.margin !== null) state.owed += margin - state.margin;
+  state.margin = margin;
+  settleFeedScrollMargin(scroller, state, virtualizer);
+  return margin;
+}
+
+/**
+ * Pays the owed shift through the virtualizer (`scrollBy`), whose scroll
+ * reconcile would otherwise restore its own target over a raw scrollTop write.
+ * On a touch device it waits while the feed scrolls: a scroll write cancels iOS
+ * momentum, which is why virtual-core holds its own corrections there too, and
+ * callers settle again once `isScrolling` clears. A shrink a reader at the end
+ * already got, because the browser clamped scrollTop to the new maximum, is
+ * dropped instead of applied a second time.
+ */
+export function settleFeedScrollMargin(scroller: HTMLElement, state: FeedMarginState, virtualizer: FeedScrollSurface): void {
+  if (state.owed === 0) return;
+  if (virtualizer.isScrolling && typeof matchMedia === 'function' && matchMedia(TOUCH_GATE).matches) return;
+  const owed = state.owed;
+  state.owed = 0;
+  if (scroller.scrollTop <= 0) return;
+  if (owed < 0 && scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) return;
+  virtualizer.scrollBy(owed);
+}

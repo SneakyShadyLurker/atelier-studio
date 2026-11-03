@@ -1,3 +1,4 @@
+import { useDeferredValue } from 'react';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import styles from './index.module.css';
 
@@ -10,6 +11,18 @@ export interface InfiniteStatusProps {
   endLabel: string;
   rootMargin?: string;
   enabled?: boolean;
+}
+
+/**
+ * The row's footprint: the full reserve while more can load, the compact end
+ * state once nothing can follow. It commits in the deferred render, the same
+ * render in which a parent drawing its rows from `useDeferredValue` (Canvas,
+ * Archive) commits the last page, so the row never shrinks a commit before the
+ * page it ends on. Fetching reads the live flags. A feed that measures what
+ * sits above its list keys that measurement on this same value.
+ */
+export function useStatusFootprint(hasNextPage: boolean): 'pending' | 'end' {
+  return useDeferredValue(hasNextPage ? 'pending' : 'end');
 }
 
 export function InfiniteStatus({
@@ -31,6 +44,7 @@ export function InfiniteStatus({
     enabled,
     ...(rootMargin !== undefined ? { rootMargin } : {}),
   });
+  const footprint = useStatusFootprint(hasNextPage);
 
   if (!enabled) return null;
   if (!hasNextPage && itemCount === 0) return null;
@@ -46,7 +60,7 @@ export function InfiniteStatus({
         : 'idle';
 
   return (
-    <div className={styles.root} data-error={isFetchNextPageError ? 'true' : undefined}>
+    <div className={styles.root} data-footprint={footprint} data-error={isFetchNextPageError ? 'true' : undefined}>
       <div className={styles.hairline} data-state={state} aria-hidden="true" />
       <div role="status" aria-live="polite" className={styles.status}>
         {state === 'loading' ? 'Loading more' : isFetchNextPageError ? 'Could not load more' : state === 'end' ? endLabel : ''}

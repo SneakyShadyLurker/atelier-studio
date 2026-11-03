@@ -145,6 +145,12 @@ export function installOfflineResponses(): void {
   const delayedMedia = motionParams.get('motionMedia') === '1';
   const emptyHistory = motionParams.get('emptyHistory') === '1';
   const historyError = motionParams.get('historyError') === '1';
+  // `paged=1` honours `limit` and an offset `cursor`, so older history loads
+  // page by page and the last page flips the feed's status row to its end state.
+  const paged = motionParams.get('paged') === '1';
+  // `pageDelay=<ms>` holds every older page that long, so a spec can settle
+  // the scroll before the page lands.
+  const pageDelay = Number(motionParams.get('pageDelay') ?? 0);
   const textAdmin = motionParams.get('textAdmin') === '1';
   // Zero configured text models: the state the AI actions' note answers.
   // Without it `/text-models` 404s, which the gate reads as unknown.
@@ -260,7 +266,13 @@ export function installOfflineResponses(): void {
         && (pinned !== 'true' || batch.pinned)
         && (!query || batch.prompt.toLowerCase().includes(query)));
       const historyItems = delayedMedia ? items.map((batch) => ({ ...batch, tiles: batch.tiles.map((tile) => ({ ...tile, url: `/e2e/motion-image.svg?id=${tile.id}` })) })) : items;
-      return Promise.resolve(json({ items: [...historyItems].reverse(), nextCursor: null }));
+      const newestFirst = [...historyItems].reverse();
+      if (!paged) return Promise.resolve(json({ items: newestFirst, nextCursor: null }));
+      const offset = Number(url.searchParams.get('cursor') ?? 0);
+      const end = offset + Number(url.searchParams.get('limit') ?? 30);
+      const page = json({ items: newestFirst.slice(offset, end), nextCursor: end < newestFirst.length ? String(end) : null });
+      if (offset === 0 || pageDelay === 0) return Promise.resolve(page);
+      return new Promise((resolve) => { setTimeout(() => { resolve(page); }, pageDelay); });
     }
     if (url.pathname === '/api/archive') return Promise.resolve(json({ items: [], nextCursor: null, total: 0 }));
     return Promise.resolve(json({ error: 'Unavailable in offline preview' }, 404));

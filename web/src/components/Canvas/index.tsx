@@ -4,13 +4,13 @@ import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, us
 import { flushSync } from 'react-dom';
 import { useIsPhone } from '../../hooks/useIsPhone';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
-import { FEED_SCROLL_END_THRESHOLD_PX, FEED_VIRTUALIZER_ANCHORING } from '../../lib/feedAnchor';
+import { FEED_SCROLL_END_THRESHOLD_PX, FEED_VIRTUALIZER_ANCHORING, measureFeedScrollMargin, settleFeedScrollMargin, type FeedMarginState } from '../../lib/feedAnchor';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { markBatchesSeen, useSeenBatches } from '../../lib/seenBatches';
 import { scopeTitle } from '../../lib/viewChrome';
 import { useAtelierStore, type AppView } from '../../store/atelier';
 import BatchView, { type BatchAction, type TileAction, type TileHandoff } from '../Batch';
-import { InfiniteStatus } from '../InfiniteStatus';
+import { InfiniteStatus, useStatusFootprint } from '../InfiniteStatus';
 import { ManagedViewHeader } from '../ManagedViewHeader';
 import { StateView, LoadingState, ErrorState } from '../StateView';
 import styles from './index.module.css';
@@ -232,6 +232,9 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   // virtualizer's offsets in scroller coordinates, so scrollToIndex lands on
   // the row itself rather than that much short of it.
   const [scrollMargin, setScrollMargin] = useState(0);
+  const marginStateRef = useRef<FeedMarginState>({ margin: null, owed: 0 });
+  // The history status row's footprint, on the render it commits in.
+  const statusFootprint = useStatusFootprint(hasNextPage);
   const seenBatchIds = useSeenBatches();
   const getBatchKey = useCallback((index: number) => canvasBatchKey(batches, index), [batches]);
 
@@ -324,8 +327,14 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
     const scroller = canvasRef.current;
     const feed = virtualFeedRef.current;
     if (!scroller || !feed) return;
-    setScrollMargin(feed.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
-  }, [batches.length, hasNextPage, isFetchingNextPage, isFetchNextPageError, isPhone]);
+    setScrollMargin(measureFeedScrollMargin(scroller, feed, marginStateRef.current, batchVirtualizer));
+  }, [batchVirtualizer, batches.length, statusFootprint, hasNextPage, isFetchingNextPage, isFetchNextPageError, isPhone]);
+
+  const feedIsScrolling = batchVirtualizer.isScrolling;
+  useLayoutEffect(() => {
+    const scroller = canvasRef.current;
+    if (scroller && !feedIsScrolling) settleFeedScrollMargin(scroller, marginStateRef.current, batchVirtualizer);
+  }, [batchVirtualizer, feedIsScrolling]);
 
   const landedRef = useRef(false);
   const landingRef = useRef(false);

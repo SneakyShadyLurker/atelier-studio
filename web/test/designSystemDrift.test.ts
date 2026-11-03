@@ -394,7 +394,16 @@ describe('design system drift guards', () => {
     expect(motion).toMatch(/::view-transition \{\s*pointer-events: none;\s*\}/);
     const app = read('web/src/App.tsx');
     expect(app).toContain('<ViewTransition key={stageKey} default="none"');
-    expect(app).toContain('<ViewTransition default="none" enter="composer-enter" exit="composer-exit" update="composer-frame">');
+    expect(app).toContain('<ViewTransition default="none" enter="composer-enter" exit="composer-exit" update={COMPOSER_FRAME_UPDATE}>');
+    // The Composer frame and mode body animate only for the Composer's own
+    // typed part commits: a capture is not hit-testable, so a frame captured
+    // while a batch enters the feed would swallow Generate presses.
+    const composerMotion = read('web/src/lib/composerMotion.ts');
+    expect(composerMotion).toContain("export const COMPOSER_FRAME_UPDATE = { [COMPOSER_PARTS_TRANSITION]: 'composer-frame', default: 'none' };");
+    expect(composerMotion).toContain("export const COMPOSER_BODY_UPDATE = { [COMPOSER_PARTS_TRANSITION]: 'composer-body', default: 'none' };");
+    const composer = read('web/src/components/Composer/index.tsx');
+    expect(composer).toContain('<ViewTransition default="none" update={COMPOSER_BODY_UPDATE}>');
+    expect(composer).toContain('addTransitionType(COMPOSER_PARTS_TRANSITION);');
     // Feed tiles and batch rows stay unnamed (React's own names), so a batch
     // that two feed scopes share never pairs across a view swap.
     const batch = read('web/src/components/Batch/index.tsx');

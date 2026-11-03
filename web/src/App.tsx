@@ -7,6 +7,7 @@ import { HISTORY_WRITE_MUTATION_KEY } from './hooks/historyWrites';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { resolveActiveBatchId } from './lib/burstFollow';
 import { describeError } from './lib/errorCopy';
+import { COMPOSER_FRAME_UPDATE } from './lib/composerMotion';
 import { composerPrefsFromDraft, saveComposerPrefs } from './lib/composerPrefs';
 import { resolveEffectiveModel } from './lib/effectiveModel';
 import { buildHistoricalRequest, isRetiredHistoricalModel, RETIRED_MODEL_TOAST, type HistoricalReplay } from './lib/historicalGeneration';
@@ -878,7 +879,7 @@ function AppContent() {
               the Composer subtree and losing local interaction state.
             */}
             <ErrorBoundary resetKeys={[composerResetKey]} fallback={composerErrorFallback}>
-              <ViewTransition default="none" enter="composer-enter" exit="composer-exit" update="composer-frame">
+              <ViewTransition default="none" enter="composer-enter" exit="composer-exit" update={COMPOSER_FRAME_UPDATE}>
               <Composer
                 models={models}
                 modelById={modelById}

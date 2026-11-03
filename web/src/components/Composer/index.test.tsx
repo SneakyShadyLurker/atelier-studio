@@ -1085,8 +1085,8 @@ describe('Composer ai-fill cap guard', () => {
 
 describe('Composer deferred parts snapshot', () => {
   // The conditional parts (queue chip, banner, ref chips, mode body) render
-  // from one useDeferredValue snapshot, so they mount and unmount in a
-  // Transition, which is what lets their <ViewTransition> boundaries play.
+  // from one snapshot committed in a typed Transition, so they mount and
+  // unmount in it, which is what lets their <ViewTransition> boundaries play.
   // The urgent commit (the Probe's layout effect) still shows the old parts.
   test('the queue chip appears only through the deferred render', () => {
     const urgent: boolean[] = [];

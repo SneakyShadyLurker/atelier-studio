@@ -475,6 +475,90 @@ test('the composer toolbar beside the open rail wraps to at most two rows at 820
   expect(tops.length).toBeLessThanOrEqual(2);
 });
 
+// Fully loaded history has no sentinel and no Retry, so its "Start" divider
+// keeps only the hairline and its label. Reserving the hidden Retry row there
+// left ~45px (~60px on touch) of empty band above the feed's first batch.
+const startDividerHeights = (page: Page) => Promise.all(
+  [page.getByTestId('canvas-scroller'), page.getByTestId('sidebar-feed')].map(async (scope) => {
+    const label = scope.getByRole('status').filter({ hasText: /^Start, \d+ batch/ });
+    await expect(label).toBeVisible();
+    return label.evaluate((element) => element.parentElement?.getBoundingClientRect().height ?? Infinity);
+  }),
+);
+
+for (const [name, options] of [['desktop', { viewport: { width: 1440, height: 900 } }], ['iPad touch', IPAD]] as const) {
+  test(`the fully loaded history Start divider stays compact on ${name}`, async ({ browser }) => {
+    const context = await browser.newContext(options);
+    const page = await context.newPage();
+    await page.goto('/e2e/studio/index.html');
+    if (name === 'iPad touch') await page.getByRole('button', { name: 'Expand sidebar' }).click();
+    await page.evaluate(() => document.fonts.ready);
+    for (const height of await startDividerHeights(page)) expect(height).toBeLessThanOrEqual(52);
+    await context.close();
+  });
+}
+
+// The divider shrinks to its end footprint in the same commit that prepends
+// the last page above the reader. Both feeds must still hold the row the
+// reader is looking at, in every frame, not just after the settle.
+test('the last history page lands without moving the reader in either feed', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/e2e/studio/index.html?paged=1&batches=150&pageDelay=400');
+  const canvas = page.getByTestId('canvas-scroller');
+  const rail = page.getByTestId('sidebar-feed');
+  const done = canvas.getByRole('status').filter({ hasText: /^Start, \d+ batches$/ });
+  await expect(canvas.locator('[data-index]').first()).toBeAttached();
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(500);
+  // Each pass scrolls both feeds to the top (the sentinel fetches the next
+  // older page) and samples one row per feed every frame while it lands.
+  const passes: { missing: number; spread: number }[][] = [];
+  for (let pass = 0; pass < 10 && !(await done.isVisible()); pass += 1) {
+    passes.push(await page.evaluate(async () => {
+      const scrollers = ['canvas-scroller', 'sidebar-feed'].map((id) => {
+        const scroller = document.querySelector(`[data-testid="${id}"]`);
+        if (!(scroller instanceof HTMLElement)) throw new Error(`missing ${id}`);
+        scroller.scrollTop = 0;
+        return scroller;
+      });
+      // Two frames for the virtualizers to render the rows now at the top;
+      // the older page is still held by `pageDelay`.
+      for (let frame = 0; frame < 2; frame += 1) await new Promise((resolve) => requestAnimationFrame(resolve));
+      const rows = scrollers.map((scroller) => {
+        const top = scroller.getBoundingClientRect().top;
+        const row = Array.from(scroller.querySelectorAll<HTMLElement>('[data-index]'))
+          .find((candidate) => candidate.getBoundingClientRect().bottom > top + 40);
+        if (!row) throw new Error('no visible row');
+        // Virtual rows may remount and their indexes shift on a prepend, so
+        // each frame re-finds the row by its batch (Canvas) or its text (rail).
+        const identity = (candidate: HTMLElement) => candidate.dataset.batchId ?? candidate.textContent;
+        const key = identity(row);
+        const find = () => Array.from(scroller.querySelectorAll<HTMLElement>('[data-index]')).find((candidate) => identity(candidate) === key);
+        return { find, samples: [] as number[], missing: 0 };
+      });
+      const until = performance.now() + 1200;
+      while (performance.now() < until) {
+        for (const entry of rows) {
+          const row = entry.find();
+          if (row) entry.samples.push(row.getBoundingClientRect().top);
+          else entry.missing += 1;
+        }
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      return rows.map(({ samples, missing }) => ({ missing, spread: Math.max(...samples) - Math.min(...samples) }));
+    }));
+  }
+  await expect(done).toBeVisible();
+  await expect(rail.getByRole('status').filter({ hasText: /^Start, \d+ batches$/ })).toBeAttached();
+  expect(passes.length).toBeGreaterThan(0);
+  for (const pass of passes) {
+    for (const { missing, spread } of pass) {
+      expect(missing, JSON.stringify(passes)).toBe(0);
+      expect(spread, JSON.stringify(passes)).toBeLessThanOrEqual(2);
+    }
+  }
+});
+
 test.describe('layout stability (T9)', () => {
   test('the viewer toolbar keeps its width and the position field stays put when the image decodes', async ({ page }) => {
     let release: () => void = () => undefined;
@@ -566,14 +650,16 @@ test.describe('layout stability (T9)', () => {
     expect(chosen.height).toBe(64);
   });
 
-  test('the load-more row has one height in every state', async ({ page }) => {
+  test('the load-more row keeps one height while more can load, and the end row drops the reserve', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?case=infinite-status');
     const heights = await page.locator('[data-infinite-state]').evaluateAll((cells) => Object.fromEntries(cells.map((cell) => [
       cell.getAttribute('data-infinite-state') ?? '',
       cell.firstElementChild?.getBoundingClientRect().height ?? 0,
     ])));
     expect(Object.keys(heights)).toEqual(['idle', 'loading', 'error', 'end']);
-    expect(new Set(Object.values(heights).map((height) => Math.round(height * 10) / 10)).size, JSON.stringify(heights)).toBe(1);
+    const { end, ...pending } = heights;
+    expect(new Set(Object.values(pending).map((height) => Math.round(height * 10) / 10)).size, JSON.stringify(heights)).toBe(1);
+    expect(end, JSON.stringify(heights)).toBeLessThan((pending.idle ?? 0) - 30);
   });
 
   test('collapsing the sidebar slides the feed sideways and re-measures it without a vertical jump', async ({ page, browserName }) => {

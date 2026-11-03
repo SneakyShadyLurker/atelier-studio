@@ -4,7 +4,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, us
 import { flushSync } from 'react-dom';
 import { useIsPhone } from '../../hooks/useIsPhone';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
-import { FEED_SCROLL_END_THRESHOLD_PX, FEED_VIRTUALIZER_ANCHORING } from '../../lib/feedAnchor';
+import { FEED_SCROLL_END_THRESHOLD_PX, FEED_VIRTUALIZER_ANCHORING, measureFeedScrollMargin } from '../../lib/feedAnchor';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { markBatchesSeen, useSeenBatches } from '../../lib/seenBatches';
 import { scopeTitle } from '../../lib/viewChrome';
@@ -210,16 +210,25 @@ const VirtualBatchRow = memo(function VirtualBatchRow({
   );
 });
 
-function Canvas({ batches: liveBatches, modelById, collections, activeView, hasNextPage, isFetchingNextPage, isFetchNextPageError = false, isLoading = false, error = null, readOnlyActions = false, onLoadMore, onRetry, onBatchAction, promptsEnabled, onTileAction, onOpenTile, onEditTile, onAnimateTile, onTellStoryTile, onCreateCardTile, cardPendingTileIds, ref, q }: CanvasProps) {
+function Canvas({ batches: liveBatches, modelById, collections, activeView, hasNextPage: liveHasNextPage, isFetchingNextPage: liveIsFetchingNextPage, isFetchNextPageError: liveIsFetchNextPageError = false, isLoading = false, error = null, readOnlyActions = false, onLoadMore, onRetry, onBatchAction, promptsEnabled, onTileAction, onOpenTile, onEditTile, onAnimateTile, onTellStoryTile, onCreateCardTile, cardPendingTileIds, ref, q }: CanvasProps) {
   // One render snapshot of the feed: the virtualizer, the rows and every
   // handler read it, so a batch removal or insertion commits in a Transition
   // and the batch-row boundaries animate it (removeBatchFromCache).
   // `readOnlyActions` is App's placeholder flag (keepPreviousData showing the
   // previous scope or search); it rides in the same snapshot as the rows.
   // Controls read `readOnly`: a placeholder row stays inert until the commit
-  // that replaces it, though the live flag clears first.
-  const liveFeed = useMemo(() => ({ batches: liveBatches, placeholder: readOnlyActions }), [liveBatches, readOnlyActions]);
-  const { batches, placeholder } = useDeferredValue(liveFeed);
+  // that replaces it, though the live flag clears first. The paging flags ride
+  // along too: the history status row above the feed must change in the same
+  // commit as the rows it describes, or the last page's end state shrinks it
+  // a render before that page prepends and the anchored reader jumps.
+  const liveFeed = useMemo(() => ({
+    batches: liveBatches,
+    placeholder: readOnlyActions,
+    hasNextPage: liveHasNextPage,
+    isFetchingNextPage: liveIsFetchingNextPage,
+    isFetchNextPageError: liveIsFetchNextPageError,
+  }), [liveBatches, readOnlyActions, liveHasNextPage, liveIsFetchingNextPage, liveIsFetchNextPageError]);
+  const { batches, placeholder, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useDeferredValue(liveFeed);
   const readOnly = readOnlyActions || placeholder;
   const trimmedQ = q.trim();
   const blockingError = batches.length === 0 ? error : null;
@@ -232,6 +241,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   // virtualizer's offsets in scroller coordinates, so scrollToIndex lands on
   // the row itself rather than that much short of it.
   const [scrollMargin, setScrollMargin] = useState(0);
+  const measuredMarginRef = useRef<number | null>(null);
   const seenBatchIds = useSeenBatches();
   const getBatchKey = useCallback((index: number) => canvasBatchKey(batches, index), [batches]);
 
@@ -324,7 +334,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
     const scroller = canvasRef.current;
     const feed = virtualFeedRef.current;
     if (!scroller || !feed) return;
-    setScrollMargin(feed.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
+    setScrollMargin(measureFeedScrollMargin(scroller, feed, measuredMarginRef));
   }, [batches.length, hasNextPage, isFetchingNextPage, isFetchNextPageError, isPhone]);
 
   const landedRef = useRef(false);

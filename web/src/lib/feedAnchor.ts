@@ -56,3 +56,24 @@ export const FEED_VIRTUALIZER_ANCHORING = {
   // Canvas row boundaries). Plain batched updates keep the reflow animated.
   useFlushSync: false,
 } as const;
+
+/**
+ * Where a feed's virtual list starts inside its scroller (TanStack's
+ * `scrollMargin`), measured after each commit. When the content above the list
+ * (the history status row) changes height, shift scrollTop by the same amount
+ * so the row under the reader holds still. `anchorTo: 'end'` cannot cover this:
+ * it re-anchors only when the row set changes, and it resolves the anchor with
+ * the margin of that same render, before this measurement has caught up. The
+ * first measurement (`previous.current === null`) only records the margin.
+ */
+export function measureFeedScrollMargin(
+  scroller: HTMLElement,
+  list: HTMLElement,
+  previous: { current: number | null },
+): number {
+  const margin = list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+  const delta = previous.current === null ? 0 : margin - previous.current;
+  previous.current = margin;
+  if (delta !== 0 && scroller.scrollTop > 0) scroller.scrollTop += delta;
+  return margin;
+}

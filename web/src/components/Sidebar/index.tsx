@@ -10,7 +10,7 @@ import {
   appViewEquals,
   useAtelierStore,
 } from '../../store/atelier';
-import { FEED_VIRTUALIZER_ANCHORING } from '../../lib/feedAnchor';
+import { FEED_VIRTUALIZER_ANCHORING, measureFeedScrollMargin } from '../../lib/feedAnchor';
 import { markBatchesSeen, useSeenBatches } from '../../lib/seenBatches';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { describeError } from '../../lib/errorCopy';
@@ -37,7 +37,12 @@ import atelierMark from '../../assets/atelier-mark.png';
 import styles from './index.module.css';
 import { buildLibraryRows, type LibraryRow } from './rows';
 
-const SIDEBAR_ROW_HEIGHT = 62;
+// A row with a two-line prompt, the common case: 2 × 12px × 1.35 prompt, 3px
+// gap, 16px meta line, 20px padding, 2px border. Prepended rows render at
+// their real height in the band above the reader, so an estimate that misses
+// it pushes the reader by the difference
+// (e2e/ui-polish "the last history page lands without moving the reader").
+const SIDEBAR_ROW_HEIGHT = 73;
 const SIDEBAR_FALLBACK_ROWS = 10;
 
 interface SidebarProps {
@@ -247,6 +252,7 @@ function Sidebar({
   const feedRef = useRef<HTMLDivElement | null>(null);
   const virtualListRef = useRef<HTMLDivElement | null>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
+  const measuredMarginRef = useRef<number | null>(null);
   const getBatchKey = useCallback((index: number) => batches[index]?.id ?? index, [batches]);
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is the shared virtualization primitive used by Canvas.
   const feedVirtualizer = useVirtualizer({
@@ -334,7 +340,7 @@ function Sidebar({
     const list = virtualListRef.current;
     if (!scroller || !list) return;
     const measure = () => {
-      setScrollMargin(list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
+      setScrollMargin(measureFeedScrollMargin(scroller, list, measuredMarginRef));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;

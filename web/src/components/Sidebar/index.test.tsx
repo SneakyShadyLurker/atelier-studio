@@ -137,7 +137,7 @@ describe('Sidebar landmarks and scroll zones', () => {
     renderSidebar({ items, nextCursor: null });
 
     expect(screen.getAllByRole('button', { name: /Open batch:/ }).length).toBeLessThan(items.length);
-    expect(screen.getByTestId('sidebar-virtual-list').style.height).toBe('6200px');
+    expect(screen.getByTestId('sidebar-virtual-list').style.height).toBe('7300px');
   });
 
   test('library search input exposes native search ergonomics', () => {

@@ -9,11 +9,27 @@
      scroll it horizontally to reveal the off-view button — a stray scrollLeft
      that survives restore and shifts the whole rail left under the viewport
      edge. `clip` clips identically but is never a scroll container. The feed's
-     own vertical scroll lives on an inner element, so nothing here scrolls. */
+     own vertical scroll and the overflow-only rail body live inside it. */
   overflow: clip;
 }
 
+.railBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.railBody > .section,
+.railBody > .archiveBtn,
+.railBody > .footer {
+  flex-shrink: 0;
+}
+
 .header {
+  flex-shrink: 0;
   min-height: var(--app-header-h);
   padding: 0 18px;
   box-sizing: border-box;
@@ -83,6 +99,12 @@
 
   .sidebar[data-collapsed='true'] {
     border-right-color: transparent;
+  }
+
+  /* The zero-width rail must not scroll horizontally when focus moves to
+     the external expand control during the existing collapse transition. */
+  .sidebar[data-collapsed='true'] .railBody {
+    overflow: clip;
   }
 }
 
@@ -388,8 +410,8 @@
   line-height: 1.35;
 }
 
-/* Bottom padding is 18px, NOT the prototype's 80px: the sidebar is its own
-   flex column with a sticky footer below `.list`; the floating composer
+/* Bottom padding is 18px, NOT the prototype's 80px: the rail body is its own
+   flex column with a footer below `.list`; the floating composer
    clears the canvas (which keeps its 180px), not this rail. Do not "fidelity
    fix" this back to 80px. */
 .list {
@@ -397,7 +419,8 @@
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding: 0 8px 18px;
-  min-height: 0;
+  /* One row, matching the existing SIDEBAR_ROW_HEIGHT virtual estimate. */
+  min-height: var(--rail-history-min-h);
   /* Scroll-edge fade declared on the scroller itself: the gradient reads the
      scroller-scoped --scroll-fade-top, which the :root --scroll-fade-mask
      token cannot carry (custom properties resolve before inheritance). */

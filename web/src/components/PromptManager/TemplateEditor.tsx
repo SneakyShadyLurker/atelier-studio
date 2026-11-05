@@ -167,7 +167,7 @@ export default function TemplateEditor({ template, initialName = '', variableLis
   return (
     <>
     <form
-      className={styles.editor}
+      className={`${styles.editor} ${styles.templateEditor}`}
       role="form"
       aria-label={template ? `Edit template ${template.name}` : 'Create template'}
       onSubmit={(event) => {

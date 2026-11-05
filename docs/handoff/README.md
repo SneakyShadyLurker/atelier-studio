@@ -84,6 +84,8 @@ The sidebar is a sheet laid on the table: `var(--bg-elev)` on `var(--bg)` with a
 
 **Footer**: top border `1px solid var(--line)`, 10px 14px padding, `var(--ink-3)`. Contains a 6×6 green dot (`var(--good)`) with a 3px ring of `--good` at 18%, then a `Meta` list "{N} models", "{M} backends", then the API keys and theme icon buttons (26×26 `buttons.iconAction`, 44px under the touch gate).
 
+**Limited-height fallback**: the sidebar header stays fixed so Collapse or Close remains reachable. Everything below it, through the footer, shares one flex-column rail body with vertical overflow only when needed. The history list keeps its own scrolling and a one-row minimum (`--rail-history-min-h: 73px`, matching its virtual row estimate); scrolling can chain to the rail body. Managed views may shrink their empty spacer to zero. When content fits, the rail body does not scroll and the footer keeps its usual position. In a short window or with many collections, navigation and footer controls scroll with the body, retaining their order, touch targets, keyboard navigation, focus restoration, reorder behavior and phone safe-area padding. Collapse and drawer motion are unchanged; no automatic scroll-follow is added. The prototype demonstrates this with its existing history and footer content.
+
 #### Library rail
 
 A second section above the history section. Main, Archive, and Prompt Library all keep the same Library rail *chrome* (position, row geometry, section header, active-bar, keyboard model); full-screen managed views hide the feed list below the rail, but the rail itself remains present. Collapsing, restructuring, or jumping the rail chrome between modes is not an option in v1. The rail *content* adapts to context: in Archive, rows route to archive-scoped views and use archived counts, collection rows with no archived content are hidden (gated like Pinned), and New collection is omitted — Archive is a terminal 30-day deletion bin, not a place to organize live work.
@@ -128,6 +130,10 @@ When `useCollections()` returns `items: []`, the rail renders only `Unsorted` + 
 **Live region**: a single rail-level `aria-live="polite"` region announces count changes (e.g. "Logo concepts, 13 batches"), debounced 300ms so rapid changes don't spam screen readers.
 
 **Mobile (≤767px)**: search is always-expanded as a full-width row with 16px font (avoids iOS auto-zoom). The drawer header gains a `Cancel` text button in non-idle inline-input states (creating / renaming / searching) — clears the active state and returns to idle.
+
+### Template Editor
+
+At widths of 768px and above, the Template Editor panel scrolls vertically only when its content exhausts the available height, with overscroll contained in the panel. The body, field and textarea grow without shrinking; the textarea keeps at least six lines plus its existing padding and border (`--template-body-min-h: calc(6lh + 22px)`) and cannot be manually resized. Labels, help text, the Referenced lists disclosure and actions remain in normal flow without overlap. In ordinary tall layouts the body fills the available space and the header and footer retain their usual positions. When exhausted, the complete panel scrolls, so the header and Save can scroll away and the footer remains reachable. Phone scrolling, touch and keyboard behavior, disclosure motion and reduced motion remain unchanged. Opening the disclosure grows downward; closing may naturally clamp the scroll position. The prototype has no Template Editor; its CSS records this scoped size and behavior without adding a new surface.
 
 ### Canvas
 

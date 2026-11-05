@@ -118,6 +118,8 @@
     --z-overlay-max: 1000;
     --sidebar-width: 240px;
     --app-header-h: 56px;
+    --rail-history-min-h: 73px;
+    --template-body-min-h: calc(6lh + 22px);
     --tile-min: clamp(220px, 18vw, 320px);
     --tile-cap: 72dvh;
     --grid-gap: 14px;

@@ -684,6 +684,7 @@ function Sidebar({
         )}
       </header>
 
+      <div className={styles.railBody} data-testid="sidebar-rail-body">
       <nav className={styles.library} aria-label="Library" onKeyDown={onLibraryKeyDown}>
           <div className={styles.section} data-zone="head">
             <span role="heading" aria-level={2}>Library</span>
@@ -919,6 +920,7 @@ function Sidebar({
           </button>
         )}
       </footer>
+      </div>
 
       {deleteTarget && (
         <ConfirmDialog

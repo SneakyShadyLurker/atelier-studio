@@ -311,8 +311,10 @@ describe('MovePopover', () => {
     renderBatch(batch());
     fireEvent.click(getMoreBtn());
     const menu = screen.getByRole('menu', { name: /batch actions/i });
-    expect(menu.getAttribute('data-anchor-place')).toBe('below-end');
-    expect(menu.getAttribute('popover')).toBe('manual');
+    const panel = menu.closest('[data-mobile]');
+    expect(panel).not.toBeNull();
+    expect(panel?.getAttribute('data-anchor-place')).toBe('below-end');
+    expect(panel?.getAttribute('popover')).toBe('manual');
 
     fireEvent.click(screen.getByRole('menuitem', { name: /move to collection/i }));
     const dialog = await screen.findByRole('dialog', { name: 'Move to collection' });

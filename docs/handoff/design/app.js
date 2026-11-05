@@ -182,6 +182,8 @@ const I = {
 // ──────────────────────────────────────────────────────────────────────────────
 const css = `
 :root {
+    --rail-history-min-h: 73px;
+    --template-body-min-h: calc(6lh + 22px);
     --glass-on-dark-70: rgba(255,255,255,0.7);
     --glass-on-dark-75: rgba(255,255,255,0.75);
     --text-2xs: 0.6875rem;
@@ -196,6 +198,12 @@ const css = `
     --cadence-loop-fast: 700ms;
 }
 
+/* Template Editor is not represented in this prototype. At width >=768px,
+   its panel scrolls only when exhausted, keeping a six-line textarea plus
+   padding and border via --template-body-min-h. Body, field and textarea
+   grow without shrinking; head and footer stay in normal flow. Phone scroll
+   behavior and disclosure motion, including reduced motion, are unchanged. */
+
 .app {
   display: grid;
   grid-template-columns: 240px 1fr;
@@ -209,8 +217,12 @@ const css = `
   background: var(--bg-elev);
   display: flex; flex-direction: column;
   min-height: 0;
+  overflow: clip;
 }
+.sb-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.sb-body > .sb-section, .sb-body > .sb-footer { flex-shrink: 0; }
 .sb-h {
+  flex-shrink: 0;
   padding: 18px 18px 14px;
   display: flex; align-items: center; gap: 10px;
   border-bottom: 1px solid var(--line);
@@ -240,7 +252,7 @@ const css = `
   color: var(--ink-3);
   display: flex; align-items: center; justify-content: space-between;
 }
-.sb-list { flex: 1; overflow-y: auto; padding: 0 8px 80px; min-height: 0; }
+.sb-list { flex: 1; overflow-y: auto; padding: 0 8px 80px; min-height: var(--rail-history-min-h); }
 .sb-empty { padding: 20px 16px; color: var(--ink-3); font-size: 12px; }
 .hist-item {
   padding: 10px 10px;
@@ -1248,6 +1260,7 @@ function HistorySidebar({ batches, onSelect, activeBatchId, onClear }) {
         <div className="sb-title">Atelier</div>
         <div className="sb-sub">v0.4</div>
       </div>
+      <div className="sb-body">
       <div className="sb-section">
         <span>History</span>
         {batches.length > 0 && (
@@ -1285,6 +1298,7 @@ function HistorySidebar({ batches, onSelect, activeBatchId, onClear }) {
       <div className="sb-footer">
         <span className="dot" />
         <span>{MODELS.length} models, 2 backends</span>
+      </div>
       </div>
     </aside>
   );

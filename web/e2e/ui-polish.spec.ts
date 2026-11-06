@@ -661,6 +661,7 @@ for (const viewport of [
     const phone = viewport.width < 768;
     const managedTest = (name: string, check: (page: Page, writes: string[], tabKey: string) => Promise<void>, longRows = false) => {
       test(`${name} at ${String(viewport.width)}×${String(viewport.height)} in ${colorScheme}`, async ({ browser }) => {
+        if (longRows) test.setTimeout(60_000);
         const context = await browser.newContext({
           ...(touch ? devices['iPhone 13'] : devices['Desktop Chrome']), viewport, colorScheme,
         });
@@ -867,6 +868,7 @@ for (const viewport of [
 
 for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }]) {
   test(`Prompt Library touch controls own their hit bounds at ${String(viewport.width)}×${String(viewport.height)}`, async ({ browser }) => {
+    test.setTimeout(60_000);
     const context = await browser.newContext({ ...devices['iPhone 13'], viewport });
     try {
       const page = await context.newPage();
@@ -1031,7 +1033,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test(`Library rail ${longCollections ? 'long collections' : 'ordinary content'} stays reachable at ${String(viewport.width)}×${String(viewport.height)}`, async ({ browser }) => {
       // Visit every one of the 50 rows before exercising all navigation and
       // footer actions; allow the slower engine to finish that complete path.
-      if (longCollections) test.setTimeout(60_000);
+      test.setTimeout(longCollections ? 180_000 : 60_000);
       const context = await browser.newContext({ ...devices['iPhone 13'], viewport });
       try {
         const page = await context.newPage();

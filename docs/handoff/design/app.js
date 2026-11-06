@@ -184,6 +184,7 @@ const css = `
 :root {
     --rail-history-min-h: 73px;
     --template-body-min-h: calc(6lh + 22px);
+    --list-dimension-body-min-h: 72px;
     --glass-on-dark-70: rgba(255,255,255,0.7);
     --glass-on-dark-75: rgba(255,255,255,0.75);
     --text-2xs: 0.6875rem;
@@ -203,6 +204,14 @@ const css = `
    padding and border via --template-body-min-h. Body, field and textarea
    grow without shrinking; head and footer stay in normal flow. Phone scroll
    behavior and disclosure motion, including reduced motion, are unchanged. */
+
+/* Variable List and Dimension editors are not represented in this prototype.
+   At width >=768px, their panels contain overscroll and scroll only when the
+   fixed chrome plus --list-dimension-body-min-h cannot fit. Head and toolbar
+   stay in normal flow; the flex-shrinking body remains the ordinary list
+   scroller. Its 72px minimum reserves a 44px row plus 14px padding at each
+   edge, with matching scroll padding to keep native reveals clear of the
+   retained mask. Normal-height and phone layouts remain unchanged. */
 
 .app {
   display: grid;

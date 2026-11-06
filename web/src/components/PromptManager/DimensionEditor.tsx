@@ -291,7 +291,7 @@ export default function DimensionEditor({ dimension, onRename, renamePending = f
 
   return (
     <form
-      className={styles.editor}
+      className={`${styles.editor} ${styles.rowEditor}`}
       role="form"
       aria-label={`Edit dimension ${dimension.name}`}
       onSubmit={(event) => {
@@ -330,7 +330,7 @@ export default function DimensionEditor({ dimension, onRename, renamePending = f
         {/* Dimension-level metadata, so it belongs in HEAD — the scroll-surface
             contract allows exactly one entry zone and that one is the Add-tag row. */}
         <label className={styles.dimensionMeaning} htmlFor={meaningId}>
-          <span>Means</span>
+          <span className={styles.inlineLabel}>Means</span>
           <input
             id={meaningId}
             className={styles.optionInput}
@@ -359,6 +359,11 @@ export default function DimensionEditor({ dimension, onRename, renamePending = f
       </div>
 
       <div className={styles.listScroll} data-zone="body">
+        {drafts.length > 0 && (
+          <p className={styles.bodyNote}>
+            Tags are the values of this dimension. Options tagged on the same dimension that share no tag cannot be rolled or picked together.
+          </p>
+        )}
         {drafts.length === 0 ? (
           <p className={styles.listEmpty}>Add mutually-exclusive tags to make this dimension usable.</p>
         ) : (
@@ -401,32 +406,36 @@ export default function DimensionEditor({ dimension, onRename, renamePending = f
                     }
                   }}
                 />
-                <select
-                  className={styles.parentSelect}
-                  aria-label={`Parent of ${draft.label || `tag ${index + 1}`}`}
-                  value={draft.parentId ?? ''}
-                  disabled={tagsPending}
-                  onChange={(event) => {
-                    const next = event.target.value === '' ? null : event.target.value;
-                    setDrafts((current) => current.map((row) => (
-                      row.key === draft.key ? { ...row, parentId: next } : row
-                    )));
-                  }}
-                >
-                  <option value="">no parent</option>
-                  {drafts
-                    .filter((candidate) => {
-                      if (candidate.id === undefined || candidate.key === draft.key) return false;
-                      if (candidate.label.trim().length === 0) return false;
-                      return draft.id === undefined || !descendantIds(drafts, draft.id).has(candidate.id);
-                    })
-                    .map((candidate) => (
-                      <option key={candidate.key} value={candidate.id}>↳ {candidate.label}</option>
-                    ))}
-                </select>
+                <label className={styles.tagParent}>
+                  <span className={styles.inlineLabel}>Parent</span>
+                  <select
+                    className={styles.parentSelect}
+                    aria-label={`Parent of ${draft.label || `tag ${index + 1}`}`}
+                    value={draft.parentId ?? ''}
+                    disabled={tagsPending}
+                    onChange={(event) => {
+                      const next = event.target.value === '' ? null : event.target.value;
+                      setDrafts((current) => current.map((row) => (
+                        row.key === draft.key ? { ...row, parentId: next } : row
+                      )));
+                    }}
+                  >
+                    <option value="">no parent</option>
+                    {drafts
+                      .filter((candidate) => {
+                        if (candidate.id === undefined || candidate.key === draft.key) return false;
+                        if (candidate.label.trim().length === 0) return false;
+                        return draft.id === undefined || !descendantIds(drafts, draft.id).has(candidate.id);
+                      })
+                      .map((candidate) => (
+                        <option key={candidate.key} value={candidate.id}>↳ {candidate.label}</option>
+                      ))}
+                  </select>
+                </label>
                 <button
-                  className={btn.icon}
+                  className={`${btn.iconAction} ${styles.tagRemove}`}
                   type="button"
+                  data-tip="Remove tag"
                   aria-label={`Remove tag ${draft.label || index + 1}`}
                   onClick={() => { setDrafts((current) => withoutTagRow(current, draft.key)); }}
                 >

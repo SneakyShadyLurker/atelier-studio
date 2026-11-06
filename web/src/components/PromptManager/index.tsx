@@ -490,7 +490,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
                         })()}
                       </div>
                       <button
-                        className={btn.icon}
+                        className={btn.iconAction}
                         type="button"
                         aria-label={`Delete template ${template.name}`}
                         data-tip="Delete template"
@@ -598,7 +598,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
                         </span>
                       </button>
                       <button
-                        className={btn.icon}
+                        className={btn.iconAction}
                         type="button"
                         aria-label={`Delete list ${list.name}`}
                         data-tip="Delete list"
@@ -704,7 +704,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
                         </span>
                       </button>
                       <button
-                        className={btn.icon}
+                        className={btn.iconAction}
                         type="button"
                         aria-label={`Delete dimension ${dimension.name}`}
                         data-tip="Delete dimension"

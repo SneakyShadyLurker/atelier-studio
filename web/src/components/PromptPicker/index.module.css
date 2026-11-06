@@ -297,6 +297,11 @@
   outline-offset: 2px;
 }
 
+.searchInput::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+}
+
 .templateList {
   list-style: none;
   margin: 0;

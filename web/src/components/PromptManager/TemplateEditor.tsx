@@ -242,7 +242,7 @@ export default function TemplateEditor({ template, initialName = '', variableLis
 
       <div className={styles.editorBody} data-zone="body">
         <label className={`${styles.field} ${styles.editorBodyField}`}>
-          <span>Body</span>
+          <span className={styles.inlineLabel}>Body</span>
           <textarea
             id={bodyId}
             ref={textareaRef}

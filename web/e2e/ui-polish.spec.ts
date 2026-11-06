@@ -1,5 +1,5 @@
 import { devices, expect, test, type Page } from '@playwright/test';
-import type { CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse } from '@atelier/shared';
+import type { CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, PromptLibraryResponse } from '@atelier/shared';
 
 const noHorizontalOverflow = (page: Page) => page.evaluate(() =>
   document.documentElement.scrollWidth <= window.innerWidth + 1,
@@ -77,6 +77,76 @@ async function withLibraryFindings(page: Page, pendingCoverage: boolean): Promis
   }, pendingCoverage);
 }
 
+// Extend only existing public library fixtures through their existing route.
+async function withLongEditorRows(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    let inner = window.fetch.bind(window);
+    const fetchLibrary = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const response = await inner(input, init);
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname !== '/api/prompts') return response;
+      const library = await response.json() as PromptLibraryResponse;
+      return Response.json({
+        ...library,
+        variableLists: library.variableLists.map((list) => ({
+          ...list,
+          options: Array.from({ length: 40 }, (_, index) => {
+            const option = list.options[index % list.options.length];
+            if (!option) throw new Error('missing option fixture');
+            return { ...option, id: `long-option-${String(index)}`, value: `Option ${String(index + 1)}`, sortOrder: index };
+          }),
+        })),
+        dimensions: library.dimensions.map((dimension) => ({
+          ...dimension,
+          tags: Array.from({ length: 40 }, (_, index) => {
+            const tag = dimension.tags[index % dimension.tags.length];
+            if (!tag) throw new Error('missing tag fixture');
+            return { ...tag, id: `long-tag-${String(index)}`, label: `Tag ${String(index + 1)}`, parentId: null, sortOrder: index };
+          }),
+        })),
+      });
+    };
+    Object.defineProperty(window, 'fetch', {
+      configurable: true,
+      get: () => fetchLibrary,
+      set: (value: typeof fetch) => { inner = value; },
+    });
+  });
+}
+
+async function rowEditorScrollGeometry(editor: ReturnType<Page['locator']>, phone: boolean, short: boolean): Promise<void> {
+  const geometry = await editor.evaluate((form) => {
+    const body = form.querySelector('[data-zone="body"]');
+    if (!body) throw new Error('missing editor body');
+    return {
+      overflow: getComputedStyle(form).overflowY,
+      bodyOverflow: getComputedStyle(body).overflowY,
+      overscroll: getComputedStyle(form).overscrollBehaviorY,
+      excess: form.scrollHeight - form.clientHeight,
+      bodyHeight: body.getBoundingClientRect().height,
+      mask: getComputedStyle(body).maskImage,
+      scrollPadding: getComputedStyle(body).scrollPaddingBlockStart,
+      minimumExcess: [...form.querySelectorAll('[data-zone="head"], [data-zone="entry"]')]
+        .reduce((height, zone) => height + zone.getBoundingClientRect().height, 72) - form.clientHeight,
+    };
+  });
+  if (phone) {
+    expect(geometry.overflow).toBe('visible');
+    expect(geometry.bodyOverflow).toBe('visible');
+    expect(geometry.mask).toBe('none');
+    expect(geometry.scrollPadding).toBe('auto');
+  } else {
+    expect(geometry.overflow).toBe('auto');
+    expect(geometry.bodyOverflow).toBe('auto');
+    expect(geometry.overscroll).toBe('contain');
+    expect(geometry.bodyHeight).toBeGreaterThanOrEqual(72);
+    expect(geometry.mask).not.toBe('none');
+    expect(geometry.scrollPadding).toBe('14px');
+    if (short && geometry.minimumExcess > 1) expect(geometry.excess).toBeGreaterThan(1);
+    else expect(geometry.excess, 'normal-height panel does not scroll unnecessarily').toBeLessThanOrEqual(1);
+  }
+}
+
 // Sample the real receiver across a 44px target, including the corners. The
 // pending badge deliberately keeps a smaller painted box, so its sampled
 // bounds include space above/below the chrome and just outside its sides.
@@ -118,6 +188,272 @@ async function libraryHitPoints(target: ReturnType<Page['locator']>, pending = f
     const cornerInset = extended ? 0 : 3;
     return [{ x: left + cornerInset, y: top }, { x: right - cornerInset, y: top }, { x: left + cornerInset, y: bottom }, { x: right - cornerInset, y: bottom }];
   }, pending);
+}
+
+async function placeholderInk(target: ReturnType<Page['locator']>): Promise<void> {
+  const result = await target.evaluate((element) => {
+    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) throw new Error('missing input');
+    // A field without placeholder text has no rendered ::placeholder. Exercise
+    // the shared rule with text present, then restore the live draft unchanged.
+    const originalPlaceholder = element.getAttribute('placeholder');
+    const originalValue = element.value;
+    element.setAttribute('placeholder', originalPlaceholder ?? 'Placeholder');
+    element.value = '';
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('missing color sampler');
+    const sample = (color: string) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data);
+    };
+    const style = getComputedStyle(element);
+    const placeholder = getComputedStyle(element, '::placeholder');
+    const foreground = sample(placeholder.color);
+    let surface: Element | null = element;
+    let background = sample(style.backgroundColor);
+    while (background[3] === 0 && surface.parentElement) {
+      surface = surface.parentElement;
+      background = sample(getComputedStyle(surface).backgroundColor);
+    }
+    const luminance = (channels: number[]) => {
+      const linear = channels.slice(0, 3).map((value) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return (linear[0] ?? 0) * 0.2126 + (linear[1] ?? 0) * 0.7152 + (linear[2] ?? 0) * 0.0722;
+    };
+    const a = luminance(foreground);
+    const b = luminance(background);
+    const result = {
+      foreground, ink: sample(style.getPropertyValue('--ink-3')),
+      opacity: placeholder.opacity, backgroundAlpha: background[3],
+      contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05),
+    };
+    element.value = originalValue;
+    if (originalPlaceholder === null) element.removeAttribute('placeholder');
+    else element.setAttribute('placeholder', originalPlaceholder);
+    return result;
+  });
+  expect(result.foreground).toEqual(result.ink);
+  expect(result.opacity).toBe('1');
+  expect(result.backgroundAlpha, 'contrast uses an opaque input or containing sheet').toBe(255);
+  expect(result.contrast).toBeGreaterThanOrEqual(4.5);
+}
+
+for (const viewport of [
+  { width: 1440, height: 900 }, { width: 844, height: 390 },
+  { width: 820, height: 1180 }, { width: 390, height: 844 },
+]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    const touch = viewport.width !== 1440;
+    const phone = viewport.width < 768;
+    const managedTest = (name: string, check: (page: Page, writes: string[], tabKey: string) => Promise<void>, longRows = false) => {
+      test(`${name} at ${String(viewport.width)}×${String(viewport.height)} in ${colorScheme}`, async ({ browser }) => {
+        const context = await browser.newContext({
+          ...(touch ? devices['iPhone 13'] : devices['Desktop Chrome']), viewport, colorScheme,
+        });
+        try {
+          const page = await context.newPage();
+          const writes: string[] = [];
+          page.on('request', (request) => {
+            if (request.method() === 'PUT' && request.url().includes('/prompts/')) writes.push(request.url());
+          });
+          if (longRows) await withLongEditorRows(page);
+          await page.goto('/e2e/studio/index.html?view=prompts');
+          await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+          // macOS WebKit includes buttons in native traversal with Option+Tab.
+          await check(page, writes, browser.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab');
+        } finally {
+          await context.close();
+        }
+      });
+    };
+
+    managedTest('managed editor dimension layout, touch bounds and local reorder', async (page, writes, tabKey) => {
+      await page.getByRole('tab', { name: 'Dimensions', exact: true }).click();
+      const dimension = page.getByRole('form', { name: 'Edit dimension Atmosphere', exact: true });
+      await expect(dimension.locator('[data-zone="body"] > p').first()).toHaveText(
+        'Tags are the values of this dimension. Options tagged on the same dimension that share no tag cannot be rolled or picked together.',
+      );
+      const grip = dimension.getByRole('button', { name: 'Reorder Quiet', exact: true });
+      const name = dimension.getByRole('textbox', { name: 'Tag 1: Quiet', exact: true });
+      const parent = dimension.getByRole('combobox', { name: 'Parent of Quiet', exact: true });
+      const remove = dimension.getByRole('button', { name: 'Remove tag Quiet', exact: true });
+      await name.scrollIntoViewIfNeeded();
+      await expect.poll(() => name.evaluate((element, isPhone) => {
+        const row = element.parentElement;
+        if (!row) throw new Error('missing tag row');
+        const controls = [...row.querySelectorAll('button, input, select')];
+        const boxes = controls.map((control) => {
+          const box = control.getBoundingClientRect();
+          return { x: box.x, y: box.y, right: box.right, bottom: box.bottom, width: box.width, cy: box.y + box.height / 2 };
+        });
+        const [grip, label, parent, remove] = boxes;
+        if (!grip || !label || !parent || !remove) throw new Error('missing tag controls');
+        const parentLabel = row.querySelector('label')?.getBoundingClientRect();
+        const sameCenter = (a: typeof grip, b: typeof grip) => Math.abs(a.cy - b.cy) < 1;
+        const separated = boxes.every((a, i) => boxes.every((b, j) => i === j
+          || a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y));
+        const aligned = sameCenter(grip, label) && sameCenter(label, remove)
+          && (isPhone
+            ? !!parentLabel && Math.abs(parentLabel.left - label.x) < 1 && parent.y >= label.bottom
+            : sameCenter(label, parent) && remove.x >= parent.right);
+        const rowBox = row.getBoundingClientRect();
+        const contained = boxes.every((box) => box.width > 0 && box.x >= Math.max(0, rowBox.left)
+          && box.right <= Math.min(innerWidth, rowBox.right) + 0.5);
+        return { aligned, separated, contained, geometry: aligned && separated && contained ? null : boxes,
+          order: controls.map((control) => control.tagName) };
+      }, phone), `dimension controls at ${String(viewport.width)}×${String(viewport.height)}`).toEqual({
+        aligned: true, separated: true, contained: true, geometry: null, order: ['BUTTON', 'INPUT', 'SELECT', 'BUTTON'],
+      });
+      await expect(remove).toHaveAttribute('data-tip', 'Remove tag');
+      if (touch) for (const control of [grip, name, parent, remove]) await libraryHitPoints(control);
+      await grip.focus();
+      await page.keyboard.press(tabKey);
+      await expect(name).toBeFocused();
+      await page.keyboard.press(tabKey);
+      await expect(parent).toBeFocused();
+      await page.keyboard.press(tabKey);
+      await expect(remove).toBeFocused();
+      await grip.press('Alt+ArrowDown');
+      await expect(dimension.getByRole('textbox', { name: 'Tag 2: Quiet', exact: true })).toHaveValue('Quiet');
+      await expect(dimension.getByRole('button', { name: 'Save dimension', exact: true })).toBeEnabled();
+      expect(await dimension.locator('[data-zone]').evaluateAll((zones) => zones.map((zone) => zone.getAttribute('data-zone')))).toEqual(['head', 'entry', 'body']);
+      expect(await noHorizontalOverflow(page)).toBe(true);
+      expect(writes, 'reorder remains a local draft').toEqual([]);
+      await rowEditorScrollGeometry(dimension, phone, viewport.height === 390);
+      await dimension.getByRole('button', { name: 'Save dimension', exact: true }).scrollIntoViewIfNeeded();
+      if (touch) await libraryHitPoints(dimension.getByRole('button', { name: 'Save dimension', exact: true }));
+      await dimension.getByRole('button', { name: '+ Add tag', exact: true }).scrollIntoViewIfNeeded();
+      if (touch) await libraryHitPoints(dimension.getByRole('button', { name: '+ Add tag', exact: true }));
+    });
+
+    managedTest('managed variable controls and local reorder', async (page, writes) => {
+      await page.getByRole('tab', { name: 'Variable lists', exact: true }).click();
+      const list = page.getByRole('form', { name: 'Edit variable list lighting', exact: true });
+      await expect(list.locator('[data-zone="body"] > p').first()).toHaveText(phone
+        ? 'The number beside each option is its weight: how often it is rolled (0 pin only, 1 default). Tags are under ⋯.'
+        : 'The number beside each option is its weight: how often it is rolled. 0 means pin only; 1 is the default.');
+      const option = list.getByRole('textbox', { name: 'Option 1: soft window light', exact: true });
+      await expect(list.getByRole('spinbutton').first()).toHaveAttribute('aria-describedby', /weight-help-/);
+      if (touch) {
+        await libraryHitPoints(list.getByRole('button', { name: 'Reorder soft window light', exact: true }));
+        await libraryHitPoints(option);
+        await libraryHitPoints(list.getByRole('spinbutton').first());
+        if (phone) await libraryHitPoints(list.getByRole('button', { name: 'More actions for soft window light', exact: true }));
+        else {
+          await libraryHitPoints(list.getByRole('button', { name: 'Show tags for soft window light', exact: true }));
+          await libraryHitPoints(list.getByRole('button', { name: 'Remove option soft window light', exact: true }));
+        }
+      }
+      if (phone) await expect(list.getByRole('button', { name: /^Remove option / })).toHaveCount(0);
+      else await expect(list.getByRole('button', { name: 'Remove option soft window light', exact: true })).toHaveAttribute('data-tip', 'Remove option');
+      await option.press('Alt+ArrowDown');
+      await expect(list.getByRole('textbox', { name: 'Option 2: soft window light', exact: true })).toHaveValue('soft window light');
+      expect(writes, 'reorder remains a local draft').toEqual([]);
+      expect(await noHorizontalOverflow(page)).toBe(true);
+      await rowEditorScrollGeometry(list, phone, viewport.height === 390);
+      await list.getByRole('button', { name: 'Save list', exact: true }).scrollIntoViewIfNeeded();
+      if (touch) await libraryHitPoints(list.getByRole('button', { name: 'Save list', exact: true }));
+      await list.getByRole('button', { name: '+ Add option', exact: true }).scrollIntoViewIfNeeded();
+      if (touch) await libraryHitPoints(list.getByRole('button', { name: '+ Add option', exact: true }));
+    });
+
+    managedTest('managed editor long lists preserve body scrolling and native row reveals', async (page, writes) => {
+      for (const [tab, formName, rowName, saveName, addName] of [
+        ['Variable lists', 'Edit variable list lighting', 'Option 40: Option 40', 'Save list', '+ Add option'],
+        ['Dimensions', 'Edit dimension Atmosphere', 'Tag 40: Tag 40', 'Save dimension', '+ Add tag'],
+      ]) {
+        if (!tab || !formName || !rowName || !saveName || !addName) throw new Error('missing editor case');
+        await page.getByRole('tab', { name: tab, exact: true }).click();
+        const editor = page.getByRole('form', { name: formName, exact: true });
+        await rowEditorScrollGeometry(editor, phone, viewport.height === 390);
+        const body = editor.locator('[data-zone="body"]');
+        const row = editor.getByRole('textbox', { name: rowName, exact: true });
+        await expect(row).toHaveCount(1);
+        const before = await editor.evaluate((form) => ({
+          head: form.querySelector('[data-zone="head"]')?.getBoundingClientRect().top,
+          entry: form.querySelector('[data-zone="entry"]')?.getBoundingClientRect().top,
+        }));
+        // Native start alignment exercises scroll-padding against the mask;
+        // subsequent focus must leave the complete control reachable.
+        await row.evaluate((element) => { element.scrollIntoView({ block: 'start' }); });
+        await row.focus();
+        await expect(row).toBeFocused();
+        if (touch) await libraryHitPoints(row);
+        else await expect(row).toBeInViewport({ ratio: 1 });
+        const rowLayout = await row.evaluate((element) => {
+          const row = element.parentElement;
+          if (!row) throw new Error('missing editor row');
+          const boxes = [...row.querySelectorAll('button, input, select')].map((control) => control.getBoundingClientRect());
+          return boxes.every((a, i) => boxes.every((b, j) => i === j
+            || a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top));
+        });
+        expect(rowLayout, 'long-list row controls do not overlap').toBe(true);
+        if (!phone) {
+          expect(await body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+          expect(await body.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(1);
+          if (viewport.height !== 390) {
+            expect(await editor.evaluate((form) => ({
+              head: form.querySelector('[data-zone="head"]')?.getBoundingClientRect().top,
+              entry: form.querySelector('[data-zone="entry"]')?.getBoundingClientRect().top,
+            }))).toEqual(before);
+            expect(await editor.evaluate((form) => form.scrollTop)).toBe(0);
+          }
+        }
+        // Make Save enabled through the existing local draft owner, then
+        // reveal header and toolbar through native scrolling without saving.
+        await row.fill('Changed locally');
+        const save = editor.getByRole('button', { name: saveName, exact: true });
+        await expect(save).toBeEnabled();
+        await save.scrollIntoViewIfNeeded();
+        if (touch) await libraryHitPoints(save);
+        else await expect(save).toBeInViewport({ ratio: 1 });
+        const add = editor.getByRole('button', { name: addName, exact: true });
+        await add.scrollIntoViewIfNeeded();
+        if (touch) await libraryHitPoints(add);
+        else await expect(add).toBeInViewport({ ratio: 1 });
+        await rowEditorScrollGeometry(editor, phone, viewport.height === 390);
+        expect(await noHorizontalOverflow(page)).toBe(true);
+      }
+      expect(writes, 'native scrolling and edits remain local drafts').toEqual([]);
+    }, true);
+
+    managedTest('managed placeholder ink and resource deletion bounds', async (page) => {
+      const template = page.getByRole('form', { name: 'Edit template Editorial portrait', exact: true });
+      await placeholderInk(template.getByRole('textbox', { name: 'Template name', exact: true }));
+      await placeholderInk(template.getByRole('textbox', { name: 'Body', exact: true }));
+
+      const templates = page.getByRole('complementary', { name: 'Templates', exact: true });
+      if (touch) {
+        const remove = templates.getByRole('button', { name: 'Delete template Editorial portrait', exact: true });
+        await libraryHitPoints(remove);
+        expect(await remove.evaluate((element) => {
+          const pane = element.closest('aside')?.getBoundingClientRect();
+          const box = element.getBoundingClientRect();
+          return !!pane && box.left >= pane.left && box.right <= pane.right;
+        }), 'resource delete fits within its pane').toBe(true);
+      }
+      await templates.getByRole('button', { name: 'New', exact: true }).click();
+      const newName = templates.getByRole('textbox', { name: 'Template name', exact: true });
+      await placeholderInk(newName);
+      await newName.press('Escape');
+
+      await page.getByRole('tab', { name: 'Dimensions', exact: true }).click();
+      const dimension = page.getByRole('form', { name: 'Edit dimension Atmosphere', exact: true });
+      await placeholderInk(dimension.getByRole('textbox', { name: 'Dimension description', exact: true }));
+      await page.getByRole('tab', { name: 'Variable lists', exact: true }).click();
+      const list = page.getByRole('form', { name: 'Edit variable list lighting', exact: true });
+      await placeholderInk(list.getByRole('textbox', { name: 'Option 1: soft window light', exact: true }));
+      await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).click();
+      if (phone) await page.getByRole('button', { name: 'Expand composer', exact: true }).click();
+      await page.getByRole('button', { name: 'Templates', exact: true }).click();
+      await placeholderInk(page.getByRole('searchbox', { name: 'Search templates', exact: true }));
+    });
+  }
 }
 
 for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }]) {

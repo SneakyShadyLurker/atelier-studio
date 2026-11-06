@@ -737,7 +737,7 @@ test.describe('reduced motion holds every leak site still', () => {
 
   test('the menuShell popover fades in place', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?case=menu');
-    await startRecording(page, '[role="menu"]', 300);
+    await startRecording(page, '[data-mobile]:has(> [role="menu"])', 300);
     await page.locator('#trigger').click();
     expectStill(await recordedFrames(page), 'menu popover');
   });

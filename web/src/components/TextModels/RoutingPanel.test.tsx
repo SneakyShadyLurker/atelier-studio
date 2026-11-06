@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
-import type { TextRoutingResponse } from '@atelier/shared';
+import type { AdminProvider, TextRoutingResponse } from '@atelier/shared';
 import { TEXT_TASK_LABELS, TEXT_TASKS } from '@atelier/shared';
 import { textAdminKeys } from '../../api/textProviders';
 import { textModelKeys } from '../../api/textModels';
@@ -24,6 +24,7 @@ function urlOf(input: RequestInfo | URL): string {
 function renderPanel(
   initial: TextRoutingResponse = ROUTING,
   next: (url: string, body: { modelId: string | null; mode?: 'lock' | 'prefer' }, current: TextRoutingResponse) => TextRoutingResponse = () => initial,
+  providers: readonly AdminProvider[] = PROVIDERS,
 ) {
   const calls: Call[] = [];
   let current = initial;
@@ -45,7 +46,7 @@ function renderPanel(
   function Wrapper({ children }: PropsWithChildren) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   }
-  render(<RoutingPanel providers={PROVIDERS} />, { wrapper: Wrapper });
+  render(<RoutingPanel providers={providers} />, { wrapper: Wrapper });
   return { calls, client };
 }
 
@@ -58,6 +59,53 @@ afterEach(() => {
 });
 
 describe('RoutingPanel', () => {
+  test('loading routing keeps its existing note until data arrives', () => {
+    globalThis.fetch = mock(() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><RoutingPanel providers={PROVIDERS} /></QueryClientProvider>);
+    expect(screen.getByText('Loading routing…')).toBeTruthy();
+    expect(screen.queryByText('Turn on a model to choose a default.')).toBeNull();
+  });
+
+  test.each([
+    { state: 'ordinary default', id: 'm-kimi', note: 'Every task uses it unless assigned below.' },
+    { state: 'unknown status', id: 'm-scout', note: 'Every task uses it unless assigned below.' },
+    { state: 'offline default', id: 'm-glm', note: 'GLM 5.3 is offline right now.' },
+    { state: 'removed default', id: 'removed', note: 'This default model is no longer listed. Choose another.' },
+  ])('$state reports current facts without a write', ({ id, note }) => {
+    const { calls } = renderPanel({ ...ROUTING, defaults: { ...ROUTING.defaults, default: id } });
+    expect(screen.getByText(note)).toBeTruthy();
+    expect(screen.getByText('1 assigned, 10 use the default')).toBeTruthy();
+    expect(puts(calls)).toEqual([]);
+  });
+
+  test('an off default is named while another model remains enabled', () => {
+    const providers = PROVIDERS.map((provider) => ({ ...provider, models: provider.models.map((model) => model.id === 'm-kimi' ? { ...model, enabled: false, status: 'offline' as const } : model) }));
+    const { calls } = renderPanel(ROUTING, undefined, providers);
+    expect(screen.getByText('Kimi K3 is off. Turn it on or choose another default.')).toBeTruthy();
+    expect(puts(calls)).toEqual([]);
+  });
+
+  test('no enabled model takes precedence, while provider enabledness does not change the note', () => {
+    const off = PROVIDERS.map((provider) => ({ ...provider, models: provider.models.map((model) => ({ ...model, enabled: false })) }));
+    const { calls } = renderPanel(ROUTING, undefined, off);
+    expect(screen.getByText('Turn on a model to choose a default.')).toBeTruthy();
+    cleanup();
+    const disabledProviders = PROVIDERS.map((provider) => ({ ...provider, enabled: false }));
+    const second = renderPanel(ROUTING, undefined, disabledProviders);
+    expect(screen.getByText('Every task uses it unless assigned below.')).toBeTruthy();
+    expect([...puts(calls), ...puts(second.calls)]).toEqual([]);
+  });
+
+  test.each([0, 1, TEXT_TASKS.length - 1, TEXT_TASKS.length])('without a default, %i task assignments leave factual counts', (assigned) => {
+    const byTask = Object.fromEntries(TEXT_TASKS.slice(0, assigned).map((task) => [task, 'm-kimi']));
+    const unassigned = TEXT_TASKS.length - assigned;
+    const { calls } = renderPanel({ ...ROUTING, defaults: { byTask } });
+    expect(screen.getByText(`${assigned} assigned, ${unassigned} unassigned.`)).toBeTruthy();
+    expect(screen.getByText(unassigned === 0 ? 'All tasks have assignments.' : `No default yet. Choose one for the ${unassigned} unassigned ${unassigned === 1 ? 'task' : 'tasks'}.`)).toBeTruthy();
+    expect(puts(calls)).toEqual([]);
+  });
+
   test('default model lists "No default" first, then enabled models by provider', async () => {
     renderPanel();
     const select = await screen.findByRole('button', { name: 'Default model, currently Kimi K3' });

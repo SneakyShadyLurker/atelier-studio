@@ -56,6 +56,21 @@ export default function RoutingPanel({ providers }: RoutingPanelProps) {
   const nameOf = (id: string | undefined, fallback: string) =>
     id === undefined ? fallback : byId.get(id)?.displayName ?? 'Removed model';
   const assigned = TEXT_TASKS.filter((task) => data.defaults.byTask[task] !== undefined).length;
+  const unassigned = TEXT_TASKS.length - assigned;
+  const defaultModel = data.defaults.default === undefined ? undefined : byId.get(data.defaults.default);
+  const defaultNote = ![...byId.values()].some((model) => model.enabled)
+    ? 'Turn on a model to choose a default.'
+    : data.defaults.default === undefined
+      ? unassigned > 0
+        ? `No default yet. Choose one for the ${unassigned} unassigned ${unassigned === 1 ? 'task' : 'tasks'}.`
+        : 'All tasks have assignments.'
+      : defaultModel === undefined
+        ? 'This default model is no longer listed. Choose another.'
+        : !defaultModel.enabled
+          ? `${defaultModel.displayName} is off. Turn it on or choose another default.`
+          : defaultModel.status === 'offline'
+            ? `${defaultModel.displayName} is offline right now.`
+            : 'Every task uses it unless assigned below.';
   const saving = setDefault.isPending || setWriter.isPending;
 
   const fail = (fallback: string) => (error: unknown) => {
@@ -86,7 +101,7 @@ export default function RoutingPanel({ providers }: RoutingPanelProps) {
       <div className={styles.routeDefault}>
         <div className={styles.routeMain}>
           <p className={styles.routeLabel}>Default model</p>
-          <p className={styles.note}>Every task uses it unless assigned below.</p>
+          <p className={styles.note}>{defaultNote}</p>
         </div>
         <div className={styles.routeControl}>
           <ChipSelect<string>
@@ -103,7 +118,7 @@ export default function RoutingPanel({ providers }: RoutingPanelProps) {
       <div className={styles.routeGroup} role="group" aria-labelledby={`${headingId}-tasks`}>
         <div className={styles.routeGroupHead}>
           <h4 id={`${headingId}-tasks`} className={styles.routeLabel}>Task assignments</h4>
-          <p className={styles.note}>{`${assigned} assigned, ${TEXT_TASKS.length - assigned} use the default`}</p>
+          <p className={styles.note}>{data.defaults.default === undefined ? `${assigned} assigned, ${unassigned} unassigned.` : `${assigned} assigned, ${unassigned} use the default`}</p>
         </div>
         <ul className={styles.routeList}>
           {TEXT_TASKS.map((task) => {

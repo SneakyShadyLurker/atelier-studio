@@ -90,6 +90,18 @@ afterEach(() => {
 
 describe('Canvas passive keyboard access', () => {
   test.each([
+    { activeView: APP_VIEW_UNSORTED, title: 'Unsorted', collections: [] },
+    { activeView: { kind: 'collection' as const, id: 'collection-1' }, title: 'Portraits', collections: [{ id: 'collection-1', name: 'Portraits', count: 0, archivedCount: 0, createdAt: 1 }] },
+  ])('scopes a history error to $title and preserves its exact body and Retry', ({ activeView, title, collections }) => {
+    const onRetry = mock();
+    render(<Canvas {...canvasProps} activeView={activeView} collections={collections} error="History unavailable: try again." onRetry={onRetry} />);
+    expect(screen.getByRole('heading', { name: `Couldn’t load ${title}.` })).toBeTruthy();
+    expect(screen.getByText('History unavailable: try again.').tagName).toBe('P');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
     { state: 'empty', q: '', isLoading: false },
     { state: 'loading', q: '', isLoading: true },
     { state: 'no search results', q: 'harbour', isLoading: false },

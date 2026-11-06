@@ -559,14 +559,14 @@ export default function PromptPicker({
           <div className={styles.scrollBody} data-zone="body">
             <div ref={previewRef} className={styles.previewBlock} data-pulse={rollPulse}>
               <div className={styles.previewMeta}>
-                <span className={styles.previewLabel}>{filledActive !== null ? 'Simulated prompt' : 'Resolved prompt'}</span>
+                <span className={styles.previewLabel}>{filledActive !== null ? 'Simulated prompt' : showFillNote ? 'Prompt preview' : 'Resolved prompt'}</span>
                 <Meta className={styles.previewCount} items={[
                   <span key="count" className={overCap ? styles.meterDanger : undefined}>Characters: {charCount} / {MAX_PROMPT_CHARS}</span>,
                   simulating
                     ? <span key="simulating" className={`${styles.aiFillNote} ${styles.aiFillNotePulse}`}>Resolving AI fills…</span>
                     : null,
-                  !simulating && showFillNote ? <span key="expand" className={styles.aiFillNote}>AI fills expand at Generate</span> : null,
-                  !simulating && showFillNote ? <span key="simulate" className={styles.aiFillNote}>Simulate to preview</span> : null,
+                  !simulating && showFillNote ? <span key="expand" className={styles.aiFillNote}>{textModelGate.availability === 'none' ? 'AI fills need a text model' : 'AI fills expand at Generate'}</span> : null,
+                  !simulating && showFillNote && textModelGate.availability !== 'none' ? <span key="simulate" className={styles.aiFillNote}>Simulate to preview</span> : null,
                 ]} />
               </div>
               <div className={styles.previewBody} aria-busy={simulating || undefined}>
@@ -580,7 +580,7 @@ export default function PromptPicker({
                   tabIndex={-1}
                   className={styles.preview}
                   data-state={previewState}
-                  aria-label="Resolved prompt preview"
+                  aria-label={filledActive !== null ? 'Simulated prompt preview' : showFillNote ? 'Prompt preview' : 'Resolved prompt preview'}
                   onKeyDown={selectPreviewOnly}
                 >
                   {toPreviewSegments(previewText).map((seg) =>
@@ -591,7 +591,7 @@ export default function PromptPicker({
                           key={`aiFill:${seg.start}`}
                           className={styles.aiFillChip}
                           data-resolving={simulating ? '' : undefined}
-                          data-tip="AI fills at Generate"
+                          data-tip={textModelGate.availability === 'none' ? 'Needs a text model' : 'AI fills at Generate'}
                         >
                           <I.sparkle className={styles.aiFillSparkle} aria-hidden />
                           <span className={styles.aiFillChipText}>{seg.value}</span>

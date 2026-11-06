@@ -426,7 +426,8 @@ describe('Sidebar rail states', () => {
     const onRetry = mock();
     renderSidebar({ items: [], error: 'History unavailable', onRetry });
     const feed = await screen.findByTestId('sidebar-feed');
-    expect(await within(feed).findByRole('heading', { name: 'History unavailable' })).toBeTruthy();
+    expect(await within(feed).findByRole('heading', { name: 'Couldn’t load Unsorted.' })).toBeTruthy();
+    expect(within(feed).getByText('History unavailable').tagName).toBe('P');
     fireEvent.click(within(feed).getByRole('button', { name: 'Retry' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });

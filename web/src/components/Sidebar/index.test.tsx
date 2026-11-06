@@ -33,6 +33,7 @@ function renderSidebar(historyPage: HistoryPage<Batch> = history, hasNextPage = 
   error?: string;
   isFetchNextPageError?: boolean;
   onLoadMore?: () => void;
+  onRetry?: () => void;
 } = {}) {
   useAtelierStore.setState({ q: 'portrait', view: { kind: 'unsorted' } });
   globalThis.fetch = mock(() => Response.json({
@@ -72,6 +73,15 @@ afterEach(() => {
 });
 
 describe('Sidebar landmarks and scroll zones', () => {
+  test('scopes the compact history error and preserves its exact body and Retry', () => {
+    const onRetry = mock();
+    renderSidebar(history, false, { error: 'History unavailable: try again.', onRetry });
+    expect(screen.getByRole('heading', { name: 'Couldn’t load Unsorted.' })).toBeTruthy();
+    expect(screen.getByText('History unavailable: try again.').tagName).toBe('P');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   test('keeps loaded rows and the pagination retry when loading an older page fails', () => {
     const onLoadMore = mock();
     renderSidebar({

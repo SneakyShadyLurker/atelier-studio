@@ -804,7 +804,8 @@ function Sidebar({
           <ViewTransition key={railState.kind} default="none" enter="part-enter" exit="part-exit">
             <StateView
               className={styles.railState}
-              title={railState.message}
+              title={railState.kind === 'error' ? `Couldn’t load ${historyLabel}.` : railState.message}
+              {...(railState.kind === 'error' ? { body: railState.message } : {})}
               {...(railState.kind === 'error' && onRetry ? { action: { label: 'Retry', onClick: onRetry } } : {})}
             />
           </ViewTransition>

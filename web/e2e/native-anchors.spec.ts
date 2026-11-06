@@ -1024,6 +1024,182 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, phon
   }
 }
 
+// Local readiness evidence for the virtualized short-menu fixture. Keep the
+// trigger pinned to its batch while native prerequisite scrolling settles.
+async function shortMenuReady(page: Page, trigger: Locator, samples: unknown[]): Promise<void> {
+  let previous: number[] | undefined;
+  let stable = 0;
+  await expect.poll(async () => {
+    await frames(page);
+    const sample = await trigger.evaluate((element) => {
+      const feed = document.querySelector('[data-testid="canvas-scroller"]');
+      if (!(feed instanceof HTMLElement)) throw new Error('Missing feed');
+      const rect = element.getBoundingClientRect();
+      const clip = feed.getBoundingClientRect();
+      return {
+        time: performance.now(), fonts: document.fonts.status,
+        batchId: element.closest('[data-batch-id]')?.getAttribute('data-batch-id'),
+        connected: element.isConnected, feedTop: feed.scrollTop, feedHeight: feed.scrollHeight,
+        trigger: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height },
+        visible: rect.width > 0 && rect.height > 0 && rect.top >= Math.max(0, clip.top)
+          && rect.bottom <= Math.min(innerHeight, clip.bottom) && rect.left >= 0 && rect.right <= innerWidth,
+      };
+    });
+    samples.push(sample);
+    if (samples.length > 24) samples.shift();
+    const geometry = [sample.feedTop, sample.feedHeight, ...Object.values(sample.trigger)];
+    const unchanged = previous?.every((value, index) => {
+      const next = geometry[index];
+      return next !== undefined && Math.abs(value - next) <= 0.25;
+    });
+    stable = sample.visible && sample.connected && sample.fonts === 'loaded' && unchanged ? stable + 1 : 0;
+    previous = geometry;
+    if (!sample.visible) await trigger.scrollIntoViewIfNeeded({ timeout: 1000 });
+    return stable >= 3;
+  }, { timeout: 8000, intervals: [50, 100, 150], message: 'Fonts and batch-pinned feed/trigger geometry are ready before input' }).toBe(true);
+}
+
+async function shortMenuPosition(page: Page, trigger: Locator, panel: Locator) {
+  const anchor = await box(trigger);
+  const bounds = await box(panel);
+  return {
+    feedTop: await scroller(page).evaluate((element) => element.scrollTop),
+    anchor, panel: bounds, side: bounds.top >= anchor.bottom - SLOP ? 'below' : 'above',
+    availableBelow: (page.viewportSize()?.height ?? 0) - anchor.bottom,
+    availableAbove: anchor.top,
+  };
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+    test.describe(`short-menu reachability · ${theme} · motion ${reducedMotion}`, () => {
+      test.use({ viewport: VIEWPORTS.phoneLandscape, hasTouch: true });
+
+      test('More End and Move End then Tab keep the final actions reachable by touch', async ({ page }, testInfo) => {
+        await page.emulateMedia({ reducedMotion });
+        await page.goto(`${HARNESS}?case=feed${theme === 'dark' ? '&theme=dark' : ''}`);
+        const readiness: unknown[] = [];
+        const evidence: Record<string, unknown> = { project: testInfo.project.name, theme, reducedMotion, readiness };
+        try {
+          await expect.poll(() => page.evaluate(() => document.fonts.status), { timeout: 5000 }).toBe('loaded');
+          await page.evaluate(async () => { await document.fonts.ready; });
+          const trigger = await moreOf(page, more(page).first());
+          await shortMenuReady(page, trigger, readiness);
+          // One boundary sample in each existing context: the preferred side
+          // has 138px, just short of the 120px floor + 8px gap + 12px edge.
+          const boundaryBottom = VIEWPORTS.phoneLandscape.height - (120 + GAP + EDGE - 2);
+          await scroller(page).evaluate((element, delta) => { element.scrollTop += delta; }, (await box(trigger)).bottom - boundaryBottom);
+          const boundaryReadiness: unknown[] = [];
+          evidence.boundaryReadiness = boundaryReadiness;
+          await shortMenuReady(page, trigger, boundaryReadiness);
+          const beforeOpenFeedTop = await scroller(page).evaluate((element) => element.scrollTop);
+          evidence.beforeOpen = { feedTop: beforeOpenFeedTop, anchor: await box(trigger) };
+          await trigger.tap();
+          await settle(menuPanel(page));
+          await frames(page);
+          const panel = await box(menuPanel(page));
+          const moreOpen = await shortMenuPosition(page, trigger, menuPanel(page));
+          evidence.more = moreOpen;
+          evidence.openingFeedDelta = moreOpen.feedTop - beforeOpenFeedTop;
+          near(moreOpen.feedTop, beforeOpenFeedTop);
+          expectOnScreen(page, panel, EDGE);
+          if (await anchored(page, menuPanel(page))) {
+            expect(await inTopLayer(menuPanel(page))).toBe(true);
+            expectAdjacent(panel, await box(trigger));
+            expect(moreOpen.availableBelow).toBeLessThan(120 + GAP + EDGE);
+            expect(moreOpen.availableAbove).toBeGreaterThanOrEqual(120 + GAP + EDGE);
+            expect(moreOpen.side).toBe('above');
+          } else {
+            expectCentred(page, panel);
+          }
+          expect(await overflows(menuPanel(page))).toBe(true);
+          const menuScroll = menuPanel(page).locator('[data-overlay-scroll]');
+          const initialMenuTop = await menuScroll.evaluate((element) => element.scrollTop);
+          const moreFeedBaseline = await scroller(page).evaluate((element) => element.scrollTop);
+          await page.keyboard.press('End');
+          const move = menu(page).getByRole('menuitem', { name: 'Move to collection', exact: true });
+          await expect(move).toBeFocused();
+          await frames(page);
+          expect(await topmostAt(move)).toBe(true);
+          await expectFocusRingInsideScroll(menuPanel(page));
+          const endMenuTop = await menuScroll.evaluate((element) => element.scrollTop);
+          const moreFeedAfter = await scroller(page).evaluate((element) => element.scrollTop);
+          evidence.moreScroll = { before: initialMenuTop, after: endMenuTop, feedBeforeEnd: moreFeedBaseline, feedAfterEnd: moreFeedAfter };
+          expect(endMenuTop).toBeGreaterThan(initialMenuTop);
+          near(moreFeedAfter, moreFeedBaseline);
+
+          await page.keyboard.press('Escape');
+          await expect(menuPanel(page)).toHaveCount(0);
+          await expect(trigger).toBeFocused();
+          await trigger.tap();
+          await settle(menuPanel(page));
+          evidence.moreReopened = await shortMenuPosition(page, trigger, menuPanel(page));
+          near(await scroller(page).evaluate((element) => element.scrollTop), moreFeedAfter);
+          await page.keyboard.press('End');
+          await expect(move).toBeFocused();
+          await move.tap();
+          await expect(menuPanel(page)).toHaveCount(0);
+          await settle(moveDialog(page));
+          await page.evaluate(() => { (window as unknown as HarnessWindow).atelierHarness.growCollections(); });
+          const lastCollection = moveDialog(page).getByRole('button', { name: 'Harness collection 31', exact: true });
+          await expect(lastCollection).toHaveCount(1);
+          await frames(page);
+          const movePanel = await box(moveDialog(page));
+          evidence.move = await shortMenuPosition(page, trigger, moveDialog(page));
+          near(await scroller(page).evaluate((element) => element.scrollTop), moreFeedAfter);
+          expectOnScreen(page, movePanel, EDGE);
+          if (await anchored(page, moveDialog(page))) {
+            expect(await inTopLayer(moveDialog(page))).toBe(true);
+            expectAdjacent(movePanel, await box(trigger));
+          } else {
+            expectCentred(page, movePanel);
+          }
+          expect(await overflows(moveDialog(page))).toBe(true);
+          const moveScroll = moveDialog(page).locator('[data-overlay-scroll]');
+          const initialMoveTop = await moveScroll.evaluate((element) => element.scrollTop);
+          const moveFeedBaseline = await scroller(page).evaluate((element) => element.scrollTop);
+          await page.keyboard.press('End');
+          await expect(lastCollection).toBeFocused();
+          expect(await topmostAt(lastCollection)).toBe(true);
+          // End traverses collection rows; the final action is the next Tab stop.
+          await page.keyboard.press('Tab');
+          const create = moveDialog(page).getByRole('button', { name: 'New collection', exact: true });
+          await expect(create).toBeFocused();
+          await frames(page);
+          expect(await topmostAt(create)).toBe(true);
+          await expectFocusRingInsideScroll(moveDialog(page));
+          const endMoveTop = await moveScroll.evaluate((element) => element.scrollTop);
+          const moveFeedAfter = await scroller(page).evaluate((element) => element.scrollTop);
+          evidence.moveScroll = { before: initialMoveTop, after: endMoveTop, feedBeforeEnd: moveFeedBaseline, feedAfterTab: moveFeedAfter };
+          expect(endMoveTop).toBeGreaterThan(initialMoveTop);
+          near(moveFeedAfter, moveFeedBaseline);
+          await create.tap();
+          const input = moveDialog(page).getByRole('textbox', { name: 'Collection name' });
+          await expect(input).toBeFocused();
+          evidence.createFocus = await activeLabel(page);
+          expectOnScreen(page, await box(moveDialog(page)), EDGE);
+          await page.keyboard.press('Escape');
+          await expect(input).toHaveCount(0);
+          await expect(create).toBeFocused();
+          evidence.cancelFocus = await activeLabel(page);
+          await expect(moveDialog(page)).toBeVisible();
+          await page.keyboard.press('Escape');
+          await expect(moveDialog(page)).toHaveCount(0);
+          await expect(trigger).toBeFocused();
+          evidence.closedFocus = await activeLabel(page);
+          evidence.finalFeedTop = await scroller(page).evaluate((element) => element.scrollTop);
+          near(await scroller(page).evaluate((element) => element.scrollTop), moveFeedBaseline);
+        } finally {
+          // The list reporter does not persist successful body attachments.
+          // Keep the same bounded evidence in the supervised command log too.
+          console.log(`[short-menu-reachability] ${JSON.stringify(evidence)}`);
+          await testInfo.attach('short-menu-reachability', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
+        }
+      });
+    });
+  }
+}
+
 // The confirmed short-window regression: a trigger in the middle of a window
 // too short for the panel on either side used to fail every fallback and keep
 // the unconstrained panel, overflowing the bottom edge.

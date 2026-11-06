@@ -248,7 +248,77 @@ describe('MovePopover', () => {
     fireEvent.doubleClick(within(dialog).getByRole('button', { name: /Logo concepts/i }));
     expect(screen.getByLabelText('Rename collection')).toBeTruthy();
     fireEvent.keyDown(screen.getByLabelText('Rename collection'), { key: 'Escape' });
-    await waitFor(() => { expect(screen.queryByLabelText('Rename collection')).toBeNull(); });
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Rename collection')).toBeNull();
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: /Logo concepts/i }));
+    });
+    expect(screen.getByRole('dialog', { name: 'Move to collection' })).toBe(dialog);
+    fireEvent.keyDown(within(dialog).getByRole('button', { name: /Logo concepts/i }), { key: 'Escape' });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(screen.queryByRole('dialog', { name: 'Move to collection' })).toBeNull();
+    await waitFor(() => { expect(document.activeElement).toBe(getMoreBtn()); });
+  });
+
+  test('Escape from New collection restores its remounted button before a second Escape closes', async () => {
+    const { calls } = renderBatch(batch());
+    const dialog = await openMove();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'New collection' }));
+    const input = screen.getByLabelText('Collection name');
+    fireEvent.change(input, { target: { value: 'Unsaved collection' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Collection name')).toBeNull();
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'New collection' }));
+    });
+    expect(calls.some((call) => call.method === 'POST' || call.method === 'PATCH')).toBe(false);
+    fireEvent.keyDown(within(dialog).getByRole('button', { name: 'New collection' }), { key: 'Escape' });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(screen.queryByRole('dialog', { name: 'Move to collection' })).toBeNull();
+    await waitFor(() => { expect(document.activeElement).toBe(getMoreBtn()); });
+  });
+
+  test.each([
+    { kind: 'create', draft: '   ' },
+    { kind: 'rename', draft: '   ' },
+    { kind: 'rename', draft: 'Logo concepts' },
+  ])('$kind with an empty or unchanged name restores the remounted control on Enter ($draft)', async ({ kind, draft }) => {
+    const { calls } = renderBatch(batch());
+    const dialog = await openMove();
+    const name = kind === 'create' ? 'New collection' : 'Logo concepts';
+    const control = within(dialog).getByRole('button', { name });
+    if (kind === 'create') fireEvent.click(control);
+    else fireEvent.doubleClick(control);
+    const input = screen.getByLabelText(kind === 'create' ? 'Collection name' : 'Rename collection');
+    fireEvent.change(input, { target: { value: draft } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => {
+      expect(screen.queryByRole('textbox')).toBeNull();
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name }));
+    });
+    expect(calls.some((call) => call.method === 'POST' || call.method === 'PATCH')).toBe(false);
+  });
+
+  test.each(['create', 'rename'])('%s keeps IME keys in the input and blur leaves focus on another reachable control', async (kind) => {
+    const { calls } = renderBatch(batch());
+    const dialog = await openMove();
+    const control = within(dialog).getByRole('button', { name: kind === 'create' ? 'New collection' : 'Logo concepts' });
+    if (kind === 'create') fireEvent.click(control);
+    else fireEvent.doubleClick(control);
+    const input = screen.getByLabelText(kind === 'create' ? 'Collection name' : 'Rename collection');
+    fireEvent.change(input, { target: { value: 'Draft' } });
+    for (const key of ['Enter', 'Escape']) {
+      fireEvent.keyDown(input, { key, isComposing: true });
+      fireEvent.keyDown(input, { key, keyCode: 229 });
+      expect(document.activeElement).toBe(input);
+      expect(input.isConnected).toBe(true);
+    }
+    const other = within(dialog).getByRole('button', { name: 'Studio refs' });
+    act(() => { other.focus(); });
+    await waitFor(() => {
+      expect(screen.queryByRole('textbox')).toBeNull();
+      expect(document.activeElement).toBe(other);
+    });
+    expect(calls.some((call) => call.method === 'POST' || call.method === 'PATCH')).toBe(false);
   });
 
   test('+ New collection creates and immediately moves the batch into the new collection', async () => {

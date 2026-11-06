@@ -1,6 +1,6 @@
 import type { Batch, Collection } from '@atelier/shared';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, RefObject } from 'react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useCollections } from '../../hooks/useCollections';
 import { useCreateCollection } from '../../hooks/useCreateCollection';
@@ -47,6 +47,7 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const newBtnRef = useRef<HTMLButtonElement | null>(null);
   const buttonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const pendingInlineFocusRef = useRef<InlineContext | null>(null);
   const pendingMoveRef = useRef<number | null>(null);
   const onEscapeRef = useRef<() => void>(() => undefined);
   const [inlineContext, setInlineContext] = useState<InlineContext | null>(null);
@@ -106,14 +107,29 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
   };
 
   const cancelInline = (context = inlineContext) => {
+    pendingInlineFocusRef.current = context;
     setInlineContext(null);
     inlineEdit.cancel();
-    if (context?.kind === 'renaming') focusRow(context.id);
-    else if (context?.kind === 'creating') {
-      const target = newBtnRef.current;
-      runWhenReachable(() => { target?.focus(); }, target);
-    }
   };
+
+  // Inline inputs replace their destination controls. Resolve the live ref
+  // only after React has remounted the row or New collection button.
+  useLayoutEffect(() => {
+    if (!open || closing || inlineContext) {
+      pendingInlineFocusRef.current = null;
+      return;
+    }
+    const pending = pendingInlineFocusRef.current;
+    if (!pending) return;
+    const target = pending.kind === 'renaming' ? buttonRefs.current.get(pending.id) : newBtnRef.current;
+    runWhenReachable(() => {
+      if (pendingInlineFocusRef.current !== pending) return;
+      pendingInlineFocusRef.current = null;
+      target?.focus();
+    }, target);
+  }, [open, closing, inlineContext]);
+
+  useLayoutEffect(() => () => { pendingInlineFocusRef.current = null; }, []);
 
   useEffect(() => () => { clearPendingMove(); }, []);
 
@@ -178,6 +194,7 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
 
   const startRename = (collection: Collection) => {
     if (closing) return;
+    pendingInlineFocusRef.current = null;
     clearPendingMove();
     setInlineContext({ kind: 'renaming', id: collection.id });
     inlineEdit.begin('renaming', collection.name);
@@ -311,6 +328,7 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
           tabIndex={0}
           onClick={() => {
             if (closing) return;
+            pendingInlineFocusRef.current = null;
             clearPendingMove();
             setInlineContext({ kind: 'creating' });
             inlineEdit.begin('creating');

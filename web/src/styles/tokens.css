@@ -48,6 +48,12 @@
 }
 
   :root {
+    /* --rail-history-min-h is the row content minimum; host padding is additional.
+       Image Composer compacts only at width >=768px and height <=620px using
+       existing 10/32/44px sizes; its no-reference prompt reserves the existing
+       Minimize hit region: 28px (44px under the touch gate) plus 16px from the
+       grid cell's end. Soft informational toasts omit their glyph.
+       These scoped extensions introduce no palette, size or motion tokens. */
     --bg: #ebeae6;
     --bg-elev: #f7f7f3;
     --bg-sunk: #dedcd6;
@@ -118,6 +124,9 @@
     --z-overlay-max: 1000;
     --sidebar-width: 240px;
     --app-header-h: 56px;
+    --rail-history-min-h: 73px;
+    --template-body-min-h: calc(6lh + 22px);
+    --list-dimension-body-min-h: 72px;
     --tile-min: clamp(220px, 18vw, 320px);
     --tile-cap: 72dvh;
     --grid-gap: 14px;

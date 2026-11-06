@@ -182,6 +182,15 @@ const I = {
 // ──────────────────────────────────────────────────────────────────────────────
 const css = `
 :root {
+    /* --rail-history-min-h is the row content minimum; host padding is additional.
+       Image Composer compacts only at width >=768px and height <=620px using
+       existing 10/32/44px sizes; its no-reference prompt reserves the existing
+       Minimize hit region: 28px (44px under the touch gate) plus 16px from the
+       grid cell's end. Soft informational toasts omit their glyph.
+       These scoped extensions introduce no palette, size or motion tokens. */
+    --rail-history-min-h: 73px;
+    --template-body-min-h: calc(6lh + 22px);
+    --list-dimension-body-min-h: 72px;
     --glass-on-dark-70: rgba(255,255,255,0.7);
     --glass-on-dark-75: rgba(255,255,255,0.75);
     --text-2xs: 0.6875rem;
@@ -196,6 +205,20 @@ const css = `
     --cadence-loop-fast: 700ms;
 }
 
+/* Template Editor is not represented in this prototype. At width >=768px,
+   its panel scrolls only when exhausted, keeping a six-line textarea plus
+   padding and border via --template-body-min-h. Body, field and textarea
+   grow without shrinking; head and footer stay in normal flow. Phone scroll
+   behavior and disclosure motion, including reduced motion, are unchanged. */
+
+/* Variable List and Dimension editors are not represented in this prototype.
+   At width >=768px, their panels contain overscroll and scroll only when the
+   fixed chrome plus --list-dimension-body-min-h cannot fit. Head and toolbar
+   stay in normal flow; the flex-shrinking body remains the ordinary list
+   scroller. Its 72px minimum reserves a 44px row plus 14px padding at each
+   edge, with matching scroll padding to keep native reveals clear of the
+   retained mask. Normal-height and phone layouts remain unchanged. */
+
 .app {
   display: grid;
   grid-template-columns: 240px 1fr;
@@ -209,8 +232,12 @@ const css = `
   background: var(--bg-elev);
   display: flex; flex-direction: column;
   min-height: 0;
+  overflow: clip;
 }
+.sb-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.sb-body > .sb-section, .sb-body > .sb-footer { flex-shrink: 0; }
 .sb-h {
+  flex-shrink: 0;
   padding: 18px 18px 14px;
   display: flex; align-items: center; gap: 10px;
   border-bottom: 1px solid var(--line);
@@ -240,7 +267,7 @@ const css = `
   color: var(--ink-3);
   display: flex; align-items: center; justify-content: space-between;
 }
-.sb-list { flex: 1; overflow-y: auto; padding: 0 8px 80px; min-height: 0; }
+.sb-list { flex: 1; overflow-y: auto; padding: 0 8px 80px; min-height: calc(var(--rail-history-min-h) + 80px); }
 .sb-empty { padding: 20px 16px; color: var(--ink-3); font-size: 12px; }
 .hist-item {
   padding: 10px 10px;
@@ -733,6 +760,24 @@ const css = `
 }
 .composer textarea::placeholder { color: var(--ink-3); }
 
+/* This prototype has only an image Composer, without Attach, references,
+   Minimize, the command dock or the reserved status rail. Mirror the matching
+   image fields only; production keeps those existing owners and animations.
+   Only production's compact no-reference prompt reserves the Minimize hit
+   region by subtracting its canonical 28px width (44px under the touch gate)
+   plus 16px from the grid cell's end; this prototype has no such target. */
+@media (width >= 768px) and (height <= 620px) {
+  .composer { padding-top: 10px; }
+  .composer textarea {
+    min-height: 32px;
+    max-height: calc(3lh + 10px);
+    overflow-y: auto;
+  }
+  @media (hover: none), (any-pointer: coarse) {
+    .composer textarea { min-height: 44px; }
+  }
+}
+
 .composer-row {
   display: flex; align-items: center; gap: 8px;
   flex-wrap: wrap;
@@ -934,6 +979,9 @@ const css = `
   opacity: 0;
   transition: transform 160ms cubic-bezier(.2,.8,.2,1), opacity 160ms cubic-bezier(.2,.8,.2,1);
 }
+/* The prototype emits success strings only and retains their check. Production
+   soft informational toasts omit the glyph, errors retain their alert; their
+   lifecycle, action, live-region and motion owners are unchanged. */
 .toast svg { color: oklch(78% 0.14 145); }
 
 @media (min-width: 768px) {
@@ -1248,6 +1296,7 @@ function HistorySidebar({ batches, onSelect, activeBatchId, onClear }) {
         <div className="sb-title">Atelier</div>
         <div className="sb-sub">v0.4</div>
       </div>
+      <div className="sb-body">
       <div className="sb-section">
         <span>History</span>
         {batches.length > 0 && (
@@ -1285,6 +1334,7 @@ function HistorySidebar({ batches, onSelect, activeBatchId, onClear }) {
       <div className="sb-footer">
         <span className="dot" />
         <span>{MODELS.length} models, 2 backends</span>
+      </div>
       </div>
     </aside>
   );

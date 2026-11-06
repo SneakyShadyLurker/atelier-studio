@@ -1,26 +1,1214 @@
 import { devices, expect, test, type Page } from '@playwright/test';
+import type { AdminProvider, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, PromptLibraryResponse } from '@atelier/shared';
 
 const noHorizontalOverflow = (page: Page) => page.evaluate(() =>
   document.documentElement.scrollWidth <= window.innerWidth + 1,
 );
 
-test('history Retry stays reachable above a tall expanded composer', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 600 });
-  await page.goto('/e2e/studio/index.html?historyError=1');
-  const retry = page.getByTestId('canvas-scroller').getByRole('button', { name: 'Retry', exact: true });
-  await expect(retry).toBeVisible();
-  await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill(Array.from({ length: 12 }, (_, index) => `Retained draft line ${index}`).join('\n'));
-  const composer = page.locator('#atelier-composer');
-  await expect.poll(() => composer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(280);
-  await page.getByTestId('canvas-scroller').evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect.poll(() => retry.evaluate((element) => {
+// Use the studio's existing offline fetch seam; keep the real Enhance action
+// pending so both labels can be measured without a provider or capture hook.
+async function withPendingEnhance(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    let inner = window.fetch.bind(window);
+    const fetchEnhance = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname === '/api/enhance-prompt') {
+        return Promise.resolve(new Response(new ReadableStream<Uint8Array>(), { headers: { 'Content-Type': 'text/event-stream' } }));
+      }
+      return inner(input, init);
+    };
+    Object.defineProperty(window, 'fetch', {
+      configurable: true,
+      get: () => fetchEnhance,
+      set: (value: typeof fetch) => { inner = value; },
+    });
+  });
+}
+
+for (const scenario of [
+  { width: 844, height: 390, touch: true, colorScheme: 'light' },
+  { width: 844, height: 390, touch: true, colorScheme: 'dark' },
+  { width: 1280, height: 600, touch: false, colorScheme: 'light' },
+  { width: 1280, height: 800, touch: false, colorScheme: 'light' },
+  { width: 390, height: 844, touch: true, colorScheme: 'light' },
+] as const) {
+  test(`approved short-window: image controls at ${String(scenario.width)}×${String(scenario.height)} ${scenario.touch ? 'touch' : 'pointer'} ${scenario.colorScheme}`, async ({ browser }) => {
+    test.setTimeout(60_000);
+    const context = await browser.newContext({
+      ...(scenario.touch ? devices['iPhone 13'] : devices['Desktop Chrome']),
+      viewport: { width: scenario.width, height: scenario.height }, colorScheme: scenario.colorScheme,
+    });
+    try {
+      const page = await context.newPage();
+      // The studio installs an offline fetch implementation. Extend its public
+      // seam for a synthetic upload, leaving the production attach path intact.
+      await page.addInitScript(() => {
+        let inner = window.fetch.bind(window);
+        const fetchUpload = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+          const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+          if (url.pathname === '/api/uploads') return Promise.resolve(Response.json({ id: 'public-short-window-ref', mime: 'image/png', ext: 'png', sizeBytes: 68, width: 1, height: 1, createdAt: 1 }));
+          if (url.pathname === '/api/uploads/public-short-window-ref') return Promise.resolve(new Response(null, { status: 204 }));
+          return inner(input, init);
+        };
+        Object.defineProperty(window, 'fetch', { configurable: true, get: () => fetchUpload, set: (value: typeof fetch) => { inner = value; } });
+      });
+      await page.goto('/e2e/studio/index.html?video=1');
+      const expand = page.getByRole('button', { name: 'Expand composer', exact: true });
+      if (await expand.isVisible()) await expand.click();
+      const composer = page.getByTestId('composer-drop-surface');
+      const prompt = composer.getByRole('textbox', { name: 'Prompt', exact: true });
+      const attach = composer.getByRole('button', { name: 'Attach reference images' });
+      const generate = composer.getByRole('button', { name: 'Generate', exact: true });
+      const compact = scenario.width >= 768 && scenario.height <= 620;
+      const settle = async () => {
+        await composer.evaluate(async () => {
+          await Promise.all(document.getAnimations().filter((animation) => animation.timeline === document.timeline && animation.playState === 'running' && animation.effect?.getTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => undefined)));
+        });
+      };
+      const promptRow = async (shared: boolean) => {
+        // The flex reference row stretches to the textarea's grid track;
+        // its Attach button remains vertically centered as the prompt grows.
+        const a = await attach.locator('..').boundingBox();
+        const p = await prompt.boundingBox();
+        if (!a || !p) throw new Error('missing image controls');
+        if (shared) {
+          expect(Math.abs(a.y - p.y), 'Attach and prompt share the first row').toBeLessThanOrEqual(1);
+          expect(p.x).toBeGreaterThanOrEqual(a.x + a.width + 9);
+        } else expect(p.y).toBeGreaterThanOrEqual(a.y + a.height + 9);
+      };
+      const reachable = async () => {
+        expect(await noHorizontalOverflow(page)).toBe(true);
+        expect(await composer.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+        for (const name of ['Attach reference images', 'Templates', 'Enhance', 'Undo enhance', 'Model', 'Ratio', 'Count', 'Generate', ...(scenario.width >= 768 ? ['Clear prompt and reference images', 'Minimize composer'] : ['Collapse composer'])]) {
+          const control = composer.getByRole('button', { name, exact: true });
+          await expect(control).toBeVisible();
+          const box = await control.boundingBox();
+          if (!box) throw new Error(`missing ${name}`);
+          expect(box.x).toBeGreaterThanOrEqual(0);
+          expect(box.y).toBeGreaterThanOrEqual(0);
+          expect(box.x + box.width).toBeLessThanOrEqual(scenario.width + 1);
+          expect(box.y + box.height).toBeLessThanOrEqual(scenario.height + 1);
+          if (scenario.touch && name !== 'Collapse composer') expect(box.height, `${name} touch height`).toBeGreaterThanOrEqual(43.9);
+        }
+      };
+      const promptClearance = async (state: string) => {
+        if (!compact) return;
+        const minimize = await composer.getByRole('button', { name: 'Minimize composer', exact: true }).boundingBox();
+        if (!minimize) throw new Error('missing Minimize');
+        const measured = await prompt.evaluate((element, m) => {
+          const p = element.getBoundingClientRect();
+          const points = [
+            { name: 'top-right', x: p.right - 1, y: p.top + 1 },
+            { name: 'right-edge', x: p.right - 1, y: p.top + p.height / 2 },
+            { name: 'bottom-right', x: p.right - 1, y: p.bottom - 1 },
+          ];
+          return {
+            prompt: { x: p.x, y: p.y, width: p.width, height: p.height },
+            minimize: m,
+            clearance: m.x - p.right,
+            intersects: p.left < m.x + m.width && p.right > m.x && p.top < m.y + m.height && p.bottom > m.y,
+            hits: points.map((point) => {
+              const receiver = document.elementFromPoint(point.x, point.y);
+              return { ...point, owns: receiver === element, receiver: receiver?.getAttribute('aria-label') ?? receiver?.tagName ?? null };
+            }),
+          };
+        }, minimize);
+        await test.info().attach(`compact-prompt-hit-clearance-${state}`, { body: JSON.stringify(measured, null, 2), contentType: 'application/json' });
+        console.log('[compact-prompt-hit-clearance]', JSON.stringify({ project: test.info().project.name, scenario, state, ...measured }));
+        expect(measured.intersects, `${state}: prompt and Minimize rectangles do not intersect`).toBe(false);
+        expect(measured.clearance, `${state}: measured prompt-to-Minimize gap`).toBeGreaterThan(0);
+        for (const hit of measured.hits) expect(hit.owns, `${state}: ${hit.name} resolves to textarea (${hit.receiver ?? 'none'})`).toBe(true);
+        if (scenario.touch && state === 'empty') {
+          const edge = measured.hits[1];
+          if (!edge) throw new Error('missing textarea edge');
+          await attach.focus();
+          await page.touchscreen.tap(edge.x, edge.y);
+          await expect(prompt).toBeFocused();
+          await expect(prompt).toBeVisible();
+          await test.info().attach('compact-prompt-edge-touch-focus', { body: JSON.stringify({ point: edge, focused: true }), contentType: 'application/json' });
+        }
+      };
+      await expect(prompt).toHaveValue('');
+      await expect(generate).toBeDisabled();
+      await expect(composer).toHaveCSS('display', compact ? 'grid' : 'flex');
+      await expect(composer).toHaveCSS('padding-top', compact ? '10px' : scenario.width < 768 ? '12px' : '14px');
+      await expect(prompt).toHaveCSS('min-height', compact ? scenario.touch ? '44px' : '32px' : scenario.width < 768 ? '40px' : '48px');
+      await settle();
+      await promptRow(compact);
+      await reachable();
+      await promptClearance('empty');
+      const initial = await generate.boundingBox();
+      const anchored = async () => {
+        await settle();
+        const box = await generate.boundingBox();
+        if (!initial || !box) throw new Error('missing Generate');
+        expect(Math.max(Math.abs(box.x - initial.x), Math.abs(box.y - initial.y), Math.abs(box.width - initial.width), Math.abs(box.height - initial.height)), 'Generate bounds stay invariant').toBeLessThanOrEqual(1);
+        await reachable();
+      };
+      await prompt.fill(Array.from({ length: 12 }, (_, index) => `Public coastal observatory line ${String(index + 1)}`).join('\n'));
+      await expect(generate).toBeEnabled();
+      await anchored();
+      await promptClearance('long');
+      if (compact) {
+        const sizes = await prompt.evaluate((element) => ({ height: element.getBoundingClientRect().height, line: Number.parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight, client: element.clientHeight }));
+        expect(sizes.height).toBeLessThanOrEqual(3 * sizes.line + 10.1);
+        expect(sizes.scroll).toBeGreaterThan(sizes.client);
+        await expect(prompt).toHaveCSS('overflow-y', 'auto');
+        await prompt.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+        expect(await prompt.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      }
+      const chooser = page.waitForEvent('filechooser');
+      await attach.click();
+      await (await chooser).setFiles({ name: 'public-reference.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') });
+      const remove = composer.getByRole('button', { name: 'Remove reference image 1' });
+      await expect(remove).toBeEnabled();
+      await anchored();
+      await promptRow(false);
+      await remove.click();
+      await expect(remove).toHaveCount(0);
+      await anchored();
+      await promptRow(compact);
+      await promptClearance('reference-removed');
+      await composer.getByRole('button', { name: scenario.width >= 768 ? 'Minimize composer' : 'Collapse composer', exact: true }).click();
+      await expect(expand).toBeVisible();
+      await expand.click();
+      await expect(prompt).toHaveValue(/Public coastal observatory/);
+      await anchored();
+      await promptClearance('re-expanded');
+      await prompt.fill('');
+      await expect(generate).toBeDisabled();
+      await anchored();
+      await promptClearance('cleared');
+      if (compact) {
+        await composer.getByRole('button', { name: 'Model', exact: true }).click();
+        await page.getByRole('option', { name: /Studio Motion/ }).click();
+        await expect(composer.getByRole('textbox', { name: 'Motion prompt' })).toBeVisible();
+        await expect(composer).toHaveCSS('display', 'flex');
+        await expect(composer).toHaveCSS('padding-top', '14px');
+        await expect(composer.getByRole('button', { name: 'Animate', exact: true })).toBeVisible();
+        await composer.getByRole('button', { name: 'Back to image generation' }).click();
+        await expect(prompt).toBeVisible();
+        await expect(composer).toHaveCSS('display', 'grid');
+        await anchored();
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+for (const viewport of [
+  { width: 320, height: 844 }, { width: 360, height: 844 }, { width: 390, height: 844 },
+  { width: 844, height: 390 }, { width: 820, height: 1180 }, { width: 1440, height: 900 },
+]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`presentation fixes: model token and Enhance at ${String(viewport.width)}×${String(viewport.height)} in ${colorScheme}`, async ({ browser }) => {
+      test.setTimeout(60_000);
+      const context = await browser.newContext({
+        ...(viewport.width === 1440 ? devices['Desktop Chrome'] : devices['iPhone 13']), viewport, colorScheme,
+      });
+      try {
+        const page = await context.newPage();
+        await withPendingEnhance(page);
+        await page.goto('/e2e/studio/index.html');
+        const expand = page.getByRole('button', { name: 'Expand composer', exact: true });
+        if (await expand.isVisible()) await expand.click();
+        const composer = page.locator('#atelier-composer');
+        const model = composer.getByRole('button', { name: 'Model', exact: true });
+        const enhance = composer.getByRole('button', { name: 'Enhance', exact: true });
+        const generate = composer.getByRole('button', { name: 'Generate', exact: true });
+        const undo = composer.getByRole('button', { name: 'Undo enhance', exact: true });
+        const checkGeometry = async (token: string) => {
+          await expect(model).toContainText(token);
+          const value = model.locator('[data-tip]');
+          expect(await value.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), 'full short family token is visible').toBe(true);
+          await expect(enhance.locator('span')).toBeVisible();
+          expect(await noHorizontalOverflow(page)).toBe(true);
+          expect(await composer.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), 'composer has no internal horizontal overflow').toBe(true);
+          const selects = await Promise.all(['Model', 'Ratio', 'Count'].map((name) => composer.getByRole('button', { name, exact: true }).boundingBox()));
+          const [first, ratio, count] = selects;
+          if (!first || !ratio || !count) throw new Error('missing generation selects');
+          expect(Math.abs(first.y + first.height / 2 - ratio.y - ratio.height / 2)).toBeLessThanOrEqual(1);
+          expect(Math.abs(first.y + first.height / 2 - count.y - count.height / 2)).toBeLessThanOrEqual(1);
+          expect(first.x + first.width).toBeLessThanOrEqual(ratio.x);
+          expect(ratio.x + ratio.width).toBeLessThanOrEqual(count.x);
+          expect(count.x + count.width).toBeLessThanOrEqual(viewport.width);
+          if (viewport.width !== 1440) {
+            for (const target of [model, composer.getByRole('button', { name: 'Ratio', exact: true }), composer.getByRole('button', { name: 'Count', exact: true }), enhance, undo, generate]) {
+              const box = await target.boundingBox();
+              if (!box) throw new Error('missing touch control');
+              expect(box.height).toBeGreaterThanOrEqual(43.9);
+              expect(box.width).toBeGreaterThanOrEqual(43.9);
+            }
+          }
+          const enhanceBox = await enhance.boundingBox();
+          if (!enhanceBox) throw new Error('missing Enhance');
+          expect(enhanceBox.width).toBeGreaterThanOrEqual(104);
+        };
+        await checkGeometry('GPT');
+        // Keep the local model's token and health dot independently visible.
+        await model.click();
+        await page.getByRole('option', { name: /Test Alpha/ }).click();
+        await expect(model).toContainText('Test');
+        const local = model.locator('[data-tip] > span');
+        await expect(local.locator('> span').first()).toHaveText('Test');
+        await expect(local.locator('[data-state="online"]')).toBeVisible();
+        await checkGeometry('Test');
+        await model.click();
+        await page.getByRole('option', { name: /GPT Image/ }).click();
+        await composer.getByRole('textbox', { name: 'Prompt', exact: true }).fill('A quiet coastal observatory');
+        await expect(enhance).toBeEnabled();
+        // Let the existing finite surface/footprint transitions finish before
+        // comparing the live controls, without changing their motion.
+        await enhance.evaluate(async () => {
+          await Promise.all(document.getAnimations().filter((animation) => animation.timeline === document.timeline && animation.playState === 'running' && animation.effect?.getTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => undefined)));
+        });
+        const ordering = () => composer.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label') ?? button.textContent.trim()));
+        const beforeOrder = await ordering();
+        const beforeGenerate = await generate.boundingBox();
+        const beforeEnhance = await enhance.boundingBox();
+        await enhance.click();
+        await expect(enhance).toHaveText('Enhancing…');
+        await expect(enhance).toBeDisabled();
+        await checkGeometry('GPT');
+        expect(await ordering()).toEqual(beforeOrder);
+        await expect.poll(async () => {
+          const after = await generate.boundingBox();
+          if (!beforeGenerate || !after) return Infinity;
+          return Math.max(Math.abs(after.x - beforeGenerate.x), Math.abs(after.y - beforeGenerate.y), Math.abs(after.width - beforeGenerate.width));
+        }, 'Generate stays anchored during Enhance').toBeLessThanOrEqual(1);
+        const afterEnhance = await enhance.boundingBox();
+        if (!beforeEnhance || !afterEnhance) throw new Error('missing Enhance bounds');
+        expect(Math.abs(afterEnhance.width - beforeEnhance.width), 'Enhance reserves its working label width').toBeLessThanOrEqual(1);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`presentation fixes: disabled provider preserves offline danger and live controls in ${colorScheme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme });
+    await page.addInitScript(() => {
+      let inner = window.fetch.bind(window);
+      const fetchProviders = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const response = await inner(input, init);
+        const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+        if (url.pathname !== '/api/text-providers') return response;
+        const { providers } = await response.json() as { providers: AdminProvider[] };
+        return Response.json({ providers: providers.map((provider) => {
+          const model = provider.models[0];
+          if (!model) throw new Error('missing public model fixture');
+          return {
+            ...provider, enabled: false,
+            models: ['available', 'offline', 'unknown'].map((status) => ({
+              ...model, id: `preview-${status}`, displayName: `Preview ${status}`, enabled: true, status,
+            })),
+          };
+        }) });
+      };
+      Object.defineProperty(window, 'fetch', {
+        configurable: true, get: () => fetchProviders, set: (value: typeof fetch) => { inner = value; },
+      });
+    });
+    await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+    const provider = page.getByRole('region', { name: 'Preview provider', exact: true });
+    await expect(provider).toHaveAttribute('data-enabled', 'false');
+    for (const status of ['available', 'offline', 'unknown']) {
+      const row = provider.getByRole('listitem', { name: `Preview ${status}`, exact: true });
+      const word = row.locator(`[data-status="${status}"]`);
+      await expect(word).toHaveText(status);
+      expect(await row.getByText(`Preview ${status}`, { exact: true }).evaluate((element) => {
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--ink-2)';
+        element.append(probe);
+        const matches = getComputedStyle(element).color === getComputedStyle(probe).color;
+        probe.remove();
+        return matches;
+      })).toBe(true);
+      // Resolve token colours through a native CSS property rather than
+      // comparing engine-specific token serialization (hex vs rgb).
+      expect(await word.evaluate((element, offline) => {
+        const probe = document.createElement('span');
+        probe.style.color = offline ? 'var(--danger)' : 'var(--ink-3)';
+        element.append(probe);
+        const matches = getComputedStyle(element).color === getComputedStyle(probe).color;
+        probe.remove();
+        return matches;
+      }, status === 'offline')).toBe(true);
+      if (status === 'available') {
+        expect(await word.evaluate((element) => {
+          const dot = element.firstElementChild;
+          return dot !== null && getComputedStyle(dot).backgroundColor === getComputedStyle(element).color
+            && getComputedStyle(dot).borderTopColor === getComputedStyle(element).color;
+        })).toBe(true);
+      }
+      await expect(row.getByRole('switch', { name: `Use Preview ${status}`, exact: true })).toBeEnabled();
+      await row.getByRole('button', { name: `More actions for Preview ${status}`, exact: true }).click();
+      await expect(page.getByRole('menuitem', { name: 'Test', exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+    }
+  });
+}
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`presentation fixes: native Advanced cues and input with ${reducedMotion} motion`, async ({ browser }) => {
+    const context = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: 390, height: 844 }, reducedMotion });
+    try {
+      const page = await context.newPage();
+      await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+      for (const kind of ['provider', 'model'] as const) {
+        if (kind === 'provider') await page.getByRole('button', { name: 'Add provider', exact: true }).click();
+        else {
+          await page.getByRole('button', { name: 'More actions for Preview writer', exact: true }).click();
+          await page.getByRole('menuitem', { name: 'Edit', exact: true }).click();
+        }
+        const dialog = page.getByRole('dialog', { name: kind === 'provider' ? 'Add a provider' : 'Edit model', exact: true });
+        const summary = dialog.locator('summary').filter({ hasText: /^Advanced$/ });
+        const details = summary.locator('..');
+        const caret = summary.locator('svg');
+        await expect(summary).toBeVisible();
+        await expect(caret).toHaveCount(1);
+        await expect(caret).toHaveAttribute('aria-hidden', 'true');
+        await expect(details).not.toHaveAttribute('open');
+        const box = await summary.boundingBox();
+        if (!box) throw new Error('missing native summary');
+        expect(box.height).toBeGreaterThanOrEqual(44);
+        expect(box.width).toBeGreaterThanOrEqual(44);
+        await expect(summary).toHaveCSS('list-style-type', 'none');
+        // Engines do not expose a useful computed style for the legacy
+        // WebKit marker pseudo. Check the rendered content's leading edge:
+        // there is no native marker slot before the label or beside the caret.
+        const labelBox = await summary.locator('span').boundingBox();
+        const caretBox = await caret.boundingBox();
+        if (!labelBox || !caretBox) throw new Error('missing Advanced content');
+        expect(Math.abs(labelBox.x - box.x), 'no leading native disclosure marker').toBeLessThanOrEqual(1);
+        expect(Math.abs(caretBox.x - labelBox.x - labelBox.width - 6), 'one caret beside the label').toBeLessThanOrEqual(1);
+        if (reducedMotion === 'reduce') await expect(caret).toHaveCSS('transition-duration', '0s');
+        await expect(caret).toHaveCSS('transform', 'none');
+        await summary.click();
+        await expect(details).toHaveAttribute('open', '');
+        await expect(caret).toHaveCSS('transform', 'matrix(-1, 0, 0, -1, 0, 0)');
+        await summary.focus();
+        await summary.press('Enter');
+        await expect(details).not.toHaveAttribute('open');
+        await expect(caret).toHaveCSS('transform', 'none');
+        await summary.press('Space');
+        await expect(details).toHaveAttribute('open', '');
+        await expect(caret).toHaveCSS('transform', 'matrix(-1, 0, 0, -1, 0, 0)');
+        await expect(summary).toBeFocused();
+        if (kind === 'model') {
+          await dialog.getByLabel('Temperature', { exact: true }).fill('3');
+          await expect(dialog.getByText('Temperature must be a number from 0 to 2.')).toBeVisible();
+          await expect(details).toHaveAttribute('open', '');
+          await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+        }
+        await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await expect(dialog).toHaveCount(0);
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+async function templateBodyGeometry(editor: ReturnType<Page['locator']>, sixLines: boolean): Promise<void> {
+  await expect.poll(() => editor.evaluate((form, minimum) => {
+    const area = form.querySelector('textarea');
+    const label = area?.closest('label')?.querySelector('span');
+    const help = form.querySelector('[data-zone="body"] > p');
+    const foot = form.querySelector('[data-zone="foot"]');
+    if (!area || !label || !help || !foot) throw new Error('missing template zones');
+    const areaBox = area.getBoundingClientRect();
+    const footBox = foot.getBoundingClientRect();
+    const style = getComputedStyle(area);
+    const minimumHeight = 6 * Number.parseFloat(style.lineHeight) + 22;
+    return label.getBoundingClientRect().bottom <= areaBox.top
+      && areaBox.bottom <= help.getBoundingClientRect().top
+      && help.getBoundingClientRect().bottom <= footBox.top
+      && (!minimum || areaBox.height >= minimumHeight - 0.5);
+  }, sixLines), 'body label, help and usable textarea stay above the footer').toBe(true);
+}
+
+async function withLongCollections(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    let inner = window.fetch.bind(window);
+    const fetchCollections = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const response = await inner(input, init);
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname !== '/api/collections') return response;
+      const data = await response.json() as CollectionsResponse;
+      const first = data.items[0];
+      if (!first) throw new Error('missing collection fixture');
+      return Response.json({
+        ...data,
+        items: Array.from({ length: 50 }, (_, index) => ({
+          ...first, id: `collection-${String(index + 1)}`, name: `Collection ${String(index + 1)}`, archivedCount: 1,
+        })),
+      });
+    };
+    Object.defineProperty(window, 'fetch', {
+      configurable: true,
+      get: () => fetchCollections,
+      set: (value: typeof fetch) => { inner = value; },
+    });
+  });
+}
+
+// Keep the studio's offline transport and data; vary only the two reports
+// needed to expose the warning and pending-coverage controls.
+async function withLibraryFindings(page: Page, pendingCoverage: boolean): Promise<void> {
+  await page.addInitScript((pending) => {
+    let inner = window.fetch.bind(window);
+    const fetchReports = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const response = await inner(input, init);
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname === '/api/prompts/library-diagnosis') {
+        const report = await response.json() as LibraryDiagnosisResponse;
+        return Response.json({
+          ...report,
+          templates: report.templates.map((entry) => ({ ...entry, satisfiable: false, reason: 'Conflicting dimension choices' })),
+        });
+      }
+      if (pending && url.pathname === '/api/prompts/library-coverage') {
+        const report = await response.json() as LibraryCoverageResponse;
+        return Response.json({ ...report, untaggedByList: [{ listId: 'lighting', listName: 'lighting', dim: 'Atmosphere', untaggedCount: 3 }] });
+      }
+      return response;
+    };
+    Object.defineProperty(window, 'fetch', {
+      configurable: true,
+      get: () => fetchReports,
+      set: (value: typeof fetch) => { inner = value; },
+    });
+  }, pendingCoverage);
+}
+
+// Extend only existing public library fixtures through their existing route.
+async function withLongEditorRows(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    let inner = window.fetch.bind(window);
+    const fetchLibrary = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const response = await inner(input, init);
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname !== '/api/prompts') return response;
+      const library = await response.json() as PromptLibraryResponse;
+      return Response.json({
+        ...library,
+        variableLists: library.variableLists.map((list) => ({
+          ...list,
+          options: Array.from({ length: 40 }, (_, index) => {
+            const option = list.options[index % list.options.length];
+            if (!option) throw new Error('missing option fixture');
+            return { ...option, id: `long-option-${String(index)}`, value: `Option ${String(index + 1)}`, sortOrder: index };
+          }),
+        })),
+        dimensions: library.dimensions.map((dimension) => ({
+          ...dimension,
+          tags: Array.from({ length: 40 }, (_, index) => {
+            const tag = dimension.tags[index % dimension.tags.length];
+            if (!tag) throw new Error('missing tag fixture');
+            return { ...tag, id: `long-tag-${String(index)}`, label: `Tag ${String(index + 1)}`, parentId: null, sortOrder: index };
+          }),
+        })),
+      });
+    };
+    Object.defineProperty(window, 'fetch', {
+      configurable: true,
+      get: () => fetchLibrary,
+      set: (value: typeof fetch) => { inner = value; },
+    });
+  });
+}
+
+async function rowEditorScrollGeometry(editor: ReturnType<Page['locator']>, phone: boolean, short: boolean): Promise<void> {
+  const geometry = await editor.evaluate((form) => {
+    const body = form.querySelector('[data-zone="body"]');
+    if (!body) throw new Error('missing editor body');
+    return {
+      overflow: getComputedStyle(form).overflowY,
+      bodyOverflow: getComputedStyle(body).overflowY,
+      overscroll: getComputedStyle(form).overscrollBehaviorY,
+      excess: form.scrollHeight - form.clientHeight,
+      bodyHeight: body.getBoundingClientRect().height,
+      mask: getComputedStyle(body).maskImage,
+      scrollPadding: getComputedStyle(body).scrollPaddingBlockStart,
+      minimumExcess: [...form.querySelectorAll('[data-zone="head"], [data-zone="entry"]')]
+        .reduce((height, zone) => height + zone.getBoundingClientRect().height, 72) - form.clientHeight,
+    };
+  });
+  if (phone) {
+    expect(geometry.overflow).toBe('visible');
+    expect(geometry.bodyOverflow).toBe('visible');
+    expect(geometry.mask).toBe('none');
+    expect(geometry.scrollPadding).toBe('auto');
+  } else {
+    expect(geometry.overflow).toBe('auto');
+    expect(geometry.bodyOverflow).toBe('auto');
+    expect(geometry.overscroll).toBe('contain');
+    expect(geometry.bodyHeight).toBeGreaterThanOrEqual(72);
+    expect(geometry.mask).not.toBe('none');
+    expect(geometry.scrollPadding).toBe('14px');
+    if (short && geometry.minimumExcess > 1) expect(geometry.excess).toBeGreaterThan(1);
+    else expect(geometry.excess, 'normal-height panel does not scroll unnecessarily').toBeLessThanOrEqual(1);
+  }
+}
+
+// Sample the real receiver across a 44px target, including the corners. The
+// pending badge deliberately keeps a smaller painted box, so its sampled
+// bounds include space above/below the chrome and just outside its sides.
+async function libraryHitPoints(target: ReturnType<Page['locator']>, pending = false) {
+  await target.scrollIntoViewIfNeeded();
+  await target.evaluate(async () => {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await Promise.all(document.getAnimations()
+      .filter((animation) => animation.timeline === document.timeline
+        && animation.playState === 'running' && animation.effect?.getTiming().iterations !== Infinity)
+      .map((animation) => animation.finished.catch(() => undefined)));
+  });
+  await expect.poll(() => target.evaluate((element, extended) => {
     const box = element.getBoundingClientRect();
-    const dock = document.querySelector('#atelier-composer')?.getBoundingClientRect();
-    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-    return dock !== undefined && box.bottom <= dock.top && (hit === element || element.contains(hit));
-  })).toBe(true);
-  await retry.click();
-  await expect(page.getByRole('button', { name: 'Minimize composer', exact: true })).toBeVisible();
+    const left = box.left + (extended ? -2 : 1);
+    const right = box.right + (extended ? 2 : -1);
+    const top = extended ? box.top + box.height / 2 - 21 : box.top + 1;
+    const bottom = extended ? top + 42 : box.bottom - 1;
+    const misses: { x: number; y: number; receiver: string | null }[] = [];
+    const cornerInset = extended ? 0 : 3;
+    const points = [
+      { x: left + cornerInset, y: top }, { x: right - cornerInset, y: top },
+      { x: left, y: (top + bottom) / 2 }, { x: right, y: (top + bottom) / 2 },
+      { x: (left + right) / 2, y: (top + bottom) / 2 },
+      { x: left + cornerInset, y: bottom }, { x: right - cornerInset, y: bottom },
+    ];
+    for (const { x, y } of points) {
+      const receiver = document.elementFromPoint(x, y);
+      if (receiver !== element && !element.contains(receiver)) misses.push({ x, y, receiver: receiver?.getAttribute('aria-label') ?? receiver?.tagName ?? null });
+    }
+    return { size: box.width >= 43.9 && (extended || box.height >= 43.9), misses };
+  }, pending), 'every sampled point belongs to its intended control').toEqual({ size: true, misses: [] });
+  return target.evaluate((element, extended) => {
+    const box = element.getBoundingClientRect();
+    const left = box.left + (extended ? -2 : 1);
+    const right = box.right + (extended ? 2 : -1);
+    const top = extended ? box.top + box.height / 2 - 21 : box.top + 1;
+    const bottom = extended ? top + 42 : box.bottom - 1;
+    const cornerInset = extended ? 0 : 3;
+    return [{ x: left + cornerInset, y: top }, { x: right - cornerInset, y: top }, { x: left + cornerInset, y: bottom }, { x: right - cornerInset, y: bottom }];
+  }, pending);
+}
+
+async function placeholderInk(target: ReturnType<Page['locator']>): Promise<void> {
+  const result = await target.evaluate((element) => {
+    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) throw new Error('missing input');
+    // A field without placeholder text has no rendered ::placeholder. Exercise
+    // the shared rule with text present, then restore the live draft unchanged.
+    const originalPlaceholder = element.getAttribute('placeholder');
+    const originalValue = element.value;
+    element.setAttribute('placeholder', originalPlaceholder ?? 'Placeholder');
+    element.value = '';
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('missing color sampler');
+    const sample = (color: string) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data);
+    };
+    const style = getComputedStyle(element);
+    const placeholder = getComputedStyle(element, '::placeholder');
+    const foreground = sample(placeholder.color);
+    let surface: Element | null = element;
+    let background = sample(style.backgroundColor);
+    while (background[3] === 0 && surface.parentElement) {
+      surface = surface.parentElement;
+      background = sample(getComputedStyle(surface).backgroundColor);
+    }
+    const luminance = (channels: number[]) => {
+      const linear = channels.slice(0, 3).map((value) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return (linear[0] ?? 0) * 0.2126 + (linear[1] ?? 0) * 0.7152 + (linear[2] ?? 0) * 0.0722;
+    };
+    const a = luminance(foreground);
+    const b = luminance(background);
+    const result = {
+      foreground, ink: sample(style.getPropertyValue('--ink-3')),
+      opacity: placeholder.opacity, backgroundAlpha: background[3],
+      contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05),
+    };
+    element.value = originalValue;
+    if (originalPlaceholder === null) element.removeAttribute('placeholder');
+    else element.setAttribute('placeholder', originalPlaceholder);
+    return result;
+  });
+  expect(result.foreground).toEqual(result.ink);
+  expect(result.opacity).toBe('1');
+  expect(result.backgroundAlpha, 'contrast uses an opaque input or containing sheet').toBe(255);
+  expect(result.contrast).toBeGreaterThanOrEqual(4.5);
+}
+
+for (const viewport of [
+  { width: 1440, height: 900 }, { width: 844, height: 390 },
+  { width: 820, height: 1180 }, { width: 390, height: 844 },
+]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    const touch = viewport.width !== 1440;
+    const phone = viewport.width < 768;
+    const managedTest = (name: string, check: (page: Page, writes: string[], tabKey: string) => Promise<void>, longRows = false) => {
+      test(`${name} at ${String(viewport.width)}×${String(viewport.height)} in ${colorScheme}`, async ({ browser }) => {
+        if (longRows) test.setTimeout(60_000);
+        const context = await browser.newContext({
+          ...(touch ? devices['iPhone 13'] : devices['Desktop Chrome']), viewport, colorScheme,
+        });
+        try {
+          const page = await context.newPage();
+          const writes: string[] = [];
+          page.on('request', (request) => {
+            if (request.method() === 'PUT' && request.url().includes('/prompts/')) writes.push(request.url());
+          });
+          if (longRows) await withLongEditorRows(page);
+          await page.goto('/e2e/studio/index.html?view=prompts');
+          await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+          // macOS WebKit includes buttons in native traversal with Option+Tab.
+          await check(page, writes, browser.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab');
+        } finally {
+          await context.close();
+        }
+      });
+    };
+
+    managedTest('managed editor dimension layout, touch bounds and local reorder', async (page, writes, tabKey) => {
+      await page.getByRole('tab', { name: 'Dimensions', exact: true }).click();
+      const dimension = page.getByRole('form', { name: 'Edit dimension Atmosphere', exact: true });
+      await expect(dimension.locator('[data-zone="body"] > p').first()).toHaveText(
+        'Tags are the values of this dimension. Options tagged on the same dimension that share no tag cannot be rolled or picked together.',
+      );
+      const grip = dimension.getByRole('button', { name: 'Reorder Quiet', exact: true });
+      const name = dimension.getByRole('textbox', { name: 'Tag 1: Quiet', exact: true });
+      const parent = dimension.getByRole('combobox', { name: 'Parent of Quiet', exact: true });
+      const remove = dimension.getByRole('button', { name: 'Remove tag Quiet', exact: true });
+      await name.scrollIntoViewIfNeeded();
+      await expect.poll(() => name.evaluate((element, isPhone) => {
+        const row = element.parentElement;
+        if (!row) throw new Error('missing tag row');
+        const controls = [...row.querySelectorAll('button, input, select')];
+        const boxes = controls.map((control) => {
+          const box = control.getBoundingClientRect();
+          return { x: box.x, y: box.y, right: box.right, bottom: box.bottom, width: box.width, cy: box.y + box.height / 2 };
+        });
+        const [grip, label, parent, remove] = boxes;
+        if (!grip || !label || !parent || !remove) throw new Error('missing tag controls');
+        const parentLabel = row.querySelector('label')?.getBoundingClientRect();
+        const sameCenter = (a: typeof grip, b: typeof grip) => Math.abs(a.cy - b.cy) < 1;
+        const separated = boxes.every((a, i) => boxes.every((b, j) => i === j
+          || a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y));
+        const aligned = sameCenter(grip, label) && sameCenter(label, remove)
+          && (isPhone
+            ? !!parentLabel && Math.abs(parentLabel.left - label.x) < 1 && parent.y >= label.bottom
+            : sameCenter(label, parent) && remove.x >= parent.right);
+        const rowBox = row.getBoundingClientRect();
+        const contained = boxes.every((box) => box.width > 0 && box.x >= Math.max(0, rowBox.left)
+          && box.right <= Math.min(innerWidth, rowBox.right) + 0.5);
+        return { aligned, separated, contained, geometry: aligned && separated && contained ? null : boxes,
+          order: controls.map((control) => control.tagName) };
+      }, phone), `dimension controls at ${String(viewport.width)}×${String(viewport.height)}`).toEqual({
+        aligned: true, separated: true, contained: true, geometry: null, order: ['BUTTON', 'INPUT', 'SELECT', 'BUTTON'],
+      });
+      await expect(remove).toHaveAttribute('data-tip', 'Remove tag');
+      if (touch) for (const control of [grip, name, parent, remove]) await libraryHitPoints(control);
+      await grip.focus();
+      await page.keyboard.press(tabKey);
+      await expect(name).toBeFocused();
+      await page.keyboard.press(tabKey);
+      await expect(parent).toBeFocused();
+      await page.keyboard.press(tabKey);
+      await expect(remove).toBeFocused();
+      await grip.press('Alt+ArrowDown');
+      await expect(dimension.getByRole('textbox', { name: 'Tag 2: Quiet', exact: true })).toHaveValue('Quiet');
+      await expect(dimension.getByRole('button', { name: 'Save dimension', exact: true })).toBeEnabled();
+      expect(await dimension.locator('[data-zone]').evaluateAll((zones) => zones.map((zone) => zone.getAttribute('data-zone')))).toEqual(['head', 'entry', 'body']);
+      expect(await noHorizontalOverflow(page)).toBe(true);
+      expect(writes, 'reorder remains a local draft').toEqual([]);
+      await rowEditorScrollGeometry(dimension, phone, viewport.height === 390);
+      await dimension.getByRole('button', { name: 'Save dimension', exact: true }).scrollIntoViewIfNeeded();
+      if (touch) await libraryHitPoints(dimension.getByRole('button', { name: 'Save dimension', exact: true }));
+      await dimension.getByRole('button', { name: '+ Add tag', exact: true }).scrollIntoViewIfNeeded();
+      if (touch) await libraryHitPoints(dimension.getByRole('button', { name: '+ Add tag', exact: true }));
+    });
+
+    managedTest('managed variable controls and local reorder', async (page, writes) => {
+      await page.getByRole('tab', { name: 'Variable lists', exact: true }).click();
+      const list = page.getByRole('form', { name: 'Edit variable list lighting', exact: true });
+      await expect(list.locator('[data-zone="body"] > p').first()).toHaveText(phone
+        ? 'The number beside each option is its weight: how often it is rolled (0 pin only, 1 default). Tags are under ⋯.'
+        : 'The number beside each option is its weight: how often it is rolled. 0 means pin only; 1 is the default.');
+      const option = list.getByRole('textbox', { name: 'Option 1: soft window light', exact: true });
+      await expect(list.getByRole('spinbutton').first()).toHaveAttribute('aria-describedby', /weight-help-/);
+      if (touch) {
+        await libraryHitPoints(list.getByRole('button', { name: 'Reorder soft window light', exact: true }));
+        await libraryHitPoints(option);
+        await libraryHitPoints(list.getByRole('spinbutton').first());
+        if (phone) await libraryHitPoints(list.getByRole('button', { name: 'More actions for soft window light', exact: true }));
+        else {
+          await libraryHitPoints(list.getByRole('button', { name: 'Show tags for soft window light', exact: true }));
+          await libraryHitPoints(list.getByRole('button', { name: 'Remove option soft window light', exact: true }));
+        }
+      }
+      if (phone) await expect(list.getByRole('button', { name: /^Remove option / })).toHaveCount(0);
+      else await expect(list.getByRole('button', { name: 'Remove option soft window light', exact: true })).toHaveAttribute('data-tip', 'Remove option');
+      await option.press('Alt+ArrowDown');
+      await expect(list.getByRole('textbox', { name: 'Option 2: soft window light', exact: true })).toHaveValue('soft window light');
+      expect(writes, 'reorder remains a local draft').toEqual([]);
+      expect(await noHorizontalOverflow(page)).toBe(true);
+      await rowEditorScrollGeometry(list, phone, viewport.height === 390);
+      await list.getByRole('button', { name: 'Save list', exact: true }).scrollIntoViewIfNeeded();
+      if (touch) await libraryHitPoints(list.getByRole('button', { name: 'Save list', exact: true }));
+      await list.getByRole('button', { name: '+ Add option', exact: true }).scrollIntoViewIfNeeded();
+      if (touch) await libraryHitPoints(list.getByRole('button', { name: '+ Add option', exact: true }));
+    });
+
+    managedTest('managed editor long lists preserve body scrolling and native row reveals', async (page, writes) => {
+      for (const [tab, formName, rowName, saveName, addName] of [
+        ['Variable lists', 'Edit variable list lighting', 'Option 40: Option 40', 'Save list', '+ Add option'],
+        ['Dimensions', 'Edit dimension Atmosphere', 'Tag 40: Tag 40', 'Save dimension', '+ Add tag'],
+      ]) {
+        if (!tab || !formName || !rowName || !saveName || !addName) throw new Error('missing editor case');
+        await page.getByRole('tab', { name: tab, exact: true }).click();
+        const editor = page.getByRole('form', { name: formName, exact: true });
+        await rowEditorScrollGeometry(editor, phone, viewport.height === 390);
+        const body = editor.locator('[data-zone="body"]');
+        const row = editor.getByRole('textbox', { name: rowName, exact: true });
+        await expect(row).toHaveCount(1);
+        const before = await editor.evaluate((form) => ({
+          head: form.querySelector('[data-zone="head"]')?.getBoundingClientRect().top,
+          entry: form.querySelector('[data-zone="entry"]')?.getBoundingClientRect().top,
+        }));
+        // Native start alignment exercises scroll-padding against the mask;
+        // subsequent focus must leave the complete control reachable.
+        await row.evaluate((element) => { element.scrollIntoView({ block: 'start' }); });
+        await row.focus();
+        await expect(row).toBeFocused();
+        if (touch) await libraryHitPoints(row);
+        else await expect(row).toBeInViewport({ ratio: 1 });
+        const rowLayout = await row.evaluate((element) => {
+          const row = element.parentElement;
+          if (!row) throw new Error('missing editor row');
+          const boxes = [...row.querySelectorAll('button, input, select')].map((control) => control.getBoundingClientRect());
+          return boxes.every((a, i) => boxes.every((b, j) => i === j
+            || a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top));
+        });
+        expect(rowLayout, 'long-list row controls do not overlap').toBe(true);
+        if (!phone) {
+          expect(await body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+          expect(await body.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(1);
+          if (viewport.height !== 390) {
+            expect(await editor.evaluate((form) => ({
+              head: form.querySelector('[data-zone="head"]')?.getBoundingClientRect().top,
+              entry: form.querySelector('[data-zone="entry"]')?.getBoundingClientRect().top,
+            }))).toEqual(before);
+            expect(await editor.evaluate((form) => form.scrollTop)).toBe(0);
+          }
+        }
+        // Make Save enabled through the existing local draft owner, then
+        // reveal header and toolbar through native scrolling without saving.
+        await row.fill('Changed locally');
+        const save = editor.getByRole('button', { name: saveName, exact: true });
+        await expect(save).toBeEnabled();
+        await save.scrollIntoViewIfNeeded();
+        if (touch) await libraryHitPoints(save);
+        else await expect(save).toBeInViewport({ ratio: 1 });
+        const add = editor.getByRole('button', { name: addName, exact: true });
+        await add.scrollIntoViewIfNeeded();
+        if (touch) await libraryHitPoints(add);
+        else await expect(add).toBeInViewport({ ratio: 1 });
+        await rowEditorScrollGeometry(editor, phone, viewport.height === 390);
+        expect(await noHorizontalOverflow(page)).toBe(true);
+      }
+      expect(writes, 'native scrolling and edits remain local drafts').toEqual([]);
+    }, true);
+
+    managedTest('managed placeholder ink and resource deletion bounds', async (page) => {
+      const template = page.getByRole('form', { name: 'Edit template Editorial portrait', exact: true });
+      await placeholderInk(template.getByRole('textbox', { name: 'Template name', exact: true }));
+      await placeholderInk(template.getByRole('textbox', { name: 'Body', exact: true }));
+
+      const templates = page.getByRole('complementary', { name: 'Templates', exact: true });
+      if (touch) {
+        const remove = templates.getByRole('button', { name: 'Delete template Editorial portrait', exact: true });
+        await libraryHitPoints(remove);
+        expect(await remove.evaluate((element) => {
+          const pane = element.closest('aside')?.getBoundingClientRect();
+          const box = element.getBoundingClientRect();
+          return !!pane && box.left >= pane.left && box.right <= pane.right;
+        }), 'resource delete fits within its pane').toBe(true);
+      }
+      await templates.getByRole('button', { name: 'New', exact: true }).click();
+      const newName = templates.getByRole('textbox', { name: 'Template name', exact: true });
+      await placeholderInk(newName);
+      await newName.press('Escape');
+
+      await page.getByRole('tab', { name: 'Dimensions', exact: true }).click();
+      const dimension = page.getByRole('form', { name: 'Edit dimension Atmosphere', exact: true });
+      await placeholderInk(dimension.getByRole('textbox', { name: 'Dimension description', exact: true }));
+      await page.getByRole('tab', { name: 'Variable lists', exact: true }).click();
+      const list = page.getByRole('form', { name: 'Edit variable list lighting', exact: true });
+      await placeholderInk(list.getByRole('textbox', { name: 'Option 1: soft window light', exact: true }));
+      await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).click();
+      if (phone) await page.getByRole('button', { name: 'Expand composer', exact: true }).click();
+      await page.getByRole('button', { name: 'Templates', exact: true }).click();
+      await placeholderInk(page.getByRole('searchbox', { name: 'Search templates', exact: true }));
+    });
+  }
+}
+
+for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }]) {
+  test(`Prompt Library touch controls own their hit bounds at ${String(viewport.width)}×${String(viewport.height)}`, async ({ browser }) => {
+    test.setTimeout(60_000);
+    const context = await browser.newContext({ ...devices['iPhone 13'], viewport });
+    try {
+      const page = await context.newPage();
+      await withLibraryFindings(page, true);
+      await page.goto('/e2e/studio/index.html?view=prompts');
+      const editor = page.getByRole('form', { name: 'Edit template Editorial portrait', exact: true });
+      const title = editor.getByRole('textbox', { name: 'Template name', exact: true });
+      for (let corner = 0; corner < 4; corner += 1) {
+        const point = (await libraryHitPoints(title))[corner];
+        if (!point) throw new Error('missing title hit point');
+        await page.touchscreen.tap(point.x, point.y);
+        await expect(title).toBeFocused();
+        await page.keyboard.insertText('x');
+        await expect(title).toHaveValue(/x/);
+        await title.fill('Editorial portrait');
+        await page.keyboard.press('Escape');
+      }
+
+      const disclosure = editor.getByRole('button', { name: 'Referenced lists, 1', exact: true });
+      for (let corner = 0; corner < 4; corner += 1) {
+        const wasOpen = await disclosure.getAttribute('aria-expanded');
+        const point = (await libraryHitPoints(disclosure))[corner];
+        if (!point) throw new Error('missing disclosure hit point');
+        await page.touchscreen.tap(point.x, point.y);
+        await expect(disclosure).toHaveAttribute('aria-expanded', wasOpen === 'true' ? 'false' : 'true');
+        await templateBodyGeometry(editor, viewport.width >= 768);
+      }
+
+      const templates = page.getByRole('tab', { name: 'Templates', exact: true });
+      const warning = page.getByRole('button', { name: 'Editorial portrait: unsatisfiable', exact: true });
+      for (let corner = 0; corner < 4; corner += 1) {
+        const point = (await libraryHitPoints(warning))[corner];
+        if (!point) throw new Error('missing warning hit point');
+        await page.touchscreen.tap(point.x, point.y);
+        await expect(page.getByRole('tab', { name: 'Dimensions', exact: true })).toHaveAttribute('aria-selected', 'true');
+        await expect(page.getByRole('heading', { name: '1 template currently unsatisfiable', exact: true })).toBeVisible();
+        await templates.click();
+      }
+
+      await warning.scrollIntoViewIfNeeded();
+      const resource = page.getByRole('complementary', { name: 'Templates' }).getByRole('button', { name: 'Editorial portrait', exact: true });
+      const remove = page.getByRole('button', { name: 'Delete template Editorial portrait', exact: true });
+      await page.getByRole('complementary', { name: 'Templates' }).getByRole('button', { name: 'Architecture study', exact: true }).click();
+      await expect(resource).toHaveAttribute('aria-pressed', 'false');
+      const boundary = await warning.evaluate((element) => {
+        const row = element.closest('li');
+        const select = row?.querySelector('button[aria-pressed]');
+        const remove = row?.querySelector('button[aria-label^="Delete template"]');
+        if (!select || !remove) throw new Error('missing adjacent template controls');
+        const warnBox = element.getBoundingClientRect();
+        const selectBox = select.getBoundingClientRect();
+        const deleteBox = remove.getBoundingClientRect();
+        const owns = (target: Element, x: number, y: number) => {
+          const receiver = document.elementFromPoint(x, y);
+          return receiver === target || target.contains(receiver);
+        };
+        const y = warnBox.top + warnBox.height / 2;
+        return {
+          separated: selectBox.right <= warnBox.left && warnBox.right <= deleteBox.left,
+          selectOwns: owns(select, selectBox.right - 1, y),
+          warningOwns: owns(element, warnBox.left + 1, y) && owns(element, warnBox.right - 1, y),
+          deleteOwns: owns(remove, deleteBox.left + 1, y),
+          selectPoint: { x: selectBox.right - 1, y },
+          deletePoint: { x: deleteBox.left + 1, y },
+        };
+      });
+      expect(boundary.separated && boundary.selectOwns && boundary.warningOwns && boundary.deleteOwns).toBe(true);
+      await page.touchscreen.tap(boundary.selectPoint.x, boundary.selectPoint.y);
+      await expect(resource).toHaveAttribute('aria-pressed', 'true');
+      await expect(templates).toHaveAttribute('aria-selected', 'true');
+      await page.touchscreen.tap(boundary.deletePoint.x, boundary.deletePoint.y);
+      const confirmation = page.getByRole('dialog', { name: 'Delete template?' });
+      await expect(confirmation).toBeVisible();
+      await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await expect(confirmation).toHaveCount(0);
+      await expect(remove).toBeVisible();
+      expect(await noHorizontalOverflow(page)).toBe(true);
+    } finally {
+      await context.close();
+    }
+  });
+
+  for (const pending of [false, true]) {
+    test(`Prompt Library ${pending ? 'pending' : 'healthy'} coverage responds across its touch target at ${String(viewport.width)}×${String(viewport.height)}`, async ({ browser }) => {
+      const context = await browser.newContext({ ...devices['iPhone 13'], viewport });
+      try {
+        const page = await context.newPage();
+        await withLibraryFindings(page, pending);
+        await page.goto('/e2e/studio/index.html?view=prompts');
+        await page.getByRole('tab', { name: 'Dimensions', exact: true }).click();
+        const badge = page.getByRole('button', { name: /Coverage.*open coverage report/ });
+        for (let corner = 0; corner < 4; corner += 1) {
+          const point = (await libraryHitPoints(badge, pending))[corner];
+          if (!point) throw new Error('missing coverage hit point');
+          await page.touchscreen.tap(point.x, point.y);
+          const report = page.getByRole('dialog', { name: 'Library coverage', exact: true });
+          await expect(report).toBeVisible();
+          await page.keyboard.press('Escape');
+          await expect(report).toHaveCount(0);
+        }
+        if (pending) expect((await badge.boundingBox())?.height ?? 44, 'pending chrome stays small').toBeLessThan(44);
+        expect(await noHorizontalOverflow(page)).toBe(true);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+}
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`short landscape Template Editor scrolls without exhausting its body with ${reducedMotion} motion`, async ({ browser }) => {
+    const context = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: 844, height: 390 }, reducedMotion });
+    try {
+      const page = await context.newPage();
+      await page.goto('/e2e/studio/index.html?view=prompts');
+      const editor = page.getByRole('form', { name: 'Edit template Editorial portrait', exact: true });
+      const toggle = editor.getByRole('button', { name: 'Referenced lists, 1', exact: true });
+      await expect(editor).toBeVisible();
+      for (const expanded of [true, false, true, false]) {
+        await templateBodyGeometry(editor, true);
+        const point = (await libraryHitPoints(toggle))[0];
+        if (!point) throw new Error('missing disclosure point');
+        await page.touchscreen.tap(point.x, point.y);
+        await expect(toggle).toHaveAttribute('aria-expanded', String(expanded));
+        await templateBodyGeometry(editor, true);
+      }
+      expect(await editor.evaluate((form) => form.scrollHeight > form.clientHeight)).toBe(true);
+      await editor.getByRole('textbox', { name: 'Template name', exact: true }).scrollIntoViewIfNeeded();
+      await expect(editor.getByRole('button', { name: 'Save template', exact: true })).toBeInViewport();
+      expect(await noHorizontalOverflow(page)).toBe(true);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+for (const viewport of [{ width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+  test(`normal Template Editor keeps its scroll composition at ${String(viewport.width)}×${String(viewport.height)}`, async ({ browser }) => {
+    const context = await browser.newContext({ ...devices['iPhone 13'], viewport });
+    try {
+      const page = await context.newPage();
+      await page.goto('/e2e/studio/index.html?view=prompts');
+      const editor = page.getByRole('form', { name: 'Edit template Editorial portrait', exact: true });
+      await expect(editor).toBeVisible();
+      await templateBodyGeometry(editor, viewport.width >= 768);
+      expect(await editor.evaluate((form) => form.scrollHeight - form.clientHeight)).toBeLessThanOrEqual(1);
+      if (viewport.width < 768) {
+        expect(await editor.evaluate((form) => getComputedStyle(form).overflowY)).toBe('visible');
+        await editor.getByRole('button', { name: 'Referenced lists, 1', exact: true }).tap();
+        await templateBodyGeometry(editor, false);
+        await editor.getByRole('textbox', { name: 'Template name', exact: true }).scrollIntoViewIfNeeded();
+        await expect(editor.getByRole('textbox', { name: 'Template name', exact: true })).toBeInViewport();
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
+  for (const longCollections of [false, true]) {
+    test(`Library rail ${longCollections ? 'long collections' : 'ordinary content'} stays reachable at ${String(viewport.width)}×${String(viewport.height)}`, async ({ browser }, testInfo) => {
+      // Visit every one of the 50 rows before exercising all navigation and
+      // footer actions; allow the slower engine to finish that complete path.
+      test.setTimeout(longCollections ? 180_000 : 60_000);
+      const context = await browser.newContext({ ...devices['iPhone 13'], viewport });
+      try {
+        const page = await context.newPage();
+        if (longCollections) await withLongCollections(page);
+        await page.goto('/e2e/studio/index.html?textAdmin=1&textProvider=1');
+        const aside = page.locator('#atelier-sidebar');
+        const body = page.getByTestId('sidebar-rail-body');
+        const phone = viewport.width < 768;
+        const openRail = async () => {
+          if (phone) {
+            const opener = page.getByRole('button', { name: 'Open menu', exact: true });
+            await libraryHitPoints(opener);
+            await opener.tap();
+          }
+          else if (await page.getByRole('button', { name: 'Expand sidebar', exact: true }).isVisible()) {
+            await page.getByRole('button', { name: 'Expand sidebar', exact: true }).tap();
+          }
+          if (phone) await expect(aside).toHaveAttribute('data-open', 'true');
+          else await expect(aside).not.toHaveAttribute('data-collapsed', 'true');
+          await expect(aside.getByRole('navigation', { name: 'Library' })).toBeVisible();
+          if (phone) await libraryHitPoints(aside.getByRole('button', { name: 'Close menu', exact: true }));
+        };
+        await openRail();
+        if (!longCollections && viewport.height > 390) {
+          expect(await body.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+        } else {
+          expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+        }
+        const history = page.getByTestId('sidebar-feed');
+        const historySize = await history.evaluate((element) => {
+          const style = getComputedStyle(element);
+          const paddingTop = Number.parseFloat(style.paddingTop);
+          const paddingBottom = Number.parseFloat(style.paddingBottom);
+          return { clientHeight: element.clientHeight, paddingTop, paddingBottom, contentHeight: element.clientHeight - paddingTop - paddingBottom };
+        });
+        expect(historySize.contentHeight).toBeGreaterThanOrEqual(73);
+        const historyRow = history.locator('[data-index]').first();
+        await expect(historyRow).toBeAttached();
+        await historyRow.evaluate((element) => { element.scrollIntoView({ block: 'nearest' }); });
+        const measureHistoryRow = () => historyRow.evaluate((element) => {
+          const scroller = element.closest<HTMLElement>('[data-testid="sidebar-feed"]');
+          if (!scroller) throw new Error('missing history scroller');
+          const bounds = scroller.getBoundingClientRect();
+          const row = element.getBoundingClientRect();
+          const top = bounds.top + scroller.clientTop;
+          const bottom = top + scroller.clientHeight;
+          return { rowHeight: row.height, rowTop: row.top, rowBottom: row.bottom, scrollerTop: top, scrollerBottom: bottom, fits: row.top >= top && row.bottom <= bottom };
+        });
+        await expect.poll(async () => (await measureHistoryRow()).fits, 'one actual history row fits after native reveal').toBe(true);
+        const historyRowSize = await measureHistoryRow();
+        expect(historyRowSize.rowHeight).toBeLessThanOrEqual(historySize.contentHeight);
+        await testInfo.attach('rail-history-geometry', {
+          body: JSON.stringify({ ...historySize, ...historyRowSize }), contentType: 'application/json',
+        });
+        console.info('rail-history-geometry', JSON.stringify({ project: testInfo.project.name, viewport, longCollections, ...historySize, ...historyRowSize }));
+        if (longCollections) {
+          const rows = aside.getByRole('navigation', { name: 'Library' }).getByRole('button', { name: /^Collection \d+ \d+$/ });
+          await expect(rows).toHaveCount(50);
+          for (const row of await rows.all()) {
+            await row.scrollIntoViewIfNeeded();
+            await expect(row).toBeInViewport();
+          }
+          await rows.last().tap();
+          await expect(page.locator('#atelier-feed-heading')).toHaveText('Collection 50');
+          if (phone) await openRail();
+          // The existing roving model still reveals the first row on Home.
+          await rows.last().focus();
+          await page.keyboard.press('Home');
+          const unsorted = aside.getByRole('button', { name: /^Unsorted/ });
+          await expect(unsorted).toBeFocused();
+          await expect(unsorted).toBeInViewport();
+          await page.keyboard.press('Enter');
+          await expect(page.locator('#atelier-feed-heading')).toHaveText('Unsorted');
+          if (phone) await openRail();
+        }
+        for (const name of ['Prompt Library', 'Text models', 'Archive']) {
+          const action = aside.getByRole('button', { name, exact: true });
+          await action.scrollIntoViewIfNeeded();
+          await expectFloor(action, name);
+          await action.tap();
+          await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+          await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).tap();
+          await expect(page.locator('#atelier-feed-heading')).toHaveText('Unsorted');
+          if (phone) await openRail();
+        }
+        const keys = aside.getByRole('button', { name: 'API keys', exact: true });
+        await keys.scrollIntoViewIfNeeded();
+        await expectFloor(keys, 'API keys');
+        await keys.focus();
+        await keys.press('Enter');
+        await expect(page.getByRole('dialog')).toBeVisible();
+        await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+        await expect(keys).toBeFocused();
+        const theme = aside.getByRole('button', { name: /Switch to (dark|light) theme/ });
+        await theme.scrollIntoViewIfNeeded();
+        await expectFloor(theme, 'theme');
+        const pressed = await theme.getAttribute('aria-pressed');
+        await theme.tap();
+        await expect(theme).toHaveAttribute('aria-pressed', pressed === 'true' ? 'false' : 'true');
+        if (phone) {
+          const containment = await aside.evaluate((element) => {
+            const footer = element.querySelector('footer');
+            if (!footer) throw new Error('missing footer');
+            const style = getComputedStyle(element);
+            const bounds = element.getBoundingClientRect();
+            return footer.getBoundingClientRect().bottom <= bounds.bottom - Number.parseFloat(style.paddingBottom) + 1
+              && bounds.left >= 0 && bounds.bottom <= innerHeight + 1;
+          });
+          expect(containment, 'drawer footer clears its safe-area padding').toBe(true);
+          await page.keyboard.press('Escape');
+          await expect(page.getByRole('button', { name: 'Open menu', exact: true })).toBeFocused();
+        } else {
+          await theme.focus();
+          // Keep focus inside the scrolling body until the collapse owner
+          // transfers it, rather than moving it to the header in the test.
+          await aside.getByRole('button', { name: 'Collapse sidebar' }).evaluate((button: HTMLButtonElement) => { button.click(); });
+          const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true });
+          await expect(expand).toBeFocused();
+          expect(await aside.evaluate((element) => element.scrollLeft)).toBe(0);
+          expect(await body.evaluate((element) => element.scrollLeft)).toBe(0);
+          await expand.tap();
+          await expect(aside.getByRole('button', { name: 'Collapse sidebar' })).toBeFocused();
+          await libraryHitPoints(aside.getByRole('button', { name: 'Collapse sidebar' }));
+        }
+        expect(await aside.evaluate((element) => element.scrollLeft)).toBe(0);
+        expect(await body.evaluate((element) => element.scrollLeft)).toBe(0);
+        expect(await noHorizontalOverflow(page)).toBe(true);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+}
+
+test('Prompt Library finding controls keep the pointer-desktop layout contained', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await withLibraryFindings(page, true);
+  await page.goto('/e2e/studio/index.html?view=prompts');
+  await expect(page.getByRole('button', { name: 'Editorial portrait: unsatisfiable', exact: true })).toBeVisible();
+  expect(await noHorizontalOverflow(page)).toBe(true);
+  await page.getByRole('tab', { name: 'Dimensions', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Coverage.*open coverage report/ })).toBeVisible();
+  expect(await noHorizontalOverflow(page)).toBe(true);
+});
+
+test('approved short-window: history Retry stays reachable above compact and tall expanded composers', async ({ page }) => {
+  for (const height of [600, 800]) {
+    await page.setViewportSize({ width: 1280, height });
+    await page.goto('/e2e/studio/index.html?historyError=1');
+    const retry = page.getByTestId('canvas-scroller').getByRole('button', { name: 'Retry', exact: true });
+    await expect(retry).toBeVisible();
+    const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
+    await prompt.fill(Array.from({ length: 12 }, (_, index) => `Retained draft line ${index}`).join('\n'));
+    const composer = page.locator('#atelier-composer');
+    if (height === 600) {
+      await expect.poll(() => prompt.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+      const size = await prompt.evaluate((element) => ({ height: element.getBoundingClientRect().height, line: Number.parseFloat(getComputedStyle(element).lineHeight) }));
+      expect(size.height).toBeGreaterThan(2 * size.line);
+      expect(size.height).toBeLessThanOrEqual(3 * size.line + 10.1);
+    } else {
+      // Preserve the original tall-composer regression at normal height;
+      // 600px now deliberately selects the approved three-line compact body.
+      await expect.poll(() => composer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(280);
+    }
+    await page.getByTestId('canvas-scroller').evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(() => retry.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const dock = document.querySelector('#atelier-composer')?.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return dock !== undefined && box.bottom <= dock.top && (hit === element || element.contains(hit));
+    })).toBe(true);
+    await retry.click();
+    await expect(page.getByRole('button', { name: 'Minimize composer', exact: true })).toBeVisible();
+  }
 });
 
 test('a selected library tab stays reachable when desktop shrinks to phone', async ({ page }) => {

@@ -253,6 +253,8 @@ test('engine and feature evidence', async ({ page, browser }, testInfo) => {
 // addressed with includeHidden.
 const more = (page: Page) => page.getByRole('button', { name: 'More actions', includeHidden: true });
 const menu = (page: Page) => page.getByRole('menu', { name: 'Batch actions' });
+// Semantics live in the content; geometry, focus trap and native popover live in its panel.
+const menuPanel = (page: Page) => menu(page).locator('xpath=ancestor::*[@data-mobile][1]');
 const moveDialog = (page: Page) => page.getByRole('dialog', { name: 'Move to collection' });
 const scroller = (page: Page) => page.locator('[data-testid="canvas-scroller"]');
 
@@ -277,16 +279,16 @@ test('an open menu survives desktop/sheet switches, and native close synchronize
   await trigger.click();
   for (const viewport of [VIEWPORTS.phonePortrait, VIEWPORTS.desktop]) {
     await page.setViewportSize(viewport);
-    await expect(menu(page)).toBeVisible();
-    await settle(menu(page));
-    expect(await menu(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
-    expectOnScreen(page, await box(menu(page)));
+    await expect(menuPanel(page)).toBeVisible();
+    await settle(menuPanel(page));
+    expect(await menuPanel(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    expectOnScreen(page, await box(menuPanel(page)));
   }
-  test.skip(!(await inTopLayer(menu(page))), 'Popover API unavailable');
-  await menu(page).evaluate((element) => {
+  test.skip(!(await inTopLayer(menuPanel(page))), 'Popover API unavailable');
+  await menuPanel(page).evaluate((element) => {
     if (element instanceof HTMLElement) element.hidePopover();
   });
-  await expect(menu(page)).toHaveCount(0);
+  await expect(menuPanel(page)).toHaveCount(0);
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   await expect(trigger).toBeFocused();
 });
@@ -303,13 +305,13 @@ test('without the optional popover source member, panels and labels remain usabl
   await page.setViewportSize(VIEWPORTS.desktop);
   await page.goto(`${HARNESS}?case=edges&at=top-left`);
   await page.locator('#edge-more').click();
-  await settle(menu(page));
-  await expect(menu(page)).not.toHaveAttribute('data-anchored');
-  expectCentred(page, await box(menu(page)));
+  await settle(menuPanel(page));
+  await expect(menuPanel(page)).not.toHaveAttribute('data-anchored');
+  expectCentred(page, await box(menuPanel(page)));
   await page.keyboard.press('ArrowDown');
-  expect(await menu(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  expect(await menuPanel(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
   await page.keyboard.press('Escape');
-  await expect(menu(page)).toHaveCount(0);
+  await expect(menuPanel(page)).toHaveCount(0);
   // The prompt card never needed the source member: it is anchored by the
   // name its prompt declares, in the page layer.
   const prompt = page.locator('#corner div[tabindex="0"]');
@@ -383,8 +385,8 @@ test('a trigger removed while its menu is open never strands the menu; a menu sh
   await page.setViewportSize(VIEWPORTS.desktop);
   await page.goto(`${HARNESS}?case=edges&at=bottom-right`);
   await page.locator('#edge-more').click();
-  await settle(menu(page));
-  const samples = await sampleAfterRemoval(page, 'removeEdgeMore', 'edge-more', '[role="menu"][aria-label="Batch actions"]');
+  await settle(menuPanel(page));
+  const samples = await sampleAfterRemoval(page, 'removeEdgeMore', 'edge-more', '[data-mobile]:has(> [role="menu"][aria-label="Batch actions"])');
   expect(samples.every((sample) => sample.sourceGone)).toBe(true);
   for (const sample of samples.filter((entry) => entry.present && entry.painted)) {
     // Never resolved against the removed trigger: the centred fallback
@@ -394,19 +396,19 @@ test('a trigger removed while its menu is open never strands the menu; a menu sh
     near((sample.top + sample.bottom) / 2, VIEWPORTS.desktop.height / 2, 8);
   }
   // Reported as a close the owner did not make: it closes, with its exit.
-  await expect(menu(page)).toHaveCount(0);
+  await expect(menuPanel(page)).toHaveCount(0);
 
   // Shown with no source at all: unanchored, centred and fully usable.
   await page.evaluate(() => { (window as unknown as HarnessWindow).atelierHarness.openEdgeMenu(); });
-  await expect(menu(page)).toBeVisible();
-  await settle(menu(page));
-  await expect(menu(page)).not.toHaveAttribute('data-anchored');
-  expectCentred(page, await box(menu(page)));
-  await expect.poll(() => menu(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await expect(menuPanel(page)).toBeVisible();
+  await settle(menuPanel(page));
+  await expect(menuPanel(page)).not.toHaveAttribute('data-anchored');
+  expectCentred(page, await box(menuPanel(page)));
+  await expect.poll(() => menuPanel(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
   await page.keyboard.press('ArrowDown');
-  expect(await menu(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  expect(await menuPanel(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
   await page.keyboard.press('Escape');
-  await expect(menu(page)).toHaveCount(0);
+  await expect(menuPanel(page)).toHaveCount(0);
 });
 
 test('a tooltip host removed while described leaves no label painted, at its corner or anywhere', async ({ page }) => {
@@ -436,18 +438,18 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
         const trigger = await moreOf(page, more(page).nth(index));
         await trigger.scrollIntoViewIfNeeded();
         await trigger.click();
-        await settle(menu(page));
-        const panel = await box(menu(page));
+        await settle(menuPanel(page));
+        const panel = await box(menuPanel(page));
         const anchor = await box(trigger);
-        if (await anchored(page, menu(page))) {
-          expect(await inTopLayer(menu(page))).toBe(true);
+        if (await anchored(page, menuPanel(page))) {
+          expect(await inTopLayer(menuPanel(page))).toBe(true);
           expectAdjacent(panel, anchor);
           near(panel.right, anchor.right);
         } else {
           expectCentred(page, panel);
         }
         await page.keyboard.press('Escape');
-        await expect(menu(page)).toHaveCount(0);
+        await expect(menuPanel(page)).toHaveCount(0);
         await expect.poll(() => trigger.evaluate((element) => document.activeElement === element)).toBe(true);
       }
     });
@@ -455,17 +457,17 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
     test('Tab and Shift+Tab stay inside, arrows rove, Escape restores the trigger', async ({ page }) => {
       const trigger = await moreOf(page, more(page).first());
       await trigger.click();
-      await expect.poll(() => menu(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
+      await expect.poll(() => menuPanel(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
       const first = await activeLabel(page);
       await page.keyboard.press('ArrowDown');
       expect(await activeLabel(page)).not.toBe(first);
       for (const key of ['Tab', 'Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab']) {
         await page.keyboard.press(key);
-        expect(await menu(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
-        await expectFocusRingInsideScroll(menu(page));
+        expect(await menuPanel(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
+        await expectFocusRingInsideScroll(menuPanel(page));
       }
       await page.keyboard.press('Escape');
-      await expect(menu(page)).toHaveCount(0);
+      await expect(menuPanel(page)).toHaveCount(0);
       await expect.poll(() => trigger.evaluate((element) => document.activeElement === element)).toBe(true);
     });
 
@@ -473,13 +475,13 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
       const trigger = await moreOf(page, more(page).nth(1));
       await trigger.scrollIntoViewIfNeeded();
       await trigger.click();
-      await settle(menu(page));
-      test.skip(!(await anchored(page, menu(page))), 'no anchor in this engine: the fallback is unanchored');
+      await settle(menuPanel(page));
+      test.skip(!(await anchored(page, menuPanel(page))), 'no anchor in this engine: the fallback is unanchored');
       const before = await box(trigger);
       await scrollFeedBy(page, 40);
       const after = await box(trigger);
       expect(after.top).toBeLessThan(before.top);
-      const panel = await box(menu(page));
+      const panel = await box(menuPanel(page));
       expectAdjacent(panel, after);
       near(panel.right, after.right);
     });
@@ -501,9 +503,9 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
       const anchor = await box(trigger);
       expect(anchor.bottom).toBeGreaterThan(height - 80);
       await trigger.click();
-      await settle(menu(page));
-      test.skip(!(await anchored(page, menu(page))), 'no anchor in this engine: the fallback is unanchored');
-      const panel = await box(menu(page));
+      await settle(menuPanel(page));
+      test.skip(!(await anchored(page, menuPanel(page))), 'no anchor in this engine: the fallback is unanchored');
+      const panel = await box(menuPanel(page));
       near(panel.bottom, anchor.top - GAP);
       near(panel.right, anchor.right);
       expectOnScreen(page, panel);
@@ -514,7 +516,7 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
       await trigger.scrollIntoViewIfNeeded();
       await trigger.click();
       const moveItem = menu(page).getByRole('menuitem', { name: /move to collection/i });
-      await settle(menu(page));
+      await settle(menuPanel(page));
       await moveItem.scrollIntoViewIfNeeded();
       await frames(page);
       expect(await topmostAt(moveItem)).toBe(true);
@@ -576,10 +578,10 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
     test('scrolling a trigger far out of the feed recycles its row and takes the menu with it', async ({ page }) => {
       const trigger = await moreOf(page, more(page).first());
       await trigger.click();
-      await expect(menu(page)).toBeVisible();
+      await expect(menuPanel(page)).toBeVisible();
       await scroller(page).evaluate((element) => { element.scrollTop = element.scrollTop > 0 ? 0 : element.scrollHeight; });
       await expect(trigger).toHaveCount(0);
-      await expect(menu(page)).toHaveCount(0);
+      await expect(menuPanel(page)).toHaveCount(0);
     });
   });
 }
@@ -978,16 +980,16 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, phon
         const trigger = page.locator('#edge-more');
         const anchor = await box(trigger);
         await trigger.click();
-        await settle(menu(page));
-        const panel = await box(menu(page));
-        if (!(await anchored(page, menu(page)))) {
+        await settle(menuPanel(page));
+        const panel = await box(menuPanel(page));
+        if (!(await anchored(page, menuPanel(page)))) {
           expectCentred(page, panel);
           return;
         }
         expectOnScreen(page, panel);
         const vertical = corner.startsWith('top') ? panel.top - anchor.bottom : anchor.top - panel.bottom;
         // Adjacent on the side with room, unless it fits on neither and scrolls.
-        if (!(await overflows(menu(page)))) near(vertical, GAP);
+        if (!(await overflows(menuPanel(page)))) near(vertical, GAP);
         // Right edges align, or mirror to left edges against the left edge.
         if (corner.endsWith('right')) near(panel.right, anchor.right);
         else near(panel.left, anchor.left);
@@ -1036,7 +1038,7 @@ test.describe('edges · very short desktop window', () => {
         element.style.bottom = 'auto';
       });
       for (const [trigger, panel] of [
-        [page.locator('#edge-more'), menu(page)],
+        [page.locator('#edge-more'), menuPanel(page)],
         [page.getByRole('button', { name: 'Edge choice' }), page.getByRole('listbox', { name: 'Edge choice' })],
       ] as const) {
         const anchor = await box(trigger);
@@ -1077,12 +1079,12 @@ test.describe('edges · phone portrait', () => {
     await expect(listbox).toHaveCount(0);
 
     await page.locator('#edge-more').click();
-    await settle(menu(page));
-    expect(await menu(page).getAttribute('data-mobile')).toBe('true');
-    expect(await inTopLayer(menu(page))).toBe(false);
-    near((await box(menu(page))).bottom, VIEWPORTS.phonePortrait.height);
+    await settle(menuPanel(page));
+    expect(await menuPanel(page).getAttribute('data-mobile')).toBe('true');
+    expect(await inTopLayer(menuPanel(page))).toBe(false);
+    near((await box(menuPanel(page))).bottom, VIEWPORTS.phonePortrait.height);
     await page.getByRole('button', { name: 'Close menu' }).tap({ position: { x: 20, y: 20 } });
-    await expect(menu(page)).toHaveCount(0);
+    await expect(menuPanel(page)).toHaveCount(0);
   });
 });
 

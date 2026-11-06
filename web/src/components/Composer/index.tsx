@@ -833,7 +833,7 @@ function Composer({
       <div className={styles.expandedTrack} inert={collapsed} aria-hidden={collapsed}>
       <div className={styles.expandedClip}>
       <div
-        className={styles.composer}
+        className={`${styles.composer} ${parts.isI2VMode ? '' : styles.imageComposer}`}
         data-testid="composer-drop-surface"
         onDragEnter={(event) => {
           event.preventDefault();
@@ -1132,7 +1132,7 @@ function Composer({
                 iconLeft={<I.chip />}
                 valueDisplay={selectedModel.backend === 'local' ? (
                   <span className={styles.localToken}>
-                    {shortModelToken(selectedModel)}
+                    <span>{shortModelToken(selectedModel)}</span>
                     {localHostStatus ? <span className={styles.hostDot} data-state={localHostStatus} aria-hidden="true" /> : null}
                   </span>
                 ) : shortModelToken(selectedModel)}

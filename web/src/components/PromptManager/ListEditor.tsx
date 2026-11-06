@@ -321,7 +321,7 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
   return (
     <form
       id={formId}
-      className={styles.editor}
+      className={`${styles.editor} ${styles.rowEditor}`}
       role="form"
       aria-label={`Edit variable list ${list.name}`}
       onSubmit={(event) => {
@@ -402,6 +402,13 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
       </div>
 
       <div className={styles.listScroll} data-zone="body">
+        {drafts.length > 0 && (
+          <p className={styles.bodyNote}>
+            {isPhone
+              ? 'The number beside each option is its weight: how often it is rolled (0 pin only, 1 default). Tags are under ⋯.'
+              : 'The number beside each option is its weight: how often it is rolled. 0 means pin only; 1 is the default.'}
+          </p>
+        )}
         {drafts.length === 0 ? (
           <p className={styles.listEmpty}>Add options to make this list usable in templates.</p>
         ) : (
@@ -444,7 +451,7 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
                 />
                 {!isPhone && (
                   <button
-                    className={btn.secondary}
+                    className={`${btn.secondary} ${styles.rowButton}`}
                     type="button"
                     aria-expanded={draft.expanded}
                     aria-controls={`${formId}-tags-${draft.key}`}
@@ -497,8 +504,9 @@ export default function ListEditor({ list, dimensions, onDelete }: ListEditorPro
                   />
                 ) : (
                   <button
-                    className={btn.icon}
+                    className={btn.iconAction}
                     type="button"
+                    data-tip="Remove option"
                     aria-label={`Remove option ${draft.value || index + 1}`}
                     onClick={() => {
                       setDrafts((current) => current.filter((row) => row.key !== draft.key));

@@ -92,14 +92,12 @@ export default function OverflowMenu<TAction extends string>({
       ref={bindToastHost}
       className={`${styles.panel} ${isPhone ? styles.sheet : `${styles.popover} ${anchors.panel}`}`}
       data-closing={closing ? 'true' : undefined}
-      role="menu"
-      aria-label={label}
       data-mobile={isPhone ? 'true' : 'false'}
       data-anchor-place={isPhone ? undefined : 'below-end'}
       {...popoverProps}
       onKeyDown={onMenuKeyDown}
     >
-      <div className={styles.content} data-overlay-scroll="true">
+      <div className={styles.content} role="menu" aria-label={label} data-overlay-scroll="true">
       {groups.map((group, groupIndex) => (
         <div key={group.key} role="none">
           {group.label !== undefined && <div className={styles.groupLabel}>{group.label}</div>}

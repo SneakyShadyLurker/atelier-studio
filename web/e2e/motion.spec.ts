@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import type { useAtelierStore as AtelierStore } from '../src/store/atelier';
 
@@ -40,18 +41,30 @@ declare global {
   interface Window {
     __motionFrames?: Frame[];
     __motionDone?: boolean;
+    __motionCleanup?: () => void;
+    __motionClickTiming?: { armedAt: number; clickedAt?: number; trusted?: boolean; completedAt?: number; durationMs: number };
     __composerSnapshots?: ComposerSnapshot[];
     __composerSnapshotsDone?: boolean;
   }
 }
 
-/** Records `selector` on every animation frame for `ms`, starting now. */
-async function startRecording(page: Page, selector: string, ms: number): Promise<void> {
-  await page.evaluate(({ selector: target, ms: duration }) => {
+/** Records `selector` for `ms`, immediately or from the next captured click. */
+async function startRecording(page: Page, selector: string, ms: number, armedOnNextClick = false): Promise<void> {
+  await page.evaluate(({ selector: target, ms: duration, armedOnNextClick: armed }) => {
+    window.__motionCleanup?.();
     const frames: Frame[] = [];
     window.__motionFrames = frames;
     window.__motionDone = false;
-    const start = performance.now();
+    if (armed) window.__motionClickTiming = { armedAt: performance.now(), durationMs: duration };
+    else delete window.__motionClickTiming;
+    let start = performance.now();
+    let frameId = 0;
+    const cleanup = () => {
+      window.removeEventListener('click', onClick, true);
+      window.removeEventListener('pagehide', cleanup);
+      cancelAnimationFrame(frameId);
+      delete window.__motionCleanup;
+    };
     const tick = (now: number) => {
       const element = document.querySelector(target);
       if (element) {
@@ -78,11 +91,27 @@ async function startRecording(page: Page, selector: string, ms: number): Promise
       } else {
         frames.push({ t: now - start, present: false, x: 0, y: 0, width: 0, height: 0, transform: 'none', opacity: 0, closing: null });
       }
-      if (now - start < duration) requestAnimationFrame(tick);
-      else window.__motionDone = true;
+      if (now - start < duration) frameId = requestAnimationFrame(tick);
+      else {
+        if (window.__motionClickTiming) window.__motionClickTiming.completedAt = now;
+        window.__motionDone = true;
+        cleanup();
+      }
     };
-    requestAnimationFrame(tick);
-  }, { selector, ms });
+    const onClick = (event: MouseEvent) => {
+      start = performance.now();
+      if (window.__motionClickTiming) {
+        window.__motionClickTiming.clickedAt = start;
+        window.__motionClickTiming.trusted = event.isTrusted;
+      }
+      // Capture the old geometry before the application's click handler runs.
+      tick(start);
+    };
+    window.__motionCleanup = cleanup;
+    window.addEventListener('pagehide', cleanup, { once: true });
+    if (armed) window.addEventListener('click', onClick, { capture: true, once: true });
+    else frameId = requestAnimationFrame(tick);
+  }, { selector, ms, armedOnNextClick });
 }
 
 async function recordedFrames(page: Page): Promise<Frame[]> {
@@ -708,7 +737,7 @@ test.describe('reduced motion holds every leak site still', () => {
 
   test('the menuShell popover fades in place', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?case=menu');
-    await startRecording(page, '[role="menu"]', 300);
+    await startRecording(page, '[data-mobile]:has(> [role="menu"])', 300);
     await page.locator('#trigger').click();
     expectStill(await recordedFrames(page), 'menu popover');
   });
@@ -1935,16 +1964,43 @@ test.describe('layout stability (T9)', () => {
     // the URL hint changes.
     await dialog.getByText('Groq', { exact: true }).click();
     await page.waitForTimeout(500);
-    await startRecording(page, 'dialog[open] > div', 600);
-    await dialog.getByText('OpenRouter', { exact: true }).click();
-    const frames = (await recordedFrames(page)).filter((frame) => frame.present);
-    const first = frames[0];
-    const last = frames.at(-1);
-    if (!first || !last) throw new Error('no dialog frames');
-    expect(last.height - first.height, 'the longer hint adds a line').toBeGreaterThan(10);
-    const moving = frames.filter((frame) => frame.height > first.height + 0.5 && frame.height < last.height - 0.5);
-    expect(new Set(moving.map((frame) => Math.round(frame.height))).size, 'distinct intermediate heights').toBeGreaterThanOrEqual(2);
-    expect((moving.at(-1)?.t ?? 0) - (moving[0]?.t ?? 0), 'ms spent between the two heights').toBeGreaterThanOrEqual(80);
+    await startRecording(page, 'dialog[open] > div', 600, true);
+    try {
+      await dialog.getByText('OpenRouter', { exact: true }).click();
+      const frames = (await recordedFrames(page)).filter((frame) => frame.present);
+      const timing = await page.evaluate(() => window.__motionClickTiming);
+      const first = frames[0];
+      const last = frames.at(-1);
+      if (!first || !last) throw new Error('no dialog frames');
+      expect(timing?.trusted, 'the recorder observed the native click').toBe(true);
+      expect(first.t, 'baseline captured synchronously before the click handler').toBe(0);
+      expect(last.t, 'full post-click recording window').toBeGreaterThanOrEqual(600);
+      expect(last.height - first.height, 'the longer hint adds a line').toBeGreaterThan(10);
+      const moving = frames.filter((frame) => frame.height > first.height + 0.5 && frame.height < last.height - 0.5);
+      expect(new Set(moving.map((frame) => Math.round(frame.height))).size, 'distinct intermediate heights').toBeGreaterThanOrEqual(2);
+      expect((moving.at(-1)?.t ?? 0) - (moving[0]?.t ?? 0), 'ms spent between the two heights').toBeGreaterThanOrEqual(80);
+    } finally {
+      if (!page.isClosed()) {
+        const recording = await page.evaluate(() => {
+          window.__motionCleanup?.();
+          return { timing: window.__motionClickTiming, done: window.__motionDone, frames: window.__motionFrames ?? [] };
+        });
+        const frames = recording.frames.filter((frame) => frame.present);
+        const first = frames[0];
+        const last = frames.at(-1);
+        const moving = first && last
+          ? frames.filter((frame) => frame.height > first.height + 0.5 && frame.height < last.height - 0.5) : [];
+        const evidencePath = test.info().outputPath('preset-hint-motion.json');
+        await writeFile(evidencePath, JSON.stringify({
+          ...recording,
+          heightIncreasePx: first && last ? last.height - first.height : null,
+          distinctIntermediateHeights: new Set(moving.map((frame) => Math.round(frame.height))).size,
+          movingSpanMs: (moving.at(-1)?.t ?? 0) - (moving[0]?.t ?? 0),
+          clickToFinalFrameMs: last?.t ?? null,
+        }, null, 2));
+        await test.info().attach('preset-hint-motion', { path: evidencePath, contentType: 'application/json' });
+      }
+    }
   });
 
   test('a tile removal that shrinks its phone batch moves the rows below through their group', async ({ page }) => {

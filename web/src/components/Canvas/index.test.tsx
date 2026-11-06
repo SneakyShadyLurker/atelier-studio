@@ -88,6 +88,26 @@ afterEach(() => {
   useAtelierStore.setState({ composerExpanded: false });
 });
 
+describe('Canvas passive keyboard access', () => {
+  test.each([
+    { state: 'empty', q: '', isLoading: false },
+    { state: 'loading', q: '', isLoading: true },
+    { state: 'no search results', q: 'harbour', isLoading: false },
+  ])('keeps the named scroller focusable while $state', ({ q, isLoading }) => {
+    installPhone(false);
+    render(<Canvas {...canvasProps} q={q} isLoading={isLoading} />);
+    const scroller = screen.getByRole('region', { name: 'Unsorted' });
+    expect(scroller).toBe(screen.getByTestId('canvas-scroller'));
+    expect(scroller.tabIndex).toBe(0);
+    const headingId = scroller.getAttribute('aria-labelledby');
+    expect(headingId && document.getElementById(headingId)?.textContent).toBe('Unsorted');
+    scroller.focus();
+    expect(document.activeElement).toBe(scroller);
+    fireEvent.keyDown(scroller, { key: 'PageDown' });
+    expect(document.activeElement).toBe(scroller);
+  });
+});
+
 describe('Canvas virtualization', () => {
   test('remeasures the leading control offset when only the next-page error flag changes', () => {
     installPhone(false);

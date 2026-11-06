@@ -79,6 +79,41 @@ function panel(): HTMLElement {
   return element;
 }
 
+describe('Toast glyph semantics', () => {
+  for (const tone of [undefined, 'success', 'soft', 'error'] as const) {
+    test(`${tone ?? 'default'} keeps its announcement and action with the intended glyph`, () => {
+      render(<Toast />);
+      const onClick = mock();
+      act(() => {
+        useAtelierStore.getState().addToast('Public fixture notice', tone, 5000, { label: 'Undo', onClick });
+      });
+      const undo = onlyUndo();
+      const toast = undo.parentElement;
+      if (!toast) throw new Error('missing visible toast');
+      expect(toast.getAttribute('role')).toBe('status');
+      expect(toast.closest('[inert], [aria-hidden="true"]')).toBeNull();
+      expect(toast.querySelectorAll(':scope > svg')).toHaveLength(tone === 'soft' ? 0 : 1);
+      expect(toast.children.length).toBe(tone === 'soft' ? 2 : 3);
+      const glyph = toast.querySelector('svg path');
+      if (tone === 'error') expect(glyph?.getAttribute('d')).toContain('M6.1 2.2');
+      else if (tone !== 'soft') expect(glyph?.getAttribute('d')).toBe('M11.5 3.5 5.7 9.3 2.5 6.2');
+      expect(Array.from(document.querySelectorAll('[aria-live]')).every((region) => !region.textContent.includes('Public fixture notice'))).toBe(true);
+      fireEvent.click(undo);
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
+    test(`${tone ?? 'default'} plain notice keeps its shared live region`, () => {
+      render(<Toast />);
+      act(() => { useAtelierStore.getState().addToast('Plain public notice', tone, 5000); });
+      const region = document.querySelector(`[aria-live="${tone === 'error' ? 'assertive' : 'polite'}"]`);
+      expect(region?.textContent).toBe('Plain public notice');
+      const visible = Array.from(document.querySelectorAll('span')).find((span) => span.textContent === 'Plain public notice' && !span.closest('[aria-live]'))?.parentElement;
+      expect(visible?.getAttribute('aria-hidden')).toBe('true');
+      expect(visible?.querySelectorAll(':scope > svg')).toHaveLength(tone === 'soft' ? 0 : 1);
+    });
+  }
+});
+
 describe('Toast host placement', () => {
   test('renders in the app root at the default placement when no modal is open', () => {
     const { getByTestId } = render(<Shell />);

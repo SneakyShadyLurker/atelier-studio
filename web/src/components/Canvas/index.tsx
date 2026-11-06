@@ -459,6 +459,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
         ref={canvasRef}
         className={styles.canvas}
         role="region"
+        tabIndex={0}
         aria-labelledby={FEED_HEADING_ID}
         onScrollCapture={handleScroll}
         onWheel={onScrollGesture}

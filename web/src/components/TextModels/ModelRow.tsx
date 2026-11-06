@@ -89,6 +89,7 @@ export default function ModelRow({ model, checking, toggling, imageLabel, onTogg
       <div className={styles.modelIdentity}>
         <div className={styles.modelNameLine}>
           <span className={styles.modelName}>{model.displayName}</span>
+          {!model.enabled && <span className={styles.tag}>Off</span>}
           {tag && (
             <span className={styles.tag} data-tone={model.usage.isDefault ? 'strong' : undefined} data-tip={tag.detail}>
               {tag.label}
@@ -107,6 +108,18 @@ export default function ModelRow({ model, checking, toggling, imageLabel, onTogg
               Untested
             </button>
           )}
+          {model.verifiedAt === null && model.lastTest !== null && (
+            <button
+              className={`${styles.tag} ${styles.tagButton}`}
+              type="button"
+              aria-label="Test failed: test again"
+              data-tip="Run the capability test again"
+              data-tone="danger"
+              onClick={() => { onAction('test'); }}
+            >
+              Test failed
+            </button>
+          )}
         </div>
         <span className={styles.modelId}>{model.modelId}</span>
       </div>
@@ -116,7 +129,11 @@ export default function ModelRow({ model, checking, toggling, imageLabel, onTogg
             ? <span key={key} className={styles.cap} aria-hidden="true" />
             : <span key={key} className={styles.cap} role="img" aria-label={label} data-tip={label}>{icon}</span>))}
         </span>
-        <span className={styles.status} data-status={model.status}>
+        <span
+          className={styles.status}
+          data-status={model.status}
+          data-tip={model.status === 'available' ? 'Listed by provider. Test to confirm capabilities.' : undefined}
+        >
           <span className={styles.statusDot} aria-hidden="true" />
           <span>{word}</span>
         </span>

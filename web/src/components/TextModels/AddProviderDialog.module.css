@@ -84,13 +84,30 @@
 }
 
 .advancedSummary {
+  composes: label from '../../styles/type.module.css';
   display: inline-flex;
   align-items: center;
+  gap: 6px;
+  list-style: none;
   min-height: 36px;
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-size: var(--text-xs);
   font-weight: 500;
   cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-out);
+}
+
+.advancedSummary::-webkit-details-marker {
+  display: none;
+}
+
+.advancedCaret {
+  flex: none;
+  transition: transform var(--dur-transform) var(--ease-out);
+}
+
+.advanced[open] > .advancedSummary .advancedCaret {
+  transform: rotate(-180deg);
 }
 
 .advancedSummary:hover {

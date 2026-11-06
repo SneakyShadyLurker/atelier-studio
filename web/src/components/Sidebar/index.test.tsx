@@ -94,12 +94,16 @@ describe('Sidebar landmarks and scroll zones', () => {
     expect(loadMore.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
-  test('renders scoped header/footer landmarks inside the aside', () => {
+  test('keeps the header outside the rail body and the footer inside it', () => {
     renderSidebar();
     const aside = screen.getByRole('complementary');
 
     expect(aside.querySelector(':scope > header')).toBeTruthy();
-    expect(aside.querySelector(':scope > footer')).toBeTruthy();
+    const body = screen.getByTestId('sidebar-rail-body');
+    expect(body.parentElement).toBe(aside);
+    expect(body.querySelector(':scope > footer')).toBeTruthy();
+    expect(body.contains(screen.getByRole('navigation', { name: 'Library' }))).toBe(true);
+    expect(body.contains(screen.getByTestId('sidebar-feed'))).toBe(true);
   });
 
   test('tags library and feed scroll zones', () => {

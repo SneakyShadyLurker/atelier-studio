@@ -53,7 +53,7 @@ function renderToast(
       inert={covered || undefined}
       {...pauseHandlers}
     >
-      {isError ? <I.alert /> : <I.check />}
+      {isError ? <I.alert /> : tone === 'soft' ? null : <I.check />}
       <span>{message.text}</span>
       {message.action ? (
         <button type="button" tabIndex={0} className={styles.action} onClick={message.action.onClick}>

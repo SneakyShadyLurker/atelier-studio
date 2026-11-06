@@ -150,18 +150,22 @@ describe('BatchOverflowMenu', () => {
   it('desktop: a manual popover placed by CSS, with no script geometry on the panel', () => {
     renderMenu(makeBatch({ pinned: false }));
     const menu = screen.getByRole('menu', { name: /batch actions/i });
-    expect(menu.getAttribute('data-anchor-place')).toBe('below-end');
-    expect(menu.getAttribute('popover')).toBe('manual');
-    expect(menu.getAttribute('style')).toBeNull();
+    const panel = menu.closest('[data-mobile]');
+    expect(panel).not.toBeNull();
+    expect(panel?.getAttribute('data-anchor-place')).toBe('below-end');
+    expect(panel?.getAttribute('popover')).toBe('manual');
+    expect(panel?.getAttribute('style')).toBeNull();
   });
 
   it('phone: the sheet is an ordinary element with no anchoring at all', () => {
     installPhone();
     renderMenu(makeBatch({ pinned: false }));
     const menu = screen.getByRole('menu', { name: /batch actions/i });
-    expect(menu.getAttribute('data-mobile')).toBe('true');
-    expect(menu.hasAttribute('data-anchor-place')).toBe(false);
-    expect(menu.hasAttribute('popover')).toBe(false);
+    const panel = menu.closest('[data-mobile]');
+    expect(panel).not.toBeNull();
+    expect(panel?.getAttribute('data-mobile')).toBe('true');
+    expect(panel?.hasAttribute('data-anchor-place')).toBe(false);
+    expect(panel?.hasAttribute('popover')).toBe(false);
     expect(screen.getByRole('button', { name: 'Close menu' })).toBeTruthy();
   });
 });

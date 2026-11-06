@@ -1043,6 +1043,15 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.localToken > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Live health of the serving host, on the Model chip (local models only).
@@ -1451,14 +1460,22 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.selectGroup > .chip {
+  flex: 0 0 auto;
 }
 
 /* The model chip truncates its name (the full name is its tip). */
 .selectGroup > .chip:first-child {
-  max-width: 14ch;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .selectGroup > .chip:first-child .chipVal {
+  max-width: 10ch;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1474,6 +1491,49 @@
   @container composer (width < 560px) {
     .go {
       width: auto;
+    }
+  }
+}
+
+/* Only the image body compacts in short desktop-width windows. The mode
+   boundary and reference-chip boundaries retain ownership of footprint motion. */
+@media (width >= 768px) and (height <= 620px) {
+  .imageComposer {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    padding-top: 10px;
+  }
+
+  .imageComposer > * {
+    grid-column: 1 / -1;
+  }
+
+  .imageComposer:not(:has(.refChip)) > .refRow {
+    grid-column: 1;
+    grid-row: 1;
+    padding-right: 0;
+  }
+
+  .imageComposer:not(:has(.refChip)) > .textarea {
+    grid-column: 2;
+    grid-row: 1;
+    width: calc(100% - 28px - 16px);
+  }
+
+  .imageComposer > .textarea {
+    min-width: 0;
+    min-height: 32px;
+    max-height: calc(3lh + 10px);
+    overflow-y: auto;
+  }
+
+  @media (hover: none), (any-pointer: coarse) {
+    .imageComposer:not(:has(.refChip)) > .textarea {
+      width: calc(100% - 44px - 16px);
+    }
+
+    .imageComposer > .textarea {
+      min-height: 44px;
     }
   }
 }

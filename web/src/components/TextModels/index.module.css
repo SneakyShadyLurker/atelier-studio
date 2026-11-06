@@ -138,6 +138,12 @@
   color: var(--ink);
 }
 
+.tagButton[data-tone='danger'] {
+  border-style: solid;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .tagButton:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
@@ -422,11 +428,6 @@
   border-radius: 0 0 calc(var(--radius-panel) - 1px) calc(var(--radius-panel) - 1px);
 }
 
-.modelRow[data-enabled='false'] .modelIdentity,
-.modelRow[data-enabled='false'] .modelMeta {
-  opacity: 0.5;
-}
-
 .modelIdentity {
   min-width: 0;
   display: grid;
@@ -510,6 +511,22 @@
 
 .status[data-status='unknown'] .statusDot {
   border-style: dashed;
+}
+
+.modelRow[data-enabled='false'] .modelName,
+.providerCard[data-enabled='false'] .modelName {
+  color: var(--ink-2);
+}
+
+.modelRow[data-enabled='false'] .status:not([data-status='offline']),
+.providerCard[data-enabled='false'] .status:not([data-status='offline']) {
+  color: var(--ink-3);
+}
+
+.modelRow[data-enabled='false'] .status[data-status='available'] .statusDot,
+.providerCard[data-enabled='false'] .status[data-status='available'] .statusDot {
+  border-color: var(--ink-3);
+  background: var(--ink-3);
 }
 
 .modelControls {

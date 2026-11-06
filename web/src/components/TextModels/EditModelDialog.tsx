@@ -15,6 +15,7 @@ import { useAtelierStore } from '../../store/atelier';
 import { RelativeTime } from '../Batch/RelativeTime';
 import ConfirmDialog from '../ConfirmDialog';
 import { DialogShell } from '../DialogShell';
+import { I } from '../icons/I';
 import btn from '../../styles/buttons.module.css';
 import dialogStyles from '../../styles/dialog.module.css';
 import { joinWords, removeModelCopy } from './ModelRow';
@@ -480,7 +481,10 @@ export default function EditModelDialog({ provider, model, imageLabel, startTest
             open={advancedOpen || advancedError !== undefined}
             onToggle={(event) => { setAdvancedOpen(event.currentTarget.open); }}
           >
-            <summary className={form.advancedSummary}>Advanced</summary>
+            <summary className={form.advancedSummary}>
+              <span>Advanced</span>
+              <I.caret className={form.advancedCaret} aria-hidden="true" />
+            </summary>
             <div className={form.advancedBody}>
               <div className={styles.capRow}>
                 <Field id={`${fieldId}-temp`} label="Temperature" error={errors.temperature}>

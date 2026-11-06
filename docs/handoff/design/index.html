@@ -43,6 +43,9 @@
       U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
   }
   :root {
+    /* Image Composer compacts only at width >=768px and height <=620px using
+       existing 10/32/44px sizes; soft informational toasts omit their glyph.
+       These scoped extensions introduce no palette, size or motion tokens. */
     --bg: #ebeae6;
     --bg-elev: #f7f7f3;
     --bg-sunk: #dedcd6;

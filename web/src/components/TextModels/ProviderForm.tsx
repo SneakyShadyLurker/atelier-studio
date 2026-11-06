@@ -5,6 +5,7 @@ import { ApiError } from '../../api/client';
 import { describeError } from '../../lib/errorCopy';
 import { isRecord } from '../../lib/guards';
 import { Disclosure } from '../Disclosure';
+import { I } from '../icons/I';
 import styles from './AddProviderDialog.module.css';
 
 // The provider form shared by "Add a provider" and "Edit provider": name,
@@ -303,7 +304,10 @@ export function ProviderFields({ draft, errors, urlHint, urlHints, keySlot, disa
         open={advancedOpen}
         onToggle={(event) => { setAdvancedOpen(event.currentTarget.open); }}
       >
-        <summary className={styles.advancedSummary}>Advanced</summary>
+        <summary className={styles.advancedSummary}>
+          <span>Advanced</span>
+          <I.caret className={styles.advancedCaret} aria-hidden="true" />
+        </summary>
         <div className={styles.advancedBody}>
           <fieldset className={styles.choiceGroup} disabled={disabled}>
             <legend className={styles.fieldLabel}>Protocol</legend>

@@ -1,9 +1,376 @@
 import { devices, expect, test, type Page } from '@playwright/test';
-import type { CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, PromptLibraryResponse } from '@atelier/shared';
+import type { AdminProvider, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, PromptLibraryResponse } from '@atelier/shared';
 
 const noHorizontalOverflow = (page: Page) => page.evaluate(() =>
   document.documentElement.scrollWidth <= window.innerWidth + 1,
 );
+
+// Use the studio's existing offline fetch seam; keep the real Enhance action
+// pending so both labels can be measured without a provider or capture hook.
+async function withPendingEnhance(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    let inner = window.fetch.bind(window);
+    const fetchEnhance = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname === '/api/enhance-prompt') {
+        return Promise.resolve(new Response(new ReadableStream<Uint8Array>(), { headers: { 'Content-Type': 'text/event-stream' } }));
+      }
+      return inner(input, init);
+    };
+    Object.defineProperty(window, 'fetch', {
+      configurable: true,
+      get: () => fetchEnhance,
+      set: (value: typeof fetch) => { inner = value; },
+    });
+  });
+}
+
+for (const scenario of [
+  { width: 844, height: 390, touch: true, colorScheme: 'light' },
+  { width: 844, height: 390, touch: true, colorScheme: 'dark' },
+  { width: 1280, height: 600, touch: false, colorScheme: 'light' },
+  { width: 1280, height: 800, touch: false, colorScheme: 'light' },
+  { width: 390, height: 844, touch: true, colorScheme: 'light' },
+] as const) {
+  test(`approved short-window: image controls at ${String(scenario.width)}×${String(scenario.height)} ${scenario.touch ? 'touch' : 'pointer'} ${scenario.colorScheme}`, async ({ browser }) => {
+    test.setTimeout(60_000);
+    const context = await browser.newContext({
+      ...(scenario.touch ? devices['iPhone 13'] : devices['Desktop Chrome']),
+      viewport: { width: scenario.width, height: scenario.height }, colorScheme: scenario.colorScheme,
+    });
+    try {
+      const page = await context.newPage();
+      // The studio installs an offline fetch implementation. Extend its public
+      // seam for a synthetic upload, leaving the production attach path intact.
+      await page.addInitScript(() => {
+        let inner = window.fetch.bind(window);
+        const fetchUpload = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+          const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+          if (url.pathname === '/api/uploads') return Promise.resolve(Response.json({ id: 'public-short-window-ref', mime: 'image/png', ext: 'png', sizeBytes: 68, width: 1, height: 1, createdAt: 1 }));
+          if (url.pathname === '/api/uploads/public-short-window-ref') return Promise.resolve(new Response(null, { status: 204 }));
+          return inner(input, init);
+        };
+        Object.defineProperty(window, 'fetch', { configurable: true, get: () => fetchUpload, set: (value: typeof fetch) => { inner = value; } });
+      });
+      await page.goto('/e2e/studio/index.html?video=1');
+      const expand = page.getByRole('button', { name: 'Expand composer', exact: true });
+      if (await expand.isVisible()) await expand.click();
+      const composer = page.getByTestId('composer-drop-surface');
+      const prompt = composer.getByRole('textbox', { name: 'Prompt', exact: true });
+      const attach = composer.getByRole('button', { name: 'Attach reference images' });
+      const generate = composer.getByRole('button', { name: 'Generate', exact: true });
+      const compact = scenario.width >= 768 && scenario.height <= 620;
+      const settle = async () => {
+        await composer.evaluate(async () => {
+          await Promise.all(document.getAnimations().filter((animation) => animation.timeline === document.timeline && animation.playState === 'running' && animation.effect?.getTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => undefined)));
+        });
+      };
+      const promptRow = async (shared: boolean) => {
+        // The flex reference row stretches to the textarea's grid track;
+        // its Attach button remains vertically centered as the prompt grows.
+        const a = await attach.locator('..').boundingBox();
+        const p = await prompt.boundingBox();
+        if (!a || !p) throw new Error('missing image controls');
+        if (shared) {
+          expect(Math.abs(a.y - p.y), 'Attach and prompt share the first row').toBeLessThanOrEqual(1);
+          expect(p.x).toBeGreaterThanOrEqual(a.x + a.width + 9);
+        } else expect(p.y).toBeGreaterThanOrEqual(a.y + a.height + 9);
+      };
+      const reachable = async () => {
+        expect(await noHorizontalOverflow(page)).toBe(true);
+        expect(await composer.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+        for (const name of ['Attach reference images', 'Templates', 'Enhance', 'Undo enhance', 'Model', 'Ratio', 'Count', 'Generate', ...(scenario.width >= 768 ? ['Clear prompt and reference images', 'Minimize composer'] : ['Collapse composer'])]) {
+          const control = composer.getByRole('button', { name, exact: true });
+          await expect(control).toBeVisible();
+          const box = await control.boundingBox();
+          if (!box) throw new Error(`missing ${name}`);
+          expect(box.x).toBeGreaterThanOrEqual(0);
+          expect(box.y).toBeGreaterThanOrEqual(0);
+          expect(box.x + box.width).toBeLessThanOrEqual(scenario.width + 1);
+          expect(box.y + box.height).toBeLessThanOrEqual(scenario.height + 1);
+          if (scenario.touch && name !== 'Collapse composer') expect(box.height, `${name} touch height`).toBeGreaterThanOrEqual(43.9);
+        }
+      };
+      await expect(prompt).toHaveValue('');
+      await expect(generate).toBeDisabled();
+      await expect(composer).toHaveCSS('display', compact ? 'grid' : 'flex');
+      await expect(composer).toHaveCSS('padding-top', compact ? '10px' : scenario.width < 768 ? '12px' : '14px');
+      await expect(prompt).toHaveCSS('min-height', compact ? scenario.touch ? '44px' : '32px' : scenario.width < 768 ? '40px' : '48px');
+      await settle();
+      await promptRow(compact);
+      await reachable();
+      const initial = await generate.boundingBox();
+      const anchored = async () => {
+        await settle();
+        const box = await generate.boundingBox();
+        if (!initial || !box) throw new Error('missing Generate');
+        expect(Math.max(Math.abs(box.x - initial.x), Math.abs(box.y - initial.y), Math.abs(box.width - initial.width), Math.abs(box.height - initial.height)), 'Generate bounds stay invariant').toBeLessThanOrEqual(1);
+        await reachable();
+      };
+      await prompt.fill(Array.from({ length: 12 }, (_, index) => `Public coastal observatory line ${String(index + 1)}`).join('\n'));
+      await expect(generate).toBeEnabled();
+      await anchored();
+      if (compact) {
+        const sizes = await prompt.evaluate((element) => ({ height: element.getBoundingClientRect().height, line: Number.parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight, client: element.clientHeight }));
+        expect(sizes.height).toBeLessThanOrEqual(3 * sizes.line + 10.1);
+        expect(sizes.scroll).toBeGreaterThan(sizes.client);
+        await expect(prompt).toHaveCSS('overflow-y', 'auto');
+        await prompt.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+        expect(await prompt.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      }
+      const chooser = page.waitForEvent('filechooser');
+      await attach.click();
+      await (await chooser).setFiles({ name: 'public-reference.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') });
+      const remove = composer.getByRole('button', { name: 'Remove reference image 1' });
+      await expect(remove).toBeEnabled();
+      await anchored();
+      await promptRow(false);
+      await remove.click();
+      await expect(remove).toHaveCount(0);
+      await anchored();
+      await promptRow(compact);
+      await composer.getByRole('button', { name: scenario.width >= 768 ? 'Minimize composer' : 'Collapse composer', exact: true }).click();
+      await expect(expand).toBeVisible();
+      await expand.click();
+      await expect(prompt).toHaveValue(/Public coastal observatory/);
+      await anchored();
+      await prompt.fill('');
+      await expect(generate).toBeDisabled();
+      await anchored();
+      if (compact) {
+        await composer.getByRole('button', { name: 'Model', exact: true }).click();
+        await page.getByRole('option', { name: /Studio Motion/ }).click();
+        await expect(composer.getByRole('textbox', { name: 'Motion prompt' })).toBeVisible();
+        await expect(composer).toHaveCSS('display', 'flex');
+        await expect(composer).toHaveCSS('padding-top', '14px');
+        await expect(composer.getByRole('button', { name: 'Animate', exact: true })).toBeVisible();
+        await composer.getByRole('button', { name: 'Back to image generation' }).click();
+        await expect(prompt).toBeVisible();
+        await expect(composer).toHaveCSS('display', 'grid');
+        await anchored();
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+for (const viewport of [
+  { width: 320, height: 844 }, { width: 360, height: 844 }, { width: 390, height: 844 },
+  { width: 844, height: 390 }, { width: 820, height: 1180 }, { width: 1440, height: 900 },
+]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`presentation fixes: model token and Enhance at ${String(viewport.width)}×${String(viewport.height)} in ${colorScheme}`, async ({ browser }) => {
+      test.setTimeout(60_000);
+      const context = await browser.newContext({
+        ...(viewport.width === 1440 ? devices['Desktop Chrome'] : devices['iPhone 13']), viewport, colorScheme,
+      });
+      try {
+        const page = await context.newPage();
+        await withPendingEnhance(page);
+        await page.goto('/e2e/studio/index.html');
+        const expand = page.getByRole('button', { name: 'Expand composer', exact: true });
+        if (await expand.isVisible()) await expand.click();
+        const composer = page.locator('#atelier-composer');
+        const model = composer.getByRole('button', { name: 'Model', exact: true });
+        const enhance = composer.getByRole('button', { name: 'Enhance', exact: true });
+        const generate = composer.getByRole('button', { name: 'Generate', exact: true });
+        const undo = composer.getByRole('button', { name: 'Undo enhance', exact: true });
+        const checkGeometry = async (token: string) => {
+          await expect(model).toContainText(token);
+          const value = model.locator('[data-tip]');
+          expect(await value.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), 'full short family token is visible').toBe(true);
+          await expect(enhance.locator('span')).toBeVisible();
+          expect(await noHorizontalOverflow(page)).toBe(true);
+          expect(await composer.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), 'composer has no internal horizontal overflow').toBe(true);
+          const selects = await Promise.all(['Model', 'Ratio', 'Count'].map((name) => composer.getByRole('button', { name, exact: true }).boundingBox()));
+          const [first, ratio, count] = selects;
+          if (!first || !ratio || !count) throw new Error('missing generation selects');
+          expect(Math.abs(first.y + first.height / 2 - ratio.y - ratio.height / 2)).toBeLessThanOrEqual(1);
+          expect(Math.abs(first.y + first.height / 2 - count.y - count.height / 2)).toBeLessThanOrEqual(1);
+          expect(first.x + first.width).toBeLessThanOrEqual(ratio.x);
+          expect(ratio.x + ratio.width).toBeLessThanOrEqual(count.x);
+          expect(count.x + count.width).toBeLessThanOrEqual(viewport.width);
+          if (viewport.width !== 1440) {
+            for (const target of [model, composer.getByRole('button', { name: 'Ratio', exact: true }), composer.getByRole('button', { name: 'Count', exact: true }), enhance, undo, generate]) {
+              const box = await target.boundingBox();
+              if (!box) throw new Error('missing touch control');
+              expect(box.height).toBeGreaterThanOrEqual(43.9);
+              expect(box.width).toBeGreaterThanOrEqual(43.9);
+            }
+          }
+          const enhanceBox = await enhance.boundingBox();
+          if (!enhanceBox) throw new Error('missing Enhance');
+          expect(enhanceBox.width).toBeGreaterThanOrEqual(104);
+        };
+        await checkGeometry('GPT');
+        // Keep the local model's token and health dot independently visible.
+        await model.click();
+        await page.getByRole('option', { name: /Test Alpha/ }).click();
+        await expect(model).toContainText('Test');
+        const local = model.locator('[data-tip] > span');
+        await expect(local.locator('> span').first()).toHaveText('Test');
+        await expect(local.locator('[data-state="online"]')).toBeVisible();
+        await checkGeometry('Test');
+        await model.click();
+        await page.getByRole('option', { name: /GPT Image/ }).click();
+        await composer.getByRole('textbox', { name: 'Prompt', exact: true }).fill('A quiet coastal observatory');
+        await expect(enhance).toBeEnabled();
+        // Let the existing finite surface/footprint transitions finish before
+        // comparing the live controls, without changing their motion.
+        await enhance.evaluate(async () => {
+          await Promise.all(document.getAnimations().filter((animation) => animation.timeline === document.timeline && animation.playState === 'running' && animation.effect?.getTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => undefined)));
+        });
+        const ordering = () => composer.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label') ?? button.textContent.trim()));
+        const beforeOrder = await ordering();
+        const beforeGenerate = await generate.boundingBox();
+        const beforeEnhance = await enhance.boundingBox();
+        await enhance.click();
+        await expect(enhance).toHaveText('Enhancing…');
+        await expect(enhance).toBeDisabled();
+        await checkGeometry('GPT');
+        expect(await ordering()).toEqual(beforeOrder);
+        await expect.poll(async () => {
+          const after = await generate.boundingBox();
+          if (!beforeGenerate || !after) return Infinity;
+          return Math.max(Math.abs(after.x - beforeGenerate.x), Math.abs(after.y - beforeGenerate.y), Math.abs(after.width - beforeGenerate.width));
+        }, 'Generate stays anchored during Enhance').toBeLessThanOrEqual(1);
+        const afterEnhance = await enhance.boundingBox();
+        if (!beforeEnhance || !afterEnhance) throw new Error('missing Enhance bounds');
+        expect(Math.abs(afterEnhance.width - beforeEnhance.width), 'Enhance reserves its working label width').toBeLessThanOrEqual(1);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`presentation fixes: disabled provider preserves offline danger and live controls in ${colorScheme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme });
+    await page.addInitScript(() => {
+      let inner = window.fetch.bind(window);
+      const fetchProviders = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const response = await inner(input, init);
+        const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+        if (url.pathname !== '/api/text-providers') return response;
+        const { providers } = await response.json() as { providers: AdminProvider[] };
+        return Response.json({ providers: providers.map((provider) => {
+          const model = provider.models[0];
+          if (!model) throw new Error('missing public model fixture');
+          return {
+            ...provider, enabled: false,
+            models: ['available', 'offline', 'unknown'].map((status) => ({
+              ...model, id: `preview-${status}`, displayName: `Preview ${status}`, enabled: true, status,
+            })),
+          };
+        }) });
+      };
+      Object.defineProperty(window, 'fetch', {
+        configurable: true, get: () => fetchProviders, set: (value: typeof fetch) => { inner = value; },
+      });
+    });
+    await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+    const provider = page.getByRole('region', { name: 'Preview provider', exact: true });
+    await expect(provider).toHaveAttribute('data-enabled', 'false');
+    for (const status of ['available', 'offline', 'unknown']) {
+      const row = provider.getByRole('listitem', { name: `Preview ${status}`, exact: true });
+      const word = row.locator(`[data-status="${status}"]`);
+      await expect(word).toHaveText(status);
+      expect(await row.getByText(`Preview ${status}`, { exact: true }).evaluate((element) => {
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--ink-2)';
+        element.append(probe);
+        const matches = getComputedStyle(element).color === getComputedStyle(probe).color;
+        probe.remove();
+        return matches;
+      })).toBe(true);
+      // Resolve token colours through a native CSS property rather than
+      // comparing engine-specific token serialization (hex vs rgb).
+      expect(await word.evaluate((element, offline) => {
+        const probe = document.createElement('span');
+        probe.style.color = offline ? 'var(--danger)' : 'var(--ink-3)';
+        element.append(probe);
+        const matches = getComputedStyle(element).color === getComputedStyle(probe).color;
+        probe.remove();
+        return matches;
+      }, status === 'offline')).toBe(true);
+      if (status === 'available') {
+        expect(await word.evaluate((element) => {
+          const dot = element.firstElementChild;
+          return dot !== null && getComputedStyle(dot).backgroundColor === getComputedStyle(element).color
+            && getComputedStyle(dot).borderTopColor === getComputedStyle(element).color;
+        })).toBe(true);
+      }
+      await expect(row.getByRole('switch', { name: `Use Preview ${status}`, exact: true })).toBeEnabled();
+      await row.getByRole('button', { name: `More actions for Preview ${status}`, exact: true }).click();
+      await expect(page.getByRole('menuitem', { name: 'Test', exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+    }
+  });
+}
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`presentation fixes: native Advanced cues and input with ${reducedMotion} motion`, async ({ browser }) => {
+    const context = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: 390, height: 844 }, reducedMotion });
+    try {
+      const page = await context.newPage();
+      await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+      for (const kind of ['provider', 'model'] as const) {
+        if (kind === 'provider') await page.getByRole('button', { name: 'Add provider', exact: true }).click();
+        else {
+          await page.getByRole('button', { name: 'More actions for Preview writer', exact: true }).click();
+          await page.getByRole('menuitem', { name: 'Edit', exact: true }).click();
+        }
+        const dialog = page.getByRole('dialog', { name: kind === 'provider' ? 'Add a provider' : 'Edit model', exact: true });
+        const summary = dialog.locator('summary').filter({ hasText: /^Advanced$/ });
+        const details = summary.locator('..');
+        const caret = summary.locator('svg');
+        await expect(summary).toBeVisible();
+        await expect(caret).toHaveCount(1);
+        await expect(caret).toHaveAttribute('aria-hidden', 'true');
+        await expect(details).not.toHaveAttribute('open');
+        const box = await summary.boundingBox();
+        if (!box) throw new Error('missing native summary');
+        expect(box.height).toBeGreaterThanOrEqual(44);
+        expect(box.width).toBeGreaterThanOrEqual(44);
+        await expect(summary).toHaveCSS('list-style-type', 'none');
+        // Engines do not expose a useful computed style for the legacy
+        // WebKit marker pseudo. Check the rendered content's leading edge:
+        // there is no native marker slot before the label or beside the caret.
+        const labelBox = await summary.locator('span').boundingBox();
+        const caretBox = await caret.boundingBox();
+        if (!labelBox || !caretBox) throw new Error('missing Advanced content');
+        expect(Math.abs(labelBox.x - box.x), 'no leading native disclosure marker').toBeLessThanOrEqual(1);
+        expect(Math.abs(caretBox.x - labelBox.x - labelBox.width - 6), 'one caret beside the label').toBeLessThanOrEqual(1);
+        if (reducedMotion === 'reduce') await expect(caret).toHaveCSS('transition-duration', '0s');
+        await expect(caret).toHaveCSS('transform', 'none');
+        await summary.click();
+        await expect(details).toHaveAttribute('open', '');
+        await expect(caret).toHaveCSS('transform', 'matrix(-1, 0, 0, -1, 0, 0)');
+        await summary.focus();
+        await summary.press('Enter');
+        await expect(details).not.toHaveAttribute('open');
+        await expect(caret).toHaveCSS('transform', 'none');
+        await summary.press('Space');
+        await expect(details).toHaveAttribute('open', '');
+        await expect(caret).toHaveCSS('transform', 'matrix(-1, 0, 0, -1, 0, 0)');
+        await expect(summary).toBeFocused();
+        if (kind === 'model') {
+          await dialog.getByLabel('Temperature', { exact: true }).fill('3');
+          await expect(dialog.getByText('Temperature must be a number from 0 to 2.')).toBeVisible();
+          await expect(details).toHaveAttribute('open', '');
+          await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+        }
+        await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await expect(dialog).toHaveCount(0);
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
 
 async function templateBodyGeometry(editor: ReturnType<Page['locator']>, sixLines: boolean): Promise<void> {
   await expect.poll(() => editor.evaluate((form, minimum) => {
@@ -743,23 +1110,35 @@ test('Prompt Library finding controls keep the pointer-desktop layout contained'
   expect(await noHorizontalOverflow(page)).toBe(true);
 });
 
-test('history Retry stays reachable above a tall expanded composer', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 600 });
-  await page.goto('/e2e/studio/index.html?historyError=1');
-  const retry = page.getByTestId('canvas-scroller').getByRole('button', { name: 'Retry', exact: true });
-  await expect(retry).toBeVisible();
-  await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill(Array.from({ length: 12 }, (_, index) => `Retained draft line ${index}`).join('\n'));
-  const composer = page.locator('#atelier-composer');
-  await expect.poll(() => composer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(280);
-  await page.getByTestId('canvas-scroller').evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect.poll(() => retry.evaluate((element) => {
-    const box = element.getBoundingClientRect();
-    const dock = document.querySelector('#atelier-composer')?.getBoundingClientRect();
-    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-    return dock !== undefined && box.bottom <= dock.top && (hit === element || element.contains(hit));
-  })).toBe(true);
-  await retry.click();
-  await expect(page.getByRole('button', { name: 'Minimize composer', exact: true })).toBeVisible();
+test('approved short-window: history Retry stays reachable above compact and tall expanded composers', async ({ page }) => {
+  for (const height of [600, 800]) {
+    await page.setViewportSize({ width: 1280, height });
+    await page.goto('/e2e/studio/index.html?historyError=1');
+    const retry = page.getByTestId('canvas-scroller').getByRole('button', { name: 'Retry', exact: true });
+    await expect(retry).toBeVisible();
+    const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
+    await prompt.fill(Array.from({ length: 12 }, (_, index) => `Retained draft line ${index}`).join('\n'));
+    const composer = page.locator('#atelier-composer');
+    if (height === 600) {
+      await expect.poll(() => prompt.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+      const size = await prompt.evaluate((element) => ({ height: element.getBoundingClientRect().height, line: Number.parseFloat(getComputedStyle(element).lineHeight) }));
+      expect(size.height).toBeGreaterThan(2 * size.line);
+      expect(size.height).toBeLessThanOrEqual(3 * size.line + 10.1);
+    } else {
+      // Preserve the original tall-composer regression at normal height;
+      // 600px now deliberately selects the approved three-line compact body.
+      await expect.poll(() => composer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(280);
+    }
+    await page.getByTestId('canvas-scroller').evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(() => retry.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const dock = document.querySelector('#atelier-composer')?.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return dock !== undefined && box.bottom <= dock.top && (hit === element || element.contains(hit));
+    })).toBe(true);
+    await retry.click();
+    await expect(page.getByRole('button', { name: 'Minimize composer', exact: true })).toBeVisible();
+  }
 });
 
 test('a selected library tab stays reachable when desktop shrinks to phone', async ({ page }) => {

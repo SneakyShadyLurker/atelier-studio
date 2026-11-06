@@ -204,6 +204,7 @@ describe('Text models view', () => {
       expect(mark.getAttribute('data-tip')).toBe(label);
     }
     expect(within(kimi).getByText('available')).toBeTruthy();
+    expect(within(kimi).getByText('available').parentElement?.getAttribute('data-tip')).toBe('Listed by provider. Test to confirm capabilities.');
     expect(within(kimi).queryByRole('button', { name: /Check again/ })).toBeNull();
 
     const glm = screen.getByRole('listitem', { name: 'GLM 5.3' });
@@ -333,6 +334,52 @@ describe('Text models view', () => {
     await waitFor(() => {
       expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/api/text-providers/p-cli/models/m-glm/test'))).toBe(true);
     });
+  });
+
+  test.each([null, 1_790_000_000_000])('test tags follow verifiedAt precedence (%s)', async (verifiedAt) => {
+    const provider = PROVIDERS[0];
+    if (!provider) throw new Error('fixture missing');
+    const model = {
+      ...KIMI, enabled: false, verifiedAt,
+      lastTest: { checks: [{ id: 'plain' as const, status: 'fail' as const, message: 'The model did not reply.' }], proposed: {}, advertised: {}, wireNotes: [] },
+    };
+    const { calls } = renderView({ providers: [{ ...provider, models: [model] }] });
+    const row = await screen.findByRole('listitem', { name: 'Kimi K3' });
+    const nameLine = within(row).getByText('Kimi K3').parentElement;
+    expect(nameLine?.children[1]?.textContent).toBe('Off');
+    expect(nameLine?.children[2]?.textContent).toStartWith('Default');
+    expect(within(row).queryByText('Untested')).toBeNull();
+    const failed = within(row).queryByRole('button', { name: 'Test failed: open the test report' });
+    if (verifiedAt !== null) {
+      expect(failed).toBeNull();
+      return;
+    }
+    if (!failed) throw new Error('missing failed test tag');
+    expect(nameLine?.children[3]).toBe(failed);
+    expect(failed.getAttribute('data-tone')).toBe('danger');
+    expect(failed.getAttribute('data-tip')).toBe('The last test did not pass every check');
+    fireEvent.click(failed);
+    expect(await screen.findByRole('dialog', { name: 'Edit model' })).toBeTruthy();
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/api/text-providers/p-cli/models/m-kimi/test'))).toBe(true);
+    });
+  });
+
+  test('a disabled provider retains model state and live model controls', async () => {
+    const provider = PROVIDERS[0];
+    if (!provider) throw new Error('fixture missing');
+    const { calls } = renderView({ providers: [{ ...provider, enabled: false }] });
+    const section = await screen.findByRole('region', { name: 'CLIProxyAPI' });
+    expect(section.getAttribute('data-enabled')).toBe('false');
+    const row = within(section).getByRole('listitem', { name: 'Kimi K3' });
+    expect(row.getAttribute('data-enabled')).toBe('true');
+    expect(within(row).queryByText('Off')).toBeNull();
+    expect(within(row).getByText('available').parentElement?.getAttribute('data-status')).toBe('available');
+    expect(within(section).getByText('offline').parentElement?.getAttribute('data-status')).toBe('offline');
+    const toggle = within(row).getByRole('switch', { name: 'Use Kimi K3' });
+    expect(toggle.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(toggle);
+    await waitFor(() => { expect(calls.some((call) => call.method === 'PATCH' && call.url.endsWith('/models/m-kimi'))).toBe(true); });
   });
 
   test('removing an unused model says nothing depends on it', async () => {

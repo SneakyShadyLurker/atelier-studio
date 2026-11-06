@@ -182,6 +182,9 @@ const I = {
 // ──────────────────────────────────────────────────────────────────────────────
 const css = `
 :root {
+    /* Image Composer compacts only at width >=768px and height <=620px using
+       existing 10/32/44px sizes; soft informational toasts omit their glyph.
+       These scoped extensions introduce no palette, size or motion tokens. */
     --rail-history-min-h: 73px;
     --template-body-min-h: calc(6lh + 22px);
     --list-dimension-body-min-h: 72px;
@@ -754,6 +757,21 @@ const css = `
 }
 .composer textarea::placeholder { color: var(--ink-3); }
 
+/* This prototype has only an image Composer, without Attach, references,
+   Minimize, the command dock or the reserved status rail. Mirror the matching
+   image fields only; production keeps those existing owners and animations. */
+@media (width >= 768px) and (height <= 620px) {
+  .composer { padding-top: 10px; }
+  .composer textarea {
+    min-height: 32px;
+    max-height: calc(3lh + 10px);
+    overflow-y: auto;
+  }
+  @media (hover: none), (any-pointer: coarse) {
+    .composer textarea { min-height: 44px; }
+  }
+}
+
 .composer-row {
   display: flex; align-items: center; gap: 8px;
   flex-wrap: wrap;
@@ -955,6 +973,9 @@ const css = `
   opacity: 0;
   transition: transform 160ms cubic-bezier(.2,.8,.2,1), opacity 160ms cubic-bezier(.2,.8,.2,1);
 }
+/* The prototype emits success strings only and retains their check. Production
+   soft informational toasts omit the glyph, errors retain their alert; their
+   lifecycle, action, live-region and motion owners are unchanged. */
 .toast svg { color: oklch(78% 0.14 145); }
 
 @media (min-width: 768px) {

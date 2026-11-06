@@ -42,6 +42,20 @@
   color: var(--accent);
 }
 
+.enhanceLabel {
+  min-width: 10ch;
+  white-space: nowrap;
+}
+
+/* Reserve the working label's actual font width in both states. The hidden
+   zero-height line participates only in intrinsic inline sizing. */
+.enhanceLabel::after {
+  content: 'Enhancing…';
+  display: block;
+  height: 0;
+  visibility: hidden;
+}
+
 .enhance svg,
 .revert svg {
   color: var(--ink-3);
@@ -89,26 +103,23 @@
 
 @media (width < 768px) {
   .seg .enhance {
-    min-width: 0;
     padding: 0 14px;
   }
 
   .seg .revert {
     padding: 0 14px;
-  }
-
-  .enhanceLabel {
-    display: none;
   }
 }
 
 @media (hover: none), (any-pointer: coarse) {
-  /* The touch gate, not width, sets the floor: phones and iPad (which keeps
-     the desktop label above 767px). The label stays width-gated above. */
+  /* The touch gate sets the height floor for phones and iPad. */
   .seg .enhance,
   .seg .revert {
-    min-width: 44px;
     min-height: 44px;
+  }
+
+  .seg .revert {
+    min-width: 44px;
   }
 }
 

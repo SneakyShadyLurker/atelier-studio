@@ -48,7 +48,8 @@
 }
 
   :root {
-    /* Image Composer compacts only at width >=768px and height <=620px using
+    /* --rail-history-min-h is the row content minimum; host padding is additional.
+       Image Composer compacts only at width >=768px and height <=620px using
        existing 10/32/44px sizes; its no-reference prompt reserves the existing
        Minimize hit region: 28px (44px under the touch gate) plus 16px from the
        grid cell's end. Soft informational toasts omit their glyph.

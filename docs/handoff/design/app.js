@@ -182,7 +182,8 @@ const I = {
 // ──────────────────────────────────────────────────────────────────────────────
 const css = `
 :root {
-    /* Image Composer compacts only at width >=768px and height <=620px using
+    /* --rail-history-min-h is the row content minimum; host padding is additional.
+       Image Composer compacts only at width >=768px and height <=620px using
        existing 10/32/44px sizes; its no-reference prompt reserves the existing
        Minimize hit region: 28px (44px under the touch gate) plus 16px from the
        grid cell's end. Soft informational toasts omit their glyph.
@@ -266,7 +267,7 @@ const css = `
   color: var(--ink-3);
   display: flex; align-items: center; justify-content: space-between;
 }
-.sb-list { flex: 1; overflow-y: auto; padding: 0 8px 80px; min-height: var(--rail-history-min-h); }
+.sb-list { flex: 1; overflow-y: auto; padding: 0 8px 80px; min-height: calc(var(--rail-history-min-h) + 80px); }
 .sb-empty { padding: 20px 16px; color: var(--ink-3); font-size: 12px; }
 .hist-item {
   padding: 10px 10px;

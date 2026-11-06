@@ -43,7 +43,8 @@
       U+2190-21FF, U+2200-22FF, U+2300-23FF, U+2460-24FF, U+2500-25FF, U+2700-27BF, U+FFFD;
   }
   :root {
-    /* Image Composer compacts only at width >=768px and height <=620px using
+    /* --rail-history-min-h is the row content minimum; host padding is additional.
+       Image Composer compacts only at width >=768px and height <=620px using
        existing 10/32/44px sizes; its no-reference prompt reserves the existing
        Minimize hit region: 28px (44px under the touch gate) plus 16px from the
        grid cell's end. Soft informational toasts omit their glyph.

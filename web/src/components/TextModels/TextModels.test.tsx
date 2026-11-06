@@ -349,7 +349,7 @@ describe('Text models view', () => {
     expect(nameLine?.children[1]?.textContent).toBe('Off');
     expect(nameLine?.children[2]?.textContent).toStartWith('Default');
     expect(within(row).queryByText('Untested')).toBeNull();
-    const failed = within(row).queryByRole('button', { name: 'Test failed: open the test report' });
+    const failed = within(row).queryByRole('button', { name: 'Test failed: test again' });
     if (verifiedAt !== null) {
       expect(failed).toBeNull();
       return;
@@ -357,7 +357,7 @@ describe('Text models view', () => {
     if (!failed) throw new Error('missing failed test tag');
     expect(nameLine?.children[3]).toBe(failed);
     expect(failed.getAttribute('data-tone')).toBe('danger');
-    expect(failed.getAttribute('data-tip')).toBe('The last test did not pass every check');
+    expect(failed.getAttribute('data-tip')).toBe('Run the capability test again');
     fireEvent.click(failed);
     expect(await screen.findByRole('dialog', { name: 'Edit model' })).toBeTruthy();
     await waitFor(() => {

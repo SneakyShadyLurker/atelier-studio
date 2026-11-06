@@ -112,8 +112,8 @@ export default function ModelRow({ model, checking, toggling, imageLabel, onTogg
             <button
               className={`${styles.tag} ${styles.tagButton}`}
               type="button"
-              aria-label="Test failed: open the test report"
-              data-tip="The last test did not pass every check"
+              aria-label="Test failed: test again"
+              data-tip="Run the capability test again"
               data-tone="danger"
               onClick={() => { onAction('test'); }}
             >

@@ -419,8 +419,8 @@
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding: 0 8px 18px;
-  /* One row, matching the existing SIDEBAR_ROW_HEIGHT virtual estimate. */
-  min-height: var(--rail-history-min-h);
+  /* One row of content, matching SIDEBAR_ROW_HEIGHT, plus host padding. */
+  min-height: calc(var(--rail-history-min-h) + 18px);
   /* Scroll-edge fade declared on the scroller itself: the gradient reads the
      scroller-scoped --scroll-fade-top, which the :root --scroll-fade-mask
      token cannot carry (custom properties resolve before inheritance). */

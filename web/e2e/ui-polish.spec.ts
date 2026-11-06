@@ -1030,7 +1030,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 1024, height: 768
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
   for (const longCollections of [false, true]) {
-    test(`Library rail ${longCollections ? 'long collections' : 'ordinary content'} stays reachable at ${String(viewport.width)}×${String(viewport.height)}`, async ({ browser }) => {
+    test(`Library rail ${longCollections ? 'long collections' : 'ordinary content'} stays reachable at ${String(viewport.width)}×${String(viewport.height)}`, async ({ browser }, testInfo) => {
       // Visit every one of the 50 rows before exercising all navigation and
       // footer actions; allow the slower engine to finish that complete path.
       test.setTimeout(longCollections ? 180_000 : 60_000);
@@ -1062,7 +1062,33 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         } else {
           expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
         }
-        expect(await page.getByTestId('sidebar-feed').evaluate((element) => element.clientHeight)).toBeGreaterThanOrEqual(73);
+        const history = page.getByTestId('sidebar-feed');
+        const historySize = await history.evaluate((element) => {
+          const style = getComputedStyle(element);
+          const paddingTop = Number.parseFloat(style.paddingTop);
+          const paddingBottom = Number.parseFloat(style.paddingBottom);
+          return { clientHeight: element.clientHeight, paddingTop, paddingBottom, contentHeight: element.clientHeight - paddingTop - paddingBottom };
+        });
+        expect(historySize.contentHeight).toBeGreaterThanOrEqual(73);
+        const historyRow = history.locator('[data-index]').first();
+        await expect(historyRow).toBeAttached();
+        await historyRow.evaluate((element) => { element.scrollIntoView({ block: 'nearest' }); });
+        const measureHistoryRow = () => historyRow.evaluate((element) => {
+          const scroller = element.closest<HTMLElement>('[data-testid="sidebar-feed"]');
+          if (!scroller) throw new Error('missing history scroller');
+          const bounds = scroller.getBoundingClientRect();
+          const row = element.getBoundingClientRect();
+          const top = bounds.top + scroller.clientTop;
+          const bottom = top + scroller.clientHeight;
+          return { rowHeight: row.height, rowTop: row.top, rowBottom: row.bottom, scrollerTop: top, scrollerBottom: bottom, fits: row.top >= top && row.bottom <= bottom };
+        });
+        await expect.poll(async () => (await measureHistoryRow()).fits, 'one actual history row fits after native reveal').toBe(true);
+        const historyRowSize = await measureHistoryRow();
+        expect(historyRowSize.rowHeight).toBeLessThanOrEqual(historySize.contentHeight);
+        await testInfo.attach('rail-history-geometry', {
+          body: JSON.stringify({ ...historySize, ...historyRowSize }), contentType: 'application/json',
+        });
+        console.info('rail-history-geometry', JSON.stringify({ project: testInfo.project.name, viewport, longCollections, ...historySize, ...historyRowSize }));
         if (longCollections) {
           const rows = aside.getByRole('navigation', { name: 'Library' }).getByRole('button', { name: /^Collection \d+ \d+$/ });
           await expect(rows).toHaveCount(50);

@@ -91,6 +91,43 @@ for (const scenario of [
           if (scenario.touch && name !== 'Collapse composer') expect(box.height, `${name} touch height`).toBeGreaterThanOrEqual(43.9);
         }
       };
+      const promptClearance = async (state: string) => {
+        if (!compact) return;
+        const minimize = await composer.getByRole('button', { name: 'Minimize composer', exact: true }).boundingBox();
+        if (!minimize) throw new Error('missing Minimize');
+        const measured = await prompt.evaluate((element, m) => {
+          const p = element.getBoundingClientRect();
+          const points = [
+            { name: 'top-right', x: p.right - 1, y: p.top + 1 },
+            { name: 'right-edge', x: p.right - 1, y: p.top + p.height / 2 },
+            { name: 'bottom-right', x: p.right - 1, y: p.bottom - 1 },
+          ];
+          return {
+            prompt: { x: p.x, y: p.y, width: p.width, height: p.height },
+            minimize: m,
+            clearance: m.x - p.right,
+            intersects: p.left < m.x + m.width && p.right > m.x && p.top < m.y + m.height && p.bottom > m.y,
+            hits: points.map((point) => {
+              const receiver = document.elementFromPoint(point.x, point.y);
+              return { ...point, owns: receiver === element, receiver: receiver?.getAttribute('aria-label') ?? receiver?.tagName ?? null };
+            }),
+          };
+        }, minimize);
+        await test.info().attach(`compact-prompt-hit-clearance-${state}`, { body: JSON.stringify(measured, null, 2), contentType: 'application/json' });
+        console.log('[compact-prompt-hit-clearance]', JSON.stringify({ project: test.info().project.name, scenario, state, ...measured }));
+        expect(measured.intersects, `${state}: prompt and Minimize rectangles do not intersect`).toBe(false);
+        expect(measured.clearance, `${state}: measured prompt-to-Minimize gap`).toBeGreaterThan(0);
+        for (const hit of measured.hits) expect(hit.owns, `${state}: ${hit.name} resolves to textarea (${hit.receiver ?? 'none'})`).toBe(true);
+        if (scenario.touch && state === 'empty') {
+          const edge = measured.hits[1];
+          if (!edge) throw new Error('missing textarea edge');
+          await attach.focus();
+          await page.touchscreen.tap(edge.x, edge.y);
+          await expect(prompt).toBeFocused();
+          await expect(prompt).toBeVisible();
+          await test.info().attach('compact-prompt-edge-touch-focus', { body: JSON.stringify({ point: edge, focused: true }), contentType: 'application/json' });
+        }
+      };
       await expect(prompt).toHaveValue('');
       await expect(generate).toBeDisabled();
       await expect(composer).toHaveCSS('display', compact ? 'grid' : 'flex');
@@ -99,6 +136,7 @@ for (const scenario of [
       await settle();
       await promptRow(compact);
       await reachable();
+      await promptClearance('empty');
       const initial = await generate.boundingBox();
       const anchored = async () => {
         await settle();
@@ -110,6 +148,7 @@ for (const scenario of [
       await prompt.fill(Array.from({ length: 12 }, (_, index) => `Public coastal observatory line ${String(index + 1)}`).join('\n'));
       await expect(generate).toBeEnabled();
       await anchored();
+      await promptClearance('long');
       if (compact) {
         const sizes = await prompt.evaluate((element) => ({ height: element.getBoundingClientRect().height, line: Number.parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight, client: element.clientHeight }));
         expect(sizes.height).toBeLessThanOrEqual(3 * sizes.line + 10.1);
@@ -129,14 +168,17 @@ for (const scenario of [
       await expect(remove).toHaveCount(0);
       await anchored();
       await promptRow(compact);
+      await promptClearance('reference-removed');
       await composer.getByRole('button', { name: scenario.width >= 768 ? 'Minimize composer' : 'Collapse composer', exact: true }).click();
       await expect(expand).toBeVisible();
       await expand.click();
       await expect(prompt).toHaveValue(/Public coastal observatory/);
       await anchored();
+      await promptClearance('re-expanded');
       await prompt.fill('');
       await expect(generate).toBeDisabled();
       await anchored();
+      await promptClearance('cleared');
       if (compact) {
         await composer.getByRole('button', { name: 'Model', exact: true }).click();
         await page.getByRole('option', { name: /Studio Motion/ }).click();

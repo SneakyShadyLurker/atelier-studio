@@ -1517,6 +1517,7 @@
   .imageComposer:not(:has(.refChip)) > .textarea {
     grid-column: 2;
     grid-row: 1;
+    width: calc(100% - 28px - 16px);
   }
 
   .imageComposer > .textarea {
@@ -1527,6 +1528,10 @@
   }
 
   @media (hover: none), (any-pointer: coarse) {
+    .imageComposer:not(:has(.refChip)) > .textarea {
+      width: calc(100% - 44px - 16px);
+    }
+
     .imageComposer > .textarea {
       min-height: 44px;
     }

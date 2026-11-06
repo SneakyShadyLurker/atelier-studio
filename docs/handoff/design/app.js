@@ -183,7 +183,9 @@ const I = {
 const css = `
 :root {
     /* Image Composer compacts only at width >=768px and height <=620px using
-       existing 10/32/44px sizes; soft informational toasts omit their glyph.
+       existing 10/32/44px sizes; its no-reference prompt reserves the existing
+       Minimize hit region: 28px (44px under the touch gate) plus 16px from the
+       grid cell's end. Soft informational toasts omit their glyph.
        These scoped extensions introduce no palette, size or motion tokens. */
     --rail-history-min-h: 73px;
     --template-body-min-h: calc(6lh + 22px);
@@ -759,7 +761,10 @@ const css = `
 
 /* This prototype has only an image Composer, without Attach, references,
    Minimize, the command dock or the reserved status rail. Mirror the matching
-   image fields only; production keeps those existing owners and animations. */
+   image fields only; production keeps those existing owners and animations.
+   Only production's compact no-reference prompt reserves the Minimize hit
+   region by subtracting its canonical 28px width (44px under the touch gate)
+   plus 16px from the grid cell's end; this prototype has no such target. */
 @media (width >= 768px) and (height <= 620px) {
   .composer { padding-top: 10px; }
   .composer textarea {

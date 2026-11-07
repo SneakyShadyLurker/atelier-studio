@@ -45,12 +45,20 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
   const panelRef = useRef<HTMLDivElement | null>(null);
   const portalRootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const createRowRef = useRef<HTMLDivElement | null>(null);
+  const createInFlightRef = useRef(false);
+  const [pendingCreateName, setPendingCreateName] = useState<string | null>(null);
   const newBtnRef = useRef<HTMLButtonElement | null>(null);
   const buttonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const pendingInlineFocusRef = useRef<InlineContext | null>(null);
   const pendingMoveRef = useRef<number | null>(null);
   const onEscapeRef = useRef<() => void>(() => undefined);
   const [inlineContext, setInlineContext] = useState<InlineContext | null>(null);
+  const liveInlineContextRef = useRef(inlineContext);
+  useLayoutEffect(() => {
+    liveInlineContextRef.current = open && !closing ? inlineContext : null;
+    return () => { liveInlineContextRef.current = null; };
+  }, [inlineContext, open, closing]);
   const collectionsQuery = useCollections();
   const moveBatch = useMoveBatch({ activeView: view, q });
   const createCollection = useCreateCollection();
@@ -222,11 +230,17 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
   }
 
   function commitCreate(draft: string) {
+    if (createInFlightRef.current) return;
     const name = draft.trim();
     if (!name) {
       cancelInline({ kind: 'creating' });
       return;
     }
+    // Mutation snapshots can briefly settle between create and move. Keep one
+    // synchronous guard for the entire initiated chain, including dismissal.
+    createInFlightRef.current = true;
+    setPendingCreateName(draft);
+    const context = inlineContext;
     void createCollection.mutateAsync({ name })
       .then((collection) => moveBatch.mutateAsync({ batchId: batch.id, collectionId: collection.id }))
       .then(() => {
@@ -235,6 +249,11 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
       })
       .catch((mutationError: unknown) => {
         useAtelierStore.getState().addToast(describeError(mutationError, "Couldn't save the collection."), 'error');
+        if (liveInlineContextRef.current === context) inlineEdit.begin('creating', draft);
+      })
+      .finally(() => {
+        createInFlightRef.current = false;
+        setPendingCreateName(null);
       });
   }
 
@@ -310,16 +329,43 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
       </ul>
       <div className={styles.divider} />
       {inlineContext?.kind === 'creating' ? (
-        <>
+        <div
+          ref={createRowRef}
+          className={styles.createRow}
+          onBlur={(event) => {
+            if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+            if (!createInFlightRef.current) inlineEdit.cancel();
+          }}
+        >
           <label className="srOnly" htmlFor={createInputId}>Collection name</label>
           <input
             ref={inputRef}
             id={createInputId}
             className={styles.input}
-            onFocus={(event) => { event.target.select(); }}
             {...inlineEdit.inputProps}
+            value={pendingCreateName ?? inlineEdit.inputProps.value}
+            readOnly={pendingCreateName !== null}
+            placeholder="Collection name"
+            enterKeyHint="done"
+            onFocus={(event) => { event.target.select(); }}
+            onBlur={() => undefined}
+            onKeyDown={(event) => {
+              if (createInFlightRef.current && event.key !== 'Escape') return;
+              inlineEdit.inputProps.onKeyDown(event);
+            }}
           />
-        </>
+          <button
+            className={styles.createMove}
+            type="button"
+            tabIndex={0}
+            disabled={pendingCreateName !== null || !inlineEdit.inputProps.value.trim()}
+            aria-busy={pendingCreateName !== null}
+            onMouseDown={(event) => { event.preventDefault(); }}
+            onClick={() => {
+              if (!closing && !createInFlightRef.current) inlineEdit.commit();
+            }}
+          >Move</button>
+        </div>
       ) : (
         <button
           ref={newBtnRef}
@@ -327,7 +373,7 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
           type="button"
           tabIndex={0}
           onClick={() => {
-            if (closing) return;
+            if (closing || createInFlightRef.current) return;
             pendingInlineFocusRef.current = null;
             clearPendingMove();
             setInlineContext({ kind: 'creating' });

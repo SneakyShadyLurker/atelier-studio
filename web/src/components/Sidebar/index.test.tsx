@@ -73,6 +73,20 @@ afterEach(() => {
 });
 
 describe('Sidebar landmarks and scroll zones', () => {
+  test.each([
+    { totalCount: 0, q: '', copy: 'Nothing here yet. Your generations will appear here.' },
+    { totalCount: 1, q: '', copy: 'No unsorted batches.' },
+    { totalCount: 1, q: 'forest', copy: 'No prompts match "forest".' },
+  ])('keeps empty Unsorted copy scoped to total=$totalCount and query=$q', async ({ totalCount, q, copy }) => {
+    useAtelierStore.setState({ q, view: { kind: 'unsorted' } });
+    globalThis.fetch = mock(() => Response.json({
+      items: [],
+      summary: { totalCount, pinnedCount: 0, unsortedCount: 0, archivedTotalCount: 0, archivedPinnedCount: 0, archivedUnsortedCount: 0 },
+    })) as unknown as typeof fetch;
+    render(<Sidebar history={history} models={models} activeBatchId={null} historyQ={q} archivedCount={0} promptsEnabled onSelect={mock()} onSelectView={mock()} onClear={mock()} />, { wrapper: wrapper() });
+    expect(await screen.findByRole('heading', { name: copy })).toBeTruthy();
+  });
+
   test('scopes the compact history error and preserves its exact body and Retry', () => {
     const onRetry = mock();
     renderSidebar(history, false, { error: 'History unavailable: try again.', onRetry });

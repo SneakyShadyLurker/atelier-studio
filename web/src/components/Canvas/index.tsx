@@ -113,7 +113,8 @@ function EmptyCanvas() {
       title="What would you like to make?"
       body={
         <>
-          Write a prompt, pick a model, press <kbd>⌘</kbd> <kbd>↵</kbd>.
+          <span className={styles.keyboardHint}>Write a prompt, pick a model, press <kbd>⌘</kbd> <kbd>↵</kbd>.</span>
+          <span className={styles.touchHint}>Write a prompt, pick a model, tap Generate.</span>
         </>
       }
     />

@@ -184,9 +184,16 @@ const css = `
 :root {
     /* --rail-history-min-h is the row content minimum; host padding is additional.
        Image Composer compacts only at width >=768px and height <=620px using
-       existing 10/32/44px sizes; its no-reference prompt reserves the existing
+       existing 10/32/44px sizes; its shared-row prompt reserves the existing
        Minimize hit region: 28px (44px under the touch gate) plus 16px from the
-       grid cell's end. Soft informational toasts omit their glyph.
+       grid cell's end. With refs and composer content >=640px, refs wrap in
+       a top-aligned 40cqi column with 4px end padding; narrower refs stack.
+       Move create adds an ink-primary Move beside its input, sharing Enter's
+       guarded create-and-move chain. Delete titles quote the collection name
+       and wrap; empty Unsorted says "No unsorted batches." Canvas's touch-only
+       hint says "Write a prompt, pick a model, tap Generate."
+       The prototype records production-only reference/create/delete behavior
+       without adding those surfaces. Soft informational toasts omit their glyph.
        These scoped extensions introduce no palette, size or motion tokens. */
     --rail-history-min-h: 73px;
     --template-body-min-h: calc(6lh + 22px);
@@ -370,6 +377,11 @@ const css = `
   margin: 0;
 }
 .canvas-empty p { max-width: 420px; line-height: 1.55; margin: 0; font-size: 13px; }
+.canvas-touch-hint { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .canvas-keyboard-hint { display: none; }
+  .canvas-touch-hint { display: inline; }
+}
 .canvas-empty kbd {
   font-family: var(--mono);
   font-size: var(--text-2xs);
@@ -763,9 +775,13 @@ const css = `
 /* This prototype has only an image Composer, without Attach, references,
    Minimize, the command dock or the reserved status rail. Mirror the matching
    image fields only; production keeps those existing owners and animations.
-   Only production's compact no-reference prompt reserves the Minimize hit
+   Production's compact shared-row prompt reserves the Minimize hit
    region by subtracting its canonical 28px width (44px under the touch gate)
-   plus 16px from the grid cell's end; this prototype has no such target. */
+   plus 16px from the grid cell's end. References share that row only with
+   composer content >=640px, top-aligned and wrapping in 40cqi with 4px end
+   padding. This prototype has neither references nor that target. Its Move
+   mock has no create input, and its rail has no delete confirmation or scoped
+   empty-Unsorted state; those production exceptions are recorded above. */
 @media (width >= 768px) and (height <= 620px) {
   .composer { padding-top: 10px; }
   .composer textarea {
@@ -1375,7 +1391,7 @@ function EmptyCanvas() {
     <div className="canvas-empty">
       <div className="plate"><div className="etching" aria-hidden="true" /></div>
       <h2>What would you like to make?</h2>
-      <p>Write a prompt, pick a model, press <kbd>⌘</kbd> <kbd>↵</kbd>.</p>
+      <p><span className="canvas-keyboard-hint">Write a prompt, pick a model, press <kbd>⌘</kbd> <kbd>↵</kbd>.</span><span className="canvas-touch-hint">Write a prompt, pick a model, tap Generate.</span></p>
     </div>
   );
 }

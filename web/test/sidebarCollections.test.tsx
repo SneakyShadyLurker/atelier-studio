@@ -262,6 +262,7 @@ describe('Sidebar Library rail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete collection Logo concepts' }));
     expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Delete “Logo concepts”?' })).toBeTruthy();
     expect(screen.getByText('Batches will return to Unsorted.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Delete collection' }));
     await waitFor(() => { expect(globalThis.fetch).toHaveBeenCalledWith('/api/collections/collection-logo', expect.objectContaining({ method: 'DELETE' })); });
@@ -376,7 +377,7 @@ describe('Sidebar scoped history affordances', () => {
     cleanup();
     renderSidebar({ view: APP_VIEW_UNSORTED, items: [] });
     expect(await screen.findByRole('heading', { name: 'Unsorted' })).toBeTruthy();
-    expect(await screen.findByText('Everything is in a collection. Nice!')).toBeTruthy();
+    expect(await screen.findByText('No unsorted batches.')).toBeTruthy();
 
     cleanup();
     renderSidebar({ view: collectionView('collection-logo'), items: [], q: 'forest' });

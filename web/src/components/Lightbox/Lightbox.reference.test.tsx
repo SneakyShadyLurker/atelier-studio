@@ -42,7 +42,7 @@ function wrapper() {
   };
 }
 
-function renderLightbox() {
+async function renderLightbox() {
   const onDownload = mock();
   const onDelete = mock();
   render(
@@ -57,6 +57,7 @@ function renderLightbox() {
     />,
     { wrapper: wrapper() },
   );
+  await act(async () => { await import('./Content'); });
   return { onDownload, onDelete };
 }
 
@@ -67,8 +68,8 @@ afterEach(() => {
 });
 
 describe('Lightbox reference images', () => {
-  test('returns to the generated image and only exposes actions for that image', () => {
-    const { onDownload, onDelete } = renderLightbox();
+  test('returns to the generated image and only exposes actions for that image', async () => {
+    const { onDownload, onDelete } = await renderLightbox();
     const generated = screen.getByRole('button', { name: 'View generated image' });
     const firstRef = screen.getByRole('button', { name: 'View reference image 1 of 2' });
     const secondRef = screen.getByRole('button', { name: 'View reference image 2 of 2' });
@@ -131,6 +132,7 @@ describe('Lightbox reference images', () => {
       </>,
       { wrapper: wrapper() },
     );
+    await act(async () => { await import('./Content'); });
 
     // Awaited: the new tile's image suspends the render, and the deferred
     // chrome commits once act settles it.
@@ -145,8 +147,8 @@ describe('Lightbox reference images', () => {
     expect(screen.getByAltText(/^Expanded generated image/)).toBeTruthy();
   });
 
-  test('a failed full image offers retry and clears the error when the source changes', () => {
-    renderLightbox();
+  test('a failed full image offers retry and clears the error when the source changes', async () => {
+    await renderLightbox();
     fireEvent.error(screen.getByRole('img', { name: /Expanded generated image/ }));
     expect(screen.getByText('Full image unavailable')).toBeTruthy();
     expect(screen.queryByRole('img', { name: /Expanded generated image/ })).toBeNull();

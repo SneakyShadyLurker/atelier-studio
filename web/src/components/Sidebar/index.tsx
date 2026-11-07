@@ -109,7 +109,7 @@ function emptyCopy(view: AppView, collections: readonly Collection[], q: string,
   if (view.kind === 'pinned') return 'No pinned batches yet. Click the star on any generation to pin it.';
   if (view.kind === 'unsorted') {
     if (totalCount === 0) return 'Nothing here yet. Your generations will appear here.';
-    return 'Everything is in a collection. Nice!';
+    return 'No unsorted batches.';
   }
   const name = collectionLabel(collections, view);
   if (name) return `No generations in ${name} yet. Move batches here from the Move menu.`;
@@ -926,7 +926,7 @@ function Sidebar({
       {deleteTarget && (
         <ConfirmDialog
           open
-          title="Delete collection?"
+          title={deleteTarget.name ? `Delete “${deleteTarget.name}”?` : 'Delete collection?'}
           body="Batches will return to Unsorted."
           confirmLabel="Delete collection"
           cancelLabel="Cancel"

@@ -166,7 +166,10 @@ function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen 
         type="button"
         aria-label={mediaFailed ? `Image ${index + 1} failed to load. Retry` : `Open image ${index + 1}${promptContext}`}
         disabled={disabled}
-        onClick={mediaFailed ? retryMedia : onOpen}
+        onClick={mediaFailed ? retryMedia : (event) => {
+          event.currentTarget.focus({ preventScroll: true });
+          onOpen();
+        }}
         className={styles.frame}
         data-media-failed={mediaFailed ? 'true' : undefined}
         data-media-ready={isVideo || ready ? 'true' : undefined}
@@ -231,7 +234,7 @@ function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen 
             <button type="button" className={buttons.tileAction} aria-label="Archive tile" data-tip="Archive" disabled={disabled} onClick={(event) => { event.stopPropagation(); onDelete(); }}>
               <I.archive />
             </button>
-            <button type="button" className={buttons.tileAction} aria-label={`Expand tile ${index + 1}`} data-tip="Expand" data-tip-place="above-end" disabled={disabled} onClick={(event) => { event.stopPropagation(); onOpen(); }}>
+            <button type="button" className={buttons.tileAction} aria-label={`Expand tile ${index + 1}`} data-tip="Expand" data-tip-place="above-end" disabled={disabled} onClick={(event) => { event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); onOpen(); }}>
               <I.expand />
             </button>
           </div>

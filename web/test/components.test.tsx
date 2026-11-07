@@ -697,6 +697,7 @@ describe('visual scaffold components', () => {
         onDelete={() => undefined}
       />,
     ));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
 
     const dialog = screen.getByRole('dialog', {
       name: new RegExp(`Image preview, 1 of 4, prompt: ${doneBatch.prompt}`),
@@ -727,7 +728,7 @@ describe('visual scaffold components', () => {
     trigger.remove();
   });
 
-  test('Lightbox shows Edit only for models that support reference images', () => {
+  test('Lightbox shows Edit only for models that support reference images', async () => {
     const doneBatch = requireValue(fixtureBatches[0], 'done batch');
     const firstTile = requireValue(doneBatch.tiles[0], 'first done tile');
     const { rerender } = render(withQueryClient(
@@ -741,6 +742,7 @@ describe('visual scaffold components', () => {
         onDelete={() => undefined}
       />,
     ));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
 
     expect(screen.getByRole('button', { name: 'Edit from this image' })).toBeTruthy();
 
@@ -755,11 +757,12 @@ describe('visual scaffold components', () => {
         onDelete={() => undefined}
       />,
     ));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
 
     expect(screen.queryByRole('button', { name: 'Edit from this image' })).toBeNull();
   });
 
-  test('Lightbox renders the active tile at full resolution regardless of thumbUrl', () => {
+  test('Lightbox renders the active tile at full resolution regardless of thumbUrl', async () => {
     const doneBatch = requireValue(fixtureBatches[0], 'done batch');
     const firstTile = requireValue(doneBatch.tiles[0], 'first done tile');
     const tileWithThumb = firstTile.status === 'done'
@@ -776,6 +779,7 @@ describe('visual scaffold components', () => {
         onDelete={() => undefined}
       />,
     ));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
 
     const full = screen.getByRole('img', { name: new RegExp(`Expanded generated image, prompt: ${doneBatch.prompt}`) });
     expect(full.getAttribute('src')).toBe(firstTile.status === 'done' ? firstTile.url : '');
@@ -812,6 +816,7 @@ describe('visual scaffold components', () => {
         onDelete={() => undefined}
       />,
     ));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit from this image' }));
 
@@ -873,6 +878,7 @@ describe('visual scaffold components', () => {
         onDelete={() => undefined}
       />,
     ));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit from this image' }));
 
@@ -927,6 +933,7 @@ describe('visual scaffold components', () => {
         onDelete={() => undefined}
       />,
     ));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit from this image' }));
 
@@ -937,7 +944,7 @@ describe('visual scaffold components', () => {
     expect(seen).not.toContain('DELETE /api/uploads/upload-4');
   });
 
-  test('Lightbox arrow buttons clear the active provenance preview', () => {
+  test('Lightbox arrow buttons clear the active provenance preview', async () => {
     const doneBatch = requireValue(fixtureBatches[0], 'done batch');
     const firstTile = requireValue(doneBatch.tiles[0], 'first done tile');
     const secondTile = requireValue(doneBatch.tiles[1], 'second done tile');
@@ -958,6 +965,7 @@ describe('visual scaffold components', () => {
         onDelete={() => undefined}
       />,
     ));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
 
     fireEvent.click(screen.getByRole('button', { name: 'View reference image 1 of 1' }));
     expect(screen.getByRole('button', { name: 'View reference image 1 of 1' }).getAttribute('aria-pressed')).toBe('true');
@@ -984,6 +992,7 @@ describe('visual scaffold components', () => {
         onDelete={() => undefined}
       />,
     ));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
 
     const image = screen.getByRole('img', { name: new RegExp(`Expanded generated image, prompt: ${doneBatch.prompt}`) });
     fireEvent.pointerDown(image, { clientX: 220, clientY: 120, pointerId: 1, pointerType: 'touch' });

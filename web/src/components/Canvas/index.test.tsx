@@ -89,6 +89,13 @@ afterEach(() => {
 });
 
 describe('Canvas passive keyboard access', () => {
+  test.each([APP_VIEW_UNSORTED, { kind: 'collection' as const, id: 'empty' }])('shares the approved hint alternatives in an empty $kind canvas', (activeView) => {
+    render(<Canvas {...canvasProps} activeView={activeView} />);
+    expect(screen.getByText(/Write a prompt, pick a model, press/).textContent).toBe('Write a prompt, pick a model, press ⌘ ↵.');
+    expect(screen.getByText('Write a prompt, pick a model, tap Generate.').tagName).toBe('SPAN');
+    expect(screen.getAllByRole('heading', { name: 'What would you like to make?' })).toHaveLength(1);
+  });
+
   test.each([
     { activeView: APP_VIEW_UNSORTED, title: 'Unsorted', collections: [] },
     { activeView: { kind: 'collection' as const, id: 'collection-1' }, title: 'Portraits', collections: [{ id: 'collection-1', name: 'Portraits', count: 0, archivedCount: 0, createdAt: 1 }] },

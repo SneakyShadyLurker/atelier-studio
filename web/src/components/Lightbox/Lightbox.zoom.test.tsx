@@ -95,7 +95,7 @@ function KeyboardHost({ batch }: { batch: Batch }) {
   return null;
 }
 
-function renderLightbox(batch: Batch, onClose = mock()) {
+async function renderLightbox(batch: Batch, onClose = mock()) {
   render(
     <>
       <KeyboardHost batch={batch} />
@@ -111,6 +111,7 @@ function renderLightbox(batch: Batch, onClose = mock()) {
     </>,
     { wrapper: wrapper() },
   );
+  await act(async () => { await import('./Content'); });
   const image = screen.getByRole('img', { name: /Expanded generated image/ });
   // Decoding is what unlocks zoom — natural size is unknown until it lands.
   fireEvent.load(image);
@@ -163,8 +164,8 @@ afterEach(() => {
 });
 
 describe('Lightbox resolution readout', () => {
-  test('the decoded size reads {w}×{h} with the multiplication sign', () => {
-    renderLightbox(allDoneBatch);
+  test('the decoded size reads {w}×{h} with the multiplication sign', async () => {
+    await renderLightbox(allDoneBatch);
 
     expect(screen.getByText('2400×1600')).toBeTruthy();
     expect(screen.queryByText('2400x1600')).toBeNull();
@@ -172,10 +173,10 @@ describe('Lightbox resolution readout', () => {
 });
 
 describe('Lightbox toolbar slots', () => {
-  test('lays out the zoom slot, hidden and inert, when the image is not zoomable', () => {
+  test('lays out the zoom slot, hidden and inert, when the image is not zoomable', async () => {
     const proto = HTMLImageElement.prototype as unknown as Record<string, unknown>;
     Object.defineProperty(proto, 'naturalWidth', { configurable: true, get: () => FIT_WIDTH });
-    renderLightbox(allDoneBatch);
+    await renderLightbox(allDoneBatch);
 
     // Not offered, so not in the accessibility tree or the focus order, but
     // its box keeps the toolbar the width it has for a zoomable image.
@@ -186,8 +187,8 @@ describe('Lightbox toolbar slots', () => {
     expect(zoom?.hasAttribute('inert')).toBe(true);
   });
 
-  test('the decoded size sits in its own slot and never reads as an ellipsis', () => {
-    renderLightbox(allDoneBatch);
+  test('the decoded size sits in its own slot and never reads as an ellipsis', async () => {
+    await renderLightbox(allDoneBatch);
     expect(document.querySelector('[data-slot="dims"]')?.textContent).toBe('2400×1600');
     expect(screen.queryByText('…')).toBeNull();
     expect(screen.getByRole('button', { name: 'Zoom to full resolution' }).getAttribute('data-slot')).toBe('zoom');
@@ -195,16 +196,16 @@ describe('Lightbox toolbar slots', () => {
 });
 
 describe('Lightbox zoom', () => {
-  test('offers 1:1 once the image is decoded and known to be downsampled', () => {
-    const { image } = renderLightbox(allDoneBatch);
+  test('offers 1:1 once the image is decoded and known to be downsampled', async () => {
+    const { image } = await renderLightbox(allDoneBatch);
 
     const toggle = screen.getByRole('button', { name: 'Zoom to full resolution' });
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(transformOf(image)).toBe('');
   });
 
-  test('clicking the image zooms to full resolution around the pointer', () => {
-    const { image } = renderLightbox(allDoneBatch);
+  test('clicking the image zooms to full resolution around the pointer', async () => {
+    const { image } = await renderLightbox(allDoneBatch);
 
     fireEvent.click(image, { clientX: 800, clientY: 300 });
 
@@ -215,8 +216,8 @@ describe('Lightbox zoom', () => {
     expect(translationOf(image).x).not.toBe(0);
   });
 
-  test('reports the live zoom level in the info bar', () => {
-    const { image } = renderLightbox(allDoneBatch);
+  test('reports the live zoom level in the info bar', async () => {
+    const { image } = await renderLightbox(allDoneBatch);
     expect(document.body.textContent).not.toContain('100%');
 
     fireEvent.click(image, { clientX: 600, clientY: 400 });
@@ -224,8 +225,8 @@ describe('Lightbox zoom', () => {
     expect(document.body.textContent).toContain('100%');
   });
 
-  test('clicking again returns to fit', () => {
-    const { image } = renderLightbox(allDoneBatch);
+  test('clicking again returns to fit', async () => {
+    const { image } = await renderLightbox(allDoneBatch);
 
     fireEvent.click(image, { clientX: 800, clientY: 300 });
     fireEvent.click(image, { clientX: 800, clientY: 300 });
@@ -234,8 +235,8 @@ describe('Lightbox zoom', () => {
     expect(screen.getByRole('button', { name: 'Zoom to full resolution' }).getAttribute('aria-pressed')).toBe('false');
   });
 
-  test('the toolbar toggle zooms about the centre, leaving the image centred', () => {
-    const { image } = renderLightbox(allDoneBatch);
+  test('the toolbar toggle zooms about the centre, leaving the image centred', async () => {
+    const { image } = await renderLightbox(allDoneBatch);
 
     fireEvent.click(screen.getByRole('button', { name: 'Zoom to full resolution' }));
 
@@ -243,8 +244,8 @@ describe('Lightbox zoom', () => {
     expect(translationOf(image)).toEqual({ x: 0, y: 0 });
   });
 
-  test('dragging pans the zoomed image and never uncovers the stage', () => {
-    const { image } = renderLightbox(allDoneBatch);
+  test('dragging pans the zoomed image and never uncovers the stage', async () => {
+    const { image } = await renderLightbox(allDoneBatch);
     fireEvent.click(screen.getByRole('button', { name: 'Zoom to full resolution' }));
 
     fireEvent.pointerDown(image, { pointerId: 1, pointerType: 'mouse', clientX: 600, clientY: 400 });
@@ -262,8 +263,8 @@ describe('Lightbox zoom', () => {
     expect(translationOf(image).x).toBeCloseTo(maxPan, 3);
   });
 
-  test('a drag does not toggle zoom on the trailing click', () => {
-    const { image } = renderLightbox(allDoneBatch);
+  test('a drag does not toggle zoom on the trailing click', async () => {
+    const { image } = await renderLightbox(allDoneBatch);
     fireEvent.click(screen.getByRole('button', { name: 'Zoom to full resolution' }));
     const zoomedScale = scaleOf(image);
 
@@ -275,9 +276,9 @@ describe('Lightbox zoom', () => {
     expect(scaleOf(image)).toBeCloseTo(zoomedScale, 3);
   });
 
-  test('Escape unwinds the zoom before it dismisses the viewer', () => {
+  test('Escape unwinds the zoom before it dismisses the viewer', async () => {
     const onClose = mock();
-    const { image } = renderLightbox(allDoneBatch, onClose);
+    const { image } = await renderLightbox(allDoneBatch, onClose);
     fireEvent.click(screen.getByRole('button', { name: 'Zoom to full resolution' }));
 
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -285,8 +286,8 @@ describe('Lightbox zoom', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  test('arrow keys pan instead of changing tile while zoomed', () => {
-    const { image } = renderLightbox(allDoneBatch);
+  test('arrow keys pan instead of changing tile while zoomed', async () => {
+    const { image } = await renderLightbox(allDoneBatch);
     act(() => { useAtelierStore.getState().openLightbox(allDoneBatch.id, allDoneBatch.tiles[0]?.id ?? ''); });
     fireEvent.click(screen.getByRole('button', { name: 'Zoom to full resolution' }));
 
@@ -295,11 +296,11 @@ describe('Lightbox zoom', () => {
     expect(useAtelierStore.getState().lightbox?.tileId).toBe(allDoneBatch.tiles[0]?.id);
   });
 
-  test('leaves zoom off for images that are already shown at full resolution', () => {
+  test('leaves zoom off for images that are already shown at full resolution', async () => {
     const proto = HTMLImageElement.prototype as unknown as Record<string, unknown>;
     Object.defineProperty(proto, 'naturalWidth', { configurable: true, get: () => FIT_WIDTH });
 
-    const { image } = renderLightbox(allDoneBatch);
+    const { image } = await renderLightbox(allDoneBatch);
 
     expect(screen.queryByRole('button', { name: 'Zoom to full resolution' })).toBeNull();
     fireEvent.click(image, { clientX: 800, clientY: 300 });

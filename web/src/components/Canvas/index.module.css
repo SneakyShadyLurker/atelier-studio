@@ -88,3 +88,17 @@
   display: flex;
   flex-direction: column;
 }
+.touchHint {
+  display: none;
+}
+
+/* Copy selection matches Composer help; this is not a touch-target floor. */
+@media (hover: none) and (pointer: coarse) {
+  .keyboardHint {
+    display: none;
+  }
+
+  .touchHint {
+    display: inline;
+  }
+}

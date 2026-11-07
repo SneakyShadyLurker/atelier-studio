@@ -54,7 +54,7 @@ function wrapper() {
   };
 }
 
-function renderLightbox(
+async function renderLightbox(
   batch: Batch = allDoneBatch,
   modelById: ReadonlyMap<string, Model> = new Map([[imageModel.id, imageModel], [wanModel.id, wanModel]]),
 ) {
@@ -71,6 +71,7 @@ function renderLightbox(
     />,
     { wrapper: wrapper() },
   );
+  await act(async () => { await import('./Content'); });
   return { onClose };
 }
 
@@ -111,7 +112,7 @@ describe('Lightbox Animate action', () => {
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const { onClose } = renderLightbox();
+    const { onClose } = await renderLightbox();
 
     const animate = screen.getByRole('button', { name: 'Animate this image' });
     expect(animate.getAttribute('data-tip')).toBe('Animate');
@@ -142,14 +143,14 @@ describe('Lightbox Animate action', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  test('does not show Animate for a video tile', () => {
-    renderLightbox({ ...allDoneBatch, tiles: [videoTile] });
+  test('does not show Animate for a video tile', async () => {
+    await renderLightbox({ ...allDoneBatch, tiles: [videoTile] });
 
     expect(screen.queryByRole('button', { name: 'Animate this image' })).toBeNull();
   });
 
-  test('does not show Animate when no H3 model is available', () => {
-    renderLightbox(allDoneBatch, new Map([[imageModel.id, imageModel]]));
+  test('does not show Animate when no H3 model is available', async () => {
+    await renderLightbox(allDoneBatch, new Map([[imageModel.id, imageModel]]));
 
     expect(screen.queryByRole('button', { name: 'Animate this image' })).toBeNull();
   });

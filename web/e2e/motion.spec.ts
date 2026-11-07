@@ -853,22 +853,27 @@ test.describe('reduced motion holds every leak site still', () => {
   });
 
   test('the lazy loader pulses instead of spinning', async ({ page }) => {
-    // Hold the Lightbox chunk so its loader stays up long enough to sample.
-    await page.route(/\/src\/components\/Lightbox\/index\.tsx(?:\?.*)?$/, async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    await page.route(/\/src\/components\/ByokDialog\/index\.tsx(?:\?.*)?$/, async (route) => {
+      await held;
       await route.continue();
     });
-    await page.goto('/e2e/studio/index.html');
-    await page.getByRole('button', { name: 'Expand tile 1' }).first().click();
-    const loader = page.getByRole('status').filter({ hasText: 'Loading image viewer' });
-    await expect(loader).toBeVisible();
-    await loader.locator('span').first().evaluate((spinner) => { spinner.id = 'motion-spinner'; });
-    await startRecording(page, '#motion-spinner', 400);
-    const frames = await recordedFrames(page);
-    expectStill(frames, 'loader');
-    // It still signals progress: the pulse changes its opacity.
-    const opacities = new Set(frames.filter((frame) => frame.present).map((frame) => frame.opacity.toFixed(2)));
-    expect(opacities.size).toBeGreaterThan(1);
+    try {
+      await page.goto('/e2e/studio/index.html');
+      await page.getByRole('button', { name: 'API keys', exact: true }).click();
+      const loader = page.getByRole('status').filter({ hasText: 'Loading key manager' });
+      await expect(loader).toBeVisible();
+      await loader.locator('span').first().evaluate((spinner) => { spinner.id = 'motion-spinner'; });
+      await startRecording(page, '#motion-spinner', 400);
+      const frames = await recordedFrames(page);
+      expectStill(frames, 'loader');
+      const opacities = new Set(frames.filter((frame) => frame.present).map((frame) => frame.opacity.toFixed(2)));
+      expect(opacities.size).toBeGreaterThan(1);
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
   });
 });
 

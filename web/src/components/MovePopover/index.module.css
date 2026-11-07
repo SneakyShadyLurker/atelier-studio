@@ -89,9 +89,37 @@
   font-size: var(--text-xs);
 }
 
+.createRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.createRow .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.input::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+}
+
+.createMove {
+  composes: primary from '../../styles/buttons.module.css';
+  height: 36px;
+  padding: 0 12px;
+  font-size: var(--text-xs);
+}
+
 @media (hover: none), (any-pointer: coarse) {
   .input {
     font-size: var(--text-base);
+    min-height: 44px;
+  }
+
+  .createMove {
+    min-height: 44px;
   }
 }
 

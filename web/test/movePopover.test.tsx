@@ -206,6 +206,91 @@ describe('Batch Phase G header affordances', () => {
 });
 
 describe('MovePopover', () => {
+  test('Move retains the draft inside its row, cancels on leaving, and shares Enter cancellation', async () => {
+    const { calls } = renderBatch(batch());
+    const dialog = await openMove();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'New collection' }));
+    const input = screen.getByLabelText('Collection name');
+    const move = within(dialog).getByRole<HTMLButtonElement>('button', { name: 'Move' });
+    expect(move.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: '   ' } });
+    expect(move.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: 'Draft' } });
+    act(() => { move.focus(); });
+    expect(input.isConnected).toBe(true);
+    expect((input as HTMLInputElement).value).toBe('Draft');
+    act(() => { input.focus(); });
+    expect(input.isConnected).toBe(true);
+    act(() => { move.focus(); });
+    const other = within(dialog).getByRole('button', { name: 'Studio refs' });
+    act(() => { other.focus(); });
+    await waitFor(() => { expect(screen.queryByLabelText('Collection name')).toBeNull(); });
+    expect(document.activeElement).toBe(other);
+    expect(calls.filter((call) => call.method === 'POST' || call.method === 'PATCH')).toHaveLength(0);
+  });
+
+  test.each(['create', 'move'] as const)('holds one create-and-move chain through %s failure and permits deliberate retry', async (failure) => {
+    renderBatch(batch());
+    const baseFetch = globalThis.fetch;
+    let releaseCreate!: (response: Response) => void;
+    let releaseMove!: (response: Response) => void;
+    const creates: unknown[] = [];
+    const moves: unknown[] = [];
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as unknown : null;
+      if (url === '/api/collections' && init?.method === 'POST') {
+        creates.push(body);
+        return new Promise<Response>((resolve) => { releaseCreate = resolve; });
+      }
+      if (url === '/api/history/batch-logo' && init?.method === 'PATCH') {
+        moves.push(body);
+        return new Promise<Response>((resolve) => { releaseMove = resolve; });
+      }
+      return baseFetch(input, init);
+    }) as unknown as typeof fetch;
+    const dialog = await openMove();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'New collection' }));
+    const input = screen.getByLabelText<HTMLInputElement>('Collection name');
+    fireEvent.change(input, { target: { value: '  Mood board  ' } });
+    const move = within(dialog).getByRole<HTMLButtonElement>('button', { name: 'Move' });
+    fireEvent.click(move);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.click(move);
+    await waitFor(() => { expect(creates).toEqual([{ name: 'Mood board' }]); });
+    expect(input.value).toBe('  Mood board  ');
+    expect(input.readOnly).toBe(true);
+    expect(move.disabled).toBe(true);
+    expect(move.getAttribute('aria-busy')).toBe('true');
+    if (failure === 'move') {
+      act(() => { releaseCreate(Response.json({ id: 'collection-new', name: 'Mood board', count: 0, archivedCount: 0, createdAt: 3 })); });
+      await waitFor(() => { expect(moves).toEqual([{ collectionId: 'collection-new' }]); });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      fireEvent.click(move);
+      expect(creates).toHaveLength(1);
+      expect(moves).toHaveLength(1);
+    }
+    act(() => {
+      (failure === 'create' ? releaseCreate : releaseMove)(Response.json({ error: 'Collection service refused this name' }, { status: 400 }));
+    });
+    await waitFor(() => {
+      expect(input.readOnly).toBe(false);
+      expect(move.disabled).toBe(false);
+      expect(useAtelierStore.getState().toasts.some((toast) => toast.text === 'Collection service refused this name')).toBe(true);
+    });
+    expect(input.value).toBe('  Mood board  ');
+    expect(creates).toHaveLength(1);
+    expect(moves).toHaveLength(failure === 'move' ? 1 : 0);
+    // Retry requires another deliberate activation; Enter uses the same path.
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => { expect(creates).toHaveLength(2); });
+    act(() => { releaseCreate(Response.json({ id: 'collection-retry', name: 'Mood board', count: 0, archivedCount: 0, createdAt: 4 })); });
+    await waitFor(() => { expect(moves).toHaveLength(failure === 'move' ? 2 : 1); });
+    act(() => { releaseMove(Response.json({ ...batch(), collectionId: 'collection-retry' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(screen.queryByRole('dialog', { name: 'Move to collection' }) === null).toBe(true);
+  });
+
   test('opens from Move icon, keeps Unsorted first, and marks null assignment', async () => {
     renderBatch(batch());
     const dialog = await openMove();

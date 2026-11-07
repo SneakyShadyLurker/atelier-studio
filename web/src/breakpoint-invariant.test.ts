@@ -87,10 +87,11 @@ const TOUCH_GATE = '(hover: none), (any-pointer: coarse)';
 
 // Hover-capability queries guard hover-only affordances (the complement of the
 // gate), and Composer's shortcut hint hides only where there is no keyboard
-// at all; neither is a touch floor.
+// at all, as does Canvas's matching empty-state copy; none is a touch floor.
 const NON_FLOOR_QUERIES: Readonly<Record<string, readonly string[]>> = {
   '*': ['(hover: hover)', '(hover: hover) and (pointer: fine)'],
   'components/Composer/index.module.css': ['(hover: none) and (pointer: coarse)'],
+  'components/Canvas/index.module.css': ['(hover: none) and (pointer: coarse)'],
 };
 
 // 44px rules that are phone geometry rather than a touch floor: the drawer's

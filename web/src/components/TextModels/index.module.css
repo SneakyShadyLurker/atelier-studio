@@ -442,6 +442,8 @@
 }
 
 .modelName {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--ink);
   font-size: var(--text-sm);
   font-weight: 500;
@@ -621,18 +623,25 @@
 
   .modelRow {
     grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 8px;
+    column-gap: 14px;
+    row-gap: 6px;
   }
 
   .modelMeta {
-    grid-column: 1;
+    grid-column: 1 / -1;
     grid-row: 2;
-    flex-wrap: wrap;
+    gap: 14px;
+    flex-wrap: nowrap;
+  }
+
+  .status {
+    order: -1;
   }
 
   .modelControls {
     grid-column: 2;
-    grid-row: 1 / span 2;
+    grid-row: 1;
+    align-self: center;
   }
 }
 
@@ -652,7 +661,7 @@
   .tagButton::before {
     content: '';
     position: absolute;
-    inset: -13px -4px;
+    inset: -14px -4px;
   }
 
   .switch {

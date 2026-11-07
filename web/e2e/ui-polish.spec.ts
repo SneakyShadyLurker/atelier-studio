@@ -353,6 +353,177 @@ for (const colorScheme of ['light', 'dark'] as const) {
   });
 }
 
+// Pair the local container boundary with phone and desktop input/theme samples,
+// rather than multiplying every axis into a full Cartesian matrix.
+for (const scenario of [
+  { label: '320 phone', width: 320, touch: true, colorScheme: 'light', containerWidth: null },
+  { label: '390 phone', width: 390, touch: true, colorScheme: 'dark', containerWidth: null },
+  { label: '599 container', width: 720, touch: false, colorScheme: 'light', containerWidth: 599 },
+  { label: '600 container', width: 720, touch: false, colorScheme: 'dark', containerWidth: 600 },
+  { label: 'standard desktop', width: 1440, touch: false, colorScheme: 'light', containerWidth: null },
+  { label: 'touch desktop', width: 1280, touch: true, colorScheme: 'dark', containerWidth: null },
+] as const) {
+  test(`model row hierarchy: ${scenario.label}, ${scenario.touch ? 'coarse' : 'fine'}, ${scenario.colorScheme}`, async ({ browser }) => {
+    test.setTimeout(60_000);
+    const context = await browser.newContext({
+      ...(scenario.touch ? devices['iPhone 13'] : devices['Desktop Chrome']),
+      viewport: { width: scenario.width, height: 900 }, colorScheme: scenario.colorScheme,
+    });
+    try {
+      const page = await context.newPage();
+      // Extend the same public fetch fixture as the existing provider test.
+      // A fresh provider exercises the real first-poll checking state.
+      await page.addInitScript(() => {
+        let inner = window.fetch.bind(window);
+        const fetchProviders = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+          const response = await inner(input, init);
+          const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+          if (url.pathname !== '/api/text-providers') return response;
+          const { providers } = await response.json() as { providers: AdminProvider[] };
+          const provider = providers[0];
+          const model = provider?.models[0];
+          if (!provider || !model) throw new Error('missing public model fixture');
+          const noUsage = { isDefault: false, tasks: [], writers: [], userPicks: 0 } as const;
+          const base = { ...model, enabled: true, structuredOutput: 'none', usage: noUsage } as const;
+          const rows: AdminProvider['models'] = [
+            { ...base, id: 'hierarchy-long', displayName: 'ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMN', modelId: `public/provider/${'long-provider-path/'.repeat(5)}writer` },
+            { ...base, id: 'hierarchy-json', displayName: 'Preview JSON', modelId: 'public/json-writer', enabled: false, status: 'offline', structuredOutput: 'json_object', usage: { ...noUsage, isDefault: true }, lastTest: { checks: [{ id: 'text', status: 'fail', message: 'Preview probe failed' }], proposed: {}, advertised: {}, wireNotes: [] } },
+            { ...base, id: 'hierarchy-complete', displayName: 'Preview complete', modelId: 'public/complete-writer', status: 'unknown', verifiedAt: 1, vision: true, structuredOutput: 'json_schema', reasoningLevels: ['high'], usage: { ...noUsage, tasks: ['ai-fill'] } },
+            { ...base, id: 'hierarchy-image', displayName: 'Preview image', modelId: 'public/image-writer', enabled: false, verifiedAt: 1, vision: true },
+          ];
+          const checkingId = 'provider-checking';
+          return Response.json({ providers: [
+            { ...provider, models: rows },
+            { ...provider, id: checkingId, name: 'Checking provider', createdAt: Date.now(), models: [{ ...base, id: 'hierarchy-checking', providerId: checkingId, displayName: 'Preview checking', modelId: 'public/checking-writer', status: 'unknown', verifiedAt: 1 }] },
+          ] });
+        };
+        Object.defineProperty(window, 'fetch', { configurable: true, get: () => fetchProviders, set: (value: typeof fetch) => { inner = value; } });
+      });
+      await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+      const provider = page.getByRole('region', { name: 'Preview provider', exact: true });
+      await expect(page.getByRole('listitem', { name: 'Preview checking', exact: true }).locator('[data-status="unknown"]')).toHaveText('checking…');
+      const rowNames = ['ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMN', 'Preview JSON', 'Preview complete', 'Preview image'] as const;
+      const first = provider.getByRole('listitem', { name: rowNames[0], exact: true });
+      const contentWidth = () => first.evaluate((element) => {
+        let container = element.parentElement;
+        while (container && getComputedStyle(container).containerName !== 'text-models') container = container.parentElement;
+        if (!container) throw new Error('missing text-models container');
+        const style = getComputedStyle(container);
+        return container.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+      });
+      if (scenario.containerWidth !== null) {
+        // Resize by the measured content-width delta; sidebar, gutters and
+        // managed-view padding are intentionally not guessed from the viewport.
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const delta = scenario.containerWidth - await contentWidth();
+          if (Math.abs(delta) <= 0.1) break;
+          const viewport = page.viewportSize();
+          if (!viewport) throw new Error('missing viewport');
+          await page.setViewportSize({ ...viewport, width: Math.round(viewport.width + delta) });
+        }
+        expect(await contentWidth(), 'measured container content boundary').toBeCloseTo(scenario.containerWidth, 1);
+      }
+      const narrow = await contentWidth() < 600;
+      const tab = browser.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab';
+      expect(await page.evaluate(() => matchMedia('(hover: none), (any-pointer: coarse)').matches)).toBe(scenario.touch);
+      const evidence = [];
+      for (const [index, name] of rowNames.entries()) {
+        const row = provider.getByRole('listitem', { name, exact: true });
+        await row.scrollIntoViewIfNeeded();
+        const toggle = row.getByRole('switch', { name: `Use ${name}`, exact: true });
+        const more = row.getByRole('button', { name: `More actions for ${name}`, exact: true });
+        await expect(toggle).toHaveAttribute('aria-checked', index === 1 || index === 3 ? 'false' : 'true');
+        await expect(toggle).toHaveAttribute('data-tip', index === 1 || index === 3 ? 'Off' : 'On');
+        await expect(more).toHaveAttribute('data-tip', 'More');
+        await expect(more).toBeEnabled();
+        const status = row.locator('[data-status]');
+        await expect(status).toHaveText(index === 1 ? 'offline' : index === 2 ? 'unknown' : 'available');
+        await expect(row.getByText('Off', { exact: true })).toHaveCount(index === 1 || index === 3 ? 1 : 0);
+        await expect(row.getByText(/^Default/)).toHaveCount(index === 1 ? 1 : 0);
+        await expect(row.getByText(/^In use/)).toHaveCount(index === 2 ? 1 : 0);
+        const testButton = row.getByRole('button', { name: index === 1 ? 'Test failed: test again' : 'Untested: test to confirm capabilities', exact: true });
+        await expect(testButton).toHaveCount(index < 2 ? 1 : 0);
+        const capabilities = index === 1 ? ['JSON output'] : index === 2 ? ['Image input', 'JSON output', 'Reasoning: High'] : index === 3 ? ['Image input'] : [];
+        await expect(row.getByRole('img')).toHaveCount(capabilities.length);
+        for (const label of capabilities) {
+          const capability = row.getByRole('img', { name: label, exact: true });
+          await expect(capability).toHaveAttribute('data-tip', label);
+          expect(await capability.evaluate((element) => element.tabIndex)).toBe(-1);
+        }
+        const geometry = await row.evaluate((element) => {
+          const [identity, meta, controls] = element.querySelectorAll(':scope > div');
+          const caps = meta?.firstElementChild;
+          const status = meta?.querySelector('[data-status]');
+          if (!identity || !meta || !controls || !caps || !status) throw new Error('missing row anatomy');
+          const rect = (node: Element) => {
+            const box = node.getBoundingClientRect();
+            return { x: box.x, y: box.y, right: box.right, bottom: box.bottom, width: box.width, height: box.height, center: box.y + box.height / 2 };
+          };
+          return { identity: rect(identity), meta: rect(meta), controls: rect(controls), caps: rect(caps), status: rect(status), slots: Array.from(caps.children, (slot) => ({ ...rect(slot), role: slot.getAttribute('role'), label: slot.getAttribute('aria-label'), hidden: slot.getAttribute('aria-hidden') })), overflow: element.scrollWidth > element.clientWidth + 1 };
+        });
+        evidence.push({ name, ...geometry });
+        expect(geometry.overflow, `${name}: no row overflow`).toBe(false);
+        expect(Math.abs(geometry.controls.center - geometry.identity.center), `${name}: controls align with identity`).toBeLessThanOrEqual(1);
+        expect(geometry.controls.x).toBeGreaterThanOrEqual(geometry.identity.right);
+        if (narrow) {
+          expect(Math.abs(geometry.meta.x - geometry.identity.x), 'meta starts at identity edge').toBeLessThanOrEqual(1);
+          expect(Math.abs(geometry.meta.right - geometry.controls.right), 'meta spans both columns').toBeLessThanOrEqual(1);
+          expect(geometry.meta.y).toBeGreaterThanOrEqual(Math.max(geometry.identity.bottom, geometry.controls.bottom) + 5);
+          expect(geometry.status.right).toBeLessThanOrEqual(geometry.caps.x);
+        } else {
+          expect(Math.abs(geometry.meta.center - geometry.identity.center), 'desktop metadata shares the row').toBeLessThanOrEqual(1);
+          expect(geometry.caps.right).toBeLessThanOrEqual(geometry.status.x);
+        }
+        expect(geometry.status.width).toBeGreaterThanOrEqual(76);
+        expect(geometry.slots).toHaveLength(3);
+        for (const [slotIndex, slot] of geometry.slots.entries()) {
+          expect(slot.width).toBeCloseTo(16, 1);
+          expect(slot.x - geometry.caps.x).toBeCloseTo(slotIndex * 24, 1);
+          expect(slot.role).toBe(slot.label === null ? null : 'img');
+          if (slot.label === null) expect(slot.hidden).toBe('true');
+        }
+        if (index === 1) expect(geometry.slots.map((slot) => slot.label)).toEqual([null, 'JSON output', null]);
+        const nameText = row.getByText(name, { exact: true });
+        expect(await nameText.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), 'display name is contained').toBe(true);
+        for (const control of [toggle, more, ...(index < 2 ? [testButton] : [])]) {
+          await expect(control).toBeEnabled();
+          expect(await control.evaluate((element) => {
+            const box = element.getBoundingClientRect();
+            return box.left >= 0 && box.right <= innerWidth + 1 && box.top >= 0 && box.bottom <= innerHeight
+              && [0.1, 0.5, 0.9].every((fraction) => {
+                const hit = document.elementFromPoint(box.left + box.width * fraction, box.top + box.height / 2);
+                return hit === element || (hit !== null && element.contains(hit));
+              });
+          }), 'interactive control is unclipped and owns its hit points').toBe(true);
+        }
+        if (scenario.touch) {
+          await expectHitArea(toggle, `${name} switch`, true);
+          await expectFloor(more, `${name} More`);
+          if (index < 2) await expectHitArea(testButton, `${name} test`, true);
+        }
+        if (index < 2) {
+          await testButton.focus();
+          await page.keyboard.press(tab);
+          await expect(toggle).toBeFocused();
+        } else await toggle.focus();
+        await page.keyboard.press(tab);
+        await expect(more).toBeFocused();
+        await more.press('Enter');
+        const menu = page.getByRole('menu', { name: `${name} actions`, exact: true });
+        await expect(menu).toBeVisible();
+        for (const action of ['Edit', 'Test', 'Remove']) await expect(menu.getByRole('menuitem', { name: action, exact: true })).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(menu).toHaveCount(0);
+        await expect(more).toBeFocused();
+        expect(await noHorizontalOverflow(page)).toBe(true);
+      }
+      await test.info().attach('model-row-hierarchy', { body: JSON.stringify({ scenario, viewport: page.viewportSize(), containerContentWidth: await contentWidth(), narrow, rows: evidence }, null, 2), contentType: 'application/json' });
+    } finally {
+      await context.close();
+    }
+  });
+}
+
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   test(`presentation fixes: native Advanced cues and input with ${reducedMotion} motion`, async ({ browser }) => {
     const context = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: 390, height: 844 }, reducedMotion });
@@ -1514,13 +1685,13 @@ async function expectFloor(locator: ReturnType<Page['locator']>, label: string, 
  * computes to 44×44 and takes every tap sampled across it. Sampling starts a
  * few pixels in, clear of the clipped parent's rounded corner.
  */
-async function expectHitArea(locator: ReturnType<Page['locator']>, label: string): Promise<void> {
-  const result = await locator.evaluate((element) => {
+async function expectHitArea(locator: ReturnType<Page['locator']>, label: string, centered = false): Promise<void> {
+  const result = await locator.evaluate((element, sampleCenter) => {
     const area = getComputedStyle(element, '::before');
     const glyph = element.getBoundingClientRect();
     const clip = element.parentElement?.getBoundingClientRect() ?? glyph;
-    const right = Math.min(clip.right, glyph.right + 3) - 4;
-    const top = Math.max(clip.top, glyph.top - 3) + 4;
+    const right = sampleCenter ? glyph.x + glyph.width / 2 + 19 : Math.min(clip.right, glyph.right + 3) - 4;
+    const top = sampleCenter ? glyph.y + glyph.height / 2 - 19 : Math.max(clip.top, glyph.top - 3) + 4;
     let misses = 0;
     for (let dx = 0; dx <= 38; dx += 2) {
       for (let dy = 0; dy <= 38; dy += 2) {
@@ -1529,7 +1700,7 @@ async function expectHitArea(locator: ReturnType<Page['locator']>, label: string
       }
     }
     return { width: Number.parseFloat(area.width), height: Number.parseFloat(area.height), misses };
-  });
+  }, centered);
   expect(result.width, `${label} hit width`).toBeGreaterThanOrEqual(44);
   expect(result.height, `${label} hit height`).toBeGreaterThanOrEqual(44);
   expect(result.misses, `${label}: sampled points that miss it`).toBe(0);

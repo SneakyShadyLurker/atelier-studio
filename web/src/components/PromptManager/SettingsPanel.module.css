@@ -97,6 +97,14 @@
   gap: 8px;
 }
 
+.unsetValue {
+  color: var(--ink-3);
+}
+
+.effortSlot {
+  display: inline-flex;
+}
+
 .stepsInput {
   width: 64px;
   height: 36px;

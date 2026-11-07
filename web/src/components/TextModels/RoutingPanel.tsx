@@ -44,7 +44,7 @@ export default function RoutingPanel({ providers }: RoutingPanelProps) {
   if (data === undefined) {
     return (
       <section className={`${styles.panel} ${styles.routing}`} aria-labelledby={headingId}>
-        <h3 id={headingId} className={styles.panelTitle}>Routing</h3>
+        <h3 id={headingId} className={styles.panelTitle}>Routing for everyone</h3>
         <p className={styles.note}>
           {routing.isError ? 'Couldn’t load the routing settings.' : 'Loading routing…'}
         </p>
@@ -96,7 +96,8 @@ export default function RoutingPanel({ providers }: RoutingPanelProps) {
 
   return (
     <section className={`${styles.panel} ${styles.routing}`} aria-labelledby={headingId}>
-      <h3 id={headingId} className={styles.panelTitle}>Routing</h3>
+      <h3 id={headingId} className={styles.panelTitle}>Routing for everyone</h3>
+      <p className={styles.note}>Features use these models for anyone who keeps the default.</p>
 
       <div className={styles.routeDefault}>
         <div className={styles.routeMain}>

@@ -1,9 +1,309 @@
 import { devices, expect, test, type Page } from '@playwright/test';
-import type { AdminProvider, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, PromptLibraryResponse } from '@atelier/shared';
+import type { AdminProvider, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, PromptLibraryResponse, TextModelsResponse } from '@atelier/shared';
+import { TEXT_TASKS } from '@atelier/shared';
 
 const noHorizontalOverflow = (page: Page) => page.evaluate(() =>
   document.documentElement.scrollWidth <= window.innerWidth + 1,
 );
+
+// Extend the public offline fixture without changing its production owners.
+async function withSettingsOwnership(page: Page, holdTask?: string): Promise<void> {
+  await page.addInitScript(({ tasks, holdTask }) => {
+    let inner = window.fetch.bind(window);
+    const models: TextModelsResponse['models'] = [
+      { id: 'atlas', displayName: 'Atlas', providerName: 'Preview provider', vision: true, reasoningLevels: ['low', 'high'], status: 'available' },
+      { id: 'override', displayName: 'Personal writer', providerName: 'Preview provider', vision: true, reasoningLevels: ['low', 'high'], status: 'available' },
+      { id: 'fixed', displayName: 'Fixed writer', providerName: 'Preview provider', vision: true, reasoningLevels: [], status: 'available' },
+      { id: 'offline', displayName: 'Offline writer', providerName: 'Preview provider', vision: true, reasoningLevels: ['low', 'high'], status: 'offline' },
+    ];
+    let current: TextModelsResponse = {
+      models, defaults: { default: 'atlas', byTask: {} }, writers: {},
+      tasks: tasks.map((task) => task === 'storytelling'
+        ? { task, pick: 'offline', pickState: 'offline', effectiveModelId: 'atlas', effort: 'high' }
+        : task === 'list-draft'
+          ? { task, pick: 'fixed', pickState: 'active', effectiveModelId: 'fixed' }
+          : { task, effectiveModelId: 'atlas' }),
+    };
+    const writes: { task: string; body: unknown }[] = [];
+    let releaseSave: (() => void) | undefined;
+    const evidence: unknown[] = [];
+    const describe = (element: Element | null) => element === null ? null : {
+      tag: element.tagName, role: element.getAttribute('role'), label: element.getAttribute('aria-label'),
+    };
+    const record = (step: string, event?: Event) => {
+      const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Text model for AI fill,"]');
+      const menu = document.querySelector('[role="listbox"][aria-label^="Text model for AI fill,"]');
+      evidence.push({ step, time: performance.now(), active: describe(document.activeElement),
+        disabled: trigger?.disabled, menuMounted: menu !== null, closing: menu?.getAttribute('data-closing'),
+        ...(event === undefined ? {} : { target: describe(event.target instanceof Element ? event.target : null),
+          ...(event instanceof KeyboardEvent ? { key: event.key } : {}) }) });
+    };
+    if (holdTask !== undefined) {
+      for (const type of ['focusin', 'focusout', 'pointerdown', 'keydown']) {
+        document.addEventListener(type, (event) => { record(type, event); }, true);
+      }
+    }
+    const fetchSettings = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname === '/settings-ownership-focus-evidence') {
+        record(url.searchParams.get('step') ?? 'snapshot');
+        return Response.json(evidence);
+      }
+      if (url.pathname === '/settings-ownership-release') {
+        record('release-response');
+        releaseSave?.();
+        releaseSave = undefined;
+        return Response.json({ released: true });
+      }
+      if (url.pathname === '/settings-ownership-held') return Response.json({ pending: releaseSave !== undefined });
+      if (url.pathname === '/api/text-models') return Response.json(current);
+      if (url.pathname.startsWith('/api/text-models/tasks/') && init?.method === 'PUT') {
+        const task = url.pathname.split('/').at(-1);
+        if (typeof init.body !== 'string') throw new Error('expected JSON task pick');
+        const body = JSON.parse(init.body) as { modelId: string | null; effort?: 'low' | 'high' | null };
+        writes.push({ task: task ?? '', body });
+        if (task === holdTask) {
+          record('hold-response');
+          await new Promise<void>((resolve) => { releaseSave = resolve; });
+        }
+        current = { ...current, tasks: current.tasks.map((row) => row.task !== task ? row : body.modelId === null
+          ? { task: row.task, effectiveModelId: 'atlas' }
+          : { task: row.task, pick: body.modelId, pickState: 'active', effectiveModelId: body.modelId,
+            ...(body.effort === undefined || body.effort === null ? {} : { effort: body.effort }) }) };
+        return Response.json(current);
+      }
+      if (url.pathname === '/settings-ownership-writes') return Response.json(writes);
+      const response = await inner(input, init);
+      if (url.pathname === '/api/text-providers') {
+        const data = await response.json() as { providers: AdminProvider[] };
+        return Response.json({ providers: data.providers.map((provider) => {
+          const template = provider.models[0];
+          if (!template) throw new Error('missing public model fixture');
+          return { ...provider, models: models.map((model) => ({ ...template, ...model, enabled: true })) };
+        }) });
+      }
+      if (url.pathname === '/api/text-routing') {
+        const data = await response.json() as Record<string, unknown>;
+        return Response.json({ ...data, defaults: current.defaults });
+      }
+      return response;
+    };
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => fetchSettings, set: (value: typeof fetch) => { inner = value; } });
+  }, { tasks: TEXT_TASKS, holdTask });
+}
+
+async function expectSettingsInk(value: ReturnType<Page['locator']>, token: '--ink' | '--ink-3'): Promise<void> {
+  expect(await value.evaluate((element, ink) => {
+    const probe = document.createElement('span');
+    probe.style.color = `var(${ink})`;
+    element.append(probe);
+    const matches = getComputedStyle(element).color === getComputedStyle(probe).color;
+    probe.remove();
+    return matches;
+  }, token)).toBe(true);
+}
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`settings ownership: personal choices and everyone defaults at ${String(viewport.width)}×${String(viewport.height)} in ${colorScheme}`, async ({ browser }) => {
+      const { defaultBrowserType: _engine, ...device } = viewport.width === 1440 ? devices['Desktop Chrome'] : devices['iPhone 13'];
+      const context = await browser.newContext({ ...device, viewport, colorScheme });
+      try {
+        const page = await context.newPage();
+        await withSettingsOwnership(page);
+        await page.goto('/e2e/studio/index.html?view=prompts&textAdmin=1&textProvider=1');
+        await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+        const panel = page.getByRole('region', { name: 'Your text model settings', exact: true });
+        await expect(panel.getByRole('heading', { level: 2, name: 'Your text models', exact: true })).toBeVisible();
+        await expect(panel.getByText('Choose which model writes for you in each feature; Default uses what your admin set for everyone.', { exact: true })).toBeVisible();
+        const model = panel.getByRole('button', { name: /^Text model for AI fill,/ });
+        const effort = panel.locator('button[aria-label^="Reasoning effort for AI fill,"]');
+        const slot = effort.locator('..');
+        const mountedSlot = await slot.elementHandle();
+        const inactiveBox = await slot.evaluate((element) => element.getBoundingClientRect().toJSON() as { width: number; height: number });
+        expect(inactiveBox.width).toBeGreaterThan(0);
+        expect(inactiveBox.height).toBeGreaterThan(0);
+        // The inline-flex wrapper is blockified as a flex item by the browser.
+        await expect(slot).toHaveCSS('display', 'flex');
+        await expect(slot).toHaveCSS('visibility', 'hidden');
+        await expect(slot).toHaveAttribute('inert', '');
+        await expect(slot).toHaveAttribute('aria-hidden', 'true');
+        await expect(effort).toBeDisabled();
+        await expect(effort).not.toHaveAttribute('data-tip');
+        await expect(page.locator('[data-tip-label]').filter({ hasText: 'Pick a model to choose its reasoning effort' })).toHaveCount(0);
+        await expect(panel.getByRole('button', { name: /^Reasoning effort for AI fill,/ })).toHaveCount(0);
+        await expectSettingsInk(model.locator('span').first().locator('span'), '--ink-3');
+        const touch = await page.evaluate(() => matchMedia('(hover: none), (any-pointer: coarse)').matches);
+        const tab = browser.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab';
+        if (touch) await expectFloor(model, 'personal model');
+        await model.focus();
+        await page.keyboard.press(tab);
+        await expect(panel.getByRole('button', { name: /^Text model for Brainstorm,/ })).toBeFocused();
+        await effort.evaluate((element) => { (element as HTMLButtonElement).focus(); });
+        await expect(effort).not.toBeFocused();
+        await model.focus();
+        await page.keyboard.press('Enter');
+        const menu = page.getByRole('listbox', { name: /^Text model for AI fill,/ });
+        await expect(menu).toBeFocused();
+        await expect(page.getByRole('option', { name: 'Offline writer offline', exact: true })).toHaveAttribute('aria-disabled', 'true');
+        // Default (Atlas) and Personal writer have equal character counts;
+        // only the visibility toggle below claims displacement invariance.
+        await page.keyboard.press('Home');
+        await page.keyboard.press('ArrowDown');
+        await page.keyboard.press('ArrowDown');
+        await page.keyboard.press('Enter');
+        await expect(menu).toHaveCount(0);
+        await expect(model).toHaveAccessibleName('Text model for AI fill, currently Personal writer');
+        await expect(model).toBeEnabled();
+        await expect(model).toBeFocused();
+        await expect(effort).toBeVisible();
+        await expect(effort).toBeEnabled();
+        await expect(slot).not.toHaveAttribute('inert');
+        await expect(slot).not.toHaveAttribute('aria-hidden');
+        expect(await slot.evaluate((element, original) => element === original, mountedSlot)).toBe(true);
+        await expectSettingsInk(model.locator('span').first(), '--ink');
+        if (touch) await expectFloor(effort, 'personal effort');
+        await page.keyboard.press(tab);
+        await expect(effort).toBeFocused();
+        const geometry = () => model.evaluate((element) => {
+          const row = element.parentElement?.parentElement;
+          const slot = element.nextElementSibling;
+          if (!row || !slot) throw new Error('missing settings row');
+          return [element, slot, row].map((node) => {
+            const rect = node.getBoundingClientRect();
+            return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+          });
+        });
+        const liveGeometry = await geometry();
+        await slot.evaluate((element) => { element.style.visibility = 'hidden'; });
+        expect(await geometry(), 'hiding the same slot alone preserves geometry').toEqual(liveGeometry);
+        await slot.evaluate((element) => { element.style.visibility = ''; });
+        expect(await geometry(), 'revealing the same slot alone preserves geometry').toEqual(liveGeometry);
+        await effort.click();
+        await expect(page.getByRole('listbox')).toBeFocused();
+        await page.keyboard.press('End');
+        await page.keyboard.press('Enter');
+        await expect(page.getByRole('listbox')).toHaveCount(0);
+        await expect(effort).toHaveAccessibleName('Reasoning effort for AI fill, currently High effort');
+        await expect(effort).toBeEnabled();
+        await expect(effort).toBeFocused();
+        await effort.click();
+        await page.keyboard.press('Escape');
+        await expect(page.getByRole('listbox')).toHaveCount(0);
+        await expect(effort).toBeFocused();
+        await model.click();
+        await page.getByRole('option', { name: 'Use default (Atlas)', exact: true }).click();
+        await expect(page.getByRole('listbox')).toHaveCount(0);
+        await expect(model).toHaveAccessibleName('Text model for AI fill, currently Default (Atlas)');
+        await expect(model).toBeEnabled();
+        await expect(model).toBeFocused();
+        await expect(slot).toHaveCSS('visibility', 'hidden');
+        await expect(slot).toHaveAttribute('inert', '');
+        await expect(slot).toHaveAttribute('aria-hidden', 'true');
+        expect(await slot.evaluate((element, original) => element === original, mountedSlot)).toBe(true);
+        const clearedBox = await slot.evaluate((element) => element.getBoundingClientRect().toJSON() as { width: number; height: number });
+        expect(clearedBox.width).toBe(inactiveBox.width);
+        expect(clearedBox.height).toBe(inactiveBox.height);
+        await page.keyboard.press(tab);
+        await expect(panel.getByRole('button', { name: /^Text model for Brainstorm,/ })).toBeFocused();
+        await expect(panel.getByText('Offline writer is offline right now; Story planner is using the default.', { exact: true })).toHaveCount(1);
+        const offline = panel.getByRole('button', { name: /^Text model for Story planner,/ });
+        await expect(offline).toHaveAccessibleName('Text model for Story planner, currently Offline writer');
+        await expectSettingsInk(offline.locator('span').first().locator('span'), '--ink-3');
+        await expect(panel.getByText('Effort fixed by the model', { exact: true })).toHaveCount(1);
+        await expect(panel.locator('button[aria-label^="Reasoning effort for List drafts,"]')).toHaveCount(0);
+        expect(await noHorizontalOverflow(page)).toBe(true);
+        expect(await panel.evaluate((element) => [...element.querySelectorAll('[data-zone="body"], [class*="rowControl"]')].every((node) => node.scrollWidth <= node.clientWidth + 1))).toBe(true);
+        expect(await page.evaluate(async () => (await fetch('/settings-ownership-writes')).json() as Promise<unknown>)).toEqual([
+          { task: 'ai-fill', body: { modelId: 'override' } },
+          { task: 'ai-fill', body: { modelId: 'override', effort: 'high' } },
+          { task: 'ai-fill', body: { modelId: null } },
+        ]);
+        await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+        const routing = page.getByRole('region', { name: 'Routing for everyone', exact: true });
+        await expect(routing.getByRole('heading', { level: 3, name: 'Routing for everyone', exact: true })).toBeVisible();
+        await expect(routing.getByText('Features use these models for anyone who keeps the default.', { exact: true })).toBeVisible();
+        await expect(routing.getByText('Every task uses it unless assigned below.', { exact: true })).toBeVisible();
+        await expect(routing.getByRole('group', { name: 'Task assignments', exact: true })).toBeVisible();
+        await expect(routing.getByRole('group', { name: 'Prompt writers', exact: true })).toBeVisible();
+        if (touch) await expectFloor(routing.getByRole('button', { name: 'Default model, currently Atlas', exact: true }), 'everyone default');
+        expect(await noHorizontalOverflow(page)).toBe(true);
+        // A separate fresh document exercises the existing public zero-model fixture.
+        const emptyPage = await context.newPage();
+        await emptyPage.goto('/e2e/studio/index.html?view=prompts&noTextModels=1');
+        await emptyPage.getByRole('tab', { name: 'Settings', exact: true }).click();
+        const empty = emptyPage.getByRole('region', { name: 'Your text model settings', exact: true });
+        await expect(empty.getByRole('heading', { name: 'Your text models', exact: true })).toBeVisible();
+        await expect(empty.getByText('Ask your admin to connect a text model.', { exact: true })).toBeVisible();
+        await expect(empty.getByRole('button', { name: /^Text model for / })).toHaveCount(TEXT_TASKS.length);
+        await expect(empty.getByRole('button', { name: /^Reasoning effort for / })).toHaveCount(0);
+        expect(await noHorizontalOverflow(emptyPage)).toBe(true);
+        await test.info().attach('settings-ownership', { body: JSON.stringify({ viewport, colorScheme, touch, inactiveBox, clearedBox, liveGeometry }), contentType: 'application/json' });
+      } finally {
+        await context.close();
+      }
+    });
+  }
+}
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  for (const selection of ['keyboard', 'pointer', 'move-on'] as const) {
+    test(`settings focus return: ${selection} selection during a held save at ${String(viewport.width)}×${String(viewport.height)}`, async ({ browser }) => {
+      const { defaultBrowserType: _engine, ...device } = viewport.width === 1440 ? devices['Desktop Chrome'] : devices['iPhone 13'];
+      const context = await browser.newContext({ ...device, viewport, colorScheme: 'dark' });
+      const page = await context.newPage();
+      const snapshot = (step: string) => page.evaluate(async (step) =>
+        (await fetch(`/settings-ownership-focus-evidence?step=${step}`)).json() as Promise<unknown>, step);
+      try {
+        await withSettingsOwnership(page, 'ai-fill');
+        await page.goto('/e2e/studio/index.html?view=prompts&textAdmin=1&textProvider=1');
+        const settingsTab = page.getByRole('tab', { name: 'Settings', exact: true });
+        await settingsTab.click();
+        const panel = page.getByRole('region', { name: 'Your text model settings', exact: true });
+        const model = panel.getByRole('button', { name: /^Text model for AI fill,/ });
+        const menu = page.getByRole('listbox', { name: /^Text model for AI fill,/ });
+        await model.click();
+        await expect(menu).toBeFocused();
+        await snapshot('open-menu');
+        if (selection === 'pointer') {
+          const option = page.getByRole('option', { name: 'Personal writer', exact: true });
+          if (viewport.width < 768) await option.tap();
+          else await option.click();
+        } else {
+          await page.keyboard.press('Home');
+          await page.keyboard.press('ArrowDown');
+          await page.keyboard.press('ArrowDown');
+          await page.keyboard.press(viewport.width < 768 ? 'Space' : 'Enter');
+        }
+        await expect(model).toBeDisabled();
+        expect(await page.evaluate(async () => (await fetch('/settings-ownership-held')).json() as Promise<unknown>)).toEqual({ pending: true });
+        await snapshot('pending-disabled');
+        await expect(menu).toHaveCount(0);
+        await snapshot('menu-unmounted-while-held');
+        if (selection === 'move-on') {
+          // A deliberate focus move to another real enabled control revokes
+          // the selection's return, even if focus later falls back to body.
+          await settingsTab.focus();
+          await expect(settingsTab).toBeFocused();
+          await snapshot('user-moved-focus');
+        }
+        await page.evaluate(async () => { await fetch('/settings-ownership-release'); });
+        await expect(model).toBeEnabled();
+        await expect(menu).toHaveCount(0);
+        await expect(model).toHaveAccessibleName('Text model for AI fill, currently Personal writer');
+        expect(await page.evaluate(async () => (await fetch('/settings-ownership-writes')).json() as Promise<unknown>)).toEqual([
+          { task: 'ai-fill', body: { modelId: 'override' } },
+        ]);
+        await snapshot('response-settled');
+        if (selection === 'move-on') await expect(settingsTab).toBeFocused();
+        else await expect(model).toBeFocused();
+      } finally {
+        await test.info().attach('settings-focus-events', { body: JSON.stringify(await snapshot('final')), contentType: 'application/json' });
+        await context.close();
+      }
+    });
+  }
+}
 
 // Use the studio's existing offline fetch seam; keep the real Enhance action
 // pending so both labels can be measured without a provider or capture hook.
@@ -1210,6 +1510,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const page = await context.newPage();
         if (longCollections) await withLongCollections(page);
         await page.goto('/e2e/studio/index.html?textAdmin=1&textProvider=1');
+        // Exercise rail navigation after the fixture history has rendered.
+        await expect(page.getByTestId('canvas-scroller').locator('section[data-batch-id]').first()).toBeVisible();
+        await expect(page.getByTestId('sidebar-virtual-list')).toBeAttached();
         const aside = page.locator('#atelier-sidebar');
         const body = page.getByTestId('sidebar-rail-body');
         const phone = viewport.width < 768;

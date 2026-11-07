@@ -157,7 +157,7 @@ describe('Text models view', () => {
     expect(guide.getAttribute('rel')).toContain('noopener');
     // Header action plus the empty state's single action.
     expect(screen.getAllByRole('button', { name: 'Add provider' })).toHaveLength(2);
-    expect(screen.queryByRole('region', { name: 'Routing' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Routing for everyone' })).toBeNull();
   });
 
   test('Add provider opens the dialog slot (Task 15 plugs the form in)', async () => {
@@ -254,7 +254,8 @@ describe('Text models view', () => {
 
   test('provider inventory comes before routing', async () => {
     const { container } = renderView();
-    const routing = await screen.findByRole('region', { name: 'Routing' });
+    const routing = await screen.findByRole('region', { name: 'Routing for everyone' });
+    expect(within(routing).getByText('Features use these models for anyone who keeps the default.')).toBeTruthy();
     const cli = screen.getByRole('region', { name: 'CLIProxyAPI' });
     expect(cli.compareDocumentPosition(routing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector('[data-zone="body"]')?.contains(routing)).toBe(true);

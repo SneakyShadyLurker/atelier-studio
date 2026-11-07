@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useKeyboard } from '../../hooks/useKeyboard';
 import ChipSelect, { type ChipSelectOption } from './ChipSelect';
 
@@ -68,12 +69,224 @@ function ActionableChipSelect({ onChange }: { onChange: (value: string) => void 
   );
 }
 
+function heldSave() {
+  let release: () => void = () => undefined;
+  const promise = new Promise<void>((resolve) => { release = resolve; });
+  return { promise, release };
+}
+
+function Prerequisite() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => { inputRef.current?.focus(); }, []);
+  return <div role="dialog" aria-label="Prerequisite"><input ref={inputRef} aria-label="Required value" /></div>;
+}
+
+function SavingChipSelect({ save, keepOpen = false, prerequisite = false }: {
+  save: Promise<void>; keepOpen?: boolean; prerequisite?: boolean;
+}) {
+  useKeyboard([]);
+  const [saving, setSaving] = useState(false);
+  const [showPrerequisite, setShowPrerequisite] = useState(false);
+  return (
+    <>
+      <div data-testid="choice-owner">
+        <ChipSelect ariaLabel="Choice" valueDisplay="One" value="one" disabled={saving}
+          options={[
+            { value: 'one', label: 'One' },
+            { value: 'two', label: 'Two', actionable: keepOpen, keepOpenOnSelect: keepOpen },
+          ]}
+          onChange={() => {
+            setSaving(true);
+            if (prerequisite) setShowPrerequisite(true);
+            void save.then(() => { setSaving(false); });
+          }}
+        />
+      </div>
+      <button type="button">Next control</button>
+      {showPrerequisite && <Prerequisite />}
+    </>
+  );
+}
+
+async function expectMenuUnmounted() {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+  expect(screen.queryByRole('listbox', { name: 'Choice' })).toBeNull();
+}
+
+function emulateNativeBlurOnDisabledTrigger(trigger: HTMLButtonElement): void {
+  act(() => {
+    expect(document.activeElement === trigger).toBe(true);
+    expect(trigger.disabled).toBe(true);
+    const disabled = trigger.disabled;
+    // happy-dom skips blur() on disabled elements. Emulate native disabling's
+    // body fallback without yielding or giving another control focus.
+    try {
+      trigger.disabled = false;
+      trigger.blur();
+    } finally {
+      trigger.disabled = disabled;
+    }
+  });
+  expect(trigger.disabled).toBe(true);
+  expect(document.activeElement === document.body).toBe(true);
+}
+
 afterEach(() => {
   cleanup();
   window.matchMedia = originalMatchMedia;
   document.addEventListener = originalAddEventListener;
   document.removeEventListener = originalRemoveEventListener;
   mock.restore();
+});
+
+describe('ChipSelect selection focus return', () => {
+  for (const selection of ['Enter', ' ', 'pointer']) {
+    test(`${selection}: returns after the exit and a held save re-enables the trigger`, async () => {
+      installDesktop();
+      const save = heldSave();
+      render(<SavingChipSelect save={save.promise} />);
+      const trigger = screen.getByRole<HTMLButtonElement>('button', { name: 'Choice' });
+      fireEvent.click(trigger);
+      if (selection === 'pointer') fireEvent.click(screen.getByRole('option', { name: 'Two' }));
+      else {
+        fireEvent.keyDown(document, { key: 'ArrowDown' });
+        fireEvent.keyDown(document, { key: selection });
+      }
+      expect(trigger.disabled).toBe(true);
+      emulateNativeBlurOnDisabledTrigger(trigger);
+      await expectMenuUnmounted();
+      expect(document.activeElement === document.body).toBe(true);
+      await act(async () => { save.release(); await save.promise; });
+      expect(trigger.disabled).toBe(false);
+      expect(document.activeElement === trigger).toBe(true);
+    });
+  }
+
+  test('retains the return when the save settles before the menu exit', async () => {
+    installDesktop();
+    const save = heldSave();
+    render(<SavingChipSelect save={save.promise} />);
+    const trigger = screen.getByRole<HTMLButtonElement>('button', { name: 'Choice' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: 'Two' }));
+    emulateNativeBlurOnDisabledTrigger(trigger);
+    await act(async () => { save.release(); await save.promise; });
+    expect(screen.queryByRole('listbox', { name: 'Choice' })).not.toBeNull();
+    await expectMenuUnmounted();
+    expect(document.activeElement === trigger).toBe(true);
+  });
+
+  for (const relocation of ['focus', 'pointer', 'Tab']) {
+    test(`cancels after ${relocation}, even if focus subsequently falls to body`, async () => {
+      installDesktop();
+      const save = heldSave();
+      render(<SavingChipSelect save={save.promise} />);
+      const trigger = screen.getByRole<HTMLButtonElement>('button', { name: 'Choice' });
+      fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole('option', { name: 'Two' }));
+      emulateNativeBlurOnDisabledTrigger(trigger);
+      if (relocation === 'focus') {
+        const next = screen.getByRole('button', { name: 'Next control' });
+        act(() => { next.focus(); next.blur(); });
+      } else if (relocation === 'pointer') fireEvent.pointerDown(document.body);
+      else fireEvent.keyDown(document, { key: 'Tab' });
+      await expectMenuUnmounted();
+      await act(async () => { save.release(); await save.promise; });
+      expect(document.activeElement === document.body).toBe(true);
+    });
+  }
+
+  test('a prerequisite dialog opened by onChange keeps focus after save and exit', async () => {
+    installDesktop();
+    const save = heldSave();
+    render(<SavingChipSelect save={save.promise} prerequisite />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choice' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Two' }));
+    const input = screen.getByRole('textbox', { name: 'Required value' });
+    expect(document.activeElement === input).toBe(true);
+    await expectMenuUnmounted();
+    await act(async () => { save.release(); await save.promise; });
+    expect(document.activeElement === input).toBe(true);
+  });
+
+  test('unmount cancels a held selection return', async () => {
+    installDesktop();
+    const save = heldSave();
+    const { unmount } = render(<SavingChipSelect save={save.promise} />);
+    const trigger = screen.getByRole('button', { name: 'Choice' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: 'Two' }));
+    const focus = mock(() => undefined);
+    trigger.focus = focus;
+    unmount();
+    await act(async () => { save.release(); await save.promise; });
+    expect(focus).not.toHaveBeenCalled();
+    expect(document.activeElement === document.body).toBe(true);
+  });
+
+  test('does not return into an inert owner after the menu unmounts', async () => {
+    installDesktop();
+    const save = heldSave();
+    render(<SavingChipSelect save={save.promise} />);
+    const trigger = screen.getByRole<HTMLButtonElement>('button', { name: 'Choice' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: 'Two' }));
+    emulateNativeBlurOnDisabledTrigger(trigger);
+    await expectMenuUnmounted();
+    screen.getByTestId('choice-owner').inert = true;
+    await act(async () => { save.release(); await save.promise; });
+    expect(document.activeElement === document.body).toBe(true);
+  });
+
+  test('a new open supersedes an exiting selection return', async () => {
+    installDesktop();
+    render(<TestChipSelect onChange={mock()} />);
+    const trigger = screen.getByRole('button', { name: 'Choice' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: 'Two' }));
+    fireEvent.click(trigger);
+    const menu = screen.getByRole('listbox', { name: 'Choice' });
+    act(() => { menu.focus(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(screen.getByRole('listbox', { name: 'Choice' }) === menu).toBe(true);
+    expect(document.activeElement === menu).toBe(true);
+  });
+
+  test('Tab returns immediately for native forward navigation and never returns again on exit', async () => {
+    installDesktop();
+    const onChange = mock();
+    render(<><TestChipSelect onChange={onChange} /><button type="button">Next control</button></>);
+    const trigger = screen.getByRole('button', { name: 'Choice' });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement === trigger).toBe(true);
+    const next = screen.getByRole('button', { name: 'Next control' });
+    // Native Tab traversal is covered in the settings browser matrix.
+    act(() => { next.focus(); });
+    await expectMenuUnmounted();
+    expect(document.activeElement === next).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test('keepOpen actionable rows retain menu focus and queue no return when their save settles', async () => {
+    installDesktop();
+    const save = heldSave();
+    render(<SavingChipSelect save={save.promise} keepOpen />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choice' }));
+    const menu = screen.getByRole('listbox', { name: 'Choice' });
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    fireEvent.keyDown(document, { key: 'Enter' });
+    expect(document.activeElement === menu).toBe(true);
+    expect(menu.getAttribute('data-closing')).toBeNull();
+    await act(async () => { save.release(); await save.promise; });
+    expect(screen.getByRole('listbox', { name: 'Choice' }) === menu).toBe(true);
+    expect(document.activeElement === menu).toBe(true);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const next = screen.getByRole('button', { name: 'Next control' });
+    act(() => { next.focus(); });
+    await expectMenuUnmounted();
+    expect(document.activeElement === next).toBe(true);
+  });
 });
 
 describe('ChipSelect keyboard listener', () => {

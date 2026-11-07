@@ -64,6 +64,8 @@ describe('RoutingPanel', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={client}><RoutingPanel providers={PROVIDERS} /></QueryClientProvider>);
     expect(screen.getByText('Loading routing…')).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 3, name: 'Routing for everyone' })).toBeTruthy();
+    expect(screen.queryByText('Features use these models for anyone who keeps the default.')).toBeNull();
     expect(screen.queryByText('Turn on a model to choose a default.')).toBeNull();
   });
 
@@ -75,6 +77,8 @@ describe('RoutingPanel', () => {
   ])('$state reports current facts without a write', ({ id, note }) => {
     const { calls } = renderPanel({ ...ROUTING, defaults: { ...ROUTING.defaults, default: id } });
     expect(screen.getByText(note)).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 3, name: 'Routing for everyone' })).toBeTruthy();
+    expect(screen.getByText('Features use these models for anyone who keeps the default.')).toBeTruthy();
     expect(screen.getByText('1 assigned, 10 use the default')).toBeTruthy();
     expect(puts(calls)).toEqual([]);
   });
@@ -132,7 +136,7 @@ describe('RoutingPanel', () => {
 
   test('task assignments list all eleven tasks, "Use default" first', async () => {
     renderPanel();
-    await screen.findByRole('region', { name: 'Routing' });
+    await screen.findByRole('region', { name: 'Routing for everyone' });
     for (const task of TEXT_TASKS) {
       const label = TEXT_TASK_LABELS[task];
       const expected = task === 'ai-fill' ? 'Kimi K3' : 'Use default';
@@ -181,7 +185,7 @@ describe('RoutingPanel', () => {
 
   test('prompt writers: one row per registered image model, "No writer" by default, no mode until chosen', async () => {
     renderPanel();
-    await screen.findByRole('region', { name: 'Routing' });
+    await screen.findByRole('region', { name: 'Routing for everyone' });
     expect(screen.getByRole('button', { name: 'Prompt writer for GPT Image 2.5 Sunburst, currently No writer' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Prompt writer for Krea 2, currently No writer' })).toBeTruthy();
     expect(screen.queryByRole('radio')).toBeNull();

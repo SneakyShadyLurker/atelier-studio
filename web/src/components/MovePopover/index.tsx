@@ -16,6 +16,7 @@ import { useRenameCollection } from '../../hooks/useRenameCollection';
 import { useAtelierStore, type AppView } from '../../store/atelier';
 import { describeError } from '../../lib/errorCopy';
 import { focusRovingItem, runWhenReachable } from '../../lib/focus';
+import { isImeComposing } from '../../lib/ime';
 import { I } from '../icons/I';
 import anchors from '../../styles/anchors.module.css';
 import styles from './index.module.css';
@@ -33,12 +34,15 @@ interface MovePopoverProps {
 }
 
 type InlineKind = 'renaming' | 'creating';
-type InlineContext = { kind: 'renaming'; id: string } | { kind: 'creating' };
+type InlineContext = { kind: 'renaming'; id: string } | {
+  kind: 'creating';
+  created?: { id: string; name: string };
+};
 
 export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, open, view, q, onClose }: MovePopoverProps) {
   // All dismissals (row select, outside pointer, Esc, backdrop) play the
   // shared exit before the parent unmounts the popover.
-  const { closing, requestClose } = useExitTransition(onClose, open);
+  const { closing, requestClose: startClose } = useExitTransition(onClose, open);
   const isPhone = useIsPhone();
   const renameInputId = useId();
   const createInputId = useId();
@@ -76,8 +80,17 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
         commitCreate(draft);
       }
     },
-    onCancel: () => { setInlineContext(null); },
+    onCancel: () => {
+      liveInlineContextRef.current = null;
+      setInlineContext(null);
+    },
   });
+
+  function requestClose() {
+    liveInlineContextRef.current = null;
+    pendingInlineFocusRef.current = null;
+    startClose();
+  }
 
   // Toasts (a failed rename/create) render inside the trapped panel; the
   // phone/desktop branches below replace that node, so both follow the key.
@@ -114,8 +127,9 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
     focusRovingItem(event, panelRef.current, '[data-move-row]', { skipTextInputs: true });
   };
 
-  const cancelInline = (context = inlineContext) => {
-    pendingInlineFocusRef.current = context;
+  const cancelInline = (context = inlineContext, restoreFocus = true) => {
+    liveInlineContextRef.current = null;
+    pendingInlineFocusRef.current = restoreFocus ? context : null;
     setInlineContext(null);
     inlineEdit.cancel();
   };
@@ -164,9 +178,15 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
   useEffect(() => {
     if (!open) return;
     if (!inlineEdit.isActive) return;
+    if (liveInlineContextRef.current !== inlineContext) return;
+    // A failure may re-open the same draft, but a connected control the user
+    // moved to owns focus. Body focus from disabling Move still belongs here.
+    const active = document.activeElement;
+    if (inlineContext?.kind === 'creating' && active?.isConnected
+      && active !== document.body && !createRowRef.current?.contains(active)) return;
     inputRef.current?.focus();
     inputRef.current?.select();
-  }, [inlineEdit.isActive, open]);
+  }, [inlineEdit.isActive, inlineContext, open]);
 
   // Keep the Escape handler in a ref (latest-ref pattern, as in useKeyboard)
   // so the document listener below binds once per open — not on every render.
@@ -231,6 +251,8 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
 
   function commitCreate(draft: string) {
     if (createInFlightRef.current) return;
+    const context = liveInlineContextRef.current;
+    if (context?.kind !== 'creating') return;
     const name = draft.trim();
     if (!name) {
       cancelInline({ kind: 'creating' });
@@ -240,10 +262,16 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
     // synchronous guard for the entire initiated chain, including dismissal.
     createInFlightRef.current = true;
     setPendingCreateName(draft);
-    const context = inlineContext;
-    void createCollection.mutateAsync({ name })
+    const created = context.created?.name === name ? context.created : undefined;
+    if (!created) delete context.created;
+    void (created ? Promise.resolve(created) : createCollection.mutateAsync({ name }).then((collection) => {
+      // This record belongs to this object only, never a subsequent session.
+      context.created = { id: collection.id, name };
+      return collection;
+    }))
       .then((collection) => moveBatch.mutateAsync({ batchId: batch.id, collectionId: collection.id }))
       .then(() => {
+        if (liveInlineContextRef.current !== context) return;
         setInlineContext(null);
         requestClose();
       })
@@ -269,6 +297,18 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
       data-anchor-place={isPhone ? undefined : 'below-end'}
       {...popoverProps}
       onKeyDown={onRowsKeyDown}
+      onFocusCapture={(event) => {
+        const context = liveInlineContextRef.current;
+        if (context?.kind === 'creating' && !createRowRef.current?.contains(event.target)) {
+          cancelInline(context, false);
+        }
+      }}
+      onPointerDownCapture={(event) => {
+        const context = liveInlineContextRef.current;
+        if (context?.kind === 'creating' && !createRowRef.current?.contains(event.target as Node)) {
+          cancelInline(context, false);
+        }
+      }}
     >
       <div className={styles.content} data-overlay-scroll="true">
       <div className={styles.header}>Move to collection</div>
@@ -334,7 +374,23 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
           className={styles.createRow}
           onBlur={(event) => {
             if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-            if (!createInFlightRef.current) inlineEdit.cancel();
+            const context = liveInlineContextRef.current;
+            if (event.relatedTarget instanceof HTMLElement && event.relatedTarget.isConnected
+              && event.relatedTarget !== document.body) {
+              cancelInline(context, false);
+              return;
+            }
+            // Disabling Move, or pressing it again, can drop either row
+            // control's focus to body. Outside pointer/focus handlers cancel
+            // deliberate move-on; body alone does not give up a pending draft.
+            const pendingSubmit = createInFlightRef.current;
+            runWhenReachable(() => {
+              if (liveInlineContextRef.current !== context) return;
+              const active = document.activeElement;
+              if (createRowRef.current?.contains(active)) return;
+              if (pendingSubmit && (active === document.body || active === null)) return;
+              cancelInline(context, false);
+            });
           }}
         >
           <label className="srOnly" htmlFor={createInputId}>Collection name</label>
@@ -343,6 +399,13 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
             id={createInputId}
             className={styles.input}
             {...inlineEdit.inputProps}
+            onChange={(event) => {
+              const context = liveInlineContextRef.current;
+              if (context?.kind === 'creating' && context.created?.name !== event.target.value.trim()) {
+                delete context.created;
+              }
+              inlineEdit.inputProps.onChange(event);
+            }}
             value={pendingCreateName ?? inlineEdit.inputProps.value}
             readOnly={pendingCreateName !== null}
             placeholder="Collection name"
@@ -350,7 +413,13 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
             onFocus={(event) => { event.target.select(); }}
             onBlur={() => undefined}
             onKeyDown={(event) => {
-              if (createInFlightRef.current && event.key !== 'Escape') return;
+              if (event.defaultPrevented || isImeComposing(event) || isImeComposing(event.nativeEvent)) return;
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                cancelInline();
+                return;
+              }
+              if (createInFlightRef.current) return;
               inlineEdit.inputProps.onKeyDown(event);
             }}
           />
@@ -372,8 +441,9 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
           className={`${styles.row} ${styles.newButton}`}
           type="button"
           tabIndex={0}
-          onClick={() => {
+          onClick={(event) => {
             if (closing || createInFlightRef.current) return;
+            event.currentTarget.focus({ preventScroll: true });
             pendingInlineFocusRef.current = null;
             clearPendingMove();
             setInlineContext({ kind: 'creating' });

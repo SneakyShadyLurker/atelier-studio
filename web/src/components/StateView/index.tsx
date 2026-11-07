@@ -45,7 +45,7 @@ export function StateView({ art, restPlate = false, glyph, title, body, action, 
       <h2>{title}</h2>
       {body != null ? <p>{body}</p> : null}
       {action ? (
-        <button className={buttons.secondary} type="button" onClick={action.onClick}>
+        <button className={`${buttons.secondary} ${styles.action}`} type="button" onClick={action.onClick}>
           {action.label}
         </button>
       ) : null}

@@ -133,9 +133,7 @@ describe('App submitDraft fan-out', () => {
     const client = makeClient();
     render(<Wrapper client={client}><App /></Wrapper>);
 
-    const more = await screen.findByRole('button', { name: /more actions/i });
-    fireEvent.click(more);
-    fireEvent.click(screen.getByRole('menuitem', { name: /re-roll/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^re-roll$/i }));
     fireEvent.click(screen.getByRole('button', { name: /retry failed tile/i }));
 
     await waitFor(() => { expect(generateMock).toHaveBeenCalledTimes(2); });
@@ -181,9 +179,7 @@ describe('App submitDraft fan-out', () => {
   });
 
   async function rerollThenRetry(): Promise<void> {
-    const more = await screen.findByRole('button', { name: /more actions/i });
-    fireEvent.click(more);
-    fireEvent.click(screen.getByRole('menuitem', { name: /re-roll/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^re-roll$/i }));
     fireEvent.click(screen.getByRole('button', { name: /retry failed tile/i }));
   }
 

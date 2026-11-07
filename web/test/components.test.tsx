@@ -1277,10 +1277,7 @@ describe('visual scaffold components', () => {
     render(withQueryClient(<App />));
     await waitFor(() => { expect(screen.getAllByText('edit-batch-prompt').length).toBeGreaterThan(0); });
 
-    // Re-roll is now in the overflow menu — open More then click Re-roll
-    const moreBtn = requireValue(screen.getAllByRole('button', { name: /more actions/i })[0], 'more button');
-    fireEvent.click(moreBtn);
-    const rerollItem = requireValue(screen.getAllByRole('menuitem', { name: /re-roll/i })[0], 'reroll menuitem');
+    const rerollItem = requireValue(screen.getAllByRole('button', { name: /^re-roll$/i })[0], 'reroll button');
     fireEvent.click(rerollItem);
 
     await waitFor(() => { expect(generateBody).not.toBeNull(); });
@@ -1309,13 +1306,10 @@ describe('visual scaffold components', () => {
     render(withQueryClient(<App />));
     await waitFor(() => { expect(screen.getAllByText('stale-scope-prompt').length).toBeGreaterThan(0); });
 
-    // Open the overflow menu while the batch is visible, THEN set the stale store state
-    // (the menu ref and menuitem are already in the DOM before state changes)
-    const moreBtn = requireValue(screen.getAllByRole('button', { name: /more actions/i })[0], 'more button');
-    fireEvent.click(moreBtn);
-    const rerollItem = requireValue(screen.getAllByRole('menuitem', { name: /re-roll/i })[0], 'reroll menuitem');
+    // Capture the direct action before the same stale-store write.
+    const rerollItem = requireValue(screen.getAllByRole('button', { name: /^re-roll$/i })[0], 'reroll button');
 
-    // Now change the store to the "stale" state — the menu is already open.
+    // Now change the store to the "stale" state with the action already mounted.
     // The store write deliberately bypasses act so React has not re-rendered
     // when the click runs: the handler must still see the live store, not the
     // App closure. Wrapping it in act (or turning the act environment off)

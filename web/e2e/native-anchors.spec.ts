@@ -1,6 +1,11 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type * as AtelierStore from '../src/store/atelier';
 import type * as ErrorCopy from '../src/lib/errorCopy';
+import type * as ReactApi from 'react';
+import type * as ReactDomApi from 'react-dom/client';
+import type * as QueryApi from '@tanstack/react-query';
+import type * as CanvasApi from '../src/components/Canvas';
+import { batches as studioBatches, models as studioModels } from './studio/fixture';
 /*
  * Native CSS anchor positioning and the native popovers behind it, asserted
  * where they actually resolve: a real browser (the chromium, webkit-anchors
@@ -455,9 +460,11 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
     });
 
     test('Tab and Shift+Tab stay inside, arrows rove, Escape restores the trigger', async ({ page }) => {
+      await page.goto(`${HARNESS}?case=feed&feedPrompts=true`);
       const trigger = await moreOf(page, more(page).first());
       await trigger.click();
       await expect.poll(() => menuPanel(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
+      expect(await menu(page).getByRole('menuitem').evaluateAll((items) => items.filter((item) => !item.matches(':disabled')).length)).toBeGreaterThanOrEqual(2);
       const first = await activeLabel(page);
       await page.keyboard.press('ArrowDown');
       expect(await activeLabel(page)).not.toBe(first);
@@ -512,15 +519,10 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
     });
 
     test('the Move popover anchors to whichever trigger opened it, and follows its own growth', async ({ page }) => {
-      const trigger = await moreOf(page, more(page).first());
+      const owner = await moreOf(page, more(page).first());
+      const trigger = owner.locator('xpath=ancestor::section').getByRole('button', { name: 'Move to collection', exact: true, includeHidden: true });
       await trigger.scrollIntoViewIfNeeded();
       await trigger.click();
-      const moveItem = menu(page).getByRole('menuitem', { name: /move to collection/i });
-      await settle(menuPanel(page));
-      await moveItem.scrollIntoViewIfNeeded();
-      await frames(page);
-      expect(await topmostAt(moveItem)).toBe(true);
-      await moveItem.click();
       await settle(moveDialog(page));
       const isAnchored = await anchored(page, moveDialog(page));
       let panel = await box(moveDialog(page));
@@ -557,10 +559,10 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
       await page.keyboard.press('Escape');
       await expect(moveDialog(page)).toHaveCount(0);
 
-      const candidate = page.getByRole('button', { name: 'Move to Logo concepts', includeHidden: true }).first();
+      const candidate = page.getByRole('button', { name: 'Logo concepts, move to collection', includeHidden: true }).first();
       const batchId = await candidate.evaluate((element) => element.closest('[data-batch-id]')?.getAttribute('data-batch-id'));
       if (!batchId) throw new Error('Missing collection-chip batch');
-      const chip = page.locator(`section[data-batch-id="${batchId}"]`).getByRole('button', { name: 'Move to Logo concepts', includeHidden: true });
+      const chip = page.locator(`section[data-batch-id="${batchId}"]`).getByRole('button', { name: 'Logo concepts, move to collection', includeHidden: true });
       await chip.scrollIntoViewIfNeeded();
       await chip.click();
       await settle(moveDialog(page));
@@ -686,6 +688,10 @@ test.describe('feed prompt card · desktop', () => {
     // the row's untranslated box would land on the first batch instead.
     const target = await pinnedPrompt(page, 1);
     await focusPrompt(page, target);
+    expect(await target.evaluate((element) => {
+      const text = element.firstElementChild;
+      return !!text && (text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight);
+    })).toBe(true);
     await expect(card(page)).toBeVisible();
     await settle(card(page));
     test.skip(!(await anchored(page, card(page))), 'no anchor in this engine: the card rests top-centre');
@@ -698,12 +704,39 @@ test.describe('feed prompt card · desktop', () => {
     host = await box(target);
     shown = await box(card(page));
     near(shown.top, host.bottom + GAP);
+    await expect(target).toBeFocused();
+    const resizeVisibility = await target.evaluateHandle((source) => {
+      const intersections: boolean[] = [];
+      const observer = new IntersectionObserver((entries) => { intersections.push(...entries.map((entry) => entry.isIntersecting)); });
+      observer.observe(source);
+      return { source, intersections, disconnect: () => { observer.disconnect(); } };
+    });
+    await expect.poll(() => resizeVisibility.evaluate(({ intersections }) => intersections.at(-1))).toBe(true);
     await page.setViewportSize({ width: 1100, height: 760 });
     await frames(page);
     // Feed reflow can move this virtual row out of the clip. Bring the same
     // source back into view before asserting visible anchored geometry.
     await target.scrollIntoViewIfNeeded();
     await frames(page);
+    const clippedDuringResize = await resizeVisibility.evaluate(({ intersections }) => intersections.includes(false));
+    expect(await resizeVisibility.evaluate(({ source }) => source.isConnected && document.activeElement === source)).toBe(true);
+    expect(await target.evaluate((element) => {
+      const text = element.firstElementChild;
+      return !!text && (text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight);
+    })).toBe(true);
+    if (clippedDuringResize) {
+      // A wholly clipped source dismisses its card. Revealing the same still-
+      // focused source does not re-arm it; a fresh native keyboard focus does.
+      await expect(card(page)).toHaveCount(0);
+      await page.keyboard.press('Tab');
+      await expect(target).not.toBeFocused();
+      await page.keyboard.press('Shift+Tab');
+    }
+    await expect(target).toBeFocused();
+    await expect(card(page)).toBeVisible();
+    await settle(card(page));
+    await resizeVisibility.evaluate(({ disconnect }) => { disconnect(); });
+    await resizeVisibility.dispose();
     host = await box(target);
     shown = await box(card(page));
     near(shown.top, host.bottom + GAP);
@@ -1070,6 +1103,54 @@ async function shortMenuPosition(page: Page, trigger: Locator, panel: Locator) {
   };
 }
 
+async function remainingActionScrollFixture(page: Page) {
+  // The plain batch's remaining Pin row now fits. Keep the original scroll,
+  // focus-ring and touch thresholds using real remaining sequence/template
+  // actions, the existing studio seed and the same Canvas/harness geometry.
+  const seed = studioBatches[0];
+  if (!seed) throw new Error('missing studio batch');
+  await page.evaluate(async ({ seed, models }) => {
+    const reactUrl = '/node_modules/.vite/deps/react.js';
+    const domUrl = '/node_modules/.vite/deps/react-dom_client.js';
+    const queryUrl = '/node_modules/.vite/deps/@tanstack_react-query.js';
+    const canvasUrl = '/src/components/Canvas/index.tsx';
+    const { default: React } = await import(/* @vite-ignore */ reactUrl) as { default: typeof ReactApi };
+    const { default: ReactDom } = await import(/* @vite-ignore */ domUrl) as { default: typeof ReactDomApi };
+    const { QueryClient, QueryClientProvider } = await import(/* @vite-ignore */ queryUrl) as typeof QueryApi;
+    const { default: Canvas } = await import(/* @vite-ignore */ canvasUrl) as typeof CanvasApi;
+    const collections = [
+      { id: 'collection-logo', name: 'Logo concepts', count: 3, archivedCount: 0, createdAt: 1 },
+      { id: 'collection-studio', name: 'Studio refs', count: 1, archivedCount: 0, createdAt: 2 },
+    ];
+    const data = { items: collections, summary: { totalCount: 4, pinnedCount: 0, unsortedCount: 1, archivedTotalCount: 0, archivedPinnedCount: 0, archivedUnsortedCount: 0 } };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    client.setQueryData(['collections', 'list'], data);
+    Object.assign((window as unknown as HarnessWindow).atelierHarness, {
+      growCollections() {
+        client.setQueryData(['collections', 'list'], { ...data, items: [...collections, ...Array.from({ length: 32 }, (_, index) => ({ id: `extra-${String(index)}`, name: `Harness collection ${String(index)}`, count: 0, archivedCount: 0, createdAt: index + 3 }))] });
+      },
+    });
+    const batches = Array.from({ length: 24 }, (_, index) => ({ ...seed, id: `batch-${String(index)}`, pinned: false, createdAt: index + 1,
+      collectionId: index % 2 === 0 ? 'collection-logo' : null,
+      provenance: { templateId: 'editorial', templateName: 'Editorial portrait', rollSeed: 7, pins: {} },
+      sequenceIndex: 1, sequence: { id: 'scroll-sequence', segmentCount: 2, totalDurationFrames: 248, masterStatus: 'ready' as const },
+    }));
+    const host = document.getElementById('harness');
+    if (!host) throw new Error('missing anchor harness');
+    const mount = document.createElement('div');
+    host.replaceChildren(mount);
+    ReactDom.createRoot(mount).render(React.createElement(QueryClientProvider, { client },
+      React.createElement('div', { style: { position: 'absolute', inset: 0, paddingLeft: 248, display: 'flex', flexDirection: 'column' } },
+        React.createElement('div', { style: { flex: 1, minHeight: 0 } }, React.createElement(Canvas, {
+          batches, modelById: new Map(models.map((model) => [model.id, model])), collections, activeView: { kind: 'unsorted' },
+          hasNextPage: false, isFetchingNextPage: false, onLoadMore: () => undefined, promptsEnabled: true,
+          onBatchAction: () => undefined, onTileAction: () => undefined, onOpenTile: () => undefined, q: '',
+        })),
+      ),
+    ));
+  }, { seed, models: studioModels });
+}
+
 for (const theme of ['light', 'dark'] as const) {
   for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     test.describe(`short-menu reachability · ${theme} · motion ${reducedMotion}`, () => {
@@ -1078,6 +1159,7 @@ for (const theme of ['light', 'dark'] as const) {
       test('More End and Move End then Tab keep the final actions reachable by touch', async ({ page }, testInfo) => {
         await page.emulateMedia({ reducedMotion });
         await page.goto(`${HARNESS}?case=feed${theme === 'dark' ? '&theme=dark' : ''}`);
+        await remainingActionScrollFixture(page);
         const readiness: unknown[] = [];
         const evidence: Record<string, unknown> = { project: testInfo.project.name, theme, reducedMotion, readiness };
         try {
@@ -1117,10 +1199,10 @@ for (const theme of ['light', 'dark'] as const) {
           const initialMenuTop = await menuScroll.evaluate((element) => element.scrollTop);
           const moreFeedBaseline = await scroller(page).evaluate((element) => element.scrollTop);
           await page.keyboard.press('End');
-          const move = menu(page).getByRole('menuitem', { name: 'Move to collection', exact: true });
-          await expect(move).toBeFocused();
+          const finalAction = menu(page).getByRole('menuitem', { name: 'Pin batch', exact: true });
+          await expect(finalAction).toBeFocused();
           await frames(page);
-          expect(await topmostAt(move)).toBe(true);
+          expect(await topmostAt(finalAction)).toBe(true);
           await expectFocusRingInsideScroll(menuPanel(page));
           const endMenuTop = await menuScroll.evaluate((element) => element.scrollTop);
           const moreFeedAfter = await scroller(page).evaluate((element) => element.scrollTop);
@@ -1136,21 +1218,23 @@ for (const theme of ['light', 'dark'] as const) {
           evidence.moreReopened = await shortMenuPosition(page, trigger, menuPanel(page));
           near(await scroller(page).evaluate((element) => element.scrollTop), moreFeedAfter);
           await page.keyboard.press('End');
-          await expect(move).toBeFocused();
-          await move.tap();
+          await expect(finalAction).toBeFocused();
+          await page.keyboard.press('Escape');
           await expect(menuPanel(page)).toHaveCount(0);
+          const move = trigger.locator('xpath=ancestor::section').getByRole('button', { name: 'Move to collection', exact: true, includeHidden: true });
+          await move.tap();
           await settle(moveDialog(page));
           await page.evaluate(() => { (window as unknown as HarnessWindow).atelierHarness.growCollections(); });
           const lastCollection = moveDialog(page).getByRole('button', { name: 'Harness collection 31', exact: true });
           await expect(lastCollection).toHaveCount(1);
           await frames(page);
           const movePanel = await box(moveDialog(page));
-          evidence.move = await shortMenuPosition(page, trigger, moveDialog(page));
+          evidence.move = await shortMenuPosition(page, move, moveDialog(page));
           near(await scroller(page).evaluate((element) => element.scrollTop), moreFeedAfter);
           expectOnScreen(page, movePanel, EDGE);
           if (await anchored(page, moveDialog(page))) {
             expect(await inTopLayer(moveDialog(page))).toBe(true);
-            expectAdjacent(movePanel, await box(trigger));
+            expectAdjacent(movePanel, await box(move));
           } else {
             expectCentred(page, movePanel);
           }
@@ -1185,7 +1269,7 @@ for (const theme of ['light', 'dark'] as const) {
           await expect(moveDialog(page)).toBeVisible();
           await page.keyboard.press('Escape');
           await expect(moveDialog(page)).toHaveCount(0);
-          await expect(trigger).toBeFocused();
+          await expect(move).toBeFocused();
           evidence.closedFocus = await activeLabel(page);
           evidence.finalFeedTop = await scroller(page).evaluate((element) => element.scrollTop);
           near(await scroller(page).evaluate((element) => element.scrollTop), moveFeedBaseline);

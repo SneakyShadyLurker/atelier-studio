@@ -1,6 +1,9 @@
 import { devices, expect, test, type Page } from '@playwright/test';
-import type { AdminProvider, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, PromptLibraryResponse, TextModelsResponse } from '@atelier/shared';
+import type { AdminProvider, Batch, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, PromptLibraryResponse, TextModelsResponse } from '@atelier/shared';
 import { TEXT_TASKS } from '@atelier/shared';
+import type * as ReactApi from 'react';
+import type * as ReactDomApi from 'react-dom/client';
+import type * as StateViewApi from '../src/components/StateView';
 import { batches as viewerFixtureBatches } from './studio/fixture';
 
 const VIEWER_FRAME = 'dialog > div[data-media][aria-busy]';
@@ -2027,6 +2030,131 @@ test('approved short-window: history Retry stays reachable above compact and tal
   }
 });
 
+for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }, { width: 820, height: 1180 }]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`in-contract control access: collection token ${String(viewport.width)}×${String(viewport.height)} ${colorScheme}`, async ({ browser }, testInfo) => {
+      const context = await browser.newContext({ ...devices['iPhone 13'], viewport, colorScheme });
+      try {
+        const page = await context.newPage();
+        const name = 'Campaign studies: editorial portraits and coastal observatory references '.repeat(3).trim();
+        await approvedStudio(page, { longName: name });
+        await page.goto('/e2e/studio/index.html?c=campaign');
+        const token = page.locator('section[data-batch-id="studio-batch-2"]').getByRole('button', { name: `${name}, move to collection`, exact: true, includeHidden: true });
+        await expect(token).toBeVisible();
+        if (viewport.height === 390) await page.getByRole('button', { name: 'Minimize composer', exact: true }).click();
+        await token.evaluate((element) => { element.scrollIntoView({ block: 'start' }); });
+        await approvedSettle(page);
+        expect(await page.evaluate(() => matchMedia('(hover: none), (any-pointer: coarse)').matches)).toBe(true);
+        const corners = await libraryHitPoints(token);
+        const geometry = await token.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const text = element.querySelector('span');
+          if (!text) throw new Error('missing collection text');
+          const style = getComputedStyle(text);
+          return { box: { x: box.x, y: box.y, width: box.width, height: box.height }, text: { client: text.clientWidth, scroll: text.scrollWidth, overflow: style.overflow, ellipsis: style.textOverflow, whiteSpace: style.whiteSpace } };
+        });
+        expect(geometry.text.overflow).toBe('hidden');
+        expect(geometry.text.ellipsis).toBe('ellipsis');
+        expect(geometry.text.whiteSpace).toBe('nowrap');
+        expect(geometry.text.scroll).toBeGreaterThan(geometry.text.client);
+        expect(await noHorizontalOverflow(page)).toBe(true);
+        const panel = page.getByRole('dialog', { name: 'Move to collection', exact: true });
+        for (let corner = 0; corner < corners.length; corner++) {
+          await token.focus();
+          const point = (await libraryHitPoints(token))[corner];
+          if (!point) throw new Error('missing token corner');
+          await page.touchscreen.tap(point.x, point.y);
+          await expect(panel).toBeVisible();
+          await expect(token).toHaveAttribute('aria-expanded', 'true');
+          await expect(panel.getByRole('button', { name: '(Unsorted)', exact: true })).toBeVisible();
+          await expect(panel.getByRole('button', { name, exact: true })).toHaveAttribute('data-current', 'true');
+          await approvedSettle(page);
+          if (corner % 2 === 0) {
+            await page.keyboard.press('Escape');
+          } else if (viewport.width < 768) {
+            const backdrop = page.getByRole('button', { name: 'Close move popover', exact: true });
+            await expect(backdrop).toBeVisible();
+            await page.touchscreen.tap(viewport.width / 2, 20);
+          } else {
+            // Desktop-width touch uses the existing anchored popover's
+            // outside-pointer dismissal rather than the phone backdrop.
+            await page.touchscreen.tap(10, 20);
+          }
+          await expect(panel).toHaveCount(0);
+          await expect(token).toBeFocused();
+          await expect(token).toHaveAttribute('aria-expanded', 'false');
+        }
+        await testInfo.attach('collection-token-control-access', { body: JSON.stringify({ viewport, colorScheme, geometry, corners, dismissals: ['Escape', viewport.width < 768 ? 'backdrop tap' : 'outside tap'], focusReturnedToActualToken: true }), contentType: 'application/json' });
+      } finally {
+        await context.close();
+      }
+    });
+  }
+}
+
+declare global { interface Window { __controlAccess?: { holdHistory: boolean; heldRequests: number } } }
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`in-contract control access: history focus clearance narrow feed 844×390 ${colorScheme}`, async ({ browser }, testInfo) => {
+    const context = await browser.newContext({ ...devices['Desktop Chrome'], viewport: { width: 844, height: 390 }, colorScheme });
+    try {
+      const page = await context.newPage();
+      await page.addInitScript(() => {
+        const state = { holdHistory: false, heldRequests: 0 };
+        window.__controlAccess = state;
+        let inner = window.fetch.bind(window);
+        const fetchHistory = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+          const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+          if (url.pathname === '/api/history' && state.holdHistory) {
+            state.heldRequests++;
+            return new Promise<Response>(() => undefined);
+          }
+          return inner(input, init);
+        };
+        Object.defineProperty(window, 'fetch', { configurable: true, get: () => fetchHistory, set: (value: typeof fetch) => { inner = value; } });
+      });
+      await page.goto('/e2e/studio/index.html?historyError=1');
+      // Keep this scroll-reveal regression stacked: the approved compact
+      // row has no vertical overflow. An expanded rail leaves <560px here.
+      const expandRail = page.getByRole('button', { name: 'Expand sidebar', exact: true });
+      if (await expandRail.isVisible()) await expandRail.click();
+      const canvas = page.getByTestId('canvas-scroller');
+      const retry = canvas.getByRole('button', { name: 'Retry', exact: true });
+      await expect(retry).toBeVisible();
+      await approvedSettle(page);
+      await canvas.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      await expect.poll(() => canvas.evaluate((element) => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1);
+      const before = await retry.boundingBox();
+      await retry.focus();
+      await expect(retry).toBeFocused();
+      const clearance = () => retry.evaluate((element) => {
+        const target = element.getBoundingClientRect();
+        const scroll = element.closest('[data-testid="canvas-scroller"]');
+        const composer = document.querySelector('#atelier-composer');
+        if (!scroll || !composer) throw new Error('missing history geometry owner');
+        const clip = scroll.getBoundingClientRect();
+        const dock = composer.getBoundingClientRect();
+        const hit = document.elementFromPoint(target.x + target.width / 2, target.y + target.height / 2);
+        const rect = (box: DOMRect) => ({ top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height });
+        return { target: rect(target), clip: rect(clip), composer: rect(dock), topClearance: target.top - clip.top, bottomClearance: dock.top - target.bottom, scrollPaddingTop: getComputedStyle(scroll).scrollPaddingTop, hit: hit === element || element.contains(hit) };
+      });
+      await expect.poll(async () => {
+        const proof = await clearance();
+        return proof.topClearance >= 13.9 && proof.bottomClearance >= -0.1 && proof.target.bottom <= proof.clip.bottom + 0.1 && proof.hit;
+      }).toBe(true);
+      const proof = await clearance();
+      expect(proof.scrollPaddingTop).toBe('14px');
+      await page.evaluate(() => { if (window.__controlAccess) window.__controlAccess.holdHistory = true; });
+      await page.keyboard.press('Enter');
+      await expect.poll(() => page.evaluate(() => window.__controlAccess?.heldRequests ?? 0)).toBeGreaterThan(0);
+      await expect(canvas.getByRole('status')).toContainText('Loading');
+      await testInfo.attach('history-native-focus-clearance', { body: JSON.stringify({ colorScheme, before, proof, nativeFocus: true, nativeActivation: 'Enter', loading: true }), contentType: 'application/json' });
+    } finally {
+      await context.close();
+    }
+  });
+}
+
 test('a selected library tab stays reachable when desktop shrinks to phone', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/e2e/studio/index.html?view=prompts');
@@ -2797,9 +2925,9 @@ test.describe('layout stability (T9)', () => {
 test.describe('consistency leftovers (T13)', () => {
   test('a phone batch header centres its actions on the meta row', async ({ browser, page }) => {
     const misalignment = (target: Page) => target.locator('main section[data-batch-id]').first().evaluate((batch) => {
-      const meta = batch.querySelector('header > ul > li');
-      const actions = [...batch.querySelectorAll('header button[aria-label="Archive batch"], header button[aria-label="More actions"]')];
-      if (!meta || actions.length !== 2) throw new Error('missing meta row or actions');
+      const meta = batch.querySelector('header > div > ul');
+      const actions = [...batch.querySelectorAll('header > div > div > button')];
+      if (!meta || actions.length < 2) throw new Error('missing meta row or actions');
       const box = meta.getBoundingClientRect();
       const centre = box.top + box.height / 2;
       return Math.max(...actions.map((button) => {
@@ -2884,22 +3012,29 @@ interface ApprovedOperations {
   holdCreate: boolean;
   holdMove: boolean;
   failCreate: boolean;
+  failMove: boolean;
+  pins: string[];
+  holdPin: boolean;
   uploadMode: 'ready' | 'held' | 'error';
   releaseCreate?: () => void;
   releaseMove?: () => void;
+  releasePin?: () => void;
   releaseUpload?: () => void;
 }
 declare global { interface Window { __approved?: ApprovedOperations } }
 
-async function approvedStudio(page: Page, options: { many?: boolean; longName?: string } = {}) {
+async function approvedStudio(page: Page, options: { many?: boolean; longName?: string; uniqueCollections?: boolean; noPrompts?: boolean } = {}) {
   await page.addInitScript(({ options, batch }) => {
-    const state: ApprovedOperations = { creates: [], moves: [], deletes: 0, holdCreate: false, holdMove: false, failCreate: false, uploadMode: 'ready' };
+    const state: ApprovedOperations = { creates: [], moves: [], deletes: 0, holdCreate: false, holdMove: false, failCreate: false, failMove: false, pins: [], holdPin: false, uploadMode: 'ready' };
     window.__approved = state;
     let inner = window.fetch.bind(window);
     let uploads = 0;
+    const createdNames = new Map<string, string>();
+    const pinned = new Set<string>();
     const fetchApproved = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
       const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+      if (options.noPrompts && url.pathname === '/api/prompts') return Response.json({ error: 'Unavailable' }, { status: 404 });
       if (url.pathname === '/api/uploads' && method === 'POST') {
         uploads++;
         if (state.uploadMode === 'held') await new Promise<void>((resolve) => { state.releaseUpload = resolve; });
@@ -2911,13 +3046,24 @@ async function approvedStudio(page: Page, options: { many?: boolean; longName?: 
         const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as { name: string };
         state.creates.push(body.name);
         if (state.holdCreate) await new Promise<void>((resolve) => { state.releaseCreate = resolve; });
+        if (options.uniqueCollections && createdNames.has(body.name)) return Response.json({ error: 'Collection name is already used' }, { status: 409 });
         if (state.failCreate) return Response.json({ error: 'Collection name is already used' }, { status: 400 });
-        return Response.json({ id: 'approved-created', name: body.name, count: 0, archivedCount: 0, createdAt: 3 });
+        const id = options.uniqueCollections ? `created-${String(createdNames.size + 1)}` : 'approved-created';
+        createdNames.set(body.name, id);
+        return Response.json({ id, name: body.name, count: 0, archivedCount: 0, createdAt: 3 });
       }
       if (url.pathname.startsWith('/api/history/') && method === 'PATCH') {
-        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as { collectionId: string };
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as { collectionId: string; pinned?: boolean };
+        if (body.pinned !== undefined) {
+          const id = url.pathname.split('/').at(-1) ?? '';
+          state.pins.push(id);
+          if (state.holdPin) await new Promise<void>((resolve) => { state.releasePin = resolve; });
+          if (body.pinned) pinned.add(id); else pinned.delete(id);
+          return Response.json({ ...batch, id, pinned: body.pinned });
+        }
         state.moves.push(body.collectionId);
         if (state.holdMove) await new Promise<void>((resolve) => { state.releaseMove = resolve; });
+        if (state.failMove) return Response.json({ error: 'Collection move refused' }, { status: 400 });
         return Response.json({ ...batch, id: url.pathname.split('/').at(-1), collectionId: body.collectionId });
       }
       if (url.pathname.startsWith('/api/collections/') && method === 'DELETE') {
@@ -2927,6 +3073,10 @@ async function approvedStudio(page: Page, options: { many?: boolean; longName?: 
       const response = location.pathname.includes('/harness/anchors.html') && url.pathname === '/api/collections' && method === 'GET'
         ? Response.json({ items: [{ id: 'collection-logo', name: 'Logo concepts', count: 3, archivedCount: 0, createdAt: 1 }, { id: 'collection-studio', name: 'Studio refs', count: 1, archivedCount: 0, createdAt: 2 }], summary: { totalCount: 4, pinnedCount: 0, unsortedCount: 1, archivedTotalCount: 0, archivedPinnedCount: 0, archivedUnsortedCount: 0 } })
         : await inner(input, init);
+      if (options.noPrompts && url.pathname === '/api/history' && method === 'GET') {
+        const data = await response.json() as { items: Batch[]; nextCursor: string | null };
+        return Response.json({ ...data, items: data.items.map((item) => pinned.has(item.id) ? { ...item, pinned: true } : item) });
+      }
       if (url.pathname === '/api/collections' && method === 'GET') {
         const data = await response.json() as CollectionsResponse;
         const first = data.items[0];
@@ -2960,15 +3110,531 @@ async function approvedAttach(page: Page, count: number) {
 
 async function approvedOpenMove(page: Page) {
   const trigger = page.url().includes('/harness/anchors.html')
-    ? page.locator('section[data-batch-id]').getByRole('button', { name: 'More actions' }).last()
-    : page.locator('section[data-batch-id="studio-batch-4"]').getByRole('button', { name: 'More actions' });
+    ? page.locator('section[data-batch-id]').getByRole('button', { name: 'Move to collection', exact: true }).last()
+    : page.locator('section[data-batch-id="studio-batch-4"]').getByRole('button', { name: 'Move to collection', exact: true });
   await trigger.scrollIntoViewIfNeeded();
   await trigger.click();
-  await page.getByRole('menuitem', { name: 'Move to collection', exact: true }).click();
   const panel = page.getByRole('dialog', { name: 'Move to collection' });
   await expect(panel).toBeVisible();
   await approvedSettle(page);
   return panel;
+}
+
+const releaseLayouts = [
+  { name: 'desktop', device: devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, phone: false },
+  { name: 'phone', device: devices['iPhone 13'], viewport: { width: 390, height: 844 }, phone: true },
+] as const;
+
+for (const layout of releaseLayouts) {
+  for (const stage of ['create', 'move'] as const) {
+    for (const submit of ['keyboard', 'pointer'] as const) {
+    test(`release retry and focus: ${layout.name} deferred ${stage} failure and deliberate retry via ${submit}`, async ({ browser }, testInfo) => {
+      const context = await browser.newContext({ ...layout.device, viewport: layout.viewport });
+      try {
+        const page = await context.newPage();
+        await approvedStudio(page, { uniqueCollections: true });
+        await page.goto('/e2e/harness/anchors.html?case=feed&seed=6');
+        const touch = await page.evaluate(() => matchMedia('(hover: none) and (pointer: coarse)').matches);
+        const panel = await approvedOpenMove(page);
+        await expect(panel).toHaveAttribute('data-mobile', String(layout.phone));
+        const create = panel.getByRole('button', { name: 'New collection' });
+        if (touch) await create.tap(); else await create.click();
+        const input = panel.getByRole('textbox', { name: 'Collection name' });
+        const move = panel.getByRole('button', { name: 'Move', exact: true });
+        await input.fill('  Retry collection  ');
+        await page.evaluate((stage) => {
+          const state = window.__approved;
+          if (!state) throw new Error('missing operations');
+          state.holdCreate = stage === 'create';
+          state.holdMove = stage === 'move';
+          state.failCreate = stage === 'create';
+          state.failMove = stage === 'move';
+        }, stage);
+        await input.focus();
+        if (submit === 'keyboard') {
+          await page.keyboard.press('Tab');
+          await expect(move).toBeFocused();
+          await page.keyboard.press('Enter');
+        } else if (touch) await move.tap();
+        else await move.click();
+        await expect.poll(() => page.evaluate(() => window.__approved?.creates)).toEqual(['Retry collection']);
+        if (stage === 'move') await expect.poll(() => page.evaluate(() => window.__approved?.moves)).toEqual(['created-1']);
+        await expect(input).toHaveValue('  Retry collection  ');
+        await expect(input).toHaveAttribute('readonly', '');
+        await expect(move).toBeDisabled();
+        // Repeated native Enter and a hit on the disabled control do not submit.
+        await page.keyboard.press('Enter');
+        const box = await move.boundingBox();
+        if (!box) throw new Error('missing Move');
+        if (touch) await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+        else await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        expect(await page.evaluate(() => window.__approved?.creates.length)).toBe(1);
+        expect(await page.evaluate(() => window.__approved?.moves.length)).toBe(stage === 'move' ? 1 : 0);
+        await page.evaluate((stage) => {
+          if (stage === 'create') window.__approved?.releaseCreate?.(); else window.__approved?.releaseMove?.();
+        }, stage);
+        await expect(move).toBeEnabled();
+        await expect(input).toBeFocused();
+        await expect(panel.getByText(stage === 'create' ? 'Collection name is already used' : 'Collection move refused', { exact: true }).first()).toBeVisible();
+        await page.evaluate(() => {
+          if (!window.__approved) throw new Error('missing operations');
+          Object.assign(window.__approved, { holdCreate: false, holdMove: false, failCreate: false, failMove: false });
+        });
+        await input.fill('Retry collection ');
+        await page.keyboard.press('Enter');
+        await expect(panel).toHaveCount(0);
+        const operations = await page.evaluate(() => ({ creates: window.__approved?.creates, moves: window.__approved?.moves }));
+        expect(operations).toEqual({ creates: stage === 'create' ? ['Retry collection', 'Retry collection'] : ['Retry collection'],
+          moves: stage === 'create' ? ['created-1'] : ['created-1', 'created-1'] });
+        await testInfo.attach('release-retry-counts.json', { body: JSON.stringify({ layout: layout.name, stage, submit, operations, recoveredInputFocus: true }), contentType: 'application/json' });
+      } finally { await context.close(); }
+    });
+    }
+
+    for (const leave of ['Tab', 'pointer', 'Escape', 'dismiss'] as const) {
+      test(`release retry and focus: ${layout.name} pending ${stage} ${leave} cancellation keeps moved focus`, async ({ browser }, testInfo) => {
+        const context = await browser.newContext({ ...layout.device, viewport: layout.viewport });
+        try {
+          const page = await context.newPage();
+          await approvedStudio(page, { uniqueCollections: true });
+          await page.goto('/e2e/harness/anchors.html?case=feed&seed=6');
+          const touch = await page.evaluate(() => matchMedia('(hover: none) and (pointer: coarse)').matches);
+          const panel = await approvedOpenMove(page);
+          const create = panel.getByRole('button', { name: 'New collection' });
+          if (touch) await create.tap(); else await create.click();
+          const input = panel.getByRole('textbox', { name: 'Collection name' });
+          await input.fill('Cancelled collection');
+          await page.evaluate((stage) => {
+            const state = window.__approved;
+            if (!state) throw new Error('missing operations');
+            Object.assign(state, { holdCreate: stage === 'create', holdMove: stage === 'move', failCreate: stage === 'create', failMove: stage === 'move' });
+          }, stage);
+          await input.press('Enter');
+          await expect.poll(() => page.evaluate(() => window.__approved?.creates.length)).toBe(1);
+          if (stage === 'move') await expect.poll(() => page.evaluate(() => window.__approved?.moves.length)).toBe(1);
+          const other = panel.getByRole('button', { name: '(Unsorted)', exact: true });
+          if (leave === 'Tab') {
+            await expect(input).toBeFocused();
+            await page.keyboard.press('Tab');
+            await expect(other).toBeFocused();
+          } else if (leave === 'pointer') {
+            // A pointer on a non-action label leaves the request untouched.
+            const label = panel.getByText('Move to collection', { exact: true });
+            if (touch) await label.tap(); else await label.click();
+            await other.focus();
+          } else if (leave === 'Escape') {
+            await page.keyboard.press('Escape');
+            await expect(create).toBeFocused();
+          } else {
+            if (layout.phone) {
+              const backdrop = page.getByRole('button', { name: 'Close move popover' });
+              await backdrop.tap({ position: { x: 10, y: 10 } });
+            } else await page.mouse.click(10, 20);
+            await expect(panel).toHaveCount(0);
+          }
+          await expect(input).toHaveCount(0);
+          const focused = await page.evaluateHandle(() => document.activeElement);
+          await page.evaluate((stage) => {
+            if (stage === 'create') window.__approved?.releaseCreate?.(); else window.__approved?.releaseMove?.();
+          }, stage);
+          await expect(page.getByText(stage === 'create' ? 'Collection name is already used' : 'Collection move refused', { exact: true }).first()).toBeVisible();
+          await expect(input).toHaveCount(0);
+          expect(await focused.evaluate((element) => element === document.activeElement && element?.isConnected)).toBe(true);
+          if (leave === 'Escape') {
+            await page.keyboard.press('Escape');
+            await expect(panel).toHaveCount(0);
+          } else if (leave !== 'dismiss') await expect(panel).toBeVisible();
+          const operations = await page.evaluate(() => ({ creates: window.__approved?.creates, moves: window.__approved?.moves }));
+          expect(operations).toEqual({ creates: ['Cancelled collection'], moves: stage === 'move' ? ['created-1'] : [] });
+          await testInfo.attach('release-cancellation-focus.json', { body: JSON.stringify({ layout: layout.name, stage, leave, operations, retainedConnectedFocus: true }), contentType: 'application/json' });
+        } finally { await context.close(); }
+      });
+    }
+  }
+}
+
+test('release retry and focus: desktop keyboard Pin removes final More and preserves adjacent navigation', async ({ page, browser }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await approvedStudio(page, { noPrompts: true });
+  await page.goto('/e2e/studio/index.html');
+  const row = page.locator('section[data-batch-id="studio-batch-4"]');
+  const more = row.getByRole('button', { name: 'More actions', exact: true });
+  await more.scrollIntoViewIfNeeded();
+  await more.focus();
+  await page.keyboard.press('Enter');
+  const menu = page.getByRole('menu', { name: 'Batch actions' });
+  await expect(menu.getByRole('menuitem')).toHaveCount(1);
+  await expect(menu.getByRole('menuitem', { name: 'Pin batch' })).toBeFocused();
+  await page.evaluate(() => { if (window.__approved) window.__approved.holdPin = true; });
+  await page.keyboard.press('Enter');
+  await expect(menu).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__approved?.pins)).toEqual(['studio-batch-4']);
+  await expect(more).toHaveCount(0);
+  const move = row.getByRole('button', { name: 'Move to collection', exact: true });
+  await expect(move).toBeFocused();
+  expect(await move.evaluate((element) => element.isConnected)).toBe(true);
+  const tab = browser.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab';
+  await page.keyboard.press(tab);
+  await expect(row.getByRole('button', { name: 'Archive batch' })).toBeFocused();
+  await page.keyboard.press(`Shift+${tab}`);
+  await expect(move).toBeFocused();
+  // Move on deliberately while the mutation is still deferred. Settlement
+  // and passive cleanup must not take focus back to the adjacent fallback.
+  const copy = row.getByRole('button', { name: 'Copy prompt' });
+  await copy.focus();
+  await page.evaluate(() => { window.__approved?.releasePin?.(); });
+  await expect(row.getByRole('button', { name: 'Unpin batch' })).toBeVisible();
+  await approvedSettle(page);
+  await expect(copy).toBeFocused();
+  await expect(more).toHaveCount(0);
+  await testInfo.attach('release-final-more-focus.json', { body: JSON.stringify({ pins: ['studio-batch-4'], moreAbsentBeforeResponse: true, fallback: 'Move to collection', nextTab: 'Archive batch', settlementFocus: 'Copy prompt' }), contentType: 'application/json' });
+});
+
+async function recoveryFeedBox(page: Page) {
+  return page.getByTestId('canvas-scroller').evaluate(async (element) => {
+    const content = await new Promise<{ width: number; height: number }>((resolve) => {
+      const observer = new ResizeObserver(([entry]) => {
+        if (!entry) return;
+        observer.disconnect();
+        resolve({ width: entry.contentRect.width, height: entry.contentRect.height });
+      });
+      observer.observe(element);
+    });
+    const style = getComputedStyle(element);
+    const box = element.getBoundingClientRect();
+    return { ...content, top: box.top + parseFloat(style.paddingTop), reserve: parseFloat(style.paddingBottom), containerType: style.containerType, contain: style.contain };
+  });
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`approved recovery and batch actions: initial landscape recovery ${colorScheme}`, async ({ browser }, testInfo) => {
+    const context = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: 844, height: 390 }, colorScheme });
+    try {
+      const page = await context.newPage();
+      await page.goto('/e2e/studio/index.html?historyError=1');
+      const canvas = page.getByTestId('canvas-scroller');
+      const retry = canvas.getByRole('button', { name: 'Retry', exact: true });
+      await expect(retry).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Minimize composer', exact: true })).toBeVisible();
+      await approvedSettle(page);
+      const content = await recoveryFeedBox(page);
+      expect(content.width).toBeGreaterThanOrEqual(560);
+      expect(content.height).toBeLessThan(440);
+      expect(content.containerType).toBe('size');
+      expect(content.contain).toBe('strict');
+      const state = retry.locator('..');
+      await expect(state).toHaveCSS('display', 'grid');
+      const geometry = await state.evaluate((element) => {
+        const rect = (node: Element | null) => {
+          if (!node) throw new Error('missing recovery child');
+          const box = node.getBoundingClientRect();
+          return { x: box.x, top: box.top, bottom: box.bottom, right: box.right, width: box.width, height: box.height };
+        };
+        return { state: rect(element), plate: rect(element.firstElementChild), art: rect(element.querySelector('[data-etching]')), title: rect(element.querySelector('h2')), body: rect(element.querySelector('p')), action: rect(element.querySelector('button')), composer: rect(document.querySelector('#atelier-composer')) };
+      });
+      expect(geometry.plate.width).toBe(64);
+      expect(geometry.plate.height).toBe(64);
+      expect(geometry.art.width).toBe(48);
+      expect(geometry.state.top).toBeCloseTo(content.top, 1);
+      expect(geometry.title.bottom + 4).toBeCloseTo(geometry.body.top, 1);
+      expect(geometry.plate.right + 18).toBeCloseTo(geometry.title.x, 1);
+      for (const box of [geometry.plate, geometry.title, geometry.body, geometry.action]) expect(box.bottom).toBeLessThanOrEqual(geometry.composer.top);
+      await libraryHitPoints(retry);
+      expect(await canvas.evaluate((element) => element.scrollTop)).toBe(0);
+      await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('Keep this recovery draft');
+      await retry.tap();
+      await expect(page.getByRole('textbox', { name: 'Prompt', exact: true })).toHaveValue('Keep this recovery draft');
+      await testInfo.attach('initial-recovery-geometry', { body: JSON.stringify({ content, geometry, nativeHits: true, composerExpanded: true, draftRetained: true }), contentType: 'application/json' });
+    } finally { await context.close(); }
+  });
+}
+
+test('approved recovery and batch actions: exact feed content boundaries and long error reachability', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto('/e2e/studio/index.html?historyError=1');
+  const canvas = page.getByTestId('canvas-scroller');
+  const retry = canvas.getByRole('button', { name: 'Retry', exact: true });
+  await expect(retry).toBeVisible();
+  const state = retry.locator('..');
+  const evidence: unknown[] = [];
+  for (const boundary of [{ width: 559, height: 439, grid: false }, { width: 560, height: 439, grid: true }, { width: 560, height: 440, grid: false }]) {
+    await canvas.evaluate((element, size) => {
+      Object.assign(element.style, { boxSizing: 'content-box', flex: 'none', width: `${String(size.width)}px`, height: `${String(size.height)}px` });
+    }, boundary);
+    // Stable scrollbar gutters belong to the feed. Correct the test's CSS
+    // width using its measured content box, not a viewport subtraction.
+    const first = await recoveryFeedBox(page);
+    await canvas.evaluate((element, correction) => { element.style.width = `${String(parseFloat(element.style.width) + correction)}px`; }, boundary.width - first.width);
+    const content = await recoveryFeedBox(page);
+    expect(content.width).toBe(boundary.width);
+    expect(content.height).toBe(boundary.height);
+    await expect(state).toHaveCSS('display', boundary.grid ? 'grid' : 'flex');
+    evidence.push({ boundary, content });
+  }
+  // A long response grows naturally. Check separation and the native scroll
+  // path to Retry rather than promising that arbitrary text fits one plate.
+  await canvas.evaluate((element) => { element.style.height = '180px'; });
+  await state.locator('p').evaluate((element) => { element.textContent = 'A longer service error with recovery detail. '.repeat(36); });
+  const separation = await state.evaluate((element) => {
+    const text = element.querySelector('p')?.getBoundingClientRect();
+    const action = element.querySelector('button')?.getBoundingClientRect();
+    if (!text || !action) throw new Error('missing error content');
+    return { textRight: text.right, actionLeft: action.left, textHeight: text.height };
+  });
+  expect(separation.textRight).toBeLessThanOrEqual(separation.actionLeft);
+  expect(separation.textHeight).toBeGreaterThan(64);
+  await retry.focus();
+  await expect(retry).toBeFocused();
+  await retry.scrollIntoViewIfNeeded();
+  expect(await retry.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return hit === element || element.contains(hit);
+  })).toBe(true);
+  await testInfo.attach('feed-query-boundaries', { body: JSON.stringify({ evidence, separation, longTextRetryReachable: true }), contentType: 'application/json' });
+});
+
+test('approved recovery and batch actions: tall phone and passive states retain their stacked owner', async ({ page }, testInfo) => {
+  const evidence: unknown[] = [];
+  for (const layout of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(layout);
+    await page.goto('/e2e/studio/index.html?historyError=1');
+    const canvas = page.getByTestId('canvas-scroller');
+    const retry = canvas.getByRole('button', { name: 'Retry', exact: true });
+    await expect(retry).toBeVisible();
+    const state = retry.locator('..');
+    await expect(state).toHaveCSS('display', 'flex');
+    evidence.push({ layout, content: await recoveryFeedBox(page), artWidth: await state.locator('[data-etching]').evaluate((element) => element.getBoundingClientRect().width) });
+  }
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.goto('/e2e/studio/index.html?emptyHistory=1');
+  const canvas = page.getByTestId('canvas-scroller');
+  const empty = canvas.locator('[data-etching]').locator('../..');
+  await expect(empty).toHaveCSS('display', 'flex');
+  await page.reload();
+  await canvas.evaluate(async (element) => {
+    // Existing production exports, mounted only in the browser spec, exercise
+    // the shared owner without adding a product fixture or capture hook.
+    const reactUrl = '/node_modules/.vite/deps/react.js';
+    const domUrl = '/node_modules/.vite/deps/react-dom_client.js';
+    const stateUrl = '/src/components/StateView/index.tsx';
+    const { default: React } = await import(/* @vite-ignore */ reactUrl) as { default: typeof ReactApi };
+    const { default: ReactDom } = await import(/* @vite-ignore */ domUrl) as { default: typeof ReactDomApi };
+    const { StateView, LoadingState } = await import(/* @vite-ignore */ stateUrl) as typeof StateViewApi;
+    const host = document.createElement('div');
+    element.replaceChildren(host);
+    ReactDom.createRoot(host).render(React.createElement(React.Fragment, null,
+      React.createElement(LoadingState, { label: 'Loading history…' }),
+      React.createElement(StateView, { glyph: '!', title: 'View error', action: { label: 'Recover view', onClick: () => undefined } }),
+      React.createElement(StateView, { art: 'state-error', title: 'Error without body', action: { label: 'Try again', onClick: () => undefined } }),
+    ));
+  });
+  await expect(canvas.getByRole('status')).toHaveCSS('display', 'flex');
+  await expect(canvas.getByRole('button', { name: 'Recover view', exact: true }).locator('..')).toHaveCSS('display', 'flex');
+  const noBody = canvas.getByRole('heading', { name: 'Error without body' }).locator('..');
+  await expect(noBody).toHaveCSS('display', 'grid');
+  expect(await noBody.locator('h2').evaluate((element) => getComputedStyle(element).alignSelf)).toBe('center');
+  await testInfo.attach('unchanged-state-layouts', { body: JSON.stringify(evidence), contentType: 'application/json' });
+});
+
+async function approvedBatchFixture(page: Page, rich: boolean) {
+  await page.addInitScript(({ rich }) => {
+    let inner = window.fetch.bind(window);
+    const fixture = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const response = await inner(input, init);
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname !== '/api/history' || !rich) return response;
+      const history = await response.json() as { items: Batch[]; nextCursor: null };
+      return Response.json({ ...history, items: history.items.map((batch) => batch.id !== 'studio-batch-4' ? batch : {
+        ...batch, pinned: true, collectionId: 'campaign',
+        provenance: { templateId: 'editorial', templateName: 'An unusually long editorial provenance label', rollSeed: 7, pins: {} },
+        sequenceIndex: 1, sequence: { id: 'approved-sequence', segmentCount: 2, totalDurationFrames: 248, masterStatus: 'ready', createdAt: 1, updatedAt: 1 },
+      }) });
+    };
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => fixture, set: (value: typeof fetch) => { inner = value; } });
+  }, { rich });
+}
+
+test('approved recovery and batch actions: one-click Copy and Re-roll and token-to-Move focus fallback', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const copies: string[] = [];
+  await page.exposeFunction('recordApprovedCopy', (text: string) => { copies.push(text); });
+  const seed = viewerFixtureBatches[0];
+  if (!seed) throw new Error('missing pinned studio fixture');
+  await approvedStudio(page);
+  await page.addInitScript((seed) => {
+    let batch = { ...seed, pinned: true };
+    let inner = window.fetch.bind(window);
+    const fixture = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname === '/api/history') return Response.json({ items: [batch], nextCursor: null });
+      if (url.pathname === `/api/history/${batch.id}` && init?.method === 'PATCH') {
+        const patch = JSON.parse(typeof init.body === 'string' ? init.body : '{}') as { collectionId: string | null };
+        batch = { ...batch, collectionId: patch.collectionId };
+        return Response.json(batch);
+      }
+      return inner(input, init);
+    };
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => fixture, set: (value: typeof fetch) => { inner = value; } });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => {
+      const record = Reflect.get(window, 'recordApprovedCopy') as (value: string) => Promise<void>;
+      await record(text);
+    } } });
+  }, seed);
+  await page.goto('/e2e/studio/index.html?view=pinned&generate=1');
+  const row = page.locator(`section[data-batch-id="${seed.id}"]`);
+  await expect(row.locator('header')).toBeVisible();
+  await approvedSettle(page);
+  await row.locator('header').evaluate((element) => { element.scrollIntoView({ block: 'start' }); });
+  const copy = row.getByRole('button', { name: 'Copy prompt', exact: true });
+  await copy.click();
+  await expect.poll(() => copies).toEqual([seed.prompt]);
+  await expect(page.getByRole('status').filter({ hasText: 'Prompt copied' })).toBeVisible();
+  await row.getByRole('button', { name: 'Re-roll', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __studioGenerated?: number }).__studioGenerated)).toBe(1);
+  // Re-roll deliberately navigates to Unsorted. Return to Pinned so the
+  // assigned batch legitimately stays mounted after a move to Unsorted.
+  await page.getByRole('button', { name: /^Pinned \d+$/ }).click();
+  await expect(row).toBeVisible();
+  await approvedSettle(page);
+  const move = row.getByRole('button', { name: 'Move to collection', exact: true, includeHidden: true });
+  const token = row.getByRole('button', { name: 'Campaign studies, move to collection', exact: true, includeHidden: true });
+  await token.scrollIntoViewIfNeeded();
+  await token.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Move to collection', exact: true });
+  await expect(dialog).toBeVisible();
+  await approvedSettle(page);
+  const anchor = await token.boundingBox();
+  const panel = await dialog.boundingBox();
+  if (await dialog.getAttribute('data-anchored')) {
+    if (!anchor || !panel) throw new Error('missing token anchor geometry');
+    expect(Math.abs(panel.x + panel.width - anchor.x - anchor.width)).toBeLessThanOrEqual(1.5);
+  }
+  await dialog.getByRole('button', { name: '(Unsorted)', exact: true }).click();
+  await expect(token).toHaveCount(0);
+  await expect(dialog).toHaveCount(0);
+  await expect(move).toBeFocused();
+  await move.press('Enter');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '(Unsorted)', exact: true })).toHaveAttribute('data-current', 'true');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(move).toBeFocused();
+  await testInfo.attach('direct-action-paths', { body: JSON.stringify({ copies, rerolls: 1, tokenAnchor: anchor, panel, tokenRemoved: true, fallback: 'Move to collection' }), contentType: 'application/json' });
+});
+
+test('approved recovery and batch actions: stale read-only rows keep Copy enabled', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    let inner = window.fetch.bind(window);
+    const fixture = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname === '/api/history' && url.searchParams.get('pinned') === 'true') return new Promise<Response>(() => undefined);
+      return inner(input, init);
+    };
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => fixture, set: (value: typeof fetch) => { inner = value; } });
+  });
+  await page.goto('/e2e/studio/index.html');
+  const row = page.locator('section[data-batch-id="studio-batch-4"]');
+  await expect(row).toBeVisible();
+  await page.getByRole('button', { name: /^Pinned \d+$/ }).click();
+  await expect(row.getByRole('button', { name: 'Re-roll', exact: true })).toBeDisabled();
+  await expect(row.getByRole('button', { name: 'Move to collection', exact: true })).toBeDisabled();
+  await expect(row.getByRole('button', { name: 'Archive batch', exact: true })).toBeDisabled();
+  await expect(row.getByRole('button', { name: 'Copy prompt', exact: true })).toBeEnabled();
+});
+
+for (const layout of [
+  { width: 320, height: 844, touch: true, colorScheme: 'light', rich: false },
+  { width: 360, height: 844, touch: true, colorScheme: 'dark', rich: false },
+  { width: 390, height: 844, touch: true, colorScheme: 'light', rich: false },
+  { width: 768, height: 1024, touch: true, colorScheme: 'dark', rich: false },
+  { width: 844, height: 390, touch: true, colorScheme: 'dark', rich: false },
+  { width: 1440, height: 900, touch: false, colorScheme: 'light', rich: false },
+  { width: 390, height: 844, touch: true, colorScheme: 'dark', rich: true },
+  { width: 1440, height: 900, touch: false, colorScheme: 'dark', rich: true },
+] as const) {
+  test(`approved recovery and batch actions: header ${String(layout.width)} ${layout.touch ? 'coarse' : 'fine'} ${layout.colorScheme} ${layout.rich ? 'pin master provenance' : 'plain'}`, async ({ browser }, testInfo) => {
+    const context = await browser.newContext({ ...(layout.touch ? devices['iPhone 13'] : devices['Desktop Chrome']), viewport: { width: layout.width, height: layout.height }, colorScheme: layout.colorScheme });
+    try {
+      const page = await context.newPage();
+      await approvedBatchFixture(page, layout.rich);
+      await page.goto('/e2e/studio/index.html?video=1');
+      if (layout.width === 768) {
+        const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true });
+        if (await expand.isVisible()) await expand.click();
+      }
+      const row = page.locator('section[data-batch-id="studio-batch-4"]');
+      const header = row.locator('header');
+      await expect(header).toBeVisible();
+      await header.evaluate((element) => { element.scrollIntoView({ block: 'start' }); });
+      await approvedSettle(page);
+      const cluster = row.getByRole('button', { name: 'Archive batch', exact: true, includeHidden: true }).locator('..');
+      const expected = [...(layout.rich ? ['Unpin batch', 'Play master'] : []), ...(layout.width >= 768 ? ['Copy prompt'] : []), 'Re-roll', 'Move to collection', 'Archive batch', 'More actions'];
+      expect(await cluster.locator('button').evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')))).toEqual(expected);
+      const geometry = await header.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const rect = (node: Element) => { const box = node.getBoundingClientRect(); return { x: box.x, y: box.y, right: box.right, bottom: box.bottom, width: box.width, height: box.height }; };
+        const controls = element.querySelector('[class*="headerControls"]');
+        const meta = controls?.querySelector('ul');
+        const prompt = element.firstElementChild;
+        if (!meta || !prompt) throw new Error('missing header owners');
+        return { width: bounds.width, left: bounds.left, right: bounds.right, prompt: rect(prompt), meta: rect(meta), buttons: [...element.querySelectorAll('button')].map((button) => ({ label: button.getAttribute('aria-label'), ...rect(button) })) };
+      });
+      for (const box of geometry.buttons) {
+        expect(box.x).toBeGreaterThanOrEqual(geometry.left - 0.1);
+        expect(box.right).toBeLessThanOrEqual(geometry.right + 0.1);
+      }
+      if (!layout.rich && layout.width < 768) {
+        const first = geometry.buttons[0];
+        if (!first) throw new Error('missing action');
+        expect(geometry.meta.width).toBeGreaterThanOrEqual(96);
+        if (layout.width === 320) expect(first.y).toBeGreaterThanOrEqual(geometry.meta.bottom);
+        else expect(first.y + first.height / 2).toBeCloseTo(geometry.meta.y + geometry.meta.height / 2, 1);
+      }
+      if (layout.width === 768) expect(geometry.meta.y).toBeGreaterThanOrEqual(geometry.prompt.bottom);
+      if (layout.width >= 768 && geometry.meta.y < geometry.prompt.bottom) expect(geometry.prompt.width).toBeGreaterThanOrEqual(240);
+      for (let i = 0; i < geometry.buttons.length; i++) {
+        const a = geometry.buttons[i];
+        if (!a) continue;
+        for (const b of geometry.buttons.slice(i + 1)) expect(a.right <= b.x + 0.1 || b.right <= a.x + 0.1 || a.bottom <= b.y + 0.1 || b.bottom <= a.y + 0.1).toBe(true);
+      }
+      for (const label of expected) {
+        const button = cluster.getByRole('button', { name: label, exact: true });
+        if (layout.touch) await libraryHitPoints(button);
+        await expect(button).toHaveAttribute('data-tip', label === 'More actions' ? 'More' : label);
+      }
+      await cluster.getByRole('button').first().focus();
+      const tab = browser.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab';
+      for (const label of expected.slice(1)) { await page.keyboard.press(tab); await expect(cluster.getByRole('button', { name: label, exact: true })).toBeFocused(); }
+      await cluster.getByRole('button', { name: 'More actions' }).press('Enter');
+      const menu = page.getByRole('menu', { name: 'Batch actions' });
+      await expect(menu).toBeVisible();
+      await expect(menu.getByRole('menuitem', { name: 'Re-roll', exact: true })).toHaveCount(0);
+      await expect(menu.getByRole('menuitem', { name: 'Move to collection', exact: true })).toHaveCount(0);
+      await expect(menu.getByRole('menuitem', { name: 'Copy prompt', exact: true })).toHaveCount(layout.width < 768 ? 1 : 0);
+      await page.keyboard.press('Escape');
+      await expect(menu).toHaveCount(0);
+      const move = cluster.getByRole('button', { name: 'Move to collection', exact: true, includeHidden: true });
+      await move.press('Enter');
+      const dialog = page.getByRole('dialog', { name: 'Move to collection', exact: true });
+      await expect(dialog).toBeVisible();
+      await expect(move).toHaveAttribute('aria-expanded', 'true');
+      await approvedSettle(page);
+      const anchor = await move.boundingBox();
+      const panel = await dialog.boundingBox();
+      if (layout.width >= 768 && await dialog.getAttribute('data-anchored')) {
+        if (!anchor || !panel) throw new Error('missing native anchor geometry');
+        expect(Math.abs(panel.x + panel.width - anchor.x - anchor.width)).toBeLessThanOrEqual(1.5);
+        expect(Math.min(Math.abs(panel.y - anchor.y - anchor.height - 8), Math.abs(anchor.y - panel.y - panel.height - 8))).toBeLessThanOrEqual(1.5);
+      }
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      await expect(move).toBeFocused();
+      expect(await noHorizontalOverflow(page)).toBe(true);
+      await testInfo.attach('approved-batch-header', { body: JSON.stringify({ layout, geometry, expected, anchor, panel, tabOrder: expected, tab, nativeFocusReturned: true }), contentType: 'application/json' });
+    } finally { await context.close(); }
+  });
 }
 
 for (const scenario of [

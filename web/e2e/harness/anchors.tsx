@@ -197,7 +197,7 @@ function FeedCase() {
           isFetchingNextPage={false}
           onLoadMore={() => undefined}
           onBatchAction={() => undefined}
-          promptsEnabled={false}
+          promptsEnabled={params.get('feedPrompts') === 'true'}
           onTileAction={() => undefined}
           onOpenTile={() => undefined}
           q=""

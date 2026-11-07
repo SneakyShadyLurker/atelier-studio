@@ -1,17 +1,19 @@
 import type { Batch, Collection, DoneTile, Model, Tile } from '@atelier/shared';
 import { isVideoMime } from '@atelier/shared';
-import { memo, useDeferredValue, useEffect, useRef, useState, ViewTransition } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useRef, useState, ViewTransition } from 'react';
 import { refImageUrl } from '../../api/uploads';
 import { sequenceMasterUrl } from '../../api/sequences';
 import { findI2VModel } from '../../lib/i2v';
 import { queueLabel } from '../../lib/queueLabel';
+import { runWhenReachable } from '../../lib/focus';
 import { announceBatchSettled } from '../../lib/queueLiveAnnouncer';
 import { getRatioDefinition } from '../../lib/ratios';
 import { useTogglePin } from '../../hooks/useTogglePin';
+import { useIsPhone } from '../../hooks/useIsPhone';
 import type { AppView } from '../../store/atelier';
 import { I } from '../icons/I';
 import { Meta } from '../Meta';
-import BatchOverflowMenu, { type BatchOverflowAction } from '../BatchOverflowMenu';
+import BatchOverflowMenu, { buildBatchOverflowGroups, type BatchOverflowAction } from '../BatchOverflowMenu';
 import BatchPrompt from './BatchPrompt';
 import MovePopover from '../MovePopover';
 import FailedTile from '../tile/FailedTile';
@@ -207,9 +209,31 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
   const [moveOpen, setMoveOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreBtnRef = useRef<HTMLButtonElement | null>(null);
+  const moveBtnRef = useRef<HTMLButtonElement | null>(null);
+  const moreFocusRef = useRef<HTMLElement | null>(null);
+  const pinFocusHandoffRef = useRef(false);
+  const bindMoreButton = useCallback((element: HTMLButtonElement | null) => {
+    moreBtnRef.current = element;
+    if (!element) return;
+    return () => {
+      moreBtnRef.current = null;
+      const owner = moreFocusRef.current;
+      const active = document.activeElement;
+      if (!owner || (active !== owner && active !== document.body && active !== null)) return;
+      // Selection closes the menu before its optimistic patch removes More.
+      // Ref cleanup sees that later removal as well as availability changes.
+      const target = moveBtnRef.current;
+      runWhenReachable(() => {
+        const current = document.activeElement;
+        if (owner.isConnected || (current !== document.body && current?.isConnected)) return;
+        if (target && !target.disabled) target.focus();
+      }, target);
+    };
+  }, []);
   // MovePopover anchors (and returns focus) to whichever trigger opened it —
-  // the collection chip in the meta row or the More button's overflow action.
+  // the collection token in the meta row or the persistent Move icon.
   const moveAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const isPhone = useIsPhone();
   const togglePin = useTogglePin({ activeView, q });
   const { pendingTileId: extendingTileId, extendFromTile } = useExtendFromTile();
   const ratio = getRatioDefinition(batch.ratio);
@@ -222,6 +246,10 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
   // the header reads, so it costs nothing extra and stays memo-stable.
   const i2vModel = findI2VModel(modelById.values());
   const i2vAvailable = i2vModel !== undefined;
+  const hasMoreItems = buildBatchOverflowGroups({ batch, promptsEnabled, readOnlyActions, i2vAvailable, isPhone }).length > 0;
+  // Losing the last canonical item dismisses the existing menu through its
+  // ordinary exit lifecycle, and cannot leave a latent open state behind.
+  if (moreOpen && !hasMoreItems) setMoreOpen(false);
   const batchIsVideo = modelById.get(batch.modelId)?.outputsVideo === true;
   const sequenceLabel = sequenceChipLabel(batch);
   const storyLabel = storyChipLabel(batch);
@@ -268,15 +296,22 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
   useEffect(() => {
     if (settledHere) announceBatchSettled(batch.id, done, failed);
   }, [settledHere, batch.id, done, failed]);
-  const moveLabel = `Move to ${currentCollection?.name ?? 'collection'}`;
+  const moveLabel = `${currentCollection?.name ?? 'collection'}, move to collection`;
   const openMove = (anchor: HTMLButtonElement | null) => {
-    moveAnchorRef.current = anchor ?? moreBtnRef.current;
+    moveAnchorRef.current = anchor ?? moveBtnRef.current;
+    // Touch activation can leave focus on the page. Give both canonical
+    // overlay owners the actual invoker before they capture restore focus.
+    moveAnchorRef.current?.focus();
     setMoreOpen(false);
     setMoveOpen(true);
   };
   const onOverflowSelect = (action: BatchOverflowAction) => {
-    if (action === 'move') { openMove(moreBtnRef.current); return; }
+    if (action === 'move') { openMove(moveBtnRef.current); return; }
     if (action === 'pin') {
+      // The canonical chrome's deferred restore was queued when the menu
+      // closed. A focus move made before it runs must keep its destination.
+      pinFocusHandoffRef.current = true;
+      runWhenReachable(() => { pinFocusHandoffRef.current = false; });
       togglePin.mutate({ batchId: batch.id, pinned: true });
       setMoreOpen(false);
       return;
@@ -295,8 +330,14 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
   return (
     <section className={styles.batch} data-batch-id={batch.id} data-first={isFirstBatch ? 'true' : undefined} data-seen={seen ? 'true' : undefined}>
       <h2 className="srOnly">{headingPrompt}, {modelName}</h2>
-      <header className={styles.header}>
+      <header className={styles.header} onFocusCapture={(event) => {
+        const target = event.target;
+        // Portalled menu focus bubbles through its owning header in React.
+        moreFocusRef.current = target === moreBtnRef.current
+          || target.closest('[role="menu"][aria-label="Batch actions"]') ? target : null;
+      }}>
         <BatchPrompt prompt={batch.prompt} />
+        <div className={styles.headerControls}>
         <Meta lead className={styles.meta} items={[
           <span key="model" className={styles.modelName}>{modelName}</span>,
           batch.ratio,
@@ -335,7 +376,7 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
               aria-label={`Rolled from ${batch.provenance.templateName ?? 'template'}, seed ${String(batch.provenance.rollSeed)}`}
               data-tip={`Seed ${String(batch.provenance.rollSeed)}`}
             >
-              <I.sparkle /> {batch.provenance.templateName ?? 'Template'}
+              <I.sparkle /> <span className={styles.metaColName}>{batch.provenance.templateName ?? 'Template'}</span>
             </span>
           ) : null,
         ]} />
@@ -374,11 +415,34 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
             </button>
             </ViewTransition>
           ) : null}
+          {!isPhone && (
+            <button className={buttons.iconAction} data-size="28" type="button" aria-label="Copy prompt" data-tip="Copy prompt" onClick={() => { onBatchAction('copy', batch); }}>
+              <I.copy />
+            </button>
+          )}
+          <button className={buttons.iconAction} data-size="28" type="button" aria-label="Re-roll" data-tip="Re-roll" disabled={readOnlyActions} onClick={() => { onBatchAction('reroll', batch); }}>
+            <I.reroll />
+          </button>
+          <button
+            ref={moveBtnRef}
+            className={buttons.iconAction}
+            data-size="28"
+            data-in-collection={batch.collectionId !== null ? 'true' : undefined}
+            type="button"
+            aria-label="Move to collection"
+            data-tip="Move to collection"
+            aria-haspopup="dialog"
+            aria-expanded={moveOpen}
+            disabled={readOnlyActions}
+            onClick={(event) => { openMove(event.currentTarget); }}
+          >
+            <I.folderPlus />
+          </button>
           <button className={buttons.iconAction} data-size="28" type="button" aria-label="Archive batch" data-tip="Archive batch" disabled={readOnlyActions} onClick={() => { onBatchAction('delete', batch); }}>
             <I.archive />
           </button>
-          <button
-            ref={moreBtnRef}
+          {hasMoreItems && <button
+            ref={bindMoreButton}
             className={buttons.iconAction}
             data-size="28"
             type="button"
@@ -387,16 +451,27 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
             data-tip-place="above-end"
             aria-haspopup="menu"
             aria-expanded={moreOpen}
-            onClick={() => { setMoreOpen((value) => !value); }}
+            onBlur={(event) => {
+              const next = event.relatedTarget;
+              if (!pinFocusHandoffRef.current || !(next instanceof HTMLElement) || !next.isConnected) return;
+              runWhenReachable(() => {
+                if (document.activeElement === moreBtnRef.current) next.focus();
+              }, next);
+            }}
+            onClick={(event) => {
+              event.currentTarget.focus({ preventScroll: true });
+              setMoreOpen((value) => !value);
+            }}
           >
             <I.more />
-          </button>
+          </button>}
+        </div>
         </div>
         {moreOpen && (
           <BatchOverflowMenu
             batch={batch}
             anchorRef={moreBtnRef}
-            open
+            open={hasMoreItems}
             promptsEnabled={promptsEnabled}
             readOnlyActions={readOnlyActions}
             i2vAvailable={i2vAvailable}
@@ -408,7 +483,7 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
           <MovePopover
             batch={batch}
             anchorRef={moveAnchorRef}
-            returnFocusFallbackRef={moreBtnRef}
+            returnFocusFallbackRef={moveBtnRef}
             open
             view={activeView}
             q={q}

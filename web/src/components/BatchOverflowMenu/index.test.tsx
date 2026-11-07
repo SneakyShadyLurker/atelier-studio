@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import type { Batch } from '@atelier/shared';
-import BatchOverflowMenu, { type BatchOverflowAction } from './index';
+import BatchOverflowMenu, { buildBatchOverflowGroups, type BatchOverflowAction } from './index';
 import { allDoneBatch } from '../../../test/fixtures/batches';
 
 const originalMatchMedia = window.matchMedia.bind(window);
@@ -52,14 +52,21 @@ function renderMenu(batch: Batch, opts?: { promptsEnabled?: boolean; readOnlyAct
 
 describe('BatchOverflowMenu', () => {
   it('renders the grouped action items as a menu', () => {
+    installPhone();
     renderMenu(makeBatch({ pinned: false, provenance: { templateId: 't1', templateName: 'T', rollSeed: 1, pins: {} } }));
     expect(screen.getByRole('menu', { name: /batch actions/i })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /re-roll/i })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /re-roll/i })).toBeNull();
     expect(screen.getByRole('menuitem', { name: /reopen in picker/i })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /copy prompt/i })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /save to templates/i })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /^pin batch$/i })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /move to collection/i })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /move to collection/i })).toBeNull();
+  });
+
+  it('uses the canonical groups for empty desktop menus and phone-only Copy', () => {
+    const options = { batch: makeBatch({ pinned: true }), promptsEnabled: false, readOnlyActions: true };
+    expect(buildBatchOverflowGroups({ ...options, isPhone: false })).toEqual([]);
+    expect(buildBatchOverflowGroups({ ...options, isPhone: true }).flatMap((group) => group.items.map((item) => item.action))).toEqual(['copy']);
   });
 
   it('hides Pin when already pinned', () => {
@@ -88,7 +95,7 @@ describe('BatchOverflowMenu', () => {
 
   it('ignores a row activation during the exit fade after Escape', async () => {
     const { onSelect, onClose } = renderMenu(makeBatch({ pinned: false }));
-    const reroll = screen.getByRole('menuitem', { name: /re-roll/i });
+    const reroll = screen.getByRole('menuitem', { name: /save to templates/i });
     reroll.focus();
     fireEvent.keyDown(reroll, { key: 'Escape' });
     // Enter on the still-focused row inside the fade window.
@@ -101,13 +108,14 @@ describe('BatchOverflowMenu', () => {
 
   it('fires onSelect with the action when a row is clicked', () => {
     const { onSelect } = renderMenu(makeBatch({ pinned: false }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /re-roll/i }));
-    expect(onSelect).toHaveBeenCalledWith('reroll');
+    fireEvent.click(screen.getByRole('menuitem', { name: /save to templates/i }));
+    expect(onSelect).toHaveBeenCalledWith('saveTemplate');
   });
 
   it('disables non-copy actions under readOnlyActions but keeps Copy enabled', () => {
+    installPhone();
     renderMenu(makeBatch({ pinned: false }), { readOnlyActions: true });
-    const rerollBtn = screen.getByRole('menuitem', { name: /re-roll/i });
+    const rerollBtn = screen.getByRole('menuitem', { name: /save to templates/i });
     const copyBtn = screen.getByRole('menuitem', { name: /copy prompt/i });
     expect((rerollBtn as HTMLButtonElement).disabled).toBe(true);
     expect((copyBtn as HTMLButtonElement).disabled).toBe(false);
@@ -115,7 +123,7 @@ describe('BatchOverflowMenu', () => {
 
   it('closes on Escape from inside the menu', async () => {
     const { onClose } = renderMenu(makeBatch({ pinned: false }));
-    const reroll = screen.getByRole('menuitem', { name: /re-roll/i });
+    const reroll = screen.getByRole('menuitem', { name: /save to templates/i });
     reroll.focus();
     // Dismissal rides the shared exit transition (useExitTransition).
     fireEvent.keyDown(reroll, { key: 'Escape' });
@@ -124,11 +132,12 @@ describe('BatchOverflowMenu', () => {
   });
 
   it('moves focus between enabled items with Arrow/Home/End keys', () => {
+    installPhone();
     renderMenu(makeBatch({ pinned: false, provenance: { templateId: 't1', templateName: 'T', rollSeed: 1, pins: {} } }));
     const menu = screen.getByRole('menu', { name: /batch actions/i });
-    const reroll = screen.getByRole('menuitem', { name: /re-roll/i });
+    const reroll = screen.getByRole('menuitem', { name: /reopen in picker/i });
     const copy = screen.getByRole('menuitem', { name: /copy prompt/i });
-    const move = screen.getByRole('menuitem', { name: /move to collection/i });
+    const move = screen.getByRole('menuitem', { name: /^pin batch$/i });
     reroll.focus();
     fireEvent.keyDown(menu, { key: 'Home' });
     expect(document.activeElement).toBe(reroll);
@@ -140,9 +149,9 @@ describe('BatchOverflowMenu', () => {
     expect(document.activeElement).toBe(move); // wraps from first to last
     reroll.focus();
     fireEvent.keyDown(menu, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: /reopen in picker/i }));
-    fireEvent.keyDown(menu, { key: 'ArrowDown' });
     expect(document.activeElement).toBe(copy);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: /save to templates/i }));
   });
 
   // Geometry is asserted in a real browser (e2e/native-anchors.spec.ts); here

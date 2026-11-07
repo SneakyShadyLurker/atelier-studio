@@ -121,3 +121,50 @@
   padding: 2px 6px;
   color: var(--ink-2);
 }
+
+/* The named Canvas query measures its content box above the existing
+   Composer padding reserve. Only an etched state with an action compacts. */
+@container feed (width >= 560px) and (height < 440px) {
+  .state:has(> .plate):has(> .action) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 520px) auto;
+    grid-template-areas: 'plate title action' 'plate body action';
+    justify-content: center;
+    align-items: center;
+    column-gap: 18px;
+    row-gap: 4px;
+    min-height: 0;
+    flex: none;
+    padding-block: 0;
+    text-align: start;
+  }
+
+  .state:has(> .action) > .plate {
+    grid-area: plate;
+    width: 64px;
+    height: 64px;
+    padding: 8px;
+    --etch-width: 48px;
+  }
+
+  .state:has(> .plate):has(> .action) > h2 {
+    grid-area: title;
+    align-self: end;
+    overflow-wrap: anywhere;
+  }
+
+  .state:has(> .plate):has(> .action) > p {
+    grid-area: body;
+    align-self: start;
+    overflow-wrap: anywhere;
+  }
+
+  .state:has(> .plate):has(> .action):not(:has(> p)) > h2 {
+    grid-row: 1 / -1;
+    align-self: center;
+  }
+
+  .state:has(> .plate) > .action {
+    grid-area: action;
+  }
+}

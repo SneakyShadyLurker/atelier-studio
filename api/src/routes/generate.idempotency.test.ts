@@ -77,7 +77,7 @@ function generateRequest(overrides: Record<string, unknown> = {}, user = 'carol'
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Remote-User': user },
     body: JSON.stringify({
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       prompt: 'a test image',
       ratio: '1:1',
       count: 1,
@@ -105,7 +105,7 @@ function insertKeyedBatch(
   db.query(
     `INSERT INTO batches (id, user_id, prompt, ratio, model_id, model_label, created_at, status, pool, idempotency_key)
      VALUES (?, ?, 'p', '1:1', ?, 'Label', 1, ?, 'shared', ?)`,
-  ).run(opts.id, opts.user, opts.modelId ?? 'gpt-image-2.5-sunburst', opts.status ?? 'running', opts.key);
+  ).run(opts.id, opts.user, opts.modelId ?? 'gpt-image-2.6-sunburst', opts.status ?? 'running', opts.key);
   db.query(
     `INSERT INTO tiles (id, batch_id, user_id, tile_index, seed, status) VALUES (?, ?, ?, 0, 7, ?)`,
   ).run(`${opts.id}-t0`, opts.id, opts.user, opts.status === 'done' ? 'done' : 'loading');

@@ -8,7 +8,7 @@ import type { ComposerLibrary } from '../../lib/resolveComposerPrompt';
 import { useAtelierStore } from '../../store/atelier';
 
 const noop = () => { /* noop */ };
-const modelOptions: readonly ChipSelectOption<string>[] = [{ value: 'gpt-image-2.5-sunburst', label: 'GPT Image 2.5 Sunburst' }];
+const modelOptions: readonly ChipSelectOption<string>[] = [{ value: 'gpt-image-2.6-sunburst', label: 'GPT Image 2.6 Sunburst' }];
 const library: ComposerLibrary = { variableLists: [], dimensions: [] };
 
 // Generate reads the text-model gate, a query.
@@ -40,7 +40,7 @@ describe('BrainstormPhase', () => {
       <BrainstormPhase
         onBack={noop}
         modelOptions={modelOptions}
-        modelId="gpt-image-2.5-sunburst"
+        modelId="gpt-image-2.6-sunburst"
         onModelChange={noop}
         library={library}
         navigateToTextModels={noop}
@@ -58,7 +58,7 @@ describe('BrainstormPhase', () => {
       <BrainstormPhase
         onBack={noop}
         modelOptions={modelOptions}
-        modelId="gpt-image-2.5-sunburst"
+        modelId="gpt-image-2.6-sunburst"
         onModelChange={noop}
         library={library}
         navigateToTextModels={noop}
@@ -75,7 +75,7 @@ describe('BrainstormPhase', () => {
 
   test('brief survives unmount/remount (persisted in the composer draft)', async () => {
     const { default: BrainstormPhase } = await loadComponent({ status: 'idle', generated: 0, errorMessage: null });
-    const props = { onBack: noop, modelOptions, modelId: 'gpt-image-2.5-sunburst', onModelChange: noop, library, navigateToTextModels: noop };
+    const props = { onBack: noop, modelOptions, modelId: 'gpt-image-2.6-sunburst', onModelChange: noop, library, navigateToTextModels: noop };
     const { unmount } = render(<BrainstormPhase {...props} />);
 
     const brief = screen.getByPlaceholderText(/real world/i);
@@ -106,7 +106,7 @@ describe('BrainstormPhase', () => {
       <BrainstormPhase
         onBack={noop}
         modelOptions={modelOptions}
-        modelId="gpt-image-2.5-sunburst"
+        modelId="gpt-image-2.6-sunburst"
         onModelChange={noop}
         library={library}
         navigateToTextModels={noop}

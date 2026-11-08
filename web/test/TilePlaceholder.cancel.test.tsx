@@ -57,8 +57,8 @@ function seedTile(client: QueryClient, status: 'loading' | 'done' = 'loading'): 
         id: 'b1',
         prompt: 'prompt',
         ratio: '1:1',
-        modelId: 'gpt-image-2.5-sunburst',
-        modelLabel: 'GPT Image 2.5 Sunburst',
+        modelId: 'gpt-image-2.6-sunburst',
+        modelLabel: 'GPT Image 2.6 Sunburst',
         createdAt: 1,
         collectionId: null,
           pinned: false,
@@ -98,7 +98,7 @@ afterEach(() => {
 describe('TilePlaceholder Cancel button', () => {
   test('renders Cancel button with aria-label, data-tip, and close icon', () => {
     render(
-      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
+      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.6-sunburst" startedAt={Date.now()} />,
       { wrapper },
     );
     const btn = screen.getByLabelText('Cancel generation');
@@ -114,7 +114,7 @@ describe('TilePlaceholder Cancel button', () => {
     test(`click sends exactly one DELETE at once (reduced motion: ${String(reduced)})`, async () => {
       setReducedMotion(reduced);
       render(
-        <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
+        <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.6-sunburst" startedAt={Date.now()} />,
         { wrapper },
       );
       fireEvent.click(screen.getByLabelText('Cancel generation'));
@@ -131,7 +131,7 @@ describe('TilePlaceholder Cancel button', () => {
     // A virtualized scroll-out or a view switch can unmount the tile at once;
     // the cancel already left with the click.
     const { unmount } = render(
-      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
+      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.6-sunburst" startedAt={Date.now()} />,
       { wrapper },
     );
     fireEvent.click(screen.getByLabelText('Cancel generation'));
@@ -148,7 +148,7 @@ describe('TilePlaceholder Cancel button', () => {
     const client = createClient();
     seedTile(client, 'done');
     render(
-      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
+      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.6-sunburst" startedAt={Date.now()} />,
       { wrapper: wrapperFor(client) },
     );
 
@@ -160,7 +160,7 @@ describe('TilePlaceholder Cancel button', () => {
 
   test('Esc key on the tile cancels', async () => {
     render(
-      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
+      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.6-sunburst" startedAt={Date.now()} />,
       { wrapper },
     );
     const btn = screen.getByLabelText('Cancel generation');
@@ -171,7 +171,7 @@ describe('TilePlaceholder Cancel button', () => {
 
   test('double-click does not fire cancelTile twice', async () => {
     render(
-      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
+      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.6-sunburst" startedAt={Date.now()} />,
       { wrapper },
     );
     const btn = screen.getByLabelText('Cancel generation');
@@ -183,7 +183,7 @@ describe('TilePlaceholder Cancel button', () => {
 
   test('button is keyboard-focusable', () => {
     render(
-      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.5-sunburst" startedAt={Date.now()} />,
+      <TilePlaceholder tileId="t1" batchId="b1" batchStatus="running" aspectRatio="1 / 1" modelName="gpt-image-2.6-sunburst" startedAt={Date.now()} />,
       { wrapper },
     );
     const btn = screen.getByLabelText('Cancel generation');

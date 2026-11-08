@@ -16,8 +16,8 @@ const collections: readonly Collection[] = [
 ];
 
 const models: readonly Model[] = [{
-  id: 'gpt-image-2.5-sunburst-cloud',
-  name: 'GPT Image 2.5 Sunburst',
+  id: 'gpt-image-2.6-sunburst-cloud',
+  name: 'GPT Image 2.6 Sunburst',
   backend: 'cloud',
   tag: 'cloud',
   latency: 'fast',
@@ -33,8 +33,8 @@ function batch(overrides: Partial<Batch> = {}): Batch {
     id: 'batch-logo',
     prompt: 'Logo mark for a Nordic espresso bar',
     ratio: '1:1',
-    modelId: 'gpt-image-2.5-sunburst-cloud',
-    modelLabel: 'GPT Image 2.5 Sunburst',
+    modelId: 'gpt-image-2.6-sunburst-cloud',
+    modelLabel: 'GPT Image 2.6 Sunburst',
     createdAt: Date.now(),
     collectionId: null,
       pinned: false,

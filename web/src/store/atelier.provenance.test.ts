@@ -34,20 +34,20 @@ describe('composer provenance capture + invalidation', () => {
 
   test('toGenerateRequest forwards provenance onto the wire request', () => {
     const draft = {
-      prompt: '  text  ', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1' as const, durationFrames: null, count: 2 as const,
+      prompt: '  text  ', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1' as const, durationFrames: null, count: 2 as const,
       refImages: [], rollQueue: [],
       provenance: { templateId: 'tpl1', rollSeed: 5, pins: { 'face#0': 'opt-a' } },
     };
-    const req = toGenerateRequest(draft, 'gpt-image-2.5-sunburst', '1:1');
+    const req = toGenerateRequest(draft, 'gpt-image-2.6-sunburst', '1:1');
     expect(req.provenance).toEqual({ templateId: 'tpl1', rollSeed: 5, pins: { 'face#0': 'opt-a' } });
   });
 
   test('toGenerateRequest omits provenance key when absent', () => {
     const draft = {
-      prompt: 'text', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1' as const, durationFrames: null, count: 2 as const,
+      prompt: 'text', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1' as const, durationFrames: null, count: 2 as const,
       refImages: [], rollQueue: [],
     };
-    const req = toGenerateRequest(draft, 'gpt-image-2.5-sunburst', '1:1');
+    const req = toGenerateRequest(draft, 'gpt-image-2.6-sunburst', '1:1');
     expect('provenance' in req).toBe(false);
   });
 });

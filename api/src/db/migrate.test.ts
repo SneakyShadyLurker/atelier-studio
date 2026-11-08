@@ -1548,7 +1548,7 @@ describe('migration 46 - drop batch preferred host', () => {
         `INSERT INTO batches (id, user_id, prompt, ratio, model_id, model_label, created_at, status, pool, preferred_host)
          VALUES ('b1', 'u1', 'p1', '1:1', 'krea-2-gonzalomo', 'Krea 2 GonzaLomo', 1, 'queued', 'local', 'pod'),
                 ('b2', 'u1', 'p2', '1:1', 'krea-2-gonzalomo', 'Krea 2 GonzaLomo', 2, 'done', 'local', 'direct'),
-                ('b3', 'u1', 'p3', '1:1', 'gpt-image-2.5-sunburst', 'GPT', 3, 'done', 'shared', NULL)`,
+                ('b3', 'u1', 'p3', '1:1', 'gpt-image-2.6-sunburst', 'GPT', 3, 'done', 'shared', NULL)`,
       );
       const before = db.query('SELECT rowid, id, prompt, status, pool FROM batches ORDER BY id').all();
 

@@ -16,7 +16,7 @@ function entry(batchId: string, userId = 'u1', _pool: Pool = 'shared'): queue.Qu
   return {
     batchId,
     userId,
-    modelId: 'gpt-image-2.5-sunburst',
+    modelId: 'gpt-image-2.6-sunburst',
     count: 1,
     queuedAt: Date.now(),
   };
@@ -26,7 +26,7 @@ function seedQueued(db: Database, batchId: string, createdAt: number, pool: Pool
   db.run("INSERT OR IGNORE INTO users (id, created_at) VALUES ('u1', ?)", [Date.now()]);
   db.run(
     `INSERT INTO batches (id, user_id, prompt, model_id, model_label, ratio, created_at, status, pool)
-     VALUES (?, 'u1', 'p', 'gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst', '1:1', ?, 'queued', ?)`,
+     VALUES (?, 'u1', 'p', 'gpt-image-2.6-sunburst', 'GPT Image 2.6 Sunburst', '1:1', ?, 'queued', ?)`,
     [batchId, createdAt, pool],
   );
   db.run(

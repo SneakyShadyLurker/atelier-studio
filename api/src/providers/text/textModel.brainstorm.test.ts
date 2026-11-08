@@ -16,7 +16,7 @@ const FS = BRAINSTORM_FIELD_SEPARATOR;
 const rec = (scene: string, subject: string, details: string): string =>
   `${scene}\n${FS}\n${subject}\n${FS}\n${details}`;
 
-// These suites drive brainstormCharacters with modelId 'gpt-image-2.5-sunburst', so the
+// These suites drive brainstormCharacters with modelId 'gpt-image-2.6-sunburst', so the
 // provider assembles with the GPT (anatomy-safe) constraints variant.
 const assembled = (scene: string, subject: string, details: string): string =>
   `Scene / Image type: ${scene}\nSubject: ${subject}\nDetails: ${details}\n${BRAINSTORM_CONSTRAINTS_GPT}`;
@@ -58,7 +58,7 @@ describe('brainstormCharacters', () => {
       const baseUrl = serve(() => new Response(`data: ${data}\n\n${reason === undefined ? '' : 'data: [DONE]\n\n'}`));
       const chunks: BrainstormChunk[] = [];
       for await (const chunk of provider(baseUrl).brainstormCharacters(
-        { count: 2, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal,
+        { count: 2, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal,
       )) chunks.push(chunk);
       expect(chunks.filter((chunk) => chunk.type === 'prompt')).toEqual([
         { type: 'prompt', index: 0, text: assembled('scene1', 'subject1', 'details1') },
@@ -72,7 +72,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => new Response(`data: ${data}\n\n`));
     const chunks: BrainstormChunk[] = [];
     for await (const chunk of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal,
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal,
     )) chunks.push(chunk);
     expect(chunks.at(-1)).toEqual({ type: 'done', count: 1 });
   });
@@ -94,7 +94,7 @@ describe('brainstormCharacters', () => {
     });
     const chunks: BrainstormChunk[] = [];
     for await (const chunk of highDefault.brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal,
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal,
     )) chunks.push(chunk);
     expect(body.reasoning_effort).toBe('high');
     expect(body.max_completion_tokens).toBe(brainstormDefaults(1, 'high').max_completion_tokens);
@@ -107,7 +107,7 @@ describe('brainstormCharacters', () => {
       const baseUrl = serve(() => new Response(`data: ${data}\n\ndata: [DONE]\n\n`));
       const chunks: BrainstormChunk[] = [];
       for await (const chunk of provider(baseUrl).brainstormCharacters(
-        { count: 1, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal,
+        { count: 1, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal,
       )) chunks.push(chunk);
       expect(chunks.at(-1)).toMatchObject({ type: 'failed', ...(reason === 'content_filter' ? { kind: 'content-filter' } : {}) });
       expect(chunks.some((chunk) => chunk.type === 'done')).toBe(false);
@@ -119,7 +119,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => new Response(`data: ${data}\n\ndata: [DONE]\n\n`));
     const chunks: BrainstormChunk[] = [];
     for await (const chunk of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal,
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal,
     )) chunks.push(chunk);
     expect(chunks.at(-1)).toEqual({ type: 'done', count: 1 });
   });
@@ -129,7 +129,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const chunks: { type: string; index?: number; text?: string; count?: number }[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 5, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 5, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -147,7 +147,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const prompts: string[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 2, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 2, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       if (c.type === 'prompt') prompts.push(c.text);
@@ -160,7 +160,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const chunks: { type: string; index?: number; text?: string; count?: number }[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 5, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 5, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -175,7 +175,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const chunks: { type: string; text?: string; count?: number }[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -192,7 +192,7 @@ describe('brainstormCharacters', () => {
     const prompts: string[] = [];
     let doneCount = -1;
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 2, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 2, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       if (c.type === 'prompt') prompts.push(c.text);
@@ -209,7 +209,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const chunks: { type: string; index?: number; text?: string; count?: number }[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 5, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 5, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -225,7 +225,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const chunks: BrainstormChunk[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 5, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 5, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -241,7 +241,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const chunks: BrainstormChunk[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -262,7 +262,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const chunks: BrainstormChunk[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -279,7 +279,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const chunks: BrainstormChunk[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -300,7 +300,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(out));
     const chunks: BrainstormChunk[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -319,7 +319,7 @@ describe('brainstormCharacters', () => {
     ));
     const chunks: BrainstormChunk[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -339,7 +339,7 @@ describe('brainstormCharacters', () => {
     ));
     const chunks: BrainstormChunk[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);
@@ -357,7 +357,7 @@ describe('brainstormCharacters', () => {
     const baseUrl = serve(() => chatSse(`${refusal}\n${RS}\n`));
     const chunks: BrainstormChunk[] = [];
     for await (const c of provider(baseUrl).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     )) {
       chunks.push(c);

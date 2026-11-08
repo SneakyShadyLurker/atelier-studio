@@ -54,7 +54,7 @@ export const KIMI = adminModel({
   structuredOutput: 'json_schema',
   reasoningLevels: ['low', 'high', 'max'],
   verifiedAt: 1_790_000_000_000,
-  usage: { isDefault: true, tasks: ['ai-fill'], writers: ['gpt-image-2.5-sunburst'], userPicks: 3 },
+  usage: { isDefault: true, tasks: ['ai-fill'], writers: ['gpt-image-2.6-sunburst'], userPicks: 3 },
 });
 
 export const GLM = adminModel({
@@ -97,7 +97,7 @@ export const ROUTING: TextRoutingResponse = {
   defaults: { default: 'm-kimi', byTask: { 'ai-fill': 'm-kimi' } },
   writers: {},
   imageModels: [
-    { id: 'gpt-image-2.5-sunburst', label: 'GPT Image 2.5 Sunburst' },
+    { id: 'gpt-image-2.6-sunburst', label: 'GPT Image 2.6 Sunburst' },
     { id: 'krea-2', label: 'Krea 2' },
   ],
 };

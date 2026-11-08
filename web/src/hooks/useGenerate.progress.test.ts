@@ -79,7 +79,7 @@ describe('useGenerate progress events', () => {
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
     const promise = result.current.generate({
       prompt: 'animate progress',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
     });

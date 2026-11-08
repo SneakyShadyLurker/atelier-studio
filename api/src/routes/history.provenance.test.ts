@@ -9,8 +9,8 @@ import type { BatchRow } from '../db/types';
 
 function seedBatchRow(overrides: Partial<BatchRow>): BatchRow {
   return {
-    id: 'b1', user_id: 'u1', prompt: 'p', ratio: '1:1', model_id: 'gpt-image-2.5-sunburst',
-    model_label: 'GPT Image 2.5 Sunburst', created_at: 1, archived_at: null, collection_id: null,
+    id: 'b1', user_id: 'u1', prompt: 'p', ratio: '1:1', model_id: 'gpt-image-2.6-sunburst',
+    model_label: 'GPT Image 2.6 Sunburst', created_at: 1, archived_at: null, collection_id: null,
     pinned: 0, status: 'done', pool: 'shared',
     template_id: null, roll_seed: null, roll_pins: null, i2v_source_upload_id: null,
     motion_prompt: null, duration_frames: null,

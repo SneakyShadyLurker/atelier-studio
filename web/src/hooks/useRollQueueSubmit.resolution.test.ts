@@ -6,7 +6,7 @@ import type { GenerateRequest, Model, TagDimension, VariableList } from '@atelie
 import { useAtelierStore, initialAtelierState } from '../store/atelier';
 import { useRollQueueSubmit } from './useRollQueueSubmit';
 
-const model = { id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', pool: 'shared', backend: 'cloud', supportsReferenceImages: false } as unknown as Model;
+const model = { id: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst', pool: 'shared', backend: 'cloud', supportsReferenceImages: false } as unknown as Model;
 
 const era: VariableList = {
   id: 'e', name: 'era', sortOrder: 0, createdAt: 0, updatedAt: 0,

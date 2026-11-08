@@ -46,7 +46,7 @@ function setup(provider: AdminProvider, options: { test?: () => Response } = {})
   function Wrapper({ children }: PropsWithChildren) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   }
-  const imageLabel = (id: string) => (id === 'gpt-image-2.5-sunburst' ? 'GPT Image 2.5 Sunburst' : id);
+  const imageLabel = (id: string) => (id === 'gpt-image-2.6-sunburst' ? 'GPT Image 2.6 Sunburst' : id);
   render(<EditProviderDialog provider={provider} imageLabel={imageLabel} onClose={onClose} />, { wrapper: Wrapper });
   return { calls, onClose, client };
 }
@@ -169,7 +169,7 @@ describe('Edit provider', () => {
     fireEvent.click(button('Delete provider…'));
     const confirm = await screen.findByRole('dialog', { name: 'Delete CLIProxyAPI?' });
     expect(confirm.textContent).toContain(
-      'Its 2 models go with it. Between them they are the default model, assigned to AI fill, the prompt writer for GPT Image 2.5 Sunburst, and picked by 3 people. Those will fall back to the next model in line.',
+      'Its 2 models go with it. Between them they are the default model, assigned to AI fill, the prompt writer for GPT Image 2.6 Sunburst, and picked by 3 people. Those will fall back to the next model in line.',
     );
     fireEvent.click(within(confirm).getByRole('button', { name: 'Delete provider' }));
     await waitFor(() => { expect(onClose).toHaveBeenCalled(); });

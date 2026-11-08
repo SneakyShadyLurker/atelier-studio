@@ -45,7 +45,7 @@ void mock.module('../api/aiFill', () => ({
 
 const { useRollQueueSubmit } = await import('./useRollQueueSubmit');
 
-const model = { id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', pool: 'shared', backend: 'cloud', supportsReferenceImages: false } as unknown as Model;
+const model = { id: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst', pool: 'shared', backend: 'cloud', supportsReferenceImages: false } as unknown as Model;
 const byokModel = { ...model, requiresKey: true } as unknown as Model;
 const emptyLib: { variableLists: readonly VariableList[]; dimensions: readonly TagDimension[] } = { variableLists: [], dimensions: [] };
 
@@ -552,7 +552,7 @@ describe('useRollQueueSubmit — {{ai-fill}} resolution', () => {
     expect(resolveAiFillMock.mock.calls[0]?.[0]).toEqual({
       staticSegments: ['a ', ' b'],
       instructions: ['yard'],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     });
     expect(h.generate.mock.calls[0]?.[0]?.prompt).toBe('a FILLED b');
   });

@@ -136,7 +136,7 @@ describe('admin gate and CSRF', () => {
     ['DELETE', '/text-providers/p1/models/m1'],
     ['POST', '/text-providers/p1/models/m1/test'],
     ['PUT', '/text-routing/defaults/default'],
-    ['PUT', '/text-routing/writers/gpt-image-2.5-sunburst'],
+    ['PUT', '/text-routing/writers/gpt-image-2.6-sunburst'],
   ];
 
   test.each(routes)('a non-admin gets 404 on %s %s', async (method, path) => {
@@ -336,11 +336,11 @@ describe('model writes', () => {
     const [model] = await createModels(rt, provider.id, [{ modelId: 'm-1' }]);
     const id = model?.id ?? '';
     await json(await call(rt, 'PUT', '/text-routing/defaults/rescue', { modelId: id }), 200);
-    await json(await call(rt, 'PUT', '/text-routing/writers/gpt-image-2.5-sunburst', { modelId: id, mode: 'lock' }), 200);
+    await json(await call(rt, 'PUT', '/text-routing/writers/gpt-image-2.6-sunburst', { modelId: id, mode: 'lock' }), 200);
     rt.text.store.writeUserPick('bob', 'enhance', { modelId: id, effort: null });
 
     expect((await providers(rt))[0]?.models[0]?.usage).toEqual({
-      isDefault: false, tasks: ['rescue'], writers: ['gpt-image-2.5-sunburst'], userPicks: 1,
+      isDefault: false, tasks: ['rescue'], writers: ['gpt-image-2.6-sunburst'], userPicks: 1,
     });
     const before = rt.text.store.revision();
     expect(await json<{ ok: boolean }>(await call(rt, 'DELETE', `/text-providers/${provider.id}/models/${id}`), 200)).toEqual({ ok: true });

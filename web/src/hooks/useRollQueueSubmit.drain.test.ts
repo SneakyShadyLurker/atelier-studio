@@ -28,7 +28,7 @@ void mock.module('../api/aiFill', () => ({
 
 const { useRollQueueSubmit } = await import('./useRollQueueSubmit');
 
-const model = { id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', pool: 'shared', backend: 'cloud', supportsReferenceImages: false } as unknown as Model;
+const model = { id: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst', pool: 'shared', backend: 'cloud', supportsReferenceImages: false } as unknown as Model;
 const emptyLib: { variableLists: readonly VariableList[]; dimensions: readonly TagDimension[] } = { variableLists: [], dimensions: [] };
 
 function queueFull429(retryAfterSeconds = 0): ApiError {

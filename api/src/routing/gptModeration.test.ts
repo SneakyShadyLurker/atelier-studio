@@ -126,7 +126,7 @@ describe('GPT moderation gate', () => {
     const provider = seededText('gpt');
     const results = [
       ...(await collect(provider.enhance('input', [], signal()))),
-      ...(await collect(provider.brainstormCharacters({ modelId: 'gpt-image-2.5-sunburst', count: 1, brief: 'input' }, signal()))),
+      ...(await collect(provider.brainstormCharacters({ modelId: 'gpt-image-2.6-sunburst', count: 1, brief: 'input' }, signal()))),
       await provider.aiFill({ systemPrompt: 'instructions', userContent: 'input' }, signal()),
       await provider.draftList({ name: 'L', existing: [], target: 1 }, signal()),
       await provider.draftTemplate({ name: 'T', existingBody: '', library: { lists: [] } }, signal()),

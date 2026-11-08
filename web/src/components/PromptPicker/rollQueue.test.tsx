@@ -66,8 +66,8 @@ function renderPicker(targetContextLine?: ReactNode) {
       open
       onClose={mock()}
       targetContextLine={targetContextLine}
-      modelOptions={[{ value: 'gpt-image-2.5-sunburst', label: 'GPT Image 2.5 Sunburst' }]}
-      modelId="gpt-image-2.5-sunburst"
+      modelOptions={[{ value: 'gpt-image-2.6-sunburst', label: 'GPT Image 2.6 Sunburst' }]}
+      modelId="gpt-image-2.6-sunburst"
     />,
     { wrapper: wrapper(client) },
   );

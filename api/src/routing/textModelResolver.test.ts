@@ -19,7 +19,7 @@ import {
   type ResolveTextModelInput,
 } from './textModelResolver';
 
-const SUNBURST = 'gpt-image-2.5-sunburst';
+const SUNBURST = 'gpt-image-2.6-sunburst';
 const GPT_IMAGE = 'gpt-image-2';
 const LOCAL_IMAGE = 'krea-2-turbo';
 const BYOK_IMAGE = 'gemini-3.1-flash-image-preview';

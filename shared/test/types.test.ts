@@ -135,8 +135,8 @@ describe('shared wire types', () => {
 
   test('Model.supportedRatios is per-model and immutable', () => {
     const m: Model = {
-      id: 'gpt-image-2.5-sunburst',
-      name: 'GPT Image 2.5 Sunburst',
+      id: 'gpt-image-2.6-sunburst',
+      name: 'GPT Image 2.6 Sunburst',
       backend: 'cloud',
       tag: 'cloud',
       latency: 'medium',
@@ -172,8 +172,8 @@ describe('shared wire types', () => {
 
   test('Model.requiresKey is a narrow optional Google gate', () => {
     const m: Model = {
-      id: 'gpt-image-2.5-sunburst',
-      name: 'GPT Image 2.5 Sunburst',
+      id: 'gpt-image-2.6-sunburst',
+      name: 'GPT Image 2.6 Sunburst',
       backend: 'cloud',
       tag: 'cloud',
       latency: 'medium',
@@ -232,8 +232,8 @@ describe('shared wire types', () => {
       id: 'b1',
       prompt: 'p',
       ratio: '1:1',
-      modelId: 'gpt-image-2.5-sunburst',
-      modelLabel: 'GPT Image 2.5 Sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
+      modelLabel: 'GPT Image 2.6 Sunburst',
       createdAt: 1,
       collectionId: null,
       pinned: false,

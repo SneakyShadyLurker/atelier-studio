@@ -19,7 +19,7 @@ describe('prompt budgets', () => {
     expect(promptWordBudgetForModel('krea-2-gonzalomo')).toBe(200);
     expect(promptCharBudgetForModel('krea-2-gonzalomo')).toBe(1200);
 
-    for (const modelId of ['gemini-3-pro-image-preview', 'gpt-image-2.5-sunburst', 'moss-image-sft', 'other-model']) {
+    for (const modelId of ['gemini-3-pro-image-preview', 'gpt-image-2.6-sunburst', 'moss-image-sft', 'other-model']) {
       expect(promptWordBudgetForModel(modelId)).toBeNull();
       expect(promptCharBudgetForModel(modelId)).toBe(MAX_PROMPT_CHARS);
     }
@@ -34,7 +34,7 @@ describe('prompt budgets', () => {
     expect(share).toBeLessThan(0);
     expect(Math.max(promptMinPerSlotWordsForModel('krea-2-gonzalomo'), share)).toBe(KREA_MIN_PER_SLOT_WORDS);
     // Non-Krea targets keep the original floor.
-    expect(promptMinPerSlotWordsForModel('gpt-image-2.5-sunburst')).toBe(8);
+    expect(promptMinPerSlotWordsForModel('gpt-image-2.6-sunburst')).toBe(8);
   });
 
   test('counts whitespace-delimited words while ignoring empty tokens', () => {

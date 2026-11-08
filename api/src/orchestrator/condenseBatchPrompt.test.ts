@@ -185,7 +185,7 @@ test('leaves a Krea prompt at the trigger and every non-Krea prompt untouched', 
   const gptPrompt = wordPrompt(OVER_TRIGGER_WORDS + 30);
 
   expect(await condense(runtime, kreaPrompt)).toBe(kreaPrompt);
-  expect(await condense(runtime, gptPrompt, 'gpt-image-2.5-sunburst')).toBe(gptPrompt);
+  expect(await condense(runtime, gptPrompt, 'gpt-image-2.6-sunburst')).toBe(gptPrompt);
   expect(calls).toBe(0);
 });
 

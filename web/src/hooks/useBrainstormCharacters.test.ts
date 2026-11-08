@@ -32,7 +32,7 @@ describe('useBrainstormCharacters', () => {
       'event: done\ndata: {"count":2}\n\n',
     ) as unknown as typeof fetch;
     const { result } = renderHook(() => useBrainstormCharacters());
-    await act(async () => { await result.current.run({ brief: 'x', count: 2, modelId: 'gpt-image-2.5-sunburst' }); });
+    await act(async () => { await result.current.run({ brief: 'x', count: 2, modelId: 'gpt-image-2.6-sunburst' }); });
     expect(useAtelierStore.getState().draft.rollQueue).toHaveLength(2);
     expect(result.current.status).toBe('done');
     expect(result.current.generated).toBe(2);

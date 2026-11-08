@@ -41,8 +41,8 @@ describe('shortModelToken', () => {
   });
 
   test('gpt id prefix → GPT', () => {
-    expect(shortModelToken({ ...base, id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', backend: 'cloud' })).toBe('GPT');
-    expect(shortModelToken({ ...base, id: 'gpt-image-2.5-sunburst-cloud', name: 'GPT Image 2.5 Sunburst', backend: 'cloud' })).toBe('GPT');
+    expect(shortModelToken({ ...base, id: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst', backend: 'cloud' })).toBe('GPT');
+    expect(shortModelToken({ ...base, id: 'gpt-image-2.6-sunburst-cloud', name: 'GPT Image 2.6 Sunburst', backend: 'cloud' })).toBe('GPT');
   });
 
   test('fallback → first whitespace word of name', () => {

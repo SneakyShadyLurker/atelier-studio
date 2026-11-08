@@ -16,7 +16,7 @@ describe('textProviderForResolved', () => {
 describe('imageModelRouting', () => {
   test('only a registered image model selects a prompt writer', () => {
     const { config } = testRuntime();
-    expect(imageModelRouting(config, 'gpt-image-2.5-sunburst')).toEqual({ imageModelId: 'gpt-image-2.5-sunburst' });
+    expect(imageModelRouting(config, 'gpt-image-2.6-sunburst')).toEqual({ imageModelId: 'gpt-image-2.6-sunburst' });
     expect(imageModelRouting(config, 'not-a-model')).toEqual({});
     expect(imageModelRouting(config, undefined)).toEqual({});
   });

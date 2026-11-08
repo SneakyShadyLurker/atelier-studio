@@ -140,7 +140,7 @@ describe('DELETE cancel behavior', () => {
     db.query('INSERT INTO users (id, created_at) VALUES (?, ?)').run('alice', 1);
     db.query(
       `INSERT INTO batches (id, user_id, prompt, ratio, model_id, model_label, created_at, status, pool)
-       VALUES (?, 'alice', 'queued', '1:1', 'gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst', 1, 'queued', 'shared')`,
+       VALUES (?, 'alice', 'queued', '1:1', 'gpt-image-2.6-sunburst', 'GPT Image 2.6 Sunburst', 1, 'queued', 'shared')`,
     ).run(batchId);
     const insertTile = db.query(
       "INSERT INTO tiles (id, batch_id, user_id, tile_index, seed, status) VALUES (?, ?, 'alice', ?, ?, 'loading')",
@@ -151,7 +151,7 @@ describe('DELETE cancel behavior', () => {
     queue.enqueue('shared', {
       batchId,
       userId: 'alice',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       count: tileIds.length,
       queuedAt: 1,
     });

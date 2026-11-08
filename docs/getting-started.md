@@ -188,7 +188,7 @@ described in [Connect a text model](connect-a-text-model.md).
 
 Configure your own [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
 or compatible service first. Atelier's cloud image adapter requests
-`gpt-image-2.5-sunburst` and uses its image generation, edit and streaming
+`gpt-image-2.6-sunburst` and uses its image generation, edit and streaming
 contracts. A generic OpenAI-compatible chat endpoint alone is insufficient.
 The [provider reference](providers.md#cliproxyapi-cloud) describes the contract.
 

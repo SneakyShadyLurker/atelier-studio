@@ -13,7 +13,7 @@ describe('brainstorm wire types', () => {
   });
 
   it('models a request and the three SSE events', () => {
-    const req: BrainstormCharactersRequest = { brief: '1950s noir', count: 12, modelId: 'gpt-image-2.5-sunburst' };
+    const req: BrainstormCharactersRequest = { brief: '1950s noir', count: 12, modelId: 'gpt-image-2.6-sunburst' };
     expect(req.count).toBe(12);
     const events: BrainstormSseEvent[] = [
       { event: 'prompt', data: { index: 0, text: 'a full-body...' } },

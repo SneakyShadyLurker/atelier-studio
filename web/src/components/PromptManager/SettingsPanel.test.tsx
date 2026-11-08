@@ -6,6 +6,7 @@ import type { PublicTextModel, TaskRow, TextModelsResponse } from '@atelier/shar
 import { TEXT_TASK_LABELS, TEXT_TASKS } from '@atelier/shared';
 import { promptKeys } from '../../api/prompts';
 import { textModelKeys } from '../../api/textModels';
+import { textAdminKeys } from '../../api/textProviders';
 import { useAtelierStore, type PromptManagerTab } from '../../store/atelier';
 import PromptManager from './index';
 import SettingsPanel from './SettingsPanel';
@@ -40,16 +41,20 @@ function wrapper(client: QueryClient) {
   };
 }
 
-function renderPanel(response: TextModelsResponse = settings(), putStatus = 200) {
+function renderPanel(response: TextModelsResponse = settings(), putStatus = 200, admin: 'yes' | 'no' | 'unknown' = 'no') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+    if (urlOf(input).endsWith('/text-providers')) {
+      if (admin === 'unknown') return new Promise<Response>(() => undefined);
+      return admin === 'yes' ? Response.json({ providers: [] }) : Response.json({ error: 'not found' }, { status: 404 });
+    }
     if (urlOf(input).includes('/text-models')) {
       if (init?.method === 'PUT' && putStatus !== 200) return Response.json({ error: 'That model is offline.' }, { status: putStatus });
       return Response.json(response);
     }
     return Response.json({});
   }) as unknown as typeof fetch;
-  return render(<SettingsPanel />, { wrapper: wrapper(client) });
+  return { ...render(<SettingsPanel />, { wrapper: wrapper(client) }), client };
 }
 
 function renderManagerOnSettingsTab() {
@@ -77,12 +82,38 @@ afterEach(() => {
 });
 
 describe('SettingsPanel text models', () => {
+  for (const admin of ['yes', 'no', 'unknown'] as const) {
+    test(`zero-model wording respects ${admin} admin scope and clears on query refresh`, async () => {
+      const { client } = renderPanel({ ...settings(), models: [], tasks: [], defaults: { byTask: {} } }, 200, admin);
+      const copy = admin === 'yes'
+        ? 'No text models are connected yet. Add one in Text models.'
+        : 'Ask your admin to connect a text model.';
+      expect(await screen.findByText(copy)).toBeTruthy();
+      expect(screen.queryByText(admin === 'yes' ? 'Ask your admin to connect a text model.' : 'No text models are connected yet. Add one in Text models.')).toBeNull();
+      expect(screen.getAllByRole('button', { name: /^Text model for / })).toHaveLength(TEXT_TASKS.length);
+      for (const row of screen.getAllByRole('button', { name: /^Text model for / })) expect(row.hasAttribute('disabled')).toBe(false);
+      expect(screen.queryByRole('button', { name: /^Reasoning effort for / })).toBeNull();
+      expect(screen.queryByRole('link')).toBeNull();
+      await act(async () => { client.setQueryData(textModelKeys.all(), settings()); await Promise.resolve(); });
+      expect(await screen.findByText('Choose which model writes for you in each feature. Default follows the shared setup.')).toBeTruthy();
+      expect(screen.queryByText(copy)).toBeNull();
+    });
+  }
+
+  test('an unsettled admin probe updates through the existing snapshot', async () => {
+    const { client } = renderPanel({ ...settings(), models: [], tasks: [], defaults: { byTask: {} } }, 200, 'unknown');
+    expect(await screen.findByText('Ask your admin to connect a text model.')).toBeTruthy();
+    await act(async () => { client.setQueryData(textAdminKeys.providers(), { providers: [] }); await Promise.resolve(); });
+    expect(await screen.findByText('No text models are connected yet. Add one in Text models.')).toBeTruthy();
+    expect(screen.queryByText('Ask your admin to connect a text model.')).toBeNull();
+  });
+
   test('introduces the section and renders a row for every task on its default', async () => {
     renderPanel();
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Your text models' })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Your text model settings' })).toBeTruthy();
-    expect(screen.getByText('Choose which model writes for you in each feature; Default uses what your admin set for everyone.')).toBeTruthy();
+    expect(screen.getByText('Choose which model writes for you in each feature. Default follows the shared setup.')).toBeTruthy();
     for (const task of TEXT_TASKS) {
       expect(screen.getByRole('button', { name: `Text model for ${TEXT_TASK_LABELS[task]}, currently Default (Kimi K3)` })).toBeTruthy();
     }

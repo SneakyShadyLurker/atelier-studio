@@ -10,13 +10,14 @@ interface EnhanceControlProps {
   canUndo: boolean;
   /** Composer-level gate (offline / empty prompt). Combined with `enhancing`. */
   disabled: boolean;
+  needsTextModel?: boolean;
   onEnhance: () => void;
   onUndo: () => void;
   /** The Enhance button, which anchors the no-text-model note. */
   enhanceRef?: Ref<HTMLButtonElement> | undefined;
 }
 
-function EnhanceControl({ enhancing, canUndo, disabled, onEnhance, onUndo, enhanceRef }: EnhanceControlProps) {
+function EnhanceControl({ enhancing, canUndo, disabled, needsTextModel = false, onEnhance, onUndo, enhanceRef }: EnhanceControlProps) {
   // Announce the async enhance lifecycle to assistive tech: the textarea is
   // disabled mid-stream and its value is swapped on completion, neither of
   // which a screen reader picks up on its own. Derived from props (no extra
@@ -35,7 +36,7 @@ function EnhanceControl({ enhancing, canUndo, disabled, onEnhance, onUndo, enhan
         type="button"
         className={`${buttons.ai} ${styles.enhance}`}
         aria-label="Enhance"
-        data-tip="Rewrite prompt"
+        data-tip={needsTextModel ? 'Needs a text model' : 'Rewrite prompt'}
         disabled={disabled || enhancing}
         onClick={onEnhance}
       >

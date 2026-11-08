@@ -453,7 +453,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.getByRole('tab', { name: 'Settings', exact: true }).click();
         const panel = page.getByRole('region', { name: 'Your text model settings', exact: true });
         await expect(panel.getByRole('heading', { level: 2, name: 'Your text models', exact: true })).toBeVisible();
-        await expect(panel.getByText('Choose which model writes for you in each feature; Default uses what your admin set for everyone.', { exact: true })).toBeVisible();
+        await expect(panel.getByText('Choose which model writes for you in each feature. Default follows the shared setup.', { exact: true })).toBeVisible();
         const model = panel.getByRole('button', { name: /^Text model for AI fill,/ });
         const effort = panel.locator('button[aria-label^="Reasoning effort for AI fill,"]');
         const slot = effort.locator('..');
@@ -2362,6 +2362,127 @@ test('every form factor shows one scope title and the collapsed hamburger clears
   // moves the feed horizontally only.
   expect(collapsed.scrollerTop - collapsed.headerBottom).toBeLessThan(20);
   expect(Math.abs(collapsed.scrollerTop - expanded.scrollerTop)).toBeLessThanOrEqual(1);
+});
+
+// Extend the same offline fetch seam as settings ownership. Only the existing
+// admin model update changes availability; production query refresh owns the UI.
+async function withPrerequisiteReadiness(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    let inner = window.fetch.bind(window);
+    let enabled = false;
+    let provider: AdminProvider | undefined;
+    const fixture = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname === '/api/text-providers/provider-preview/models/text-model-preview' && init?.method === 'PATCH') {
+        const model = provider?.models[0];
+        if (!model) throw new Error('missing existing public writer fixture');
+        if (typeof init.body !== 'string') throw new Error('expected JSON model update');
+        const patch = JSON.parse(init.body) as { enabled: boolean };
+        enabled = patch.enabled;
+        return Response.json({ ...model, enabled });
+      }
+      if (url.pathname === '/api/text-models' && enabled) return Response.json({
+        models: [{ id: 'text-model-preview', displayName: 'Preview writer', providerName: 'Preview provider', vision: false, reasoningLevels: [], status: 'available' }],
+        tasks: [], defaults: { byTask: {} }, writers: {},
+      } satisfies TextModelsResponse);
+      const response = await inner(input, init);
+      if (url.pathname === '/api/text-providers' && response.ok) {
+        const data = await response.json() as { providers: AdminProvider[] };
+        provider = data.providers[0];
+        return Response.json({ providers: data.providers.map((item) => ({ ...item, models: item.models.map((model) => ({ ...model, enabled })) })) });
+      }
+      if (url.pathname === '/api/prompts' && response.ok) {
+        const data = await response.json() as PromptLibraryResponse;
+        return Response.json({ ...data, templates: data.templates.map((template, index) => index === 0
+          ? { ...template, body: 'A harbour with {{ai-fill: a color}} sails' } : template) });
+      }
+      return response;
+    };
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => fixture, set: (value: typeof fetch) => { inner = value; } });
+  });
+}
+
+test.describe('prerequisite readiness:', () => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    for (const colorScheme of ['light', 'dark'] as const) {
+      for (const admin of [false, true]) {
+        test(`${viewport.width}×${viewport.height} ${colorScheme} ${admin ? 'admin' : 'non-admin'} copy and existing actions`, async ({ browser }) => {
+          const { defaultBrowserType: _engine, ...device } = viewport.width === 1440 ? devices['Desktop Chrome'] : devices['iPhone 13'];
+          const context = await browser.newContext({ ...device, viewport, colorScheme });
+          try {
+            const page = await context.newPage();
+            await withPrerequisiteReadiness(page);
+            await page.goto(`/e2e/studio/index.html?view=prompts&noTextModels=1${admin ? '&textAdmin=1&textProvider=1' : ''}`);
+            await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+            const panel = page.getByRole('region', { name: 'Your text model settings' });
+            await expect(panel.getByText(admin
+              ? 'No text models are connected yet. Add one in Text models.'
+              : 'Ask your admin to connect a text model.', { exact: true })).toBeVisible();
+            await expect(panel.getByRole('button', { name: /^Text model for / })).toHaveCount(TEXT_TASKS.length);
+            await expect(panel.getByRole('link')).toHaveCount(0);
+            await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).click();
+            const composer = await approvedExpand(page);
+            await composer.getByRole('textbox', { name: 'Prompt', exact: true }).fill('A harbour with {{ai-fill: a color}} sails');
+            const status = composer.getByText('AI fills need a text model, 1 live token, re-rolled at Generate', { exact: true });
+            await expect(status).toBeVisible();
+            await expect(status).toHaveAttribute('data-tone', 'info');
+            const generate = composer.getByRole('button', { name: 'Generate', exact: true });
+            await expect(generate).toBeEnabled();
+            await expect(generate).not.toHaveAttribute('aria-disabled', 'true');
+            const enhance = page.getByRole('button', { name: 'Enhance', exact: true, includeHidden: true });
+            await expect(enhance).toHaveAttribute('data-tip', 'Needs a text model');
+            await expect(enhance).toBeEnabled();
+            await enhance.click();
+            const note = page.getByRole('dialog', { name: 'Enhance needs a text model.' });
+            await expect(note).toBeVisible();
+            if (admin) await expect(note.getByRole('button', { name: 'Set up text models' })).toBeVisible();
+            else await expect(note).toContainText('Ask your admin to connect a text model.');
+            await page.keyboard.press('Escape');
+            await expect(note).toHaveCount(0);
+            await expect(enhance).toBeFocused();
+            await composer.getByRole('button', { name: 'Templates', exact: true }).click();
+            const picker = page.getByRole('dialog', { name: 'Templates', exact: true });
+            const brainstorm = picker.getByRole('button', { name: 'Brainstorm', exact: true });
+            await expect(brainstorm).toHaveAttribute('data-tip', 'Needs a text model');
+            await brainstorm.click();
+            const brainstormNote = page.getByRole('dialog', { name: 'Brainstorm needs a text model.' });
+            await expect(brainstormNote).toBeVisible();
+            await page.keyboard.press('Escape');
+            await expect(brainstormNote).toHaveCount(0);
+            await expect(brainstorm).toBeFocused();
+            await expect(picker).toBeVisible();
+            await picker.getByRole('button', { name: /Editorial portrait/ }).click();
+            const simulate = page.getByRole('button', { name: 'Simulate this prompt' });
+            await expect(simulate).toHaveAttribute('data-tip', 'Preview the final prompt here. AI fills need a text model.');
+            await expect(simulate).toBeEnabled();
+            await expect(page.getByLabel('Prompt preview', { exact: true })).toBeVisible();
+            await expect(page.getByRole('button', { name: 'Use prompt', exact: true })).toBeEnabled();
+            await page.getByRole('dialog').getByRole('button', { name: 'Close templates', exact: true }).click();
+            await expect(page.getByRole('button', { name: 'Simulate this prompt' })).toHaveCount(0);
+            if (admin) {
+              await enhance.click();
+              await page.getByRole('button', { name: 'Set up text models', exact: true }).click();
+              const toggle = page.getByRole('switch', { name: 'Use Preview writer', exact: true });
+              await toggle.click();
+              await expect(toggle).toHaveAttribute('aria-checked', 'true');
+              await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).click();
+              await approvedExpand(page);
+              await expect(status).toHaveCount(0);
+              await expect(enhance).toHaveAttribute('data-tip', 'Rewrite prompt');
+              await expect(generate).not.toHaveAttribute('aria-disabled', 'true');
+              await composer.getByRole('button', { name: 'Templates', exact: true }).click();
+              await expect(page.getByRole('dialog', { name: 'Editorial portrait', exact: true })).toBeVisible();
+              await expect(simulate).toHaveAttribute('data-tip', "Preview the final prompt here — resolves AI fills too. Doesn't fill the composer.");
+              await expect(page.getByText('AI fills need a text model', { exact: true })).toHaveCount(0);
+            }
+            await test.info().attach('readiness.png', { body: await page.screenshot(), contentType: 'image/png' });
+          } finally {
+            await context.close();
+          }
+        });
+      }
+    }
+  }
 });
 
 // M1 (T5): AI actions stay enabled without a text model and answer with an

@@ -4,6 +4,7 @@ import { useDeferredValue, useMemo, ViewTransition } from 'react';
 import { describeError } from '../../lib/errorCopy';
 import { useAtelierStore } from '../../store/atelier';
 import { usePendingTaskPicks, useSetTaskPick, useTextModels } from '../../hooks/useTextModels';
+import { useTextModelGate } from '../../hooks/useTextModelGate';
 import ChipSelect, { type ChipSelectOption } from '../Composer/ChipSelect';
 import { LoadingState, ErrorState } from '../StateView';
 import ModelStepsSection from './ModelStepsSection';
@@ -50,13 +51,14 @@ function defaultModelId(data: TextModelsResponse, row: TaskRow, byId: ReadonlyMa
 
 function TextModelsSection() {
   const settings = useTextModels();
+  const { admin } = useTextModelGate();
   const setPick = useSetTaskPick();
   const saving = usePendingTaskPicks();
   const addToast = useAtelierStore((state) => state.addToast);
 
   // One render snapshot of the query: the loading, error and loaded states
   // swap in a Transition, each through its own part boundary.
-  const liveSnapshot = useMemo(() => ({ pending: settings.isPending, data: settings.data }), [settings.isPending, settings.data]);
+  const liveSnapshot = useMemo(() => ({ pending: settings.isPending, data: settings.data, admin }), [settings.isPending, settings.data, admin]);
   const snapshot = useDeferredValue(liveSnapshot);
 
   if (snapshot.pending) {
@@ -92,8 +94,10 @@ function TextModelsSection() {
         <h2 className={styles.headTitle}>Your text models</h2>
         <p className={styles.headNote}>
           {data.models.length === 0
-            ? 'Ask your admin to connect a text model.'
-            : 'Choose which model writes for you in each feature; Default uses what your admin set for everyone.'}
+            ? snapshot.admin === 'yes'
+              ? 'No text models are connected yet. Add one in Text models.'
+              : 'Ask your admin to connect a text model.'
+            : 'Choose which model writes for you in each feature. Default follows the shared setup.'}
         </p>
       </div>
       <div className={styles.body} data-zone="body">

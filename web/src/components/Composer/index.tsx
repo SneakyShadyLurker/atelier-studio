@@ -348,7 +348,7 @@ function Composer({
       let hint: string | undefined;
       if (model.requiresKey) hint = 'Needs your API key';
       else if (probingModelId === model.id) hint = 'Checking…';
-      else if (offline) hint = 'Offline, check again';
+      else if (offline) hint = 'Offline';
       else if (locator.toLowerCase() !== group.toLowerCase()) hint = locator;
       const baseTitle = `${model.backend}, ${locator}, ${model.latency}`;
       const title = offline && model.availability
@@ -358,6 +358,7 @@ function Composer({
         value: model.id,
         label: model.name,
         ...(hint === undefined ? {} : { hint }),
+        ...(offline && !model.requiresKey && probingModelId !== model.id ? { hintAction: 'Check again' } : {}),
         ...(model.requiresKey ? { hintIcon: <I.lock /> } : {}),
         group,
         title,
@@ -741,6 +742,8 @@ function Composer({
   } else if (aiFillExceeded) {
     statusMessage = `${aiFillCount} AI fills, up to ${AI_FILL_MAX_SLOTS} allowed`;
     statusTone = 'danger';
+  } else if (!isI2VMode && aiFillCount > 0 && textModelGate.availability === 'none') {
+    statusMessage = 'AI fills need a text model';
   } else if (missingI2VSource) {
     statusMessage = 'Add source still';
     statusTone = 'info';
@@ -1097,6 +1100,7 @@ function Composer({
               <EnhanceControl
                 enhancing={enhancing}
                 canUndo={canUndo}
+                needsTextModel={textModelGate.availability === 'none'}
                 disabled={disabled || !prompt.trim() || hasUploadingRefs || hasErrorRefs || refsOverCap}
                 onEnhance={() => { gateTextAction('Enhance', enhanceButtonRef, enhance); }}
                 onUndo={undo}
@@ -1109,6 +1113,7 @@ function Composer({
                 type="button"
                 className={buttons.ai}
                 aria-haspopup="dialog"
+                data-tip={textModelGate.availability === 'none' ? 'Needs a text model' : undefined}
                 disabled={disabled || enhancing}
                 onClick={() => { gateTextAction('Tell Story', tellStoryButtonRef, onTellStory); }}
               >

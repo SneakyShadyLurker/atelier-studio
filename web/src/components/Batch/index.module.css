@@ -71,6 +71,12 @@
   anchor-name: var(--prompt-anchor, none);
 }
 
+@media (width >= 768px) {
+  .prompt {
+    flex: 999 1 max(240px, 50%);
+  }
+}
+
 .promptText {
   display: block;
   overflow: hidden;

@@ -306,6 +306,40 @@ describe('PromptPicker', () => {
     expect(document.querySelector('[data-tip="Needs a text model"]')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Use prompt' }).hasAttribute('disabled')).toBe(false);
     expect(screen.getByRole('button', { name: /^Simulate/ }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: /^Simulate/ }).getAttribute('data-tip')).toBe('Preview the final prompt here. AI fills need a text model.');
+  });
+
+  for (const availability of ['none', 'available', 'unknown'] as const) {
+    test(`${availability} keeps Brainstorm and Simulate action availability with factual tooltips`, async () => {
+      const { client } = renderPicker({ library: aiFillLibrary, noTextModels: availability === 'none' });
+      if (availability === 'available') await act(async () => {
+        client.setQueryData(textModelKeys.all(), { models: [{ id: 'writer' }], tasks: [], defaults: { byTask: {} }, writers: {} });
+        await Promise.resolve();
+      });
+      const brainstorm = screen.getByRole('button', { name: 'Brainstorm' });
+      expect(brainstorm.getAttribute('data-tip')).toBe(availability === 'none' ? 'Needs a text model' : null);
+      expect(brainstorm.hasAttribute('disabled')).toBe(false);
+      fireEvent.click(screen.getByRole('button', { name: /AI fill portrait/i }));
+      const simulate = screen.getByRole('button', { name: 'Simulate this prompt' });
+      expect(simulate.hasAttribute('disabled')).toBe(false);
+      expect(simulate.getAttribute('data-tip')).toBe(availability === 'none'
+        ? 'Preview the final prompt here. AI fills need a text model.'
+        : "Preview the final prompt here — resolves AI fills too. Doesn't fill the composer.");
+      expect(screen.queryByText('AI fills need a text model') !== null).toBe(availability === 'none');
+      expect(screen.getByRole('button', { name: 'Use prompt' }).hasAttribute('disabled')).toBe(false);
+      await act(async () => {
+        client.setQueryData(textModelKeys.all(), { models: [{ id: 'writer' }], tasks: [], defaults: { byTask: {} }, writers: {} });
+        await Promise.resolve();
+      });
+      await waitFor(() => { expect(screen.queryByText('AI fills need a text model')).toBeNull(); });
+      expect(simulate.getAttribute('data-tip')).toBe("Preview the final prompt here — resolves AI fills too. Doesn't fill the composer.");
+    });
+  }
+
+  test('no-model Simulate keeps its ordinary tooltip without unresolved fills', () => {
+    renderPicker({ noTextModels: true });
+    fireEvent.click(screen.getByRole('button', { name: /Constraint portrait/i }));
+    expect(screen.getByRole('button', { name: 'Simulate this prompt' }).getAttribute('data-tip')).toBe("Preview the final prompt here — resolves AI fills too. Doesn't fill the composer.");
   });
 
   test('Use prompt with no pins pastes the unresolved body verbatim (full re-roll) and drops the Enhance anchor', async () => {

@@ -1,14 +1,656 @@
 import { devices, expect, test, type Page } from '@playwright/test';
-import type { AdminProvider, Batch, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, PromptLibraryResponse, TextModelsResponse } from '@atelier/shared';
+import type { AdminProvider, Batch, CollectionsResponse, ConnectionReport, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse, TextModelsResponse } from '@atelier/shared';
 import { TEXT_TASKS } from '@atelier/shared';
 import type * as ReactApi from 'react';
 import type * as ReactDomApi from 'react-dom/client';
 import type * as StateViewApi from '../src/components/StateView';
-import { batches as viewerFixtureBatches } from './studio/fixture';
+import { batches as viewerFixtureBatches, models as recoveryModels, promptLibrary as reorderLibrary } from './studio/fixture';
+
+// Geometry comes from the production components and the existing offline
+// transport.
+async function finalLayoutRail(page: Page, open: boolean) {
+  const toggle = page.getByRole('button', { name: open ? 'Expand sidebar' : 'Collapse sidebar', exact: true });
+  if (await toggle.isVisible()) await toggle.click();
+  await approvedSettle(page);
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  for (const layout of [
+    { width: 820, height: 1180, touch: true },
+    { width: 820, height: 1180, touch: false },
+    { width: 844, height: 390, touch: true },
+    { width: 844, height: 390, touch: false },
+    { width: 1440, height: 900, touch: false },
+    { width: 2560, height: 1440, touch: false },
+    { width: 390, height: 844, touch: true },
+    { width: 767, height: 900, touch: true },
+    { width: 768, height: 900, touch: true },
+  ]) {
+    test(`approved header hierarchy: ${layout.width}x${layout.height} ${layout.touch ? 'coarse' : 'fine'} ${colorScheme}`, async ({ browser }, testInfo) => {
+      test.setTimeout(90_000);
+      const context = await browser.newContext({ ...(layout.touch ? devices['iPhone 13'] : devices['Desktop Chrome']), viewport: layout, colorScheme });
+      const matrix: unknown[] = [];
+      try {
+        const page = await context.newPage();
+        await approvedBatchFixture(page, false);
+        await page.goto('/e2e/studio/index.html?video=1');
+        for (const open of layout.width >= 768 ? [false, true] : [false]) {
+          await finalLayoutRail(page, open);
+          const header = page.locator('section[data-batch-id="studio-batch-4"] header');
+          await header.evaluate((element) => { element.scrollIntoView({ block: 'start' }); });
+          await approvedSettle(page);
+          const geometry = await header.evaluate((element) => {
+            const box = (node: Element) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
+            const prompt = element.firstElementChild;
+            const controls = element.querySelector('[class*="headerControls"]');
+            const meta = controls?.querySelector('ul');
+            if (!prompt || !controls || !meta) throw new Error('missing header owner');
+            return { header: box(element), prompt: box(prompt), controls: box(controls), meta: box(meta), flexBasis: getComputedStyle(prompt).flexBasis, whiteSpace: getComputedStyle(prompt.firstElementChild ?? prompt).whiteSpace, buttons: [...controls.querySelectorAll('button')].map((button) => ({ label: button.getAttribute('aria-label'), ...box(button) })) };
+          });
+          const { header: h, prompt: p, controls: c } = geometry;
+          if (layout.width >= 768) {
+            expect(p.width).toBeGreaterThanOrEqual(Math.min(h.width, Math.max(240, h.width / 2)) - 0.1);
+            if (layout.width <= 844 && (layout.touch || open)) {
+              expect(p.width).toBeCloseTo(h.width, 0);
+              expect(c.y).toBeGreaterThanOrEqual(p.bottom + 7.9);
+            } else {
+              expect(c.y).toBeLessThan(p.bottom);
+              expect(h.height).toBeLessThan(40);
+            }
+          } else {
+            expect(p.width).toBeCloseTo(h.width, 0);
+            expect(c.y).toBeGreaterThanOrEqual(p.bottom);
+            expect(geometry.meta.width).toBeGreaterThanOrEqual(96);
+            expect(geometry.flexBasis).toBe('100%');
+          }
+          expect(geometry.whiteSpace).toBe(layout.width >= 768 ? 'nowrap' : 'normal');
+          expect(geometry.buttons.map((button) => button.label)).toEqual([...(layout.width >= 768 ? ['Copy prompt'] : []), 'Re-roll', 'Move to collection', 'Archive batch', 'More actions']);
+          expect(geometry.buttons.at(-1)?.right).toBeCloseTo(h.right, 0);
+          for (const button of geometry.buttons) {
+            expect(button.x).toBeGreaterThanOrEqual(h.x - 0.1);
+            expect(button.right).toBeLessThanOrEqual(h.right + 0.1);
+            if (layout.touch) {
+              expect(button.width).toBeGreaterThanOrEqual(44);
+              expect(button.height).toBeGreaterThanOrEqual(44);
+              await libraryHitPoints(header.getByRole('button', { name: button.label ?? '', exact: true }));
+            }
+          }
+          const move = header.getByRole('button', { name: 'Move to collection', exact: true, includeHidden: true });
+          await move.click();
+          const panel = page.getByRole('dialog', { name: 'Move to collection', exact: true });
+          await expect(panel).toBeVisible();
+          await approvedSettle(page);
+          const anchor = await move.boundingBox();
+          const popup = await panel.boundingBox();
+          if (layout.width >= 768 && await panel.getAttribute('data-anchored')) {
+            if (!anchor || !popup) throw new Error('missing anchor geometry');
+            expect(popup.x + popup.width).toBeCloseTo(anchor.x + anchor.width, 0);
+          }
+          await page.keyboard.press('Escape');
+          await expect(panel).toHaveCount(0);
+          await expect(move).toBeFocused();
+          matrix.push({ open, geometry, anchor, popup, focusReturned: true });
+          await testInfo.attach(`header-${open ? 'open' : 'closed'}.png`, { body: await page.screenshot(), contentType: 'image/png' });
+        }
+        await testInfo.attach('header-geometry.json', { body: JSON.stringify({ layout, colorScheme, matrix }), contentType: 'application/json' });
+      } finally { await context.close(); }
+    });
+  }
+}
 
 const VIEWER_FRAME = 'dialog > div[data-media][aria-busy]';
 const VIEWER_DOCK = 'dialog > div[data-media]:not([aria-busy])';
 const VIEWER_BODY_MODULE = /\/src\/components\/Lightbox\/Content\.tsx(?:\?.*)?$/;
+
+// Extend the existing offline transport only for this acceptance matrix. All
+// writes below go to per-test routes, never a real provider.
+async function resourceRecoveryFixture(page: Page, library: PromptLibraryResponse | null, inventory: readonly Model[] | null = null) {
+  await page.addInitScript(({ library, inventory }) => {
+    const nativeFetch = window.fetch.bind(window);
+    let inner = nativeFetch;
+    const fixture = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (library && url.pathname === '/api/prompts') return Response.json(library);
+      if (inventory && url.pathname === '/api/models') return Response.json(inventory);
+      if (/^\/api\/prompts\/templates\/order$/.test(url.pathname)) {
+        const response = await nativeFetch(input, init);
+        if (response.ok) library = await response.clone().json() as PromptLibraryResponse;
+        return response;
+      }
+      if (/^\/api\/models\/[^/]+\/probe$/.test(url.pathname) || url.pathname === '/api/text-providers/test') return nativeFetch(input, init);
+      return inner(input, init);
+    };
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => fixture, set: (value: typeof fetch) => { inner = value; } });
+  }, { library, inventory });
+}
+
+test.describe('resource list capacity:', () => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    for (const layout of [
+      { width: 820, height: 1180, touch: false, counts: [3, 8] },
+      { width: 820, height: 1180, touch: true, counts: [3, 8] },
+      { width: 844, height: 390, touch: false, counts: [8] },
+      { width: 844, height: 390, touch: true, counts: [8] },
+      { width: 1440, height: 900, touch: false, counts: [8] },
+      { width: 390, height: 844, touch: true, counts: [8] },
+    ]) {
+      test(`${layout.width}x${layout.height} ${layout.touch ? 'coarse' : 'fine'} ${colorScheme}`, async ({ browser }, testInfo) => {
+        test.setTimeout(120_000);
+        const context = await browser.newContext({ viewport: layout, hasTouch: layout.touch, isMobile: layout.touch, colorScheme });
+        try {
+          for (const count of layout.counts) {
+            const first = reorderLibrary.templates[0];
+            if (!first) throw new Error('Missing template fixture');
+            let library: PromptLibraryResponse = { ...reorderLibrary, templates: Array.from({ length: count }, (_, index) => ({
+              ...first, id: `capacity-${index}`, name: `Capacity study ${index}`, body: `Saved body ${index}`, sortOrder: index,
+            })) };
+            const page = await context.newPage();
+            const orders: string[][] = [];
+            await resourceRecoveryFixture(page, library);
+            await page.route('**/api/prompts/templates/order', async (route) => {
+              const { orderedIds } = route.request().postDataJSON() as { orderedIds: string[] };
+              orders.push(orderedIds);
+              library = { ...library, templates: orderedIds.map((id) => {
+                const item = library.templates.find((item) => item.id === id);
+                if (!item) throw new Error('Unknown capacity row');
+                return item;
+              }) };
+              await route.fulfill({ json: library });
+            });
+            await page.goto('/e2e/studio/index.html?view=prompts');
+            await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+            const expandSidebar = page.getByRole('button', { name: 'Expand sidebar', exact: true });
+            if (layout.width >= 768 && layout.width < 900 && await expandSidebar.isVisible()) await expandSidebar.click();
+            if (layout.width >= 768) await expect(page.getByRole('button', { name: 'Collapse sidebar', exact: true })).toBeVisible();
+            const rail = page.getByRole('complementary', { name: 'Templates', exact: true });
+            const list = rail.getByRole('list');
+            const scroller = list.locator('..');
+            const rows = rail.locator('button[aria-pressed]');
+            await expect(rows).toHaveCount(count);
+            const measure = () => scroller.evaluate((element) => {
+              const box = element.getBoundingClientRect();
+              const panel = element.parentElement?.parentElement;
+              const editor = panel?.querySelector<HTMLFormElement>(':scope > form');
+              if (!panel || !editor) throw new Error('Missing direct-child editor or outer tabpanel');
+              const editorBox = editor.getBoundingClientRect();
+              const panelBox = panel.getBoundingClientRect();
+              const rows = [...element.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].map((row) => {
+                const rect = row.getBoundingClientRect();
+                const style = getComputedStyle(row);
+                return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, height: rect.height, lineHeight: Number.parseFloat(style.lineHeight), padding: Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom), border: Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.borderBottomWidth), scrollWidth: row.scrollWidth, clientWidth: row.clientWidth };
+              });
+              return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, height: box.height, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollTop: element.scrollTop, overflowY: getComputedStyle(element).overflowY, coarse: matchMedia('(hover: none), (any-pointer: coarse)').matches, rows,
+                editor: { minimum: Number.parseFloat(getComputedStyle(editor).minHeight), x: editorBox.x, y: editorBox.y, width: editorBox.width, height: editorBox.height, clientHeight: editor.clientHeight, scrollHeight: editor.scrollHeight, directChild: editor.parentElement === panel },
+                outer: { id: panel.id, role: panel.getAttribute('role'), tabIndex: panel.tabIndex, x: panelBox.x, y: panelBox.y, width: panelBox.width, height: panelBox.height, clientHeight: panel.clientHeight, scrollHeight: panel.scrollHeight, scrollTop: panel.scrollTop, overflowY: getComputedStyle(panel).overflowY },
+              };
+            });
+            const before = await measure();
+            await testInfo.attach(`capacity-${count}-initial.png`, { body: await page.screenshot(), contentType: 'image/png' });
+            expect(before.coarse).toBe(layout.touch);
+            const firstRow = before.rows[0];
+            if (!firstRow) throw new Error('Missing row geometry');
+            expect(firstRow.padding).toBe(16);
+            expect(firstRow.border).toBe(2);
+            expect(Math.abs(firstRow.height - Math.max(layout.touch ? 44 : 36, firstRow.lineHeight + 18))).toBeLessThan(0.1);
+            const stacked = layout.width >= 768 && layout.width < 900;
+            if (stacked) {
+              expect(before.editor.directChild).toBe(true);
+              expect(before.editor.minimum).toBe(layout.height <= 620 ? 320 : 560);
+              expect(before.editor.height).toBeGreaterThanOrEqual(before.editor.minimum);
+              const capacity = (layout.height <= 620 ? 2.5 : 3.5) * firstRow.height + (layout.height <= 620 ? 2 : 3) * 4;
+              if (count === 8) expect(Math.abs(before.height - capacity)).toBeLessThan(1);
+              else {
+                expect(before.scrollHeight).toBeLessThanOrEqual(before.clientHeight);
+                for (const row of before.rows) {
+                  expect(row.top).toBeGreaterThanOrEqual(before.top - 0.1);
+                  expect(row.bottom).toBeLessThanOrEqual(before.bottom + 0.1);
+                }
+                // Each short-list row accepts an ordinary click or tap.
+                for (let index = 0; index < count; index += 1) {
+                  if (layout.touch) await rows.nth(index).tap();
+                  else await rows.nth(index).click();
+                  await expect(rows.nth(index)).toHaveAttribute('aria-pressed', 'true');
+                }
+              }
+            } else if (layout.width >= 900) {
+              expect(before.height).toBeGreaterThan(3.5 * firstRow.height + 12);
+              const editorBox = await page.getByRole('form', { name: 'Edit template Capacity study 0', exact: true }).boundingBox();
+              const railBox = await rail.boundingBox();
+              if (!editorBox || !railBox) throw new Error('Missing two-column geometry');
+              expect(editorBox.x).toBeGreaterThanOrEqual(railBox.x + railBox.width);
+            } else expect(before.overflowY).toBe('visible');
+            for (const row of before.rows) {
+              expect(row.left).toBeGreaterThanOrEqual(before.left - 0.1);
+              expect(row.right).toBeLessThanOrEqual(before.right + 0.1);
+              expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
+            }
+            await rows.first().press('End');
+            await expect(rows.last()).toBeFocused();
+            if (stacked && count === 8) {
+              await expect.poll(async () => (await measure()).scrollTop).toBeGreaterThan(0);
+              const after = await measure();
+              const last = after.rows.at(-1);
+              if (!last) throw new Error('Missing last row');
+              expect(last.bottom).toBeLessThanOrEqual(after.bottom + 0.1);
+              expect(last.top).toBeGreaterThanOrEqual(after.top - 0.1);
+            }
+            // Native selection, then keyboard reorder, keeps this editor and
+            // its unsaved draft. Reordering an unselected row also keeps it.
+            await rows.first().click();
+            const editor = page.getByRole('form', { name: 'Edit template Capacity study 0', exact: true });
+            const body = editor.getByRole('textbox', { name: 'Body', exact: true });
+            await body.fill('Unsaved capacity draft');
+            const original = await body.elementHandle();
+            await rows.first().press('Alt+ArrowDown');
+            await expect.poll(() => orders.length).toBe(1);
+            await expect(rail.getByRole('button', { name: 'Capacity study 0', exact: true })).toBeFocused();
+            await expect(editor).toBeVisible();
+            await expect(body).toHaveValue('Unsaved capacity draft');
+            expect(await body.evaluate((element, original) => element === original, original)).toBe(true);
+            await rows.last().press('Alt+ArrowUp');
+            await expect.poll(() => orders.length).toBe(2);
+            await expect(body).toHaveValue('Unsaved capacity draft');
+            const outer = rail.locator('..');
+            let outerScroll: { clientHeight: number; scrollHeight: number; scrollTop: number } | null = null;
+            let beforePageDown: Awaited<ReturnType<typeof measure>>['outer'] | null = null;
+            if (stacked && layout.height <= 620) {
+              beforePageDown = (await measure()).outer;
+              expect(beforePageDown.role).toBe('tabpanel');
+              expect(beforePageDown.tabIndex).toBe(0);
+              expect(beforePageDown.scrollHeight).toBeGreaterThan(beforePageDown.clientHeight);
+              await outer.press('PageDown');
+              await expect(outer).toBeFocused();
+              await expect.poll(() => outer.evaluate((element) => element.scrollTop)).toBeGreaterThan(beforePageDown.scrollTop);
+              outerScroll = await outer.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollTop: element.scrollTop }));
+              expect(outerScroll.scrollTop).toBeGreaterThan(0);
+              expect(outerScroll.scrollHeight).toBeGreaterThan(outerScroll.clientHeight);
+              await testInfo.attach(`capacity-${count}-native-pagedown.png`, { body: await page.screenshot(), contentType: 'image/png' });
+            }
+            await body.scrollIntoViewIfNeeded();
+            // A textarea can exceed a short clip. Use a real native input at
+            // its visible intersection instead of assuming its centre paints.
+            const bodyPoint = await body.evaluate((element) => {
+              const box = element.getBoundingClientRect();
+              let left = Math.max(0, box.left);
+              let right = Math.min(innerWidth, box.right);
+              let top = Math.max(0, box.top);
+              let bottom = Math.min(innerHeight, box.bottom);
+              for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+                const style = getComputedStyle(parent);
+                const clip = parent.getBoundingClientRect();
+                if (style.overflowX !== 'visible') { left = Math.max(left, clip.left + parent.clientLeft); right = Math.min(right, clip.left + parent.clientLeft + parent.clientWidth); }
+                if (style.overflowY !== 'visible') { top = Math.max(top, clip.top + parent.clientTop); bottom = Math.min(bottom, clip.top + parent.clientTop + parent.clientHeight); }
+              }
+              const x = (left + right) / 2;
+              const y = (top + bottom) / 2;
+              return { x, y, width: right - left, height: bottom - top, hit: document.elementFromPoint(x, y) === element };
+            });
+            expect(bodyPoint.width).toBeGreaterThan(0);
+            expect(bodyPoint.height).toBeGreaterThan(0);
+            expect(bodyPoint.hit).toBe(true);
+            if (layout.touch) await page.touchscreen.tap(bodyPoint.x, bodyPoint.y);
+            else await page.mouse.click(bodyPoint.x, bodyPoint.y);
+            await expect(body).toBeFocused();
+            const save = editor.getByRole('button', { name: 'Save template', exact: true });
+            for (let step = 0; step < 3 && !await save.evaluate((element) => element === document.activeElement); step += 1) {
+              await page.keyboard.press(browser.browserType().name() === 'webkit' ? 'Alt+Shift+Tab' : 'Shift+Tab');
+            }
+            await expect(save).toBeFocused();
+            await expect(save).toBeInViewport({ ratio: 1 });
+            await expect(save).toBeEnabled();
+            await testInfo.attach(`capacity-${count}-geometry.json`, { body: JSON.stringify({ layout, count, before, after: await measure(), beforePageDown, outerScroll, bodyPoint, orders, draftPreserved: true }, null, 2), contentType: 'application/json' });
+            await testInfo.attach(`capacity-${count}.png`, { body: await page.screenshot(), contentType: 'image/png' });
+            await page.close();
+          }
+        } finally { await context.close(); }
+      });
+    }
+  }
+});
+
+test.describe('model recovery and provider guidance:', () => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    for (const layout of [{ width: 1440, height: 900, touch: false }, { width: 820, height: 1180, touch: true }, { width: 390, height: 844, touch: true }]) {
+      test(`model ${layout.width} ${colorScheme}`, async ({ browser }, testInfo) => {
+        test.setTimeout(90_000);
+        const context = await browser.newContext({ viewport: layout, hasTouch: layout.touch, isMobile: layout.touch, colorScheme });
+        try {
+          const page = await context.newPage();
+          const cloud = recoveryModels[0];
+          const local = recoveryModels[1];
+          if (!cloud || !local) throw new Error('Missing recovery model fixtures');
+          const name = 'Recovery model with a deliberately long descriptive name';
+          const offline: Model = { ...local, name, availability: { ok: false, checkedAt: 1 } };
+          const keyRequired: Model = { ...cloud, id: 'recovery-key', name: 'Key-required model', requiresKey: { provider: 'google' } };
+          const inventory = [cloud, offline, keyRequired];
+          await resourceRecoveryFixture(page, null, inventory);
+          let probes = 0;
+          const releases: (() => void)[] = [];
+          await page.route('**/api/models/*/probe', async (route) => {
+            const attempt = ++probes;
+            expect(route.request().method()).toBe('POST');
+            await new Promise<void>((resolve) => { releases.push(resolve); });
+            await route.fulfill(attempt === 1 ? { status: 503, json: { error: 'Re-check unavailable' } } : { json: attempt === 2 ? inventory : [cloud, { ...offline, availability: { ok: true, checkedAt: Date.now() } }, keyRequired] });
+          });
+          await page.goto('/e2e/studio/index.html');
+          const expand = page.getByRole('button', { name: 'Expand composer', exact: true });
+          if (await expand.isVisible()) await expand.click();
+          const trigger = page.getByRole('button', { name: 'Model', exact: true });
+          await trigger.click();
+          const menu = page.getByRole('listbox', { name: 'Model', exact: true });
+          const row = () => menu.getByRole('option', { name: `${name} — Offline, Check again`, exact: true });
+          await expect(row()).toHaveAttribute('aria-selected', 'false');
+          await expect(row()).not.toHaveAttribute('aria-disabled');
+          await expect(menu.getByRole('option', { name: /Key-required model/ })).toHaveAttribute('aria-disabled', 'true');
+          await expect(menu.getByRole('option', { name: 'GPT Image', exact: true })).toHaveAttribute('aria-selected', 'true');
+          const geometry = await menu.evaluate((element) => {
+            const menu = element.getBoundingClientRect();
+            const rows = [...element.querySelectorAll('[role="option"]')].map((row) => {
+              const box = row.getBoundingClientRect();
+              return { height: box.height, scrollWidth: row.scrollWidth, clientWidth: row.clientWidth };
+            });
+            const row = element.querySelector('[data-dimmed="true"]:not([aria-disabled])');
+            if (!row) throw new Error('Missing offline option');
+            const spans = [...row.children].filter((child) => child.tagName === 'SPAN');
+            return { menu: { left: menu.left, right: menu.right, width: menu.width }, rows, coarse: matchMedia('(hover: none), (any-pointer: coarse)').matches, parts: spans.map((span) => { const box = span.getBoundingClientRect(); const style = getComputedStyle(span); return { text: span.textContent, left: box.left, right: box.right, width: box.width, clientWidth: span.clientWidth, scrollWidth: span.scrollWidth, textOverflow: style.textOverflow }; }), nestedTargets: row.querySelectorAll('button,a,input,[role="button"],[tabindex]').length };
+          });
+          expect(geometry.coarse).toBe(layout.touch);
+          expect(geometry.nestedTargets).toBe(0);
+          expect(geometry.menu.left).toBeGreaterThanOrEqual(0);
+          expect(geometry.menu.right).toBeLessThanOrEqual(layout.width);
+          for (const option of geometry.rows) {
+            if (layout.touch) expect(option.height).toBeGreaterThanOrEqual(44);
+            else expect(option.height).toBeLessThan(44);
+            expect(option.scrollWidth).toBeLessThanOrEqual(option.clientWidth);
+          }
+          for (let index = 0; index < geometry.parts.length; index += 1) {
+            const part = geometry.parts[index];
+            const next = geometry.parts[index + 1];
+            if (!part) throw new Error('Missing cue geometry');
+            if (next) expect(part.right).toBeLessThanOrEqual(next.left);
+            expect(part.width).toBeGreaterThan(0);
+            if (index > 0) expect(part.scrollWidth).toBeLessThanOrEqual(part.clientWidth);
+          }
+          if (layout.width === 390) {
+            expect(geometry.parts[0]?.textOverflow).toBe('ellipsis');
+            expect(geometry.parts[0]?.scrollWidth).toBeGreaterThan(geometry.parts[0]?.clientWidth ?? 0);
+          }
+          await testInfo.attach('offline-cue.png', { body: await page.screenshot(), contentType: 'image/png' });
+          for (let attempt = 1; attempt <= 3; attempt += 1) {
+            if (attempt === 3) {
+              await menu.press('Home');
+              await menu.press('Enter');
+            } else if (layout.touch) await row().tap();
+            else await row().click();
+            await expect.poll(() => probes).toBe(attempt);
+            const pending = menu.getByRole('option', { name: `${name} — Checking…`, exact: true });
+            await expect(pending).toBeVisible();
+            await expect(pending.getByText('Check again', { exact: true })).toHaveCount(0);
+            await expect(pending.locator('span svg')).toHaveCount(0);
+            await expect(menu).toBeFocused();
+            // A second native activation shares the pending request.
+            if (attempt === 3) await menu.press('Enter');
+            else if (layout.touch) await pending.tap();
+            else await pending.click();
+            expect(probes).toBe(attempt);
+            const release = releases[attempt - 1];
+            if (!release) throw new Error('Missing probe release');
+            release();
+            if (attempt < 3) {
+              await expect(row()).toBeVisible();
+              await expect(row()).toHaveAttribute('aria-selected', 'false');
+              await expect(page.getByRole('alert').getByText(attempt === 1 ? `Couldn't re-check ${name} — Something went wrong on our end. Please try again.` : `${name} is offline`, { exact: true })).toBeVisible();
+            } else {
+              const recovered = menu.getByRole('option', { name: `${name} ComfyUI`, exact: true });
+              await expect(recovered).toHaveAttribute('aria-selected', 'true');
+              await expect(recovered.getByText('Check again', { exact: true })).toHaveCount(0);
+            }
+          }
+          const tooltip = page.locator('[data-tip-label]').filter({ hasText: /^local, ComfyUI, slow$/ });
+          let tooltipFirstEscape = false;
+          if (!layout.touch) {
+            const recovered = menu.getByRole('option', { name: `${name} ComfyUI`, exact: true });
+            await recovered.hover();
+            await expect(tooltip).toHaveCount(1);
+            await expect(tooltip).toBeVisible();
+            await expect(tooltip).toHaveCSS('visibility', 'visible');
+            await expect(recovered).toHaveAttribute('data-tip', 'local, ComfyUI, slow');
+            await expect(menu).toBeFocused();
+            const menuIdentity = await menu.elementHandle();
+            await menu.press('Escape');
+            await expect(tooltip).toBeHidden();
+            await expect(recovered).toHaveAttribute('data-tip-dismissed', '');
+            await expect(menu).toBeFocused();
+            expect(await menu.evaluate((element, original) => element === original, menuIdentity)).toBe(true);
+            tooltipFirstEscape = true;
+          } else await expect(tooltip).toBeHidden();
+          await menu.press('Escape');
+          await expect(menu).toHaveCount(0);
+          await expect(trigger).toBeFocused();
+          await trigger.click();
+          await menu.getByRole('option', { name: 'GPT Image', exact: true }).click();
+          await expect(menu).toHaveCount(0);
+          await expect(trigger).toBeFocused();
+          await testInfo.attach('model-recovery-geometry.json', { body: JSON.stringify({ layout, colorScheme, geometry, probes, pendingDeduplicated: true, recoveredSelection: true, tooltipFirstEscape, escapeRestoredTrigger: true }, null, 2), contentType: 'application/json' });
+        } finally { await context.close(); }
+      });
+    }
+
+    for (const layout of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
+      test(`provider ${layout.width}x${layout.height} ${colorScheme}`, async ({ browser }, testInfo) => {
+        test.setTimeout(90_000);
+        const reducedMotion = colorScheme === 'dark' ? 'reduce' : 'no-preference';
+        const context = await browser.newContext({ viewport: layout, hasTouch: layout.width !== 1440, isMobile: layout.width !== 1440, colorScheme, reducedMotion });
+        try {
+          const page = await context.newPage();
+          await resourceRecoveryFixture(page, null);
+          let calls = 0;
+          const pass: ConnectionReport = { ok: true, checks: [{ id: 'list', status: 'pass', message: 'The server answered and listed 2 models.' }], listedCount: 2 };
+          const unsupported: ConnectionReport = { ok: false, checks: [{ id: 'list', status: 'fail', message: 'The server has no model list at this address (404/405).' }], listUnsupported: true };
+          await page.route('**/api/text-providers/test', async (route) => {
+            calls += 1;
+            expect(route.request().method()).toBe('POST');
+            await route.fulfill({ json: calls === 1 ? pass : unsupported });
+          });
+          await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+          const opener = page.getByRole('button', { name: 'Add provider', exact: true });
+          await opener.press('Enter');
+          const dialog = page.getByRole('dialog', { name: 'Add a provider', exact: true });
+          const address = dialog.getByRole('textbox', { name: 'Base URL', exact: true });
+          const save = dialog.getByRole('button', { name: 'Save provider', exact: true });
+          const saveHint = dialog.getByText('Save provider turns on when a connection test passes with these settings.', { exact: true });
+          const hintPanel = saveHint.locator('xpath=ancestor::*[@aria-hidden][1]');
+          await expect(address).toHaveValue('');
+          await expect(address).not.toHaveAttribute('placeholder');
+          await expect(address).toHaveAccessibleDescription('Choose a preset to fill this in, or enter the server’s address.');
+          await expect(save).toBeDisabled();
+          await expect(save).toHaveAccessibleDescription('Save provider turns on when a connection test passes with these settings.');
+          await expect(hintPanel).toHaveAttribute('data-open', 'true');
+          await saveHint.scrollIntoViewIfNeeded();
+          await expect(saveHint).toBeInViewport();
+          const initialGeometry = await dialog.locator(':scope > div').first().evaluate((element) => {
+            const box = element.getBoundingClientRect();
+            return { clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, bounds: { x: box.x, y: box.y, width: box.width, height: box.height } };
+          });
+          await testInfo.attach('provider-initial.png', { body: await page.screenshot(), contentType: 'image/png' });
+          // A fresh modal traps native traversal. WebKit uses Option+Tab for buttons.
+          const tabKey = browser.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab';
+          const focusTraversal: { inside: boolean; body: boolean }[] = [];
+          expect(await dialog.evaluate((element) => element.matches(':modal'))).toBe(true);
+          for (let index = 0; index < 18; index += 1) {
+            await page.keyboard.press(tabKey);
+            const focus = await dialog.evaluate((element) => ({ inside: element.contains(document.activeElement), body: document.activeElement === document.body }));
+            focusTraversal.push(focus);
+            if (!focus.inside) {
+              // Native traversal may visit browser chrome at the wrap; it
+              // never gives an inert background control focus, and returns
+              // to this still-modal dialog on the next native Tab.
+              expect(focus.body).toBe(true);
+              expect(await dialog.evaluate((element) => element.matches(':modal'))).toBe(true);
+              await page.keyboard.press(tabKey);
+            }
+            expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+          }
+          if (reducedMotion === 'reduce') await expect(hintPanel).toHaveCSS('transition-property', 'opacity');
+          await dialog.getByText('Ollama', { exact: true }).click();
+          await expect(address).toHaveValue('http://localhost:11434/v1');
+          await expect(address).toHaveAccessibleDescription('Runs on this machine. No key needed unless you set one.');
+          await dialog.getByRole('textbox', { name: 'Name', exact: true }).fill('My test provider');
+          await address.fill('https://provider.example.invalid/v1');
+          await dialog.getByText('LM Studio', { exact: true }).click();
+          await expect(address).toHaveValue('https://provider.example.invalid/v1');
+          await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('My test provider');
+          await dialog.getByRole('button', { name: 'Test connection', exact: true }).click();
+          const successReport = dialog.getByRole('status').filter({ hasText: 'Connection works.' }).filter({ has: page.getByRole('list') });
+          await expect(successReport).toHaveCount(1);
+          await expect(successReport).toContainText('Connection works.');
+          await expect(save).toBeEnabled();
+          await expect(save).not.toHaveAttribute('aria-describedby');
+          await expect(hintPanel).toHaveAttribute('inert', '');
+          await expect(hintPanel).toHaveAttribute('aria-hidden', 'true');
+          await address.fill('https://provider.example.invalid/v2');
+          await expect(save).toBeDisabled();
+          await expect(successReport).toHaveCount(0);
+          await expect(hintPanel).toHaveAttribute('data-open', 'true');
+          await expect(save).toHaveAccessibleDescription('Save provider turns on when a connection test passes with these settings.');
+          await dialog.getByRole('button', { name: 'Test connection', exact: true }).click();
+          const failureReport = dialog.getByRole('alert').filter({ hasText: 'The server has no model list at this address (404/405).' }).filter({ has: page.getByRole('list') });
+          await expect(failureReport).toHaveCount(1);
+          await expect(failureReport).toContainText('The server has no model list at this address (404/405).');
+          const anyway = dialog.getByRole('button', { name: 'Save anyway', exact: true });
+          await expect(anyway).toBeEnabled();
+          await anyway.scrollIntoViewIfNeeded();
+          await expect(anyway).toBeInViewport({ ratio: 1 });
+          await expect(save).toBeDisabled();
+          await expect(save).not.toHaveAttribute('aria-describedby');
+          await expect(hintPanel).toHaveAttribute('inert', '');
+          expect(calls).toBe(2);
+          await testInfo.attach('provider-guidance-geometry.json', { body: JSON.stringify({ layout, colorScheme, reducedMotion, initialGeometry, focusTraversal, calls, freshPassEnabledSave: true, editInvalidatedPass: true, saveAnywayEnabled: true }, null, 2), contentType: 'application/json' });
+          await testInfo.attach('provider-result.png', { body: await page.screenshot(), contentType: 'image/png' });
+          await page.keyboard.press('Escape');
+          await expect(dialog).toHaveCount(0);
+          await expect(opener).toBeFocused();
+        } finally { await context.close(); }
+      });
+    }
+  }
+});
+
+test.describe('resource reorder preserves editor:', () => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    for (const input of ['pointer', 'keyboard'] as const) {
+      test(`${colorScheme} desktop ${input}`, async ({ browser }, testInfo) => {
+        const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme });
+        try {
+          for (const kind of ['templates', 'variableLists'] as const) {
+            const firstTemplate = reorderLibrary.templates[0];
+            const firstList = reorderLibrary.variableLists[0];
+            const firstOption = firstList?.options[0];
+            if (!firstTemplate || !firstList || !firstOption) throw new Error('Missing reorder fixtures');
+            const seed: PromptLibraryResponse = {
+              ...reorderLibrary,
+              templates: [0, 1, 2].map((index) => ({ ...firstTemplate, id: `reorder-template-${index}`, name: `Reorder study ${index}`, body: `Saved body ${index}`, sortOrder: index })),
+              variableLists: [0, 1, 2].map((index) => ({
+                ...firstList, id: `reorder-list-${index}`, name: `reorder-axis-${index}`, sortOrder: index,
+                options: [{ ...firstOption, id: `reorder-option-${index}`, listId: `reorder-list-${index}`, value: `Saved value ${index}` }],
+              })),
+            };
+            const displayed = seed[kind][0];
+            if (!displayed) throw new Error('Missing displayed resource');
+            const resourceId = (index: number) => {
+              const item = seed[kind][index];
+              if (!item) throw new Error('Missing reorder resource');
+              return item.id;
+            };
+            const page = await context.newPage();
+            let current = seed;
+            const orders: string[][] = [];
+            await page.route('**/api/prompts/*/order', async (route) => {
+              const { orderedIds } = route.request().postDataJSON() as { orderedIds: string[] };
+              orders.push(orderedIds);
+              current = { ...current, [kind]: orderedIds.map((id) => {
+                const item = current[kind].find((item) => item.id === id);
+                if (!item) throw new Error('Unknown reordered resource');
+                return item;
+              }) };
+              await route.fulfill({ json: current });
+            });
+            // Keep the existing offline fixture for every other request. Only
+            // resource reads and reorder writes use this bounded test fixture.
+            await page.addInitScript((library: PromptLibraryResponse) => {
+              const nativeFetch = window.fetch.bind(window);
+              let inner = nativeFetch;
+              const fixture = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+                const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+                if (url.pathname === '/api/prompts') return Response.json(library);
+                if (/^\/api\/prompts\/(templates|lists)\/order$/.test(url.pathname)) {
+                  const response = await nativeFetch(input, init);
+                  if (response.ok) library = await response.clone().json() as PromptLibraryResponse;
+                  return response;
+                }
+                return inner(input, init);
+              };
+              Object.defineProperty(window, 'fetch', { configurable: true, get: () => fixture, set: (value: typeof fetch) => { inner = value; } });
+            }, seed);
+            await page.goto('/e2e/studio/index.html?view=prompts');
+            await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+            if (kind === 'variableLists') await page.getByRole('tab', { name: 'Variable lists', exact: true }).click();
+            const rail = page.getByRole('complementary', { name: kind === 'templates' ? 'Templates' : 'Lists', exact: true });
+            const rows = rail.locator('button[aria-pressed]');
+            const row = (index: number) => rail.getByRole('button', { name: kind === 'templates' ? `Reorder study ${index}` : `Edit list reorder-axis-${index}, 1 option`, exact: true });
+            const editor = page.getByRole('form', { name: kind === 'templates' ? 'Edit template Reorder study 0' : 'Edit variable list reorder-axis-0', exact: true });
+            const field = editor.getByRole('textbox', { name: kind === 'templates' ? 'Body' : /^Option 1:/ });
+            const draft = `Unsaved ${kind} draft`;
+            await field.fill(draft);
+            const originalField = await field.elementHandle();
+            const assertEditor = async () => {
+              await expect(editor).toBeVisible();
+              await expect(editor.getByRole('textbox', { name: kind === 'templates' ? 'Template name' : 'Variable list name', exact: true }))
+                .toHaveValue(displayed.name);
+              await expect(field).toHaveValue(draft);
+              await expect(row(0)).toHaveAttribute('aria-pressed', 'true');
+              expect(await field.evaluate((element, original) => element === original, originalField)).toBe(true);
+            };
+            const names = (order: number[]) => order.map((index) => kind === 'templates' ? `Reorder study ${index}` : `reorder-axis-${index}1`);
+            await expect(rows).toHaveText(names([0, 1, 2]));
+            if (input === 'pointer') {
+              const start = await row(0).boundingBox();
+              const end = await row(2).boundingBox();
+              if (!start || !end) throw new Error('Missing native drag rows');
+              const x = start.x + 12;
+              await page.mouse.move(x, start.y + start.height / 2);
+              await page.mouse.down();
+              await page.mouse.move(x, end.y + end.height - 2, { steps: 12 });
+              await expect(rail.locator('[data-drag-active]')).toHaveAttribute('data-drag-active', 'true');
+              await page.mouse.up();
+              await expect(rows).toHaveText(names([1, 2, 0]));
+              await expect.poll(() => orders).toEqual([[1, 2, 0].map(resourceId)]);
+            } else {
+              await row(0).press('Alt+ArrowDown');
+              await expect(rows).toHaveText(names([1, 0, 2]));
+              await expect.poll(() => orders).toEqual([[1, 0, 2].map(resourceId)]);
+            }
+            await assertEditor();
+            // Reordering another focused row must not select it either.
+            await row(1).press('Alt+ArrowDown');
+            const finalOrder = input === 'pointer' ? [2, 1, 0] : [0, 1, 2];
+            await expect(rows).toHaveText(names(finalOrder));
+            await expect.poll(() => orders.length).toBe(2);
+            expect(orders[1]).toEqual(finalOrder.map(resourceId));
+            await assertEditor();
+            await row(2).click();
+            await expect(page.getByRole('textbox', { name: kind === 'templates' ? 'Body' : /^Option 1:/ }))
+              .toHaveValue(kind === 'templates' ? 'Saved body 2' : 'Saved value 2');
+            await row(0).click();
+            await expect(field).toHaveValue(draft);
+            await testInfo.attach(`${kind}-${input}-identity.json`, { body: JSON.stringify({ colorScheme, input, displayedId: displayed.id, displayedName: displayed.name, draft, orders, finalOrder, sameFieldBeforeExplicitClick: true, explicitClickChangedEditor: true }), contentType: 'application/json' });
+            await page.close();
+          }
+        } finally { await context.close(); }
+      });
+    }
+  }
+});
 
 function viewerHold() {
   let release!: () => void;
@@ -453,7 +1095,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.getByRole('tab', { name: 'Settings', exact: true }).click();
         const panel = page.getByRole('region', { name: 'Your text model settings', exact: true });
         await expect(panel.getByRole('heading', { level: 2, name: 'Your text models', exact: true })).toBeVisible();
-        await expect(panel.getByText('Choose which model writes for you in each feature; Default uses what your admin set for everyone.', { exact: true })).toBeVisible();
+        await expect(panel.getByText('Choose which model writes for you in each feature. Default follows the shared setup.', { exact: true })).toBeVisible();
         const model = panel.getByRole('button', { name: /^Text model for AI fill,/ });
         const effort = panel.locator('button[aria-label^="Reasoning effort for AI fill,"]');
         const slot = effort.locator('..');
@@ -2364,6 +3006,127 @@ test('every form factor shows one scope title and the collapsed hamburger clears
   expect(Math.abs(collapsed.scrollerTop - expanded.scrollerTop)).toBeLessThanOrEqual(1);
 });
 
+// Extend the same offline fetch seam as settings ownership. Only the existing
+// admin model update changes availability; production query refresh owns the UI.
+async function withPrerequisiteReadiness(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    let inner = window.fetch.bind(window);
+    let enabled = false;
+    let provider: AdminProvider | undefined;
+    const fixture = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+      if (url.pathname === '/api/text-providers/provider-preview/models/text-model-preview' && init?.method === 'PATCH') {
+        const model = provider?.models[0];
+        if (!model) throw new Error('missing existing public writer fixture');
+        if (typeof init.body !== 'string') throw new Error('expected JSON model update');
+        const patch = JSON.parse(init.body) as { enabled: boolean };
+        enabled = patch.enabled;
+        return Response.json({ ...model, enabled });
+      }
+      if (url.pathname === '/api/text-models' && enabled) return Response.json({
+        models: [{ id: 'text-model-preview', displayName: 'Preview writer', providerName: 'Preview provider', vision: false, reasoningLevels: [], status: 'available' }],
+        tasks: [], defaults: { byTask: {} }, writers: {},
+      } satisfies TextModelsResponse);
+      const response = await inner(input, init);
+      if (url.pathname === '/api/text-providers' && response.ok) {
+        const data = await response.json() as { providers: AdminProvider[] };
+        provider = data.providers[0];
+        return Response.json({ providers: data.providers.map((item) => ({ ...item, models: item.models.map((model) => ({ ...model, enabled })) })) });
+      }
+      if (url.pathname === '/api/prompts' && response.ok) {
+        const data = await response.json() as PromptLibraryResponse;
+        return Response.json({ ...data, templates: data.templates.map((template, index) => index === 0
+          ? { ...template, body: 'A harbour with {{ai-fill: a color}} sails' } : template) });
+      }
+      return response;
+    };
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => fixture, set: (value: typeof fetch) => { inner = value; } });
+  });
+}
+
+test.describe('prerequisite readiness:', () => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    for (const colorScheme of ['light', 'dark'] as const) {
+      for (const admin of [false, true]) {
+        test(`${viewport.width}×${viewport.height} ${colorScheme} ${admin ? 'admin' : 'non-admin'} copy and existing actions`, async ({ browser }) => {
+          const { defaultBrowserType: _engine, ...device } = viewport.width === 1440 ? devices['Desktop Chrome'] : devices['iPhone 13'];
+          const context = await browser.newContext({ ...device, viewport, colorScheme });
+          try {
+            const page = await context.newPage();
+            await withPrerequisiteReadiness(page);
+            await page.goto(`/e2e/studio/index.html?view=prompts&noTextModels=1${admin ? '&textAdmin=1&textProvider=1' : ''}`);
+            await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+            const panel = page.getByRole('region', { name: 'Your text model settings' });
+            await expect(panel.getByText(admin
+              ? 'No text models are connected yet. Add one in Text models.'
+              : 'Ask your admin to connect a text model.', { exact: true })).toBeVisible();
+            await expect(panel.getByRole('button', { name: /^Text model for / })).toHaveCount(TEXT_TASKS.length);
+            await expect(panel.getByRole('link')).toHaveCount(0);
+            await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).click();
+            const composer = await approvedExpand(page);
+            await composer.getByRole('textbox', { name: 'Prompt', exact: true }).fill('A harbour with {{ai-fill: a color}} sails');
+            const status = composer.getByText('AI fills need a text model, 1 live token, re-rolled at Generate', { exact: true });
+            await expect(status).toBeVisible();
+            await expect(status).toHaveAttribute('data-tone', 'info');
+            const generate = composer.getByRole('button', { name: 'Generate', exact: true });
+            await expect(generate).toBeEnabled();
+            await expect(generate).not.toHaveAttribute('aria-disabled', 'true');
+            const enhance = page.getByRole('button', { name: 'Enhance', exact: true, includeHidden: true });
+            await expect(enhance).toHaveAttribute('data-tip', 'Needs a text model');
+            await expect(enhance).toBeEnabled();
+            await enhance.click();
+            const note = page.getByRole('dialog', { name: 'Enhance needs a text model.' });
+            await expect(note).toBeVisible();
+            if (admin) await expect(note.getByRole('button', { name: 'Set up text models' })).toBeVisible();
+            else await expect(note).toContainText('Ask your admin to connect a text model.');
+            await page.keyboard.press('Escape');
+            await expect(note).toHaveCount(0);
+            await expect(enhance).toBeFocused();
+            await composer.getByRole('button', { name: 'Templates', exact: true }).click();
+            const picker = page.getByRole('dialog', { name: 'Templates', exact: true });
+            const brainstorm = picker.getByRole('button', { name: 'Brainstorm', exact: true });
+            await expect(brainstorm).toHaveAttribute('data-tip', 'Needs a text model');
+            await brainstorm.click();
+            const brainstormNote = page.getByRole('dialog', { name: 'Brainstorm needs a text model.' });
+            await expect(brainstormNote).toBeVisible();
+            await page.keyboard.press('Escape');
+            await expect(brainstormNote).toHaveCount(0);
+            await expect(brainstorm).toBeFocused();
+            await expect(picker).toBeVisible();
+            await picker.getByRole('button', { name: /Editorial portrait/ }).click();
+            const simulate = page.getByRole('button', { name: 'Simulate this prompt' });
+            await expect(simulate).toHaveAttribute('data-tip', 'Preview the final prompt here. AI fills need a text model.');
+            await expect(simulate).toBeEnabled();
+            await expect(page.getByLabel('Prompt preview', { exact: true })).toBeVisible();
+            await expect(page.getByRole('button', { name: 'Use prompt', exact: true })).toBeEnabled();
+            await page.getByRole('dialog').getByRole('button', { name: 'Close templates', exact: true }).click();
+            await expect(page.getByRole('button', { name: 'Simulate this prompt' })).toHaveCount(0);
+            if (admin) {
+              await enhance.click();
+              await page.getByRole('button', { name: 'Set up text models', exact: true }).click();
+              const toggle = page.getByRole('switch', { name: 'Use Preview writer', exact: true });
+              await toggle.click();
+              await expect(toggle).toHaveAttribute('aria-checked', 'true');
+              await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).click();
+              await approvedExpand(page);
+              await expect(status).toHaveCount(0);
+              await expect(enhance).toHaveAttribute('data-tip', 'Rewrite prompt');
+              await expect(generate).not.toHaveAttribute('aria-disabled', 'true');
+              await composer.getByRole('button', { name: 'Templates', exact: true }).click();
+              await expect(page.getByRole('dialog', { name: 'Editorial portrait', exact: true })).toBeVisible();
+              await expect(simulate).toHaveAttribute('data-tip', "Preview the final prompt here — resolves AI fills too. Doesn't fill the composer.");
+              await expect(page.getByText('AI fills need a text model', { exact: true })).toHaveCount(0);
+            }
+            await test.info().attach('readiness.png', { body: await page.screenshot(), contentType: 'image/png' });
+          } finally {
+            await context.close();
+          }
+        });
+      }
+    }
+  }
+});
+
 // M1 (T5): AI actions stay enabled without a text model and answer with an
 // anchored note instead of a request.
 test.describe('AI actions without a text model', () => {
@@ -3599,7 +4362,8 @@ for (const layout of [
         else expect(first.y + first.height / 2).toBeCloseTo(geometry.meta.y + geometry.meta.height / 2, 1);
       }
       if (layout.width === 768) expect(geometry.meta.y).toBeGreaterThanOrEqual(geometry.prompt.bottom);
-      if (layout.width >= 768 && geometry.meta.y < geometry.prompt.bottom) expect(geometry.prompt.width).toBeGreaterThanOrEqual(240);
+      // The approved hierarchy replaces the former 240px-only wrap threshold.
+      if (layout.width >= 768 && geometry.meta.y < geometry.prompt.bottom) expect(geometry.prompt.width).toBeGreaterThanOrEqual(Math.max(240, geometry.width / 2));
       for (let i = 0; i < geometry.buttons.length; i++) {
         const a = geometry.buttons[i];
         if (!a) continue;

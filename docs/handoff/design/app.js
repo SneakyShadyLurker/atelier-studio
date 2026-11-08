@@ -198,8 +198,9 @@ const css = `
        Canvas at least 560px wide, become one row: a 64px plate (48px etching,
        8px padding), heading over body (4px), then the action (18px columns).
        Batch headers keep Copy prompt, Re-roll and Move inline before Archive
-       and More (Copy folds into More below 768px); meta and actions wrap below
-       a 240px prompt or a 96px phone meta list.
+       and More (Copy folds into More below 768px); at width >=768px, prompt
+       space reserves max(240px, 50% of the header) before meta/actions wrap.
+       Phone meta keeps its 96px minimum.
        These scoped extensions introduce no palette, size or motion tokens. */
     --rail-history-min-h: 73px;
     --template-body-min-h: calc(6lh + 22px);
@@ -426,6 +427,11 @@ const css = `
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+@media (width >= 768px) {
+  .batch-h { flex-wrap: wrap; row-gap: 8px; }
+  .batch-prompt { flex: 999 1 max(240px, 50%); min-width: min(100%, 240px); }
+  .batch-actions { margin-left: auto; }
 }
 .batch-meta {
   display: inline-flex; flex-wrap: wrap; gap: 10px;

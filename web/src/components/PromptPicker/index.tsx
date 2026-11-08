@@ -478,6 +478,7 @@ export default function PromptPicker({
                 ref={brainstormButtonRef}
                 className={buttons.ai}
                 type="button"
+                data-tip={textModelGate.availability === 'none' ? 'Needs a text model' : undefined}
                 onClick={() => {
                   if (textModelGate.availability === 'none') setBrainstormNoteOpen(true);
                   else setBrainstorming(true);
@@ -776,7 +777,9 @@ export default function PromptPicker({
                     aria-label="Simulate this prompt"
                     aria-busy={simulating}
                     disabled={simulating}
-                    data-tip="Preview the final prompt here — resolves AI fills too. Doesn't fill the composer."
+                    data-tip={textModelGate.availability === 'none' && showFillNote
+                      ? 'Preview the final prompt here. AI fills need a text model.'
+                      : "Preview the final prompt here — resolves AI fills too. Doesn't fill the composer."}
                     onClick={simulate}
                   >
                     {simulating ? 'Simulating…' : 'Simulate'}

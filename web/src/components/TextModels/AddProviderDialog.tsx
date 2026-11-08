@@ -28,7 +28,9 @@ import {
 import styles from './AddProviderDialog.module.css';
 
 const PRESET_URLS: ReadonlySet<string> = new Set(TEXT_PRESETS.map((preset) => preset.baseUrl));
+const NO_PRESET_HINT = 'Choose a preset to fill this in, or enter the server’s address.';
 const PRESET_HINTS: readonly string[] = [...new Set(TEXT_PRESETS.map((preset) => preset.hint))];
+const URL_HINTS: readonly string[] = [NO_PRESET_HINT, ...PRESET_HINTS];
 const isCustom = (preset: TextPreset) => preset.baseUrl === '';
 const KEY_OPTIONAL_COPY = 'Optional for this preset.';
 
@@ -92,6 +94,7 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
   const keyId = useId();
   const keyHintId = useId();
   const byokId = useId();
+  const saveHintId = useId();
   const { closing, requestClose } = useExitTransition(onClose, true);
   const addToast = useAtelierStore((state) => state.addToast);
   const create = useCreateProvider();
@@ -224,8 +227,8 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
         <ProviderFields
           draft={draft}
           errors={visibleErrors}
-          urlHint={preset?.hint}
-          urlHints={PRESET_HINTS}
+          urlHint={preset?.hint ?? NO_PRESET_HINT}
+          urlHints={URL_HINTS}
           keySlot={keySlot}
           disabled={busy}
           onChange={change}
@@ -233,6 +236,9 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
         />
 
         <ConnectionResult state={shown} />
+        <Disclosure open={!passed && !saveAnyway}>
+          <p id={saveHintId} className={styles.fieldHint}>Save provider turns on when a connection test passes with these settings.</p>
+        </Disclosure>
         {saveError !== null && <p role="alert" className={styles.fieldError}>{saveError}</p>}
 
         <div className={`${dialogStyles.actions} ${styles.actions}`}>
@@ -246,7 +252,7 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
             {saveAnyway && (
               <button type="button" className={btn.secondary} onClick={save} disabled={busy}>Save anyway</button>
             )}
-            <button type="button" className={btn.primary} onClick={save} disabled={busy || !passed}>
+            <button type="button" className={btn.primary} onClick={save} disabled={busy || !passed} aria-describedby={!passed && !saveAnyway ? saveHintId : undefined}>
               {busy ? 'Saving…' : 'Save provider'}
             </button>
           </div>

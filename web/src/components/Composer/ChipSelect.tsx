@@ -14,6 +14,7 @@ export interface ChipSelectOption<TValue extends string | number> {
   value: TValue;
   label: string;
   hint?: string;
+  hintAction?: string;
   // Decorative glyph drawn before the hint text (e.g. the lock on a
   // key-required model row).
   hintIcon?: ReactNode;
@@ -322,7 +323,7 @@ export default function ChipSelect<TValue extends string | number>({
                     aria-selected={selected}
                     aria-disabled={opt.disabled ? true : undefined}
                     aria-label={opt.actionable === true
-                      ? `${opt.label} — ${opt.hint ?? 'action available'}`
+                      ? `${opt.label} — ${opt.hint ?? 'action available'}${opt.hintAction ? `, ${opt.hintAction}` : ''}`
                       : undefined}
                     data-dimmed={dimmed ? 'true' : undefined}
                     data-tip={opt.title}
@@ -339,6 +340,7 @@ export default function ChipSelect<TValue extends string | number>({
                   >
                     <span className={styles.menuOptionLabel}>{opt.label}</span>
                     {opt.hint && <span className={styles.menuOptionHint}>{opt.hintIcon}{opt.hint}</span>}
+                    {opt.hintAction && <span className={styles.menuOptionAction}><I.reroll aria-hidden="true" />{opt.hintAction}</span>}
                     {selected && <I.check className={styles.menuOptionCheck} />}
                   </div>
                 );

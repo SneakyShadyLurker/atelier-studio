@@ -21,9 +21,21 @@ function setup(over: Partial<Parameters<typeof EnhanceControl>[0]> = {}) {
 }
 
 describe('EnhanceControl', () => {
+  test('prerequisite tooltip preserves Enhance, Undo and callbacks', () => {
+    const { onEnhance, onUndo } = setup({ needsTextModel: true, canUndo: true });
+    const enhance = screen.getByRole('button', { name: 'Enhance' });
+    expect(enhance.getAttribute('data-tip')).toBe('Needs a text model');
+    expect(enhance.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(enhance);
+    fireEvent.click(screen.getByRole('button', { name: 'Undo enhance' }));
+    expect(onEnhance).toHaveBeenCalledTimes(1);
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
   test('renders both segments; revert always present, disabled until canUndo', () => {
     setup();
     expect(screen.getByRole('button', { name: 'Enhance' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Enhance' }).getAttribute('data-tip')).toBe('Rewrite prompt');
     const undo = screen.getByRole('button', { name: 'Undo enhance' });
     expect(undo.hasAttribute('disabled')).toBe(true);
   });

@@ -106,13 +106,17 @@ Start with a simple reusable template, then add variables as you need them.
 The **Library** chip in the composer opens the picker. A roll queue lets
 you prepare multiple prompts before generating them.
 
+Reordering templates, variable lists or dimensions keeps the current editor
+open, including its unsaved draft.
+
 **Enhance** asks a text model to rewrite a prompt. **Brainstorm** produces ideas
 for the queue, and `{{ai-fill: instruction}}` asks a text model to fill a part
 of a template at generation time. These actions need a text model connected by
 an admin. A working image provider or local GPU alone does not provide one.
 
-In **Settings**, each task (Enhance, AI fill, Brainstorm and the rest) shows a
-model menu. **Use default** follows what the admin chose and names that model.
+In **Settings**, **Your text models** lists each task (Enhance, AI fill,
+Brainstorm and the rest) with a model menu. **Use default** follows the shared
+setup and names the inherited model.
 Pick another model to use it for that task, and choose a reasoning effort if
 the model offers levels. A model that is offline right now cannot be picked,
 and if your pick goes offline, the task uses the default until it is back. An

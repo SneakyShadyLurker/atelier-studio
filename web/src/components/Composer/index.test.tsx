@@ -6,6 +6,7 @@ import { useLayoutEffect, type ReactNode } from 'react';
 import Composer from './index';
 import { useKeyboard } from '../../hooks/useKeyboard';
 import { useAtelierStore } from '../../store/atelier';
+import { textModelKeys } from '../../api/textModels';
 
 const originalFetch = globalThis.fetch;
 
@@ -267,6 +268,21 @@ function probeOnly(fetchMock: (input: RequestInfo | URL, init?: RequestInit) => 
 }
 
 describe('Composer offline model re-probe', () => {
+  test('selected offline rows retain selection while unknown and key-required rows claim no recovery action', () => {
+    const keyed = models[1];
+    const unknown = models[3];
+    if (!keyed || !unknown) throw new Error('Missing model fixtures');
+    const inventory = [cloudModel, offlineReprobeModel, { ...keyed, availability: { ok: false, checkedAt: 1 } }, { ...unknown, id: 'unknown', name: 'Unknown model' }];
+    renderComposer({ models: inventory, modelById: new Map(inventory.map((model) => [model.id, model])), modelId: offlineReprobeModel.id });
+    openModelMenu();
+    const offline = screen.getByRole('option', { name: /Krea 2 Test Alpha.*Offline.*Check again/ });
+    expect(offline.getAttribute('aria-selected')).toBe('true');
+    expect(offline.querySelector('button, [tabindex]')).toBeNull();
+    const keyRequired = screen.getByRole('option', { name: /Nano Banana Pro/ });
+    expect(keyRequired.textContent).toBe('Nano Banana ProNeeds your API key');
+    expect(screen.getByRole('option', { name: /Unknown model/ }).textContent).toBe('Unknown modelComfyUI');
+  });
+
   test('clicking an offline row probes and selects it when the refreshed model is healthy', async () => {
     const onModelChange = mock();
     const initialModels = [cloudModel, offlineReprobeModel];
@@ -322,6 +338,9 @@ describe('Composer offline model re-probe', () => {
 
     const checking = await screen.findByRole('option', { name: /Krea 2 Test Alpha.*Checking/ });
     expect(checking.getAttribute('aria-disabled')).toBeNull();
+    expect(checking.textContent).not.toContain('Check again');
+    // No recovery glyph while the existing probe is pending.
+    expect(checking.querySelector('span svg')).toBeNull();
     expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeNull();
     fireEvent.click(checking);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -357,6 +376,7 @@ describe('Composer offline model re-probe', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(onModelChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('option', { name: /Krea 2 Test Alpha.*Offline.*Check again/ })).toBeTruthy();
   });
 
   test('a failed re-check reports a request failure rather than claiming the model is offline', async () => {
@@ -383,6 +403,7 @@ describe('Composer offline model re-probe', () => {
     expect(useAtelierStore.getState().toasts.some((toast) => toast.text === 'Krea 2 Test Alpha is offline')).toBe(false);
     expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeNull();
     expect(onModelChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('option', { name: /Krea 2 Test Alpha.*Offline.*Check again/ })).toBeTruthy();
   });
 
   test('a newer model selection wins over an older probe and preserves the I2V draft', async () => {
@@ -1060,6 +1081,96 @@ describe('Composer collapsed bar (phone)', () => {
     expect(screen.queryByRole('button', { name: 'Expand composer' })).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Prompt' })).toBeDefined();
   });
+});
+
+describe('Composer prerequisite readiness', () => {
+  const readinessStatus = 'AI fills need a text model, 1 live token, re-rolled at Generate';
+  function readiness(availability: 'none' | 'available' | 'unknown', overrides: Partial<Parameters<typeof Composer>[0]> = {}) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    globalThis.fetch = mock(() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+    if (availability !== 'unknown') client.setQueryData(textModelKeys.all(), {
+      models: availability === 'none' ? [] : [{ id: 'writer', displayName: 'Writer' }],
+      tasks: [], defaults: { byTask: {} }, writers: {},
+    });
+    const onSubmit = mock();
+    const result = render(composerElement({ prompt: 'a {{ai-fill: color}} sky', onSubmit, ...overrides }), {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    });
+    return { client, onSubmit, ...result };
+  }
+
+  for (const availability of ['none', 'available', 'unknown'] as const) {
+    test(`${availability} changes only factual copy, leaving Generate available`, () => {
+      const { onSubmit } = readiness(availability);
+      const enhance = screen.getByRole('button', { name: 'Enhance' });
+      expect(enhance.getAttribute('data-tip')).toBe(availability === 'none' ? 'Needs a text model' : 'Rewrite prompt');
+      expect(enhance.hasAttribute('disabled')).toBe(false);
+      const warning = screen.queryByText(readinessStatus);
+      expect(warning !== null).toBe(availability === 'none');
+      if (warning) expect(warning.getAttribute('data-tone')).toBe('info');
+      const generate = screen.getByRole('button', { name: 'Generate' });
+      expect(generate.getAttribute('aria-disabled')).not.toBe('true');
+      fireEvent.click(generate);
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    test(`${availability} preserves Tell Story availability and action gate`, async () => {
+      const onTellStory = mock();
+      readiness(availability, { models: [healthyI2VModel], modelById: new Map([[healthyI2VModel.id, healthyI2VModel]]), modelId: healthyI2VModel.id, onTellStory });
+      const story = screen.getByRole('button', { name: 'Tell Story' });
+      expect(story.getAttribute('data-tip')).toBe(availability === 'none' ? 'Needs a text model' : null);
+      expect(story.hasAttribute('disabled')).toBe(false);
+      expect(screen.queryByText(readinessStatus)).toBeNull();
+      fireEvent.click(story);
+      if (availability === 'none') {
+        expect(await screen.findByRole('dialog', { name: 'Tell Story needs a text model.' })).toBeTruthy();
+        expect(onTellStory).not.toHaveBeenCalled();
+      } else expect(onTellStory).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  test('existing query updates clear the warning and restore Enhance copy', async () => {
+    const { client } = readiness('none');
+    expect(screen.getByText(readinessStatus)).toBeTruthy();
+    await act(async () => {
+      client.setQueryData(textModelKeys.all(), { models: [{ id: 'writer' }], tasks: [], defaults: { byTask: {} }, writers: {} });
+      await Promise.resolve();
+    });
+    await waitFor(() => { expect(screen.queryByText(readinessStatus)).toBeNull(); });
+    expect(screen.getByRole('button', { name: 'Enhance' }).getAttribute('data-tip')).toBe('Rewrite prompt');
+  });
+
+  for (const scenario of [
+    { name: 'uploading', status: 'uploading', modelId: cloudModel.id, count: 1, message: 'Uploading references' },
+    { name: 'unsupported', status: 'ready', modelId: 'zib-distilled', count: 1, message: 'Model does not accept refs' },
+    { name: 'over cap', status: 'ready', modelId: cloudModel.id, count: 5, message: 'This model accepts at most 4 refs' },
+    { name: 'failed', status: 'error', modelId: cloudModel.id, count: 1, message: 'Remove failed refs' },
+  ] as const) {
+    test(`${scenario.name} reference status keeps priority over readiness`, () => {
+      useAtelierStore.getState().setDraft({ refImages: Array.from({ length: scenario.count }, (_, index) => ({
+        clientId: `readiness-${index}`, serverId: `upload-${index}`, status: scenario.status,
+        mime: 'image/png', sizeBytes: 1, previewUrl: '/readiness.png',
+      })) });
+      readiness('none', { modelId: scenario.modelId });
+      expect(screen.getByText(`${scenario.message}, 1 live token, re-rolled at Generate`)).toBeTruthy();
+      expect(screen.queryByText(readinessStatus)).toBeNull();
+    });
+  }
+
+  for (const scenario of [
+    { name: 'disabled', props: { disabled: true }, message: 'Generation unavailable' },
+    { name: 'offline', props: { models: [offlineReprobeModel], modelById: new Map([[offlineReprobeModel.id, offlineReprobeModel]]), modelId: offlineReprobeModel.id }, message: `${offlineReprobeModel.name} is offline` },
+    { name: 'empty', props: { prompt: '' }, message: 'Write a prompt or queue a roll' },
+    { name: 'fill cap', props: { prompt: Array.from({ length: 9 }, () => '{{ai-fill: color}}').join(' ') }, message: '9 AI fills, up to 8 allowed' },
+  ]) {
+    test(`${scenario.name} status keeps priority over readiness`, () => {
+      readiness('none', scenario.props);
+      const suffix = scenario.name === 'empty' ? '' : scenario.name === 'fill cap'
+        ? ', 9 live tokens, re-rolled at Generate' : ', 1 live token, re-rolled at Generate';
+      expect(screen.getByText(`${scenario.message}${suffix}`)).toBeTruthy();
+      expect(screen.queryByText(readinessStatus)).toBeNull();
+    });
+  }
 });
 
 describe('Composer ai-fill cap guard', () => {

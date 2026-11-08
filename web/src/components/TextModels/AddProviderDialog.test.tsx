@@ -62,6 +62,15 @@ const field = (name: string) => screen.getByLabelText<HTMLInputElement>(name);
 const preset = (name: string) => within(screen.getByRole('group', { name: 'Preset' })).getByRole('radio', { name });
 const button = (name: string) => screen.getByRole<HTMLButtonElement>('button', { name });
 const posts = (calls: readonly Call[], suffix: string) => calls.filter((call) => call.method === 'POST' && call.url.endsWith(suffix));
+const SAVE_HINT = 'Save provider turns on when a connection test passes with these settings.';
+
+function expectSaveHint(open: boolean) {
+  const hint = screen.getByText(SAVE_HINT);
+  const panel = hint.closest('[aria-hidden]');
+  expect(panel?.getAttribute('aria-hidden')).toBe(String(!open));
+  expect(panel?.hasAttribute('inert')).toBe(!open);
+  expect(button('Save provider').getAttribute('aria-describedby')).toBe(open ? hint.id : null);
+}
 
 function fill(name: string, value: string) {
   fireEvent.change(field(name), { target: { value } });
@@ -74,6 +83,19 @@ afterEach(() => {
 });
 
 describe('Add provider: presets', () => {
+  test('starts with an empty address and associated, honest guidance', () => {
+    const { calls } = setup();
+    const address = field('Base URL');
+    expect(address.value).toBe('');
+    expect(address.hasAttribute('placeholder')).toBe(false);
+    const hint = screen.getByText('Choose a preset to fill this in, or enter the server’s address.');
+    expect(address.getAttribute('aria-describedby')).toBe(hint.id);
+    expect(hint.closest('[aria-hidden]')?.getAttribute('aria-hidden')).toBe('false');
+    expectSaveHint(true);
+    expect(button('Save provider').disabled).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
   test('a preset fills the name, base URL, hint and advanced defaults', () => {
     setup();
     expect(screen.getByRole('dialog', { name: 'Add a provider' })).toBeTruthy();
@@ -213,6 +235,7 @@ describe('Add provider: connection test and save', () => {
     fireEvent.click(preset('OpenAI'));
     fill('API key', 'sk-test-123');
     expect(button('Save provider').disabled).toBe(true);
+    expectSaveHint(true);
 
     fireEvent.click(button('Test connection'));
     const report = await screen.findByRole('status');
@@ -226,6 +249,7 @@ describe('Add provider: connection test and save', () => {
       listModels: true,
     });
     expect(screen.queryByRole('button', { name: 'Save anyway' })).toBeNull();
+    expectSaveHint(false);
 
     fireEvent.click(button('Save provider'));
     // The next step is adding its models, so the dialog hands over instead of closing.
@@ -250,9 +274,11 @@ describe('Add provider: connection test and save', () => {
     fireEvent.click(button('Test connection'));
     await screen.findByRole('status');
     expect(button('Save provider').disabled).toBe(false);
+    expectSaveHint(false);
     fill('Base URL', 'http://localhost:11435/v1');
     expect(button('Save provider').disabled).toBe(true);
     expect(screen.queryByText('Connection works.')).toBeNull();
+    expectSaveHint(true);
     // Renaming does not change what was tested.
     fireEvent.click(button('Test connection'));
     await screen.findByRole('status');
@@ -268,6 +294,7 @@ describe('Add provider: connection test and save', () => {
     expect(alert.textContent).toContain('Could not reach http://localhost:11434/v1: connection refused. Is the server running?');
     expect(button('Save provider').disabled).toBe(true);
     expect(screen.queryByRole('button', { name: 'Save anyway' })).toBeNull();
+    expectSaveHint(true);
   });
 
   test('a server without a model list can be saved anyway', async () => {
@@ -278,6 +305,7 @@ describe('Add provider: connection test and save', () => {
     fireEvent.click(button('Test connection'));
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('The server has no model list at this address (404/405).');
+    expectSaveHint(false);
     expect(button('Save provider').disabled).toBe(true);
     fireEvent.click(button('Save anyway'));
     await waitFor(() => { expect(onSaved).toHaveBeenCalled(); });

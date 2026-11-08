@@ -1,7 +1,7 @@
 // Tile-level semaphores. Three independent counter sets, picked at the call
 // site based on which upstream the request consumes.
 //
-// Shared (CLIProxyAPI / server-side key, e.g. gpt-image-2.5-sunburst):
+// Shared (CLIProxyAPI / server-side key, e.g. gpt-image-2.6-sunburst):
 //   - global cap (default 5). Server-wide ceiling on concurrent upstream
 //     calls; protects shared rate limits and bounds physical resource usage.
 //   - per-user cap (default 4). Bounded fairness so a single user who maxes

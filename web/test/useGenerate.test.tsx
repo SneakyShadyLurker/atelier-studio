@@ -14,7 +14,7 @@ import { getBatch, resetInFlightForTests } from '../src/hooks/inFlightBatches';
 import { useGenerate } from '../src/hooks/useGenerate';
 
 // Tests run with an empty registry map on purpose: modelLabel falls back to
-// the raw modelId ('gpt-image-2.5-sunburst' assertions below) and no fixture requires a
+// the raw modelId ('gpt-image-2.6-sunburst' assertions below) and no fixture requires a
 // BYOK key.
 const emptyModelsById: ReadonlyMap<string, Model> = new Map();
 import { APP_VIEW_UNSORTED, collectionView, useAtelierStore } from '../src/store/atelier';
@@ -313,7 +313,7 @@ describe('useGenerate', () => {
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
     await act(async () => {
-      await result.current.generate({ prompt: 'small red chair', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 });
+      await result.current.generate({ prompt: 'small red chair', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 });
     });
 
     await waitFor(() => {
@@ -352,7 +352,7 @@ describe('useGenerate', () => {
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
     await act(async () => {
-      await result.current.generate({ prompt: 'small red chair', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 }).catch(() => undefined);
+      await result.current.generate({ prompt: 'small red chair', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 }).catch(() => undefined);
     });
 
     expect(useAtelierStore.getState().view).toEqual(collectionView('019e13e4-f168-7555-8dbe-6be97df82b17'));
@@ -376,7 +376,7 @@ describe('useGenerate', () => {
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
     await act(async () => {
-      await result.current.generate({ prompt: 'small red chair', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 }).catch(() => undefined);
+      await result.current.generate({ prompt: 'small red chair', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 }).catch(() => undefined);
     });
 
     expect(useAtelierStore.getState().view).toEqual(APP_VIEW_UNSORTED);
@@ -406,7 +406,7 @@ describe('useGenerate', () => {
     client.setQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] });
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
-    const promise = result.current.generate({ prompt: 'p', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 });
+    const promise = result.current.generate({ prompt: 'p', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 });
 
     // Wait for the partial to land in the store.
     await waitFor(() => {
@@ -428,8 +428,8 @@ describe('useGenerate', () => {
           id: 'batch-p',
           prompt: 'p',
           ratio: '1:1',
-          modelId: 'gpt-image-2.5-sunburst',
-          modelLabel: 'gpt-image-2.5-sunburst',
+          modelId: 'gpt-image-2.6-sunburst',
+          modelLabel: 'gpt-image-2.6-sunburst',
           createdAt: 0,
           collectionId: null,
             pinned: false,
@@ -459,7 +459,7 @@ describe('useGenerate', () => {
     client.setQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] });
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
-    const promise = result.current.generate({ prompt: 'queued', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 2 });
+    const promise = result.current.generate({ prompt: 'queued', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 2 });
 
     act(() => {
       stream.enqueue(sseChunk([
@@ -535,7 +535,7 @@ describe('useGenerate', () => {
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
     await act(async () => {
-      await result.current.generate({ prompt: 'g', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 });
+      await result.current.generate({ prompt: 'g', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 });
     });
 
     // Cache reflects the terminal state; store has no orphan entry from
@@ -567,7 +567,7 @@ describe('useGenerate', () => {
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
     await act(async () => {
-      await result.current.generate({ prompt: 'x', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 });
+      await result.current.generate({ prompt: 'x', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 });
     });
 
     expect(useAtelierStore.getState().previews.get('tx')).toBeUndefined();
@@ -583,7 +583,7 @@ describe('useGenerate', () => {
     client.setQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] });
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
-    const promise = result.current.generate({ prompt: 'cancel me', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 });
+    const promise = result.current.generate({ prompt: 'cancel me', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 });
 
     stream.enqueue(sseChunk([
       'event: batch',
@@ -622,7 +622,7 @@ describe('useGenerate', () => {
     client.setQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] });
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
-    const promise = result.current.generate({ prompt: 'track me', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 });
+    const promise = result.current.generate({ prompt: 'track me', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 });
 
     stream.enqueue(sseChunk([
       'event: batch',
@@ -683,7 +683,7 @@ describe('useGenerate', () => {
       previewUrl: '/api/uploads/upload-ready',
     };
     useAtelierStore.setState({
-      draft: { prompt: 'edit', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', durationFrames: null, count: 1, refImages: [readyRef], rollQueue: [], brainstormBrief: '', brainstormCount: 12 },
+      draft: { prompt: 'edit', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', durationFrames: null, count: 1, refImages: [readyRef], rollQueue: [], brainstormBrief: '', brainstormCount: 12 },
     });
     globalThis.fetch = mock(() => new Response(JSON.stringify({ error: 'validation failed' }), { status: 400 })) as unknown as typeof fetch;
 
@@ -691,7 +691,7 @@ describe('useGenerate', () => {
     client.setQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] });
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
 
-    await rejectedValue(result.current.generate({ prompt: 'edit', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1, refImageIds: ['upload-ready'] }));
+    await rejectedValue(result.current.generate({ prompt: 'edit', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1, refImageIds: ['upload-ready'] }));
     expect(useAtelierStore.getState().draft.refImages).toEqual([readyRef]);
 
     globalThis.fetch = mock(() => sseResponse([
@@ -708,7 +708,7 @@ describe('useGenerate', () => {
     ].join('\n'))) as unknown as typeof fetch;
 
     await act(async () => {
-      await result.current.generate({ prompt: 'edit', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1, refImageIds: ['upload-ready'] });
+      await result.current.generate({ prompt: 'edit', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1, refImageIds: ['upload-ready'] });
     });
 
     expect(useAtelierStore.getState().draft.refImages).toEqual([readyRef]);
@@ -726,7 +726,7 @@ describe('useGenerate', () => {
     client.setQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] });
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
-    expect(await rejectedValue(result.current.generate({ prompt: 'x', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 }))).toMatchObject({
+    expect(await rejectedValue(result.current.generate({ prompt: 'x', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 }))).toMatchObject({
       message: 'invalid generation response shape',
     });
     const data = client.getQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list());
@@ -765,7 +765,7 @@ describe('useGenerate', () => {
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
     await act(async () => {
-      await result.current.generate({ prompt: 'fills it', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 4 });
+      await result.current.generate({ prompt: 'fills it', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 4 });
     });
 
     const data = client.getQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list());
@@ -782,8 +782,8 @@ describe('useGenerate', () => {
       id: 'unrelated-batch',
       prompt: 'still streaming',
       ratio: '1:1',
-      modelId: 'gpt-image-2.5-sunburst',
-      modelLabel: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
+      modelLabel: 'gpt-image-2.6-sunburst',
       createdAt: 1,
       collectionId: null,
         pinned: false,
@@ -796,7 +796,7 @@ describe('useGenerate', () => {
     });
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
-    expect(await rejectedValue(result.current.generate({ prompt: 'x', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 }))).toBeInstanceOf(Error);
+    expect(await rejectedValue(result.current.generate({ prompt: 'x', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 }))).toBeInstanceOf(Error);
 
     // The unrelated batch's loading tile must survive the pre-flight 429.
     const after = client.getQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list());
@@ -827,7 +827,7 @@ describe('useGenerate', () => {
     client.setQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] });
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
-    const error = await rejectedValue(result.current.generate({ prompt: 'eof test', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 }));
+    const error = await rejectedValue(result.current.generate({ prompt: 'eof test', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 }));
 
     // Must have thrown StreamTruncatedError (the existing truncation sentinel).
     expect(error).toMatchObject({ name: 'StreamTruncatedError' });
@@ -877,7 +877,7 @@ describe('useGenerate', () => {
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
 
-    const promise = result.current.generate({ prompt: 'net error test', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 });
+    const promise = result.current.generate({ prompt: 'net error test', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 });
 
     // Wait for the batch frame to be processed — batch-err must appear in cache.
     await waitFor(() => {
@@ -918,7 +918,7 @@ describe('useGenerate', () => {
     client.setQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] });
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
-    const error = await rejectedValue(result.current.generate({ prompt: 'pre-batch loss', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 }));
+    const error = await rejectedValue(result.current.generate({ prompt: 'pre-batch loss', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 }));
 
     // Must have thrown StreamTruncatedError (batchId is null, no batch event seen).
     expect(error).toMatchObject({ name: 'StreamTruncatedError' });
@@ -950,7 +950,7 @@ describe('useGenerate', () => {
     client.setQueryData<InfiniteData<HistoryPage<Batch>>>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] });
 
     const { result } = renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
-    const promise = result.current.generate({ prompt: 'post-batch net error', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 });
+    const promise = result.current.generate({ prompt: 'post-batch net error', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 });
 
     // Wait for the batch to land in cache before erroring the stream.
     await waitFor(() => {

@@ -11,7 +11,7 @@ import type { RegistryEntry } from './providers/registry';
 function fakeRegistryEntry(): RegistryEntry {
   // Minimal shape createBatch reads: registryEntry.model.{name,pool}.
   return {
-    model: { id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', pool: 'shared' },
+    model: { id: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst', pool: 'shared' },
   } as unknown as RegistryEntry;
 }
 
@@ -28,7 +28,7 @@ describe('createBatch — provenance persistence', () => {
 
     const req: ResolvedGenerateRequest = {
       prompt: 'p',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
       provenance: { templateId: 'tpl1', rollSeed: 99, pins: { 'face#0': 'opt-a' } },
@@ -48,7 +48,7 @@ describe('createBatch — provenance persistence', () => {
     const db = new Database(':memory:');
     migrate(db, dataDir);
     db.query('INSERT INTO users (id, created_at) VALUES (?, ?)').run('u1', 1);
-    const req: ResolvedGenerateRequest = { prompt: 'p', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 };
+    const req: ResolvedGenerateRequest = { prompt: 'p', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 };
     const prepared = createBatch(db, 'u1', req, fakeRegistryEntry());
     const row = db
       .query<{ template_id: string | null; roll_seed: number | null; roll_pins: string | null }, [string]>(
@@ -70,7 +70,7 @@ describe('createBatch — provenance persistence', () => {
     db.query('INSERT INTO users (id, created_at) VALUES (?, ?)').run('u1', 1);
     const req: ResolvedGenerateRequest = {
       prompt: 'p',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
       provenance: { templateId: 'ghost-template', rollSeed: 99, pins: { 'face#0': 'opt-a' } },
@@ -100,7 +100,7 @@ describe('createBatch — provenance persistence', () => {
 
     const req: ResolvedGenerateRequest = {
       prompt: 'p',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
       provenance: { templateId: 'tpl-u2', rollSeed: 99, pins: { 'face#0': 'opt-a' } },

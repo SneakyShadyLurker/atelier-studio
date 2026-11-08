@@ -27,14 +27,14 @@ beforeEach(() => {
 function seedQueued(
   id: string,
   userId = 'u1',
-  modelId = 'gpt-image-2.5-sunburst',
+  modelId = 'gpt-image-2.6-sunburst',
   pool: 'shared' | 'byok' | 'local' = 'shared',
   count = 1,
 ): void {
   db.run('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)', [userId, Date.now()]);
   db.run(
     `INSERT INTO batches (id, user_id, prompt, model_id, model_label, ratio, created_at, status, pool)
-     VALUES (?, ?, 'p', ?, 'GPT Image 2.5 Sunburst', '1:1', ?, 'queued', ?)`,
+     VALUES (?, ?, 'p', ?, 'GPT Image 2.6 Sunburst', '1:1', ?, 'queued', ?)`,
     [id, userId, modelId, Date.now(), pool],
   );
   for (let i = 0; i < count; i += 1) {
@@ -53,7 +53,7 @@ function ctx(overrides: Partial<DequeueRuntimeContext> = {}): DequeueRuntimeCont
     config: testConfig({ DATA_DIR: tempDir() }),
     logger: { error: () => undefined, warn: () => undefined, info: () => undefined },
     registry: {
-      findModel: () => ({ model: { id: 'gpt-image-2.5-sunburst', pool: 'shared', maxCountPerBatch: 8 } }),
+      findModel: () => ({ model: { id: 'gpt-image-2.6-sunburst', pool: 'shared', maxCountPerBatch: 8 } }),
       healthSnapshot: () => new Map(),
     },
     acquireFor: () => ({ ok: true }),
@@ -850,7 +850,7 @@ test('revalidate failure tombstones first batch, releases slot, and tries next h
       registry: {
         findModel: () => {
           calls += 1;
-          return calls === 1 ? null : { model: { id: 'gpt-image-2.5-sunburst', pool: 'shared', maxCountPerBatch: 8 } };
+          return calls === 1 ? null : { model: { id: 'gpt-image-2.6-sunburst', pool: 'shared', maxCountPerBatch: 8 } };
         },
         healthSnapshot: () => new Map(),
       },

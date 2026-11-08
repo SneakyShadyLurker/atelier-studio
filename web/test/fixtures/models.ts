@@ -2,8 +2,8 @@ import type { Model } from '@atelier/shared';
 
 export const fixtureModels: readonly Model[] = [
   {
-    id: 'gpt-image-2.5-sunburst-cloud',
-    name: 'GPT Image 2.5 Sunburst',
+    id: 'gpt-image-2.6-sunburst-cloud',
+    name: 'GPT Image 2.6 Sunburst',
     backend: 'cloud',
     tag: 'cloud',
     latency: 'fast',

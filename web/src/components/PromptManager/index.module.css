@@ -89,11 +89,17 @@
     grid-template-rows: auto auto minmax(0, 1fr);
   }
 
-  .resourcePane {
-    max-height: 200px;
+  .resourceScroll {
+    max-block-size: calc(3.5 * (1lh + 18px) + 3 * 4px);
   }
 
-  .editor {
+  @media (height <= 620px) {
+    .resourceScroll {
+      max-block-size: calc(2.5 * (1lh + 18px) + 2 * 4px);
+    }
+  }
+
+  .body > .editor {
     min-height: min(560px, max(320px, calc(100dvh - 210px)));
   }
 }
@@ -680,6 +686,20 @@
 }
 
 @media (hover: none), (any-pointer: coarse) {
+  @media (width >= 768px) {
+    @container (max-width: 640px) {
+      .resourceScroll {
+        max-block-size: calc(3.5 * 44px + 3 * 4px);
+      }
+
+      @media (height <= 620px) {
+        .resourceScroll {
+          max-block-size: calc(2.5 * 44px + 2 * 4px);
+        }
+      }
+    }
+  }
+
   .chipButton,
   .chipSelected,
   .chipExcluded {

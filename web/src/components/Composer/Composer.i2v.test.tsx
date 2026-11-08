@@ -10,8 +10,8 @@ import { canSubmitDraft, initialAtelierState, toGenerateRequest, useAtelierStore
 
 
 const imageModel: Model = {
-  id: 'gpt-image-2.5-sunburst-cloud',
-  name: 'GPT Image 2.5 Sunburst',
+  id: 'gpt-image-2.6-sunburst-cloud',
+  name: 'GPT Image 2.6 Sunburst',
   backend: 'cloud',
   tag: 'cloud',
   latency: 'fast',
@@ -127,7 +127,7 @@ describe('Composer source intents vs pending tile handoffs', () => {
     const isCurrent = beginSourceHandoff();
 
     fireEvent.click(screen.getByRole('button', { name: 'Model' }));
-    fireEvent.click(screen.getByRole('option', { name: /GPT Image 2\.5 Sunburst/ }));
+    fireEvent.click(screen.getByRole('option', { name: /GPT Image 2\.6 Sunburst/ }));
 
     await waitFor(() => { expect(onModelChange).toHaveBeenCalledWith(imageModel.id); });
     expect(isCurrent()).toBe(false);
@@ -140,7 +140,7 @@ describe('Composer source intents vs pending tile handoffs', () => {
     const isCurrent = beginSourceHandoff();
 
     fireEvent.click(screen.getByRole('button', { name: 'Model' }));
-    fireEvent.click(screen.getByRole('option', { name: /GPT Image 2\.5 Sunburst/ }));
+    fireEvent.click(screen.getByRole('option', { name: /GPT Image 2\.6 Sunburst/ }));
 
     await waitFor(() => { expect(onModelChange).toHaveBeenCalledWith(imageModel.id); });
     expect(isCurrent()).toBe(true);
@@ -270,7 +270,7 @@ describe('Composer I2V mode', () => {
   });
 
   test('hides motion controls for image models', () => {
-    renderComposer({ modelId: 'gpt-image-2.5-sunburst-cloud' });
+    renderComposer({ modelId: 'gpt-image-2.6-sunburst-cloud' });
 
     expect(screen.queryByRole('textbox', { name: 'Motion prompt' })).toBeNull();
     expect(screen.queryByText(/Source still/)).toBeNull();
@@ -282,7 +282,7 @@ describe('Composer I2V mode', () => {
       motionPrompt: 'slow camera push-in',
     });
 
-    const request = toGenerateRequest(useAtelierStore.getState().draft, 'gpt-image-2.5-sunburst-cloud', '1:1', imageModel);
+    const request = toGenerateRequest(useAtelierStore.getState().draft, 'gpt-image-2.6-sunburst-cloud', '1:1', imageModel);
 
     expect(request.count).toBe(2);
     expect('i2vSourceUploadId' in request).toBe(false);
@@ -419,7 +419,7 @@ describe('Composer I2V mode', () => {
     expect(screen.getByRole('button', { name: 'Back to image generation' })).toBeDefined();
 
     cleanup();
-    renderComposer({ modelId: 'gpt-image-2.5-sunburst-cloud' });
+    renderComposer({ modelId: 'gpt-image-2.6-sunburst-cloud' });
     expect(screen.queryByRole('button', { name: 'Back to image generation' })).toBeNull();
   });
 
@@ -429,7 +429,7 @@ describe('Composer I2V mode', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to image generation' }));
     // First non-I2V model in the list (i2vModel is index 0).
-    expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.5-sunburst-cloud');
+    expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.6-sunburst-cloud');
   });
 
   test('exit affordance restores the last image model the user was on', () => {
@@ -467,7 +467,7 @@ describe('Composer I2V mode', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to image generation' }));
     // T2V outputs video, so the exit skips it and falls back to the first
     // image-producing model in the list.
-    expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.5-sunburst-cloud');
+    expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.6-sunburst-cloud');
   });
 
   test('exit affordance skips a remembered image model that is offline', () => {
@@ -485,6 +485,6 @@ describe('Composer I2V mode', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to image generation' }));
     // Neither the offline remembered row nor the offline first image row.
-    expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.5-sunburst-cloud');
+    expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.6-sunburst-cloud');
   });
 });

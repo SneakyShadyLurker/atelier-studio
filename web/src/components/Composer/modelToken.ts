@@ -14,7 +14,7 @@ export function hostLabel(id: string): string {
  * Compact model-family token for the Composer Model chip. The full name stays
  * available in the dropdown, the batch header, and the chip hover title, so
  * collapsing `Nano Banana Pro` / `Nano Banana 2` → `Banana` and
- * `GPT Image 2.5 Sunburst` → `GPT` only defers variant distinction, never loses it.
+ * `GPT Image 2.6 Sunburst` → `GPT` only defers variant distinction, never loses it.
  * Local models keep their variant identity (`GonzaLomo`); the
  * serving host is status, not identity — the chip carries it as a health dot
  * plus hover title.

@@ -51,7 +51,7 @@ function completedSse(b64: string, revised?: string): Response {
 function providerReq(overrides: Partial<ProviderRequest> = {}): ProviderRequest {
   return {
     prompt: 'paint a quiet workstation',
-    modelId: 'gpt-image-2.5-sunburst',
+    modelId: 'gpt-image-2.6-sunburst',
     ratio: '1:1',
     tileIndex: 0,
     seed: 123,
@@ -77,7 +77,7 @@ async function collectResults(baseUrl: string, overrides: Partial<ProviderReques
 }
 
 describe('CLIProxyAPI provider', () => {
-  test('sends locked gpt-image-2.5-sunburst body without n and decodes the response', async () => {
+  test('sends locked gpt-image-2.6-sunburst body without n and decodes the response', async () => {
     let seenBody: Record<string, unknown> | undefined;
     let auth: string | undefined;
     const baseUrl = serve(async (req) => {
@@ -90,7 +90,7 @@ describe('CLIProxyAPI provider', () => {
 
     expect(auth ?? '').toBe('Bearer sk-cliproxy-test');
     expect(seenBody ?? {}).toEqual({
-      model: 'gpt-image-2.5-sunburst',
+      model: 'gpt-image-2.6-sunburst',
       prompt: 'paint a quiet workstation',
       size: '3840x2160',
       quality: 'xhigh',
@@ -334,7 +334,7 @@ describe('CLIProxyAPI provider', () => {
     expect(result).toMatchObject({ status: 'ready' });
     expect(seenPath).toBe('/v1/images/edits');
     expect(seenBody ?? {}).toMatchObject({
-      model: 'gpt-image-2.5-sunburst',
+      model: 'gpt-image-2.6-sunburst',
       prompt: 'paint a quiet workstation',
       size: '2880x2880',
       quality: 'xhigh',
@@ -466,7 +466,7 @@ describe('CLIProxyAPI provider', () => {
     expect(caught).toBeInstanceOf(Error);
   });
 
-  test('registry exposes gpt-image-2.5-sunburst and fan-out performs one POST per tile', async () => {
+  test('registry exposes gpt-image-2.6-sunburst and fan-out performs one POST per tile', async () => {
     let posts = 0;
     const baseUrl = serve(() => {
       posts += 1;
@@ -476,11 +476,11 @@ describe('CLIProxyAPI provider', () => {
 
     const modelsRes = await app.fetch(new Request('http://local/api/models', { headers: { 'Remote-User': 'test' } }));
     const models = await modelsRes.json() as { id: string }[];
-    expect(models.some((model) => model.id === 'gpt-image-2.5-sunburst')).toBe(true);
+    expect(models.some((model) => model.id === 'gpt-image-2.6-sunburst')).toBe(true);
 
     const events = await generateEvents(app, {
       prompt: 'x',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 4,
     });
@@ -501,7 +501,7 @@ describe('CLIProxyAPI provider', () => {
     const { app } = testRuntime({ CLIPROXY_BASE_URL: baseUrl, CLIPROXY_TOKEN: 'sk-cliproxy-test' });
     const events = await generateEvents(app, {
       prompt: 'x',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
     });
@@ -524,23 +524,23 @@ describe('CLIProxyAPI provider', () => {
     expect(done?.data).toMatchObject({ status: 'done', ext: 'png', mime: 'image/png' });
   });
 
-  test('gpt-image-2.5-sunburst rejects unsupported ratios through route validation', async () => {
+  test('gpt-image-2.6-sunburst rejects unsupported ratios through route validation', async () => {
     const { app } = testRuntime();
     const res = await jsonRequest(app, '/api/generate', {
       prompt: 'x',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '2:3',
       count: 1,
     });
     expect(res.status).toBe(400);
   });
 
-  test('GET /api/models exposes gpt-image-2.5-sunburst ratio metadata', async () => {
+  test('GET /api/models exposes gpt-image-2.6-sunburst ratio metadata', async () => {
     const { app } = testRuntime();
     const res = await app.fetch(new Request('http://local/api/models', { headers: { 'Remote-User': 'test' } }));
     const models = await res.json() as { id: string; supportedRatios: string[]; backend: string; tag: string }[];
-    expect(models.find((model) => model.id === 'gpt-image-2.5-sunburst')).toMatchObject({
-      id: 'gpt-image-2.5-sunburst',
+    expect(models.find((model) => model.id === 'gpt-image-2.6-sunburst')).toMatchObject({
+      id: 'gpt-image-2.6-sunburst',
       supportedRatios: ['1:1', '4:5', '3:4', '16:9', '9:16'],
       backend: 'cloud',
       tag: 'cloud',

@@ -82,7 +82,7 @@ function setup(options: {
       <EditModelDialog
         provider={options.provider ?? OLLAMA}
         model={model}
-        imageLabel={(id) => (id === 'gpt-image-2.5-sunburst' ? 'GPT Image 2.5 Sunburst' : id)}
+        imageLabel={(id) => (id === 'gpt-image-2.6-sunburst' ? 'GPT Image 2.6 Sunburst' : id)}
         startTest={options.startTest ?? false}
         onClose={onClose}
       />
@@ -366,7 +366,7 @@ describe('Edit model: remove', () => {
     fireEvent.click(button('Remove model…'));
     const confirm = await screen.findByRole('dialog', { name: 'Remove Kimi K3?' });
     expect(confirm.textContent).toContain(
-      'It is the default model, assigned to AI fill, the prompt writer for GPT Image 2.5 Sunburst, and picked by 3 people. Those will fall back to the next model in line.',
+      'It is the default model, assigned to AI fill, the prompt writer for GPT Image 2.6 Sunburst, and picked by 3 people. Those will fall back to the next model in line.',
     );
     fireEvent.click(within(confirm).getByRole('button', { name: 'Remove model' }));
     await waitFor(() => { expect(onClose).toHaveBeenCalled(); });

@@ -3,7 +3,7 @@ import { MAX_PROMPT_CHARS } from '@atelier/shared';
 import { GenerateRequestSchema } from './generate.schema';
 
 test('generation text caps still count UTF-16 units after the Zod upgrade', () => {
-  const base = { prompt: 'p', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 };
+  const base = { prompt: 'p', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 };
   for (const [field, maximum] of [
     ['prompt', MAX_PROMPT_CHARS],
     ['motionPrompt', MAX_PROMPT_CHARS],
@@ -26,7 +26,7 @@ test('generation text caps still count UTF-16 units after the Zod upgrade', () =
 });
 
 describe('GenerateRequestSchema — provenance', () => {
-  const base = { prompt: 'p', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1' as const, count: 1 };
+  const base = { prompt: 'p', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1' as const, count: 1 };
 
   test('accepts valid provenance', () => {
     const r = GenerateRequestSchema.safeParse({
@@ -60,7 +60,7 @@ describe('GenerateRequestSchema — provenance', () => {
 describe('GenerateRequestSchema — retired localHost field', () => {
   test('a stale client\'s localHost is stripped rather than rejected', () => {
     const parsed = GenerateRequestSchema.safeParse({
-      prompt: 'p', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1, localHost: 'host-a',
+      prompt: 'p', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1, localHost: 'host-a',
     });
     expect(parsed.success).toBe(true);
     expect(parsed.data).not.toHaveProperty('localHost');
@@ -82,7 +82,7 @@ describe('GenerateRequestSchema — video sequence extension', () => {
 });
 
 describe('GenerateRequestSchema — idempotencyKey', () => {
-  const base = { prompt: 'p', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1' as const, count: 1 };
+  const base = { prompt: 'p', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1' as const, count: 1 };
 
   test('accepts a 36-char key', () => {
     const key = crypto.randomUUID();

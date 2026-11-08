@@ -107,7 +107,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     const inputs: BrainstormCharactersInput[] = [];
     setTextModelProviderForTests(fakeProvider(inputs));
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.5-sunburst', variationSeed: 42 });
+    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.6-sunburst', variationSeed: 42 });
     expect(res.headers.get('content-type')).toContain('text/event-stream');
     const events = await parseSse(res);
     expect(events.map((e) => e.event)).toEqual(['prompt', 'prompt', 'done']);
@@ -130,7 +130,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     const body = { brief: 'A solitary adult cartographer.', count: 2 };
     await parseSse(await post(app, 'alice', { ...body, modelId: 'krea-2-gonzalomo' }));
     await parseSse(await post(app, 'alice', { ...body, modelId: 'moss-image-sft' }));
-    await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.5-sunburst' }));
+    await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.6-sunburst' }));
 
     expect(requests.map((request) => request.model)).toEqual([
       TEXT_MODELS.kimi,
@@ -194,9 +194,9 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     pickLegacyTextModel(db, 'alice', 'brainstorm', 'mimo');
     const body = { brief: 'A solitary adult cartographer.', count: 2 };
     // Sunburst fixes the backend without mutating stored preferences.
-    await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.5-sunburst' }));
+    await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.6-sunburst' }));
     // A request pin cannot move the Sunburst workflow to another backend.
-    await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.5-sunburst', textModelId: legacyTextModelId(db, 'kimi') }));
+    await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.6-sunburst', textModelId: legacyTextModelId(db, 'kimi') }));
 
     expect(requests.map((request) => request.model)).toEqual([
       TEXT_MODELS.gpt,
@@ -348,7 +348,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
   test('returns 404 for a non-allowlisted user', async () => {
     setTextModelProviderForTests(fakeProvider());
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    const res = await post(app, 'bob', { count: 2, modelId: 'gpt-image-2.5-sunburst' });
+    const res = await post(app, 'bob', { count: 2, modelId: 'gpt-image-2.6-sunburst' });
     expect(res.status).toBe(404);
   });
 
@@ -356,7 +356,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     const inputs: BrainstormCharactersInput[] = [];
     setTextModelProviderForTests(fakeProvider(inputs));
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', BRAINSTORM_MAX_COUNT: '3' });
-    const res = await post(app, 'alice', { count: 10, modelId: 'gpt-image-2.5-sunburst' });
+    const res = await post(app, 'alice', { count: 10, modelId: 'gpt-image-2.6-sunburst' });
     expect(res.status).toBe(200);
     await parseSse(res);
     expect(inputs[0]?.count).toBe(3);
@@ -370,7 +370,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     };
     setTextModelProviderForTests(failing);
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.5-sunburst' });
+    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.6-sunburst' });
     expect(res.status).toBe(200);
     const events = await parseSse(res);
     expect(events.map((e) => e.event)).toEqual(['error']);
@@ -386,7 +386,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       },
     });
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.5-sunburst' });
+    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.6-sunburst' });
     const events = await parseSse(res);
     expect(events.map((e) => e.event)).toContain('error');
     expect(events.map((e) => e.event)).not.toContain('done');
@@ -401,7 +401,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       },
     });
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.5-sunburst' });
+    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.6-sunburst' });
     expect(res.status).toBe(200);
     const events = await parseSse(res);
     expect(events.map((e) => e.event)).toEqual(['error']);
@@ -420,7 +420,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
       },
     });
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.5-sunburst' });
+    const res = await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.6-sunburst' });
     const events = await parseSse(res);
     expect(events.map((e) => e.event)).toEqual(['error']);
     const err = events[0]?.data as { code?: string };
@@ -488,7 +488,7 @@ describe('brainstorm text model pin and failover', () => {
     const runtime = upstreamRuntime(serveByModel(requests, { [TEXT_MODELS.gpt]: 503, [TEXT_MODELS.kimi]: 'record' }));
     // Even an explicit pin cannot route around the Sunburst lock.
     const events = await parseSse(await post(runtime.app, 'alice', {
-      count: 1, modelId: 'gpt-image-2.5-sunburst', textModelId: legacyTextModelId(runtime.db, 'kimi'),
+      count: 1, modelId: 'gpt-image-2.6-sunburst', textModelId: legacyTextModelId(runtime.db, 'kimi'),
     }));
     expect(requests.map((request) => request.model)).toEqual([TEXT_MODELS.gpt]);
     expect(events.map((e) => e.event)).toEqual(['error']);
@@ -498,7 +498,7 @@ describe('brainstorm text model pin and failover', () => {
     setTextModelProviderForTests(fakeProvider());
     const runtime = upstreamRuntime('http://127.0.0.1:1');
     runtime.text.store.updateModel(legacyTextModelId(runtime.db, 'gpt'), { enabled: false });
-    const res = await post(runtime.app, 'alice', { count: 1, modelId: 'gpt-image-2.5-sunburst' });
+    const res = await post(runtime.app, 'alice', { count: 1, modelId: 'gpt-image-2.6-sunburst' });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('TEXT_MODEL_UNAVAILABLE');
   });

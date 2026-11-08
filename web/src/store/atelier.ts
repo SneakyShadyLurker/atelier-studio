@@ -19,7 +19,7 @@ export type Count = 1 | 2 | 3 | 4;
 // server count cap changes, this stops compiling until Count is updated.
 const _countMaxLock: Count = MAX_TILE_COUNT;
 
-// Default composer reference-image cap — mirrors gpt-image-2.5-sunburst's maxRefImages.
+// Default composer reference-image cap — mirrors gpt-image-2.6-sunburst's maxRefImages.
 // The server enforces the real per-model ceiling; this is the upload-time UX
 // guard used while no ref-supporting model is selected.
 export const MAX_REF_IMAGES_FALLBACK = 4;

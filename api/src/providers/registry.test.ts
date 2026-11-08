@@ -55,7 +55,7 @@ describe('publicModelsForUser', () => {
 
     const comfy = models.find((model) => model.id === 'krea-2-gonzalomo');
     expect(comfy?.availability).toEqual({ ok: false, checkedAt: 1_700_000_000_000, reason: 'unavailable' });
-    const gpt = models.find((model) => model.id === 'gpt-image-2.5-sunburst');
+    const gpt = models.find((model) => model.id === 'gpt-image-2.6-sunburst');
     expect(gpt?.availability).toBeUndefined();
   });
 
@@ -74,13 +74,13 @@ describe('publicModelsForUser', () => {
     expect(comfy?.availability).toBeUndefined();
   });
 
-  test('CLIProxy gpt-image-2.5-sunburst never carries requiresKey', async () => {
+  test('CLIProxy gpt-image-2.6-sunburst never carries requiresKey', async () => {
     const { config, keyStore } = await setup();
 
     const models = await publicModelsForUser(config, { userId: 'alice', keyStore });
 
-    const gpt = models.find((model) => model.id === 'gpt-image-2.5-sunburst');
-    expect(gpt?.name).toBe('GPT Image 2.5 Sunburst');
+    const gpt = models.find((model) => model.id === 'gpt-image-2.6-sunburst');
+    expect(gpt?.name).toBe('GPT Image 2.6 Sunburst');
     expect(models.some((model) => model.id === 'gpt-image-2')).toBe(false);
     expect(gpt?.requiresKey).toBeUndefined();
   });
@@ -90,7 +90,7 @@ describe('publicModelsForUser', () => {
 
     const models = await publicModelsForUser(config, { userId: 'alice', keyStore });
 
-    expect(models.find((model) => model.id === 'gpt-image-2.5-sunburst')?.defaultRatio).toBe('4:5');
+    expect(models.find((model) => model.id === 'gpt-image-2.6-sunburst')?.defaultRatio).toBe('4:5');
 
     const gemini = models.filter((model) => model.id.startsWith('gemini-'));
     expect(gemini).toHaveLength(3);
@@ -100,12 +100,12 @@ describe('publicModelsForUser', () => {
     expect(models.find((model) => model.id === 'moss-image-sft')?.defaultRatio).toBe('3:4');
   });
 
-  test('reference-image caps: gpt-image-2.5-sunburst = 4, all Gemini models = 10', async () => {
+  test('reference-image caps: gpt-image-2.6-sunburst = 4, all Gemini models = 10', async () => {
     const { config, keyStore } = await setup();
 
     const models = await publicModelsForUser(config, { userId: 'alice', keyStore });
 
-    const gpt = models.find((m) => m.id === 'gpt-image-2.5-sunburst');
+    const gpt = models.find((m) => m.id === 'gpt-image-2.6-sunburst');
     expect(gpt?.supportsReferenceImages).toBe(true);
     expect(gpt?.maxRefImages).toBe(4);
 
@@ -137,12 +137,12 @@ describe('publicModelsForUser', () => {
 describe('RegistryEntry.bind', () => {
   test('non-BYOK entries return the same provider instance every call', async () => {
     const { config } = await setup();
-    const entry = findModel('gpt-image-2.5-sunburst', config);
-    if (!entry) throw new Error('expected gpt-image-2.5-sunburst to be registered');
+    const entry = findModel('gpt-image-2.6-sunburst', config);
+    if (!entry) throw new Error('expected gpt-image-2.6-sunburst to be registered');
     const a = entry.bind({});
     const b = entry.bind({ keyPlaintext: 'ignored' });
     expect(a).toBe(b);
-    expect(a.id).toBe('gpt-image-2.5-sunburst');
+    expect(a.id).toBe('gpt-image-2.6-sunburst');
     expect(a.backend).toBe('cloud');
   });
 
@@ -207,7 +207,7 @@ describe('Model.concurrencyCapPerUser matches capsForPool', () => {
     });
 
     const entries = registryForConfig(config);
-    expect(entries.find((entry) => entry.model.id === 'gpt-image-2.5-sunburst')?.model.maxCountPerBatch).toBe(4);
+    expect(entries.find((entry) => entry.model.id === 'gpt-image-2.6-sunburst')?.model.maxCountPerBatch).toBe(4);
     // Local batched models use COMFYUI_BATCH_MAX (default 4), not the
     // concurrency cap — a batch_size=N job occupies a single semaphore slot.
     expect(entries.find((entry) => entry.model.id === 'krea-2-gonzalomo')?.model.maxCountPerBatch).toBe(4);
@@ -361,25 +361,25 @@ describe('MiniMax H3 I2V video model gate', () => {
 });
 
 describe('resilient decorator wiring', () => {
-  test('gpt-image-2.5-sunburst is wrapped in a resilient decorator', () => {
+  test('gpt-image-2.6-sunburst is wrapped in a resilient decorator', () => {
     const config = testConfig();
     const reg = registryForConfig(config);
 
-    const gpt = reg.find((e) => e.model.id === 'gpt-image-2.5-sunburst');
+    const gpt = reg.find((e) => e.model.id === 'gpt-image-2.6-sunburst');
     expect(gpt).toBeDefined();
     // id is preserved through the decorator:
-    expect(gpt?.bind({}).id).toBe('gpt-image-2.5-sunburst');
+    expect(gpt?.bind({}).id).toBe('gpt-image-2.6-sunburst');
   });
 
-  test('gpt-image-2.5-sunburst bind() returns the same instance on repeated calls (staticBind preserved)', () => {
+  test('gpt-image-2.6-sunburst bind() returns the same instance on repeated calls (staticBind preserved)', () => {
     const config = testConfig();
-    const entry = registryForConfig(config).find((e) => e.model.id === 'gpt-image-2.5-sunburst');
-    if (!entry) throw new Error('expected gpt-image-2.5-sunburst to be registered');
+    const entry = registryForConfig(config).find((e) => e.model.id === 'gpt-image-2.6-sunburst');
+    if (!entry) throw new Error('expected gpt-image-2.6-sunburst to be registered');
     const a = entry.bind({});
     const b = entry.bind({ keyPlaintext: 'ignored' });
     // staticBind wraps the resilient provider — always the same wrapper instance:
     expect(a).toBe(b);
-    expect(a.id).toBe('gpt-image-2.5-sunburst');
+    expect(a.id).toBe('gpt-image-2.6-sunburst');
   });
 
   test('policy is per-Config, not module-global (two configs yield independent policy instances)', () => {
@@ -387,8 +387,8 @@ describe('resilient decorator wiring', () => {
     const c2 = testConfig();
     // registryForConfig memoizes per Config reference; two distinct Configs
     // must produce two distinct provider instances (separate breaker state).
-    const p1 = registryForConfig(c1).find((e) => e.model.id === 'gpt-image-2.5-sunburst')?.bind({});
-    const p2 = registryForConfig(c2).find((e) => e.model.id === 'gpt-image-2.5-sunburst')?.bind({});
+    const p1 = registryForConfig(c1).find((e) => e.model.id === 'gpt-image-2.6-sunburst')?.bind({});
+    const p2 = registryForConfig(c2).find((e) => e.model.id === 'gpt-image-2.6-sunburst')?.bind({});
     expect(p1).toBeDefined();
     expect(p2).toBeDefined();
     expect(p1).not.toBe(p2);

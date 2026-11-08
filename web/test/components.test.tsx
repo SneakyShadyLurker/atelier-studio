@@ -330,8 +330,8 @@ describe('visual scaffold components', () => {
 
     const modelTrigger = screen.getByRole('button', { name: 'Model' });
     fireEvent.click(modelTrigger);
-    fireEvent.click(screen.getByRole('option', { name: /GPT Image 2.5 Sunburst/ }));
-    expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.5-sunburst-cloud');
+    fireEvent.click(screen.getByRole('option', { name: /GPT Image 2.6 Sunburst/ }));
+    expect(onModelChange).toHaveBeenCalledWith('gpt-image-2.6-sunburst-cloud');
 
     const ratioTrigger = screen.getByLabelText('Ratio');
     expect(within(ratioTrigger).getByText('1:1')).toBeTruthy();
@@ -354,7 +354,7 @@ describe('visual scaffold components', () => {
         models={fixtureModels}
         modelById={fixtureModelById}
         prompt="edit this"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={() => undefined}
@@ -374,7 +374,7 @@ describe('visual scaffold components', () => {
     });
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:ref-preview');
-    expect(toGenerateRequest(useAtelierStore.getState().draft, 'gpt-image-2.5-sunburst-cloud', '1:1')).toMatchObject({
+    expect(toGenerateRequest(useAtelierStore.getState().draft, 'gpt-image-2.6-sunburst-cloud', '1:1')).toMatchObject({
       refImageIds: ['upload-ready'],
     });
   });
@@ -390,7 +390,7 @@ describe('visual scaffold components', () => {
         models={fixtureModels}
         modelById={fixtureModelById}
         prompt="edit this"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={() => undefined}
@@ -424,7 +424,7 @@ describe('visual scaffold components', () => {
     useAtelierStore.setState({
       draft: {
         prompt: 'starter prompt',
-        modelId: 'gpt-image-2.5-sunburst-cloud',
+        modelId: 'gpt-image-2.6-sunburst-cloud',
         ratio: '1:1',
         durationFrames: null,
         count: 1,
@@ -446,7 +446,7 @@ describe('visual scaffold components', () => {
         models={fixtureModels}
         modelById={fixtureModelById}
         prompt="starter prompt"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={onPromptChange}
@@ -483,7 +483,7 @@ describe('visual scaffold components', () => {
         models={fixtureModels}
         modelById={fixtureModelById}
         prompt=""
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={() => undefined}
@@ -507,7 +507,7 @@ describe('visual scaffold components', () => {
         models={fixtureModels}
         modelById={fixtureModelById}
         prompt="edit this"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={() => undefined}
@@ -597,7 +597,7 @@ describe('visual scaffold components', () => {
         models={fixtureModels}
         modelById={fixtureModelById}
         prompt="edit this"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={() => undefined}
@@ -627,7 +627,7 @@ describe('visual scaffold components', () => {
         models={fixtureModels}
         modelById={fixtureModelById}
         prompt="edit this"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={() => undefined}

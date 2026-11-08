@@ -58,7 +58,7 @@ function harness(options: { body?: string } = {}) {
 describe('useDraftTemplate', () => {
   test('sends the selected image context without fetching a separate model catalog', async () => {
     const previous = useAtelierStore.getState().draft;
-    const modelId = 'gpt-image-2.5-sunburst';
+    const modelId = 'gpt-image-2.6-sunburst';
     useAtelierStore.setState({ draft: { ...previous, modelId } });
     const requests: RequestInit[] = [];
     globalThis.fetch = mock((_url: unknown, init?: RequestInit) => {

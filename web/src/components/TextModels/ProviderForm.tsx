@@ -275,7 +275,6 @@ export function ProviderFields({ draft, errors, urlHint, urlHints, keySlot, disa
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
-            placeholder="http://localhost:11434/v1"
             value={draft.baseUrl}
             disabled={disabled}
             aria-invalid={errors.baseUrl !== undefined ? true : undefined}

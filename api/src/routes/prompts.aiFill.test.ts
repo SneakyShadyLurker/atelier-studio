@@ -40,7 +40,7 @@ function fakeProvider(aiFill: (input: AiFillProviderInput) => Promise<AiFillResu
 const BODY = {
   staticSegments: ['A woman, ', ', golden hour.'],
   instructions: ['her swimsuit'],
-  modelId: 'gpt-image-2.5-sunburst',
+  modelId: 'gpt-image-2.6-sunburst',
 };
 
 function frameData(frames: { event: string; data: unknown }[], event: string): Record<string, unknown> {
@@ -307,7 +307,7 @@ describe('POST /api/prompts/ai-fill', () => {
     expect(record).toMatchObject({
       userId: 'alice',
       textModelId: legacyTextModelId(runtime.db, 'gpt'),
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       slot: 0,
       instructionCount: BODY.instructions.length,
       refusalChars: PROD_REFUSAL.length,
@@ -484,7 +484,7 @@ describe('POST /api/prompts/ai-fill', () => {
     const MULTI = {
       staticSegments: ['A ', ' wearing ', ' nearby.'],
       instructions: ['the scene', 'the garment'],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     };
 
     test('simulate retries on the selected backend and splices recovered fills', async () => {
@@ -624,7 +624,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
       return Promise.resolve({ type: 'ok', text: 'red dress' });
     }));
 
-    await (await postAiFillBatch({ items: [item('First')], modelId: 'gpt-image-2.5-sunburst' })).text();
+    await (await postAiFillBatch({ items: [item('First')], modelId: 'gpt-image-2.6-sunburst' })).text();
     await (await postAiFillBatch({ items: [item('First')], modelId: 'krea-2-gonzalomo' })).text();
 
     const staticLength = item('First').staticSegments.reduce((total, segment) => total + segment.length, 0);
@@ -647,7 +647,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     const response = await runtime.app.fetch(new Request('http://local/api/prompts/ai-fill/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': 'alice' },
-      body: JSON.stringify({ items: [item('First')], modelId: 'gpt-image-2.5-sunburst' }),
+      body: JSON.stringify({ items: [item('First')], modelId: 'gpt-image-2.6-sunburst' }),
     }));
     const frames = parseSseText(await response.text());
     expect(frameData(frames, 'result').items).toEqual([
@@ -666,7 +666,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     }));
     const frames = parseSseText(await (await postAiFillBatch({
       items: [item('First'), item('Second'), item('Third')],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     })).text());
     expect(calls).toBe(1);
     expect(frameData(frames, 'result').items).toEqual([
@@ -688,7 +688,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     }));
     const frames = parseSseText(await (await postAiFillBatch({
       items: [item('First'), item('Second'), item('Third'), item('Fourth')],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     })).text());
     expect(calls).toBe(1);
     expect(frameData(frames, 'result').items).toEqual([
@@ -714,7 +714,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     }));
     const frames = parseSseText(await (await postAiFillBatch({
       items: [item('First'), item('Second'), item('Third')],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     })).text());
     // No group retry: a refusal is deterministic, unlike a format miss.
     expect(calls).toBe(1);
@@ -742,7 +742,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
         Accept: 'text/event-stream',
         'Remote-User': 'alice',
       },
-      body: JSON.stringify({ items: [twoSlotItem('First')], modelId: 'gpt-image-2.5-sunburst' }),
+      body: JSON.stringify({ items: [twoSlotItem('First')], modelId: 'gpt-image-2.6-sunburst' }),
     }));
     const frames = parseSseText(await response.text());
     expect(calls).toBe(1);
@@ -764,7 +764,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     })));
     const frames = parseSseText(await (await postAiFillBatch({
       items: [item('First'), item('Second')],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     })).text());
     expect(frames.some((f) => f.event === 'result')).toBe(false);
     expect(frameData(frames, 'error').code).toBe('refusal');
@@ -786,7 +786,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     const response = await runtime.app.fetch(new Request('http://local/api/prompts/ai-fill/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': 'alice' },
-      body: JSON.stringify({ items: [item('First'), item('Second')], modelId: 'gpt-image-2.5-sunburst' }),
+      body: JSON.stringify({ items: [item('First'), item('Second')], modelId: 'gpt-image-2.6-sunburst' }),
     }));
     const frames = parseSseText(await response.text());
     expect(seen).toHaveLength(2);
@@ -823,7 +823,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     })).text());
     const gptFrames = parseSseText(await (await postAiFillBatch({
       items,
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     })).text());
     expect(seen).toHaveLength(2);
     expect(seen[0]?.systemPrompt).toContain('Kimi K3 multi-item');
@@ -857,7 +857,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
         { staticSegments: ['A 17-year-old girl ', '.'], instructions: ['wardrobe'] },
         { staticSegments: ['Another 25-year-old woman ', '.'], instructions: ['pose'] },
       ],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     })).text());
     expect(seen).toHaveLength(1);
     expect(frames.filter((frame) => frame.event === 'backend').map((frame) => frame.data)).toMatchObject([
@@ -890,7 +890,7 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     const response = await runtime.app.fetch(new Request('http://local/api/prompts/ai-fill/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': 'alice' },
-      body: JSON.stringify({ items: Array.from({ length: 4 }, (_, index) => item(`Item ${index + 1}`)), modelId: 'gpt-image-2.5-sunburst' }),
+      body: JSON.stringify({ items: Array.from({ length: 4 }, (_, index) => item(`Item ${index + 1}`)), modelId: 'gpt-image-2.6-sunburst' }),
     }));
     const bodyPromise = response.text();
     await started;

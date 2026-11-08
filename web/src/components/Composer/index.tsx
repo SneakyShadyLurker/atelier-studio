@@ -348,7 +348,7 @@ function Composer({
       let hint: string | undefined;
       if (model.requiresKey) hint = 'Needs your API key';
       else if (probingModelId === model.id) hint = 'Checking…';
-      else if (offline) hint = 'Offline, check again';
+      else if (offline) hint = 'Offline';
       else if (locator.toLowerCase() !== group.toLowerCase()) hint = locator;
       const baseTitle = `${model.backend}, ${locator}, ${model.latency}`;
       const title = offline && model.availability
@@ -358,6 +358,7 @@ function Composer({
         value: model.id,
         label: model.name,
         ...(hint === undefined ? {} : { hint }),
+        ...(offline && !model.requiresKey && probingModelId !== model.id ? { hintAction: 'Check again' } : {}),
         ...(model.requiresKey ? { hintIcon: <I.lock /> } : {}),
         group,
         title,

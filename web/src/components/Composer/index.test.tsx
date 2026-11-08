@@ -12,8 +12,8 @@ const originalFetch = globalThis.fetch;
 
 const models: readonly Model[] = [
   {
-    id: 'gpt-image-2.5-sunburst-cloud',
-    name: 'GPT Image 2.5 Sunburst',
+    id: 'gpt-image-2.6-sunburst-cloud',
+    name: 'GPT Image 2.6 Sunburst',
     backend: 'cloud',
     tag: 'cloud',
     latency: 'fast',
@@ -125,7 +125,7 @@ function composerElement(overrides: Partial<Parameters<typeof Composer>[0]> = {}
       models={models}
       modelById={new Map(models.map((model) => [model.id, model]))}
       prompt="make an image"
-      modelId="gpt-image-2.5-sunburst-cloud"
+      modelId="gpt-image-2.6-sunburst-cloud"
       ratio="1:1"
       count={1}
       onPromptChange={mock()}
@@ -217,8 +217,8 @@ describe('Composer BYOK model gating', () => {
     renderComposer();
     openModelMenu();
 
-    const sunburst = screen.getByRole('option', { name: /GPT Image 2\.5 Sunburst/ });
-    expect(sunburst.textContent).toBe('GPT Image 2.5 Sunburst');
+    const sunburst = screen.getByRole('option', { name: /GPT Image 2\.6 Sunburst/ });
+    expect(sunburst.textContent).toBe('GPT Image 2.6 Sunburst');
     expect(screen.getByRole('option', { name: /ZIB Distilled/ }).textContent).toContain('ComfyUI');
   });
 
@@ -268,6 +268,21 @@ function probeOnly(fetchMock: (input: RequestInfo | URL, init?: RequestInit) => 
 }
 
 describe('Composer offline model re-probe', () => {
+  test('selected offline rows retain selection while unknown and key-required rows claim no recovery action', () => {
+    const keyed = models[1];
+    const unknown = models[3];
+    if (!keyed || !unknown) throw new Error('Missing model fixtures');
+    const inventory = [cloudModel, offlineReprobeModel, { ...keyed, availability: { ok: false, checkedAt: 1 } }, { ...unknown, id: 'unknown', name: 'Unknown model' }];
+    renderComposer({ models: inventory, modelById: new Map(inventory.map((model) => [model.id, model])), modelId: offlineReprobeModel.id });
+    openModelMenu();
+    const offline = screen.getByRole('option', { name: /Krea 2 Test Alpha.*Offline.*Check again/ });
+    expect(offline.getAttribute('aria-selected')).toBe('true');
+    expect(offline.querySelector('button, [tabindex]')).toBeNull();
+    const keyRequired = screen.getByRole('option', { name: /Nano Banana Pro/ });
+    expect(keyRequired.textContent).toBe('Nano Banana ProNeeds your API key');
+    expect(screen.getByRole('option', { name: /Unknown model/ }).textContent).toBe('Unknown modelComfyUI');
+  });
+
   test('clicking an offline row probes and selects it when the refreshed model is healthy', async () => {
     const onModelChange = mock();
     const initialModels = [cloudModel, offlineReprobeModel];
@@ -323,6 +338,9 @@ describe('Composer offline model re-probe', () => {
 
     const checking = await screen.findByRole('option', { name: /Krea 2 Test Alpha.*Checking/ });
     expect(checking.getAttribute('aria-disabled')).toBeNull();
+    expect(checking.textContent).not.toContain('Check again');
+    // No recovery glyph while the existing probe is pending.
+    expect(checking.querySelector('span svg')).toBeNull();
     expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeNull();
     fireEvent.click(checking);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -358,6 +376,7 @@ describe('Composer offline model re-probe', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(onModelChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('option', { name: /Krea 2 Test Alpha.*Offline.*Check again/ })).toBeTruthy();
   });
 
   test('a failed re-check reports a request failure rather than claiming the model is offline', async () => {
@@ -384,6 +403,7 @@ describe('Composer offline model re-probe', () => {
     expect(useAtelierStore.getState().toasts.some((toast) => toast.text === 'Krea 2 Test Alpha is offline')).toBe(false);
     expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeNull();
     expect(onModelChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('option', { name: /Krea 2 Test Alpha.*Offline.*Check again/ })).toBeTruthy();
   });
 
   test('a newer model selection wins over an older probe and preserves the I2V draft', async () => {
@@ -562,7 +582,7 @@ describe('Composer local-pool count lock', () => {
 
   test('a shared-pool model leaves the Count chip enabled and untouched', () => {
     const onCountChange = mock();
-    renderComposer({ modelId: 'gpt-image-2.5-sunburst-cloud', count: 4, onCountChange });
+    renderComposer({ modelId: 'gpt-image-2.6-sunburst-cloud', count: 4, onCountChange });
     const countChip = screen.getByRole('button', { name: 'Count' });
     expect(countChip.hasAttribute('disabled')).toBe(false);
     expect(onCountChange).not.toHaveBeenCalled();
@@ -627,7 +647,7 @@ describe('Composer textarea autosize', () => {
         models={models}
         modelById={new Map(models.map((model) => [model.id, model]))}
         prompt="make a taller image prompt"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={mock()}
@@ -661,7 +681,7 @@ describe('Composer enhance', () => {
         models={models}
         modelById={new Map(models.map((model) => [model.id, model]))}
         prompt="original"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={mock()}

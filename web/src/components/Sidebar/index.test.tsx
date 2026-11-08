@@ -9,8 +9,8 @@ import Sidebar from './index';
 const originalMatchMedia = window.matchMedia.bind(window);
 const history: HistoryPage<Batch> = { items: [], nextCursor: null };
 const models: readonly Model[] = [{
-  id: 'gpt-image-2.5-sunburst-cloud',
-  name: 'GPT Image 2.5 Sunburst',
+  id: 'gpt-image-2.6-sunburst-cloud',
+  name: 'GPT Image 2.6 Sunburst',
   backend: 'cloud',
   tag: 'cloud',
   latency: 'fast',
@@ -145,8 +145,8 @@ describe('Sidebar landmarks and scroll zones', () => {
       id: `batch-${index}`,
       prompt: `Prompt ${index}`,
       ratio: '1:1',
-      modelId: 'gpt-image-2.5-sunburst-cloud',
-      modelLabel: 'GPT Image 2.5 Sunburst',
+      modelId: 'gpt-image-2.6-sunburst-cloud',
+      modelLabel: 'GPT Image 2.6 Sunburst',
       createdAt: index,
       collectionId: null,
       pinned: false,

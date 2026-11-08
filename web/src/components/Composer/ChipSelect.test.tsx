@@ -53,7 +53,8 @@ function ActionableChipSelect({ onChange }: { onChange: (value: string) => void 
     {
       value: 'offline',
       label: 'Offline model',
-      hint: 'Offline, check again',
+      hint: 'Offline',
+      hintAction: 'Check again',
       actionable: true,
       keepOpenOnSelect: true,
     },
@@ -420,10 +421,34 @@ describe('ChipSelect keyboard listener', () => {
     const option = screen.getByRole('option', { name: /Offline model.*Offline.*Check again/i });
     expect(option.getAttribute('aria-disabled')).toBeNull();
     expect(option.getAttribute('data-dimmed')).toBe('true');
+    expect(option.getAttribute('aria-label')).toBe('Offline model — Offline, Check again');
+    const status = [...option.querySelectorAll('span')].find((span) => span.textContent === 'Offline');
+    const action = [...option.querySelectorAll('span')].find((span) => span.textContent === 'Check again');
+    expect(status?.parentElement).toBe(option);
+    expect(action?.parentElement).toBe(option);
+    expect(action?.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(option.querySelector('button, a, input, [role="button"], [tabindex]')).toBeNull();
     fireEvent.click(option);
 
     expect(onChange).toHaveBeenCalledWith('offline');
     expect(screen.queryByRole('listbox', { name: 'Choice' })).not.toBeNull();
+  });
+
+  test('pending and ordinary options omit the action cue without adding focus targets', () => {
+    installDesktop();
+    const options: readonly ChipSelectOption<string>[] = [
+      { value: 'pending', label: 'Pending model', hint: 'Checking…', actionable: true },
+      { value: 'ordinary', label: 'Ordinary model', hint: 'Online locator' },
+    ];
+    render(<ChipSelect ariaLabel="Choice" valueDisplay="Ordinary model" value="ordinary" options={options} onChange={mock()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choice' }));
+    const pending = screen.getByRole('option', { name: 'Pending model — Checking…' });
+    expect(pending.textContent).toBe('Pending modelChecking…');
+    expect(pending.querySelector('svg, [tabindex], button')).toBeNull();
+    const ordinary = screen.getByRole('option', { name: 'Ordinary model Online locator' });
+    expect(ordinary.hasAttribute('aria-label')).toBe(false);
+    expect(ordinary.getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByText('Check again')).toBeNull();
   });
 
   test('global scoped keys move and close the open listbox', async () => {

@@ -1,4 +1,4 @@
--- Atelier database schema — cumulative state after migrations 1-58.
+-- Atelier database schema — cumulative state after migrations 1-59.
 -- Reference only (migrate.ts is the runtime source of truth); the version
 -- in this header must track BINARY_SCHEMA_VERSION when migrations are added.
 --

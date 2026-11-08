@@ -25,7 +25,7 @@ function generateRequest(overrides: Record<string, unknown> = {}): Request {
       'Remote-User': 'alice',
     },
     body: JSON.stringify({
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       prompt: 'a test image',
       ratio: '1:1',
       count: 1,

@@ -4,8 +4,8 @@ import { modelSelectionPatch, promptPickerAvailable } from './modelSelection';
 
 function model(overrides: Partial<Model> = {}): Model {
   return {
-    id: 'gpt-image-2.5-sunburst',
-    name: 'GPT Image 2.5 Sunburst',
+    id: 'gpt-image-2.6-sunburst',
+    name: 'GPT Image 2.6 Sunburst',
     backend: 'cloud',
     tag: 'cloud',
     latency: 'medium',
@@ -19,14 +19,14 @@ function model(overrides: Partial<Model> = {}): Model {
 
 describe('modelSelectionPatch', () => {
   test('resets the explicit ratio when the selected model defines a default', () => {
-    expect(modelSelectionPatch('gpt-image-2.5-sunburst', model({ defaultRatio: '4:5' }))).toMatchObject({
-      modelId: 'gpt-image-2.5-sunburst',
+    expect(modelSelectionPatch('gpt-image-2.6-sunburst', model({ defaultRatio: '4:5' }))).toMatchObject({
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: null,
     });
   });
 
   test('leaves the ratio absent when the selected model defines no default', () => {
-    expect('ratio' in modelSelectionPatch('gpt-image-2.5-sunburst', model())).toBe(false);
+    expect('ratio' in modelSelectionPatch('gpt-image-2.6-sunburst', model())).toBe(false);
   });
 
   test('preserves count snapping and I2V reset behavior', () => {

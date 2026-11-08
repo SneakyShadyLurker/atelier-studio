@@ -245,7 +245,7 @@ describe('Text models view', () => {
     // The image model's label arrives with the routing query.
     await waitFor(() => {
       expect(tag.getAttribute('data-tip')).toBe(
-        'The default model, assigned to AI fill, the prompt writer for GPT Image 2.5 Sunburst, and picked by 3 people',
+        'The default model, assigned to AI fill, the prompt writer for GPT Image 2.6 Sunburst, and picked by 3 people',
       );
     });
     expect(tag.textContent).toContain(': The default model');
@@ -310,7 +310,7 @@ describe('Text models view', () => {
     fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Remove' }));
     const confirm = await screen.findByRole('dialog', { name: 'Remove Kimi K3?' });
     expect(confirm.textContent).toContain(
-      'It is the default model, assigned to AI fill, the prompt writer for GPT Image 2.5 Sunburst, and picked by 3 people. Those will fall back to the next model in line.',
+      'It is the default model, assigned to AI fill, the prompt writer for GPT Image 2.6 Sunburst, and picked by 3 people. Those will fall back to the next model in line.',
     );
     fireEvent.click(within(confirm).getByRole('button', { name: 'Remove model' }));
     await waitFor(() => {

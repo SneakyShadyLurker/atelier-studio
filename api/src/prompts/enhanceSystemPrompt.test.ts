@@ -64,7 +64,7 @@ describe('ENHANCE_SYSTEM_PROMPT editorial-bias contract', () => {
 
 describe('Sunburst enhancement', () => {
   it('has a dedicated fidelity contract without the generic model workarounds', () => {
-    expect(SUNBURST_ENHANCE_SYSTEM_PROMPT).toContain('GPT Image 2.5 Sunburst');
+    expect(SUNBURST_ENHANCE_SYSTEM_PROMPT).toContain('GPT Image 2.6 Sunburst');
     expect(SUNBURST_ENHANCE_SYSTEM_PROMPT).toContain('Image 1, Image 2');
     expect(SUNBURST_ENHANCE_SYSTEM_PROMPT).toContain('Quotation marks around literal image text');
     expect(SUNBURST_ENHANCE_SYSTEM_PROMPT).not.toContain('keyword-first');

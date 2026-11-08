@@ -14,7 +14,7 @@ function seedBatch(
   db.run('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)', [userId, Date.now()]);
   db.run(
     `INSERT INTO batches (id, user_id, prompt, model_id, model_label, ratio, created_at, status, pool)
-     VALUES (?, ?, 'p', 'gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst', '1:1', ?, ?, ?)`,
+     VALUES (?, ?, 'p', 'gpt-image-2.6-sunburst', 'GPT Image 2.6 Sunburst', '1:1', ?, ?, ?)`,
     [id, userId, Date.now(), status, pool],
   );
 }

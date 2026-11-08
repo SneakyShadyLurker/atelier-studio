@@ -8,7 +8,7 @@ import {
 
 describe('isGptImageModelId', () => {
   it('matches OpenAI gpt-image models only', () => {
-    expect(isGptImageModelId('gpt-image-2.5-sunburst')).toBe(true);
+    expect(isGptImageModelId('gpt-image-2.6-sunburst')).toBe(true);
     expect(isGptImageModelId('gpt-image-1.5')).toBe(true);
     expect(isGptImageModelId('gemini-3-pro-image-preview')).toBe(false);
     expect(isGptImageModelId('krea-2-gonzalomo')).toBe(false);
@@ -18,7 +18,7 @@ describe('isGptImageModelId', () => {
 describe('classifyImageModelTarget', () => {
   it('classifies the registry models', () => {
     expect(classifyImageModelTarget('gemini-3-pro-image-preview')).toBe('gemini');
-    expect(classifyImageModelTarget('gpt-image-2.5-sunburst')).toBe('gpt');
+    expect(classifyImageModelTarget('gpt-image-2.6-sunburst')).toBe('gpt');
     expect(classifyImageModelTarget('krea-2-gonzalomo')).toBe('krea');
     expect(classifyImageModelTarget('krea-2-test-alpha')).toBe('krea');
     expect(classifyImageModelTarget('moss-image-sft')).toBe('moss');

@@ -66,6 +66,11 @@ model yet" and an **Add provider** button.
 
 ## Connect a local model
 
+The **Base URL** starts empty until you choose a preset or enter an address.
+**Save provider** explains when a connection test is required. A passing test
+applies only to the address, credentials and Advanced settings it tested;
+changing those settings requires another test before saving.
+
 Local models cost nothing per request and keep your prompts on your own
 hardware. They need a computer that can run the model, and smaller models
 write weaker prompts.
@@ -252,7 +257,7 @@ on reference images per request), **JSON output**, **Reasoning levels** and
 
 ## Choose which model writes what
 
-The **Routing** panel beside your providers decides which model each feature
+The **Routing for everyone** panel beside your providers decides which model each feature
 uses. In a narrow window it sits below them.
 
 1. **Default model**: every task uses it unless assigned below. Set this first.
@@ -287,7 +292,7 @@ images are attached, "None of the available text models accepts images".
 ## Let people pick their own model
 
 Everyone with the Prompt Library can open **Prompt Library**, then the
-**Settings** tab. The **Text models** section lists every task with a model
+**Settings** tab. The **Your text models** section lists every task with a model
 menu. "Use default" follows what the admin set, and the menu shows which model
 that is. A person can pick any model that is switched on and not offline, and
 for models with reasoning levels, a reasoning effort. Models without levels

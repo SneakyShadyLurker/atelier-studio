@@ -1037,6 +1037,19 @@
   flex-shrink: 0;
 }
 
+.menuOptionAction {
+  composes: label from '../../styles/type.module.css';
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-2);
+}
+
+.menuOptionActive .menuOptionAction,
+.menuOption:hover .menuOptionAction {
+  color: var(--ink);
+}
+
 /* Model-chip value for local models: variant token + health dot, aligned
    like the countLocked cluster. */
 .localToken {
@@ -1575,7 +1588,8 @@
   .queueChip,
   .go,
   .clear,
-  .bannerAction {
+  .bannerAction,
+  .menuOption {
     min-height: 44px;
   }
 

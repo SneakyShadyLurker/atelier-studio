@@ -8,7 +8,7 @@ describe('AiFillRequestSchema', () => {
     const r = AiFillRequestSchema.safeParse({
       staticSegments: ['A woman, ', ', golden hour.'],
       instructions: ['her swimsuit'],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     });
     expect(r.success).toBe(true);
   });
@@ -17,7 +17,7 @@ describe('AiFillRequestSchema', () => {
     const r = AiFillRequestSchema.safeParse({
       staticSegments: ['a', 'b', 'c'],
       instructions: ['only one'],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     });
     expect(r.success).toBe(false);
   });
@@ -26,7 +26,7 @@ describe('AiFillRequestSchema', () => {
     const r = AiFillRequestSchema.safeParse({
       staticSegments: ['a', 'b'],
       instructions: ['   '],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     });
     expect(r.success).toBe(false);
   });
@@ -84,7 +84,7 @@ describe('AiFillRequestSchema', () => {
     const r = AiFillRequestSchema.safeParse({
       staticSegments: ['a', 'b'],
       instructions: ['x'],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       simulate: true,
     });
     expect(r.success).toBe(true);

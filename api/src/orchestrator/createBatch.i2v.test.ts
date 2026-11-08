@@ -103,7 +103,7 @@ describe('createBatch — i2v source persistence', () => {
     expect(buildQueuedRequestForBatch(db, explicit, videoModel).durationFrames).toBe(362);
 
     // Image models declare no durations, so nothing is invented for them.
-    const imageModel = { id: 'gpt-image-2.5-sunburst' } as unknown as RegistryEntry['model'];
+    const imageModel = { id: 'gpt-image-2.6-sunburst' } as unknown as RegistryEntry['model'];
     expect(buildQueuedRequestForBatch(db, legacy, imageModel).durationFrames).toBeUndefined();
 
     db.close();

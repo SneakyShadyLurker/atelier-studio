@@ -29,19 +29,19 @@ describe('GET /api/text-routing', () => {
     const { rt, enabled } = await setup();
     rt.text.store.setDefault('default', enabled);
     rt.text.store.setDefault('ai-fill', enabled);
-    rt.text.store.setWriter('gpt-image-2.5-sunburst', { modelId: enabled, mode: 'lock' });
+    rt.text.store.setWriter('gpt-image-2.6-sunburst', { modelId: enabled, mode: 'lock' });
 
     const res = await rt.fetch('/api/text-routing', { headers: { 'Remote-User': 'alice' } });
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('private, no-store');
     const body = (await res.json()) as TextRoutingResponse;
     expect(body.defaults).toEqual({ default: enabled, byTask: { 'ai-fill': enabled } });
-    expect(body.writers).toEqual({ 'gpt-image-2.5-sunburst': { modelId: enabled, mode: 'lock' } });
+    expect(body.writers).toEqual({ 'gpt-image-2.6-sunburst': { modelId: enabled, mode: 'lock' } });
     // The same set the writer PUT validates against, labelled for the admin.
     const registered = registryForConfig(rt.config).map((entry) => ({ id: entry.model.id, label: entry.model.name }));
     expect(registered.length).toBeGreaterThan(0);
     expect(body.imageModels).toEqual(registered);
-    expect(body.imageModels.map((image) => image.id)).toContain('gpt-image-2.5-sunburst');
+    expect(body.imageModels.map((image) => image.id)).toContain('gpt-image-2.6-sunburst');
   });
 
   test('writes answer with the same shape', async () => {
@@ -90,14 +90,14 @@ describe('PUT /api/text-routing/writers/:imageModelId', () => {
   test('mode defaults to prefer, accepts lock, and null clears', async () => {
     const { rt, enabled } = await setup();
     const before = rt.text.store.revision();
-    const res = await put(rt, '/writers/gpt-image-2.5-sunburst', { modelId: enabled });
+    const res = await put(rt, '/writers/gpt-image-2.6-sunburst', { modelId: enabled });
     expect(res.status).toBe(200);
     expect(rt.text.store.revision()).toBeGreaterThan(before);
-    expect(((await res.json()) as { writers: unknown }).writers).toEqual({ 'gpt-image-2.5-sunburst': { modelId: enabled, mode: 'prefer' } });
+    expect(((await res.json()) as { writers: unknown }).writers).toEqual({ 'gpt-image-2.6-sunburst': { modelId: enabled, mode: 'prefer' } });
 
-    expect((await put(rt, '/writers/gpt-image-2.5-sunburst', { modelId: enabled, mode: 'lock' })).status).toBe(200);
-    expect(rt.text.store.readWriters()).toEqual({ 'gpt-image-2.5-sunburst': { modelId: enabled, mode: 'lock' } });
-    expect((await put(rt, '/writers/gpt-image-2.5-sunburst', { modelId: null })).status).toBe(200);
+    expect((await put(rt, '/writers/gpt-image-2.6-sunburst', { modelId: enabled, mode: 'lock' })).status).toBe(200);
+    expect(rt.text.store.readWriters()).toEqual({ 'gpt-image-2.6-sunburst': { modelId: enabled, mode: 'lock' } });
+    expect((await put(rt, '/writers/gpt-image-2.6-sunburst', { modelId: null })).status).toBe(200);
     expect(rt.text.store.readWriters()).toEqual({});
   });
 
@@ -106,14 +106,14 @@ describe('PUT /api/text-routing/writers/:imageModelId', () => {
     const unknown = await put(rt, '/writers/not-an-image-model', { modelId: enabled });
     expect(unknown.status).toBe(400);
     expect(((await unknown.json()) as { error: string }).error).toContain('image model');
-    expect((await put(rt, '/writers/gpt-image-2.5-sunburst', { modelId: disabled })).status).toBe(400);
-    expect((await put(rt, '/writers/gpt-image-2.5-sunburst', { modelId: enabled, mode: 'always' })).status).toBe(400);
+    expect((await put(rt, '/writers/gpt-image-2.6-sunburst', { modelId: disabled })).status).toBe(400);
+    expect((await put(rt, '/writers/gpt-image-2.6-sunburst', { modelId: enabled, mode: 'always' })).status).toBe(400);
     expect(rt.text.store.readWriters()).toEqual({});
   });
 
   test('is admin-only', async () => {
     const { rt, enabled } = await setup();
-    expect((await put(rt, '/writers/gpt-image-2.5-sunburst', { modelId: enabled }, 'mallory')).status).toBe(404);
+    expect((await put(rt, '/writers/gpt-image-2.6-sunburst', { modelId: enabled }, 'mallory')).status).toBe(404);
     expect((await put(rt, '/defaults/default', { modelId: enabled }, 'mallory')).status).toBe(404);
   });
 });

@@ -61,7 +61,7 @@ const params = new URLSearchParams(window.location.search);
 if (params.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark';
 
 const MODEL: Model = {
-  id: 'gpt-image-2.5-sunburst',
+  id: 'gpt-image-2.6-sunburst',
   name: 'GPT Image',
   backend: 'cloud',
   tag: 'cloud',

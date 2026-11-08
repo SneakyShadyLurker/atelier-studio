@@ -34,7 +34,7 @@ test.each([
   const runtime = testRuntime({ seedLegacyText: true, ENABLE_MOCK_PROVIDER: 'false' });
   const network = blockCategories(categories);
   const frames = await generateEvents(runtime.app, {
-    prompt: 'moderation fixture', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1, seed: 1,
+    prompt: 'moderation fixture', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1, seed: 1,
   });
   const notice = { reason, categories: [...categories], target: 'image' };
   expect(frames.find((frame) => frame.event === 'tile')?.data).toMatchObject({ status: 'failed', moderation: notice });
@@ -52,7 +52,7 @@ test.each([
 test('enhance reports the local block as a terminal SSE error before any GPT call', async () => {
   const runtime = testRuntime({ seedLegacyText: true, ENABLE_MOCK_PROVIDER: 'false' });
   const network = blockCategories(['nudity']);
-  const response = await jsonRequest(runtime.app, '/api/enhance-prompt', { prompt: 'moderation fixture', modelId: 'gpt-image-2.5-sunburst' });
+  const response = await jsonRequest(runtime.app, '/api/enhance-prompt', { prompt: 'moderation fixture', modelId: 'gpt-image-2.6-sunburst' });
   const frames = await parseSse(response);
   expect(frames.find((frame) => frame.event === 'error')?.data).toMatchObject({
     code: 'moderation-blocked', moderation: { reason: 'sexual-age', categories: ['nudity'], target: 'text' },

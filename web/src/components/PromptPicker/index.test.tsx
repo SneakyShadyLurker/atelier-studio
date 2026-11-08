@@ -84,8 +84,8 @@ function wrapper(client: QueryClient) {
 }
 
 const TEST_MODEL_PROPS = {
-  modelOptions: [{ value: 'gpt-image-2.5-sunburst', label: 'GPT Image 2.5 Sunburst' }],
-  modelId: 'gpt-image-2.5-sunburst',
+  modelOptions: [{ value: 'gpt-image-2.6-sunburst', label: 'GPT Image 2.6 Sunburst' }],
+  modelId: 'gpt-image-2.6-sunburst',
 } as const;
 
 function renderPicker(options: { phone?: boolean; library?: PromptLibraryResponse; noTextModels?: boolean } = {}) {
@@ -801,7 +801,7 @@ describe('PromptPicker brainstorm model selector', () => {
     const onClose = mock();
     const onModelChange = mock();
     const modelOptions = [
-      { value: 'gpt-image-2.5-sunburst', label: 'GPT Image 2.5 Sunburst' },
+      { value: 'gpt-image-2.6-sunburst', label: 'GPT Image 2.6 Sunburst' },
       { value: 'gemini-3-pro-image-preview', label: 'Nano Banana Pro' },
     ];
     render(
@@ -809,7 +809,7 @@ describe('PromptPicker brainstorm model selector', () => {
         open
         onClose={onClose}
         modelOptions={modelOptions}
-        modelId="gpt-image-2.5-sunburst"
+        modelId="gpt-image-2.6-sunburst"
         onModelChange={onModelChange}
       />,
       { wrapper: wrapper(client) },

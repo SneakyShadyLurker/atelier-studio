@@ -387,7 +387,7 @@ describe('text provider store: models', () => {
     store.setDefault('enhance', present(model).id);
     store.setDefault('condense', present(other).id);
     store.setWriter('gpt-image-2', { modelId: present(model).id, mode: 'prefer' });
-    store.setWriter('gpt-image-2.5-sunburst', { modelId: present(model).id, mode: 'lock' });
+    store.setWriter('gpt-image-2.6-sunburst', { modelId: present(model).id, mode: 'lock' });
     store.writeUserPick('alice', 'enhance', { modelId: present(model).id, effort: null });
     store.writeUserPick('alice', 'ai-fill', { modelId: present(model).id, effort: null });
     store.writeUserPick('bob', 'enhance', { modelId: present(model).id, effort: null });
@@ -395,7 +395,7 @@ describe('text provider store: models', () => {
     expect(store.usage(present(model).id)).toEqual({
       isDefault: true,
       tasks: ['enhance', 'rescue'],
-      writers: ['gpt-image-2', 'gpt-image-2.5-sunburst'],
+      writers: ['gpt-image-2', 'gpt-image-2.6-sunburst'],
       userPicks: 2,
     });
     expect(store.usage(present(other).id)).toEqual({ isDefault: false, tasks: ['condense'], writers: [], userPicks: 0 });

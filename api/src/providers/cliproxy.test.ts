@@ -13,7 +13,7 @@ afterEach(() => {
 
 const baseRequest: ProviderRequest = {
   prompt: 'a small dot',
-  modelId: 'gpt-image-2.5-sunburst',
+  modelId: 'gpt-image-2.6-sunburst',
   ratio: '1:1',
   tileIndex: 0,
   seed: 0,
@@ -57,7 +57,7 @@ describe('cliproxy adapter provider reasons', () => {
   test.each([
     [
       'codex credential outage (auth_unavailable)',
-      '{"error":{"message":"auth_unavailable: no auth available (providers=codex, model=gpt-image-2.5-sunburst)","type":"server_error","code":"internal_server_error"}}',
+      '{"error":{"message":"auth_unavailable: no auth available (providers=codex, model=gpt-image-2.6-sunburst)","type":"server_error","code":"internal_server_error"}}',
     ],
     [
       'upstream stream severed mid-generation',

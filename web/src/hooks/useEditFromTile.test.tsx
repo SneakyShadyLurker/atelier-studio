@@ -9,8 +9,8 @@ import { supersedeSourceHandoffs } from '../lib/composerSourceHandoff';
 import { useEditFromTile } from './useEditFromTile';
 
 const model: Model = {
-  id: 'gpt-image-2.5-sunburst-cloud',
-  name: 'GPT Image 2.5 Sunburst',
+  id: 'gpt-image-2.6-sunburst-cloud',
+  name: 'GPT Image 2.6 Sunburst',
   backend: 'cloud',
   tag: 'cloud',
   latency: 'fast',

@@ -95,19 +95,46 @@ test.describe('bottom-anchored feed', () => {
     }).toBeLessThan(200);   // still inside the follow band, so the next append follows too
   });
 
-  test('a reader who scrolled up is not pulled down when work arrives', async ({ page }) => {
+  test('a reader who scrolled up is not pulled down when work arrives', async ({ page }, testInfo) => {
     await page.goto('/e2e/harness/index.html?case=feed&seed=30');
     await expect(page.getByText('Prompt 129', { exact: true })).toBeVisible();
 
-    await scroller(page).evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight * 0.35); });
-    await page.waitForTimeout(120);
+    await expect.poll(async () => atBottom(await metrics(page))).toBe(true);
+    const landing = await metrics(page);
+    const visible = await scroller(page).evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return {
+        left: Math.max(0, box.left), right: Math.min(innerWidth, box.right),
+        top: Math.max(0, box.top), bottom: Math.min(innerHeight, box.bottom),
+      };
+    });
+    expect(visible.right).toBeGreaterThan(visible.left);
+    expect(visible.bottom).toBeGreaterThan(visible.top);
+    const gesture = {
+      x: (visible.left + visible.right) / 2,
+      y: (visible.top + visible.bottom) / 2,
+      deltaY: Math.round(landing.max * 0.35) - landing.top,
+    };
+    // A native reader gesture releases the initial landing reconciliation.
+    await page.mouse.move(gesture.x, gesture.y);
+    await page.mouse.wheel(0, gesture.deltaY);
+    await expect.poll(async () => {
+      const m = await metrics(page);
+      return m.max - m.top;
+    }).toBeGreaterThan(200);
     const before = await metrics(page);
+    await testInfo.attach('reader-scroll-setup', {
+      body: JSON.stringify({ landing, visible, gesture, before }), contentType: 'application/json',
+    });
     expect(atBottom(before)).toBe(false);
 
     await page.locator('#queue').click();
     await page.waitForTimeout(400);
 
     const after = await metrics(page);
+    await testInfo.attach('reader-scroll-after-append', {
+      body: JSON.stringify({ before, after, movement: after.top - before.top }), contentType: 'application/json',
+    });
     expect(atBottom(after)).toBe(false);
     // Their row must not shift either — appends land below the viewport.
     expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(2);

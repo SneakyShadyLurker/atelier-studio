@@ -1,6 +1,6 @@
 import type { Batch, Collection, Model } from '@atelier/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import type { ComponentProps } from 'react';
 import { fixtureModels } from './fixtures/models';
@@ -10,12 +10,12 @@ import { useAtelierStore, initialAtelierState, type AppView } from '../src/store
 
 // The real viewer renders for every tile except the one this suite breaks on
 // purpose, so the mock never changes Lightbox behavior for anything else.
-const { default: RealLightbox } = await import('../src/components/Lightbox');
+const { default: RealContent } = await import('../src/components/Lightbox/Content');
 const BROKEN_TILE = 'scope-batch-tile';
-void mock.module('../src/components/Lightbox', () => ({
-  default: (props: ComponentProps<typeof RealLightbox>) => {
+void mock.module('../src/components/Lightbox/Content', () => ({
+  default: (props: ComponentProps<typeof RealContent>) => {
     if (useAtelierStore.getState().lightbox?.tileId === BROKEN_TILE) throw new Error('viewer exploded');
-    return <RealLightbox {...props} />;
+    return <RealContent {...props} />;
   },
 }));
 const { default: App } = await import('../src/App');
@@ -177,6 +177,10 @@ describe('one scope title', () => {
     });
     expect(await screen.findByRole('button', { name: 'Back to Logo concepts' })).toBeTruthy();
     expect(screen.getByText('Image view unavailable')).toBeTruthy();
+    expect(screen.getByRole('dialog').contains(screen.getByText('Image view unavailable'))).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Logo concepts' }));
+    await waitFor(() => { expect(useAtelierStore.getState().lightbox).toBeNull(); });
+    expect(useAtelierStore.getState().view).toEqual({ kind: 'collection', id: COLLECTION_ID });
     client.clear();
   });
 });

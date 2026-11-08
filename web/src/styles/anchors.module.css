@@ -60,14 +60,14 @@
 
   .panel[data-anchor-place='below-end'][data-anchored] {
     --anchor-area: bottom span-left;
-    --anchor-margin: 8px 0 0 12px;
+    --anchor-margin: 8px 0 12px 12px;
     position-area: var(--anchor-area);
     margin: var(--anchor-margin);
   }
 
   .panel[data-anchor-place='below-start'][data-anchored] {
     --anchor-area: bottom span-right;
-    --anchor-margin: 8px 12px 0 0;
+    --anchor-margin: 8px 12px 12px 0;
     position-area: var(--anchor-area);
     margin: var(--anchor-margin);
   }

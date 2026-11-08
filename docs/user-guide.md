@@ -76,6 +76,11 @@ The **Library** sidebar contains your collections, **Unsorted** work and
 a batch into it. Pin a batch to make it easier to find, and use search to look
 for prompt text.
 
+Each batch header has **Re-roll**, **Move to collection** and **Archive batch**
+actions. **Copy prompt** is beside them on larger screens and under **More** on
+phones. To create a destination while moving a batch, choose **New collection**,
+enter its name, then select **Move** or press Enter.
+
 Archiving removes work from the active views. Open **Archive** to restore
 archived results, or delete them permanently. Archived work is retained for
 30 days before expiry; permanent deletion and **Empty archive** cannot be

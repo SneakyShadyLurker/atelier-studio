@@ -38,9 +38,22 @@
 
 .header {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 14px;
   margin-bottom: 8px;
+  row-gap: 8px;
+}
+
+.headerControls {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Batch prompt heading: data, so the sans at --text-md 500 (the serif is kept
@@ -51,8 +64,8 @@
   font-weight: 500;
   color: var(--ink);
   line-height: 1.45;
-  flex: 1;
-  min-width: 0;
+  flex: 999 1 240px;
+  min-width: min(100%, 240px);
   /* BatchPrompt declares its own per-instance name inline (--prompt-anchor)
      while its element card is open; every other prompt has none. */
   anchor-name: var(--prompt-anchor, none);
@@ -148,20 +161,25 @@
 
 /* Model, ratio, chips, time and collection as a Meta list
    (type.module.css .meta); items keep their own interactive chrome. */
-.header > .meta {
+.headerControls > .meta {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  flex-shrink: 0;
+  flex: 1 1 96px;
+  min-width: min(100%, 96px);
+  row-gap: 6px;
 }
 
-.header > .meta > li {
+.headerControls > .meta > li {
   display: inline-flex;
   align-items: center;
   min-width: 0;
+  max-width: 100%;
 }
 
 .metaCol {
+  min-width: 0;
+  max-width: 100%;
   border: 0;
   padding: 0;
   background: transparent;
@@ -186,6 +204,8 @@
 }
 
 .metaProvenance {
+  min-width: 0;
+  max-width: 100%;
   color: var(--ink-3);
   display: inline-flex;
   align-items: center;
@@ -195,6 +215,9 @@
 .modelName {
   color: var(--ink-2);
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .queueBadge {
@@ -211,6 +234,10 @@
 
 .actions {
   display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  max-width: 100%;
+  margin-left: auto;
   gap: 4px;
 }
 
@@ -273,6 +300,7 @@
 
   .prompt {
     flex: 0 0 100%;
+    min-width: 0;
   }
 
   .promptText {
@@ -284,13 +312,6 @@
 
   /* The meta row shares a line with the actions on a phone: let its chips
      wrap and a long collection name truncate instead of running off-screen. */
-  .header > .meta {
-    flex: 1 1 auto;
-    min-width: 0;
-    flex-wrap: wrap;
-    row-gap: 6px;
-  }
-
   .metaCol {
     min-width: 0;
     max-width: 100%;
@@ -300,7 +321,14 @@
     margin-left: auto;
   }
 
-  .header > .meta > li:has(> .metaTime) {
+  .headerControls > .meta > li:has(> .metaTime) {
     display: none;
+  }
+}
+
+@media (hover: none), (any-pointer: coarse) {
+  .metaCol {
+    min-width: 44px;
+    min-height: 44px;
   }
 }

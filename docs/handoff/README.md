@@ -108,7 +108,7 @@ A second section above the history section. Main, Archive, and Prompt Library al
 **Inline create + rename + delete** (no modal, no context menu):
 - New collection row (plus glyph and label): click → swaps in place to `<input>` with visually-hidden `<label>Collection name</label>`. Enter or blur commits; Esc cancels.
 - Double-click on a collection row name → swaps to inline rename input (same pattern). Enter/blur commits; Esc cancels.
-- Hover on a collection row reveals a right-side `╳` (lucide `x`). Click → `ConfirmDialog` ("Delete collection? Batches will return to Unsorted.") → idempotent DELETE; batches' `collection_id` is set NULL by FK cascade.
+- Hover on a collection row reveals a right-side `╳` (lucide `x`). Click → `ConfirmDialog` with title **Delete “{name}”?** (fallback "Delete collection?" only when the name is unavailable), body "Batches will return to Unsorted.", and unchanged Cancel / Delete collection actions, without a count. Names render as text and wrap anywhere, including unbroken names, without truncation. Confirmation → idempotent DELETE; batches' `collection_id` is set NULL by FK cascade.
 
 **Per-scope history label** (the history section title changes per active scope): it is the scope title, `scopeTitle(view, collections)` in `web/src/lib/viewChrome.ts`, the same words as the active rail row and the Canvas title.
 
@@ -116,7 +116,7 @@ Labels are sentence-case source text rendered in small caps.
 
 | view | Section label | Empty-state copy |
 |---|---|---|
-| `unsorted` | `Unsorted` | "Nothing here yet. Your generations will appear here." with no batches at all, otherwise "Everything is in a collection. Nice!" |
+| `unsorted` | `Unsorted` | "Nothing here yet. Your generations will appear here." with no batches at all, otherwise "No unsorted batches." |
 | `pinned` | `Pinned` | "No pinned batches yet. Click the star on any generation to pin it." |
 | `collection: <name>` | `<Name>` | "No generations in `<Name>` yet. Move batches here from the Move menu." |
 | any + `q !== ''` and no matches | (unchanged) | `"No prompts match \"<q>\"."` |
@@ -143,10 +143,10 @@ At widths of 768px and above, only these two editor panels gain an overflow-only
 
 **Container (`.canvas`)**: the table (`var(--bg)`), vertical scroll with a 14px fade at both edges; where scroll-driven animations exist the top fade opens at scroll 0 and returns over the first 28px of scroll, padding `28px 36px 180px` (the bottom 180 reserves space under the floating composer).
 
-**Empty state**: `StateView` (`web/src/components/StateView`), a flex column with gap 18px. Passive Canvas states centre above a stable bottom reserve: 241px on desktop and 77px plus the safe-area inset on phone. Composer resizing and view remounts leave the artwork in place. Populated feeds and actionable history errors retain the live Composer reserve so their controls remain reachable by scrolling. The plate, heading and body fade in together over `--dur-overlay`; the navigation stage owns spatial motion.
+**Empty state**: `StateView` (`web/src/components/StateView`), a flex column with gap 18px. Passive Canvas states centre above a stable bottom reserve: 241px on desktop and 77px plus the safe-area inset on phone. Composer resizing and view remounts leave the artwork in place. Populated feeds and actionable history errors retain the live Composer reserve so their controls remain reachable by scrolling. When the Canvas is at least 560px wide but shorter than 440px above that reserve, an actionable etched state becomes one centred row: a 64px plate (the etching at 48px with 8px padding), the heading over the body (4px apart, start-aligned, type unchanged), then the action, with 18px between columns, starting at the top of the content box. Passive states, narrower Canvases and taller ones keep the stacked state. Without body text, the heading centres beside the plate. Long error text can grow the row and remains scrollable. The plate, heading and body fade in together over `--dur-overlay`; the navigation stage owns spatial motion.
 - **Plate**: the `empty-canvas` etching (360px wide on desktop, 240px on phone) inside `.plate`: `var(--bg-sunk)`, `box-shadow: var(--plate-mark)`, `--radius-tile`, 24px padding (16px on phone). See The plate and etched art.
 - **Heading** "What would you like to make?": serif `--text-display`, weight 400, line-height 1.15, `text-wrap: balance`, color `var(--ink)`, max-width 520px.
-- **Body** "Write a prompt, pick a model, press ⌘ ↵.": sans `--text-sm`, line-height 1.55, max-width 420px, color `var(--ink-3)`. The keys are `<kbd>` caps: mono `--text-2xs`, `var(--bg-elev)` background, `1px solid var(--line)` border with a 2px bottom border, `--radius-control`.
+- **Body** "Write a prompt, pick a model, press ⌘ ↵.": sans `--text-sm`, line-height 1.55, max-width 420px, color `var(--ink-3)`. Under exactly `(hover: none) and (pointer: coarse)`, first-run and empty-collection Canvas instead show "Write a prompt, pick a model, tap Generate.", matching Composer help. CSS selects one visible, accessible variant. The keys are `<kbd>` caps: mono `--text-2xs`, `var(--bg-elev)` background, `1px solid var(--line)` border with a 2px bottom border, `--radius-control`.
 - A search with no matches shows `empty-search` art, "No results found" and a one-line suggestion; a history error shows `state-error` art with a Retry secondary button; loading shows the plate at rest (`restPlate`: a 96px 3:2 empty plate breathing with `atelier-pulse`).
 
 ### Batch
@@ -156,13 +156,13 @@ At widths of 768px and above, only these two editor panels gain an overflow-only
 **Header**: flex row, baseline-aligned, 14px gap, 8px bottom margin; no rule under it. Below 768px the prompt takes the first row alone and the meta line and actions share the second, centred on each other.
 - **Prompt**: the batch heading is data, so it sets in the sans: `--text-md`, weight 500, line-height 1.45, color `var(--ink)`, flex 1, single-line ellipsis. The full prompt opens in the `BatchPrompt` prose card (`--bg`, 1px `--line-2`, `--radius-panel`, `--shadow-photo`).
 - **Meta cluster**: a `Meta` list with `lead` (sans `--text-xs`, `var(--ink-3)`, tabular figures, 10px gaps, no separators): model name (first field in `var(--ink-2)`), ratio, an optional sequence or story chip (`Part 2 of 3, 0:10`, `Part 2 of 3, stitching…`, `Story failed`; 1px `--line`, `--radius-control`, `var(--ink-2)`), the queue state while queued (`Queued, 3 ahead`, `Queued, next`), relative time ("just now", "5m ago", "2h ago", or locale date), then, when `batch.collectionId` is set, a borderless folder-glyph + collection-name button that opens the Move popover, and the template provenance (sparkle + template name, seed in its tooltip). The relative-time field is hidden below 768px to prevent meta wrap on phones.
-- **Actions**: 28×28 `buttons.iconAction` buttons (transparent at rest, `var(--ink-3)`; hover `var(--bg-sunk)` fill, `var(--ink)`): a filled pin star only while pinned (`aria-pressed`, "Unpin batch"), Play master on a sequence tail with a ready master, **Archive batch**, and **More** (⋯) opening the `OverflowMenu` with Copy prompt, Re-roll, Move and the rest. The archive button uses the archive (box-with-slot) icon, not a trash icon — main-feed removals are soft deletes that move tiles to the Archive view for 30 days before permanent deletion.
+- **Actions**: 28×28 `buttons.iconAction` buttons (44×44 under the touch gate; transparent at rest in `var(--ink-3)`; hover `var(--bg-sunk)` fill and `var(--ink)`), 4px apart, in order: a filled pin star only while pinned (`aria-pressed`, "Unpin batch"), Play master on a sequence tail with a ready master, Copy prompt (below 768px it moves into More), Re-roll, Move to collection (folder-plus, filled while the batch is in a collection; opens the Move popover anchored to itself), Archive batch, and More (⋯) with the remaining actions, omitted when empty. None uses `--accent`. When the prompt would be narrower than 240px, meta and actions wrap to a second row with the actions end-aligned; below 768px the meta list keeps 96px before the actions wrap. Re-roll and Move honor read-only actions; Copy stays enabled. More retains Reopen in picker, sequence/story actions, Save to templates and Pin with their existing availability. The archive button uses the archive (box-with-slot) icon; main-feed removals are soft deletes that move tiles to the Archive view for 30 days before permanent deletion.
 
 **Grid (`.grid`)**: CSS grid `repeat(auto-fill, minmax(260px, 1fr))`, 14px gap.
 
 ### Move popover
 
-Anchored to the batch-header Move icon. Opens on Move-icon click OR collection-meta-token click (both use the same anchor ref for predictable positioning).
+Anchored to the batch-header Move icon. Opens on Move-icon click or collection-meta-token click; each anchors to the trigger that opened it.
 
 **Desktop (≥768px)** — popover layer:
 - The shared menu panel (`styles/menuShell.module.css`): 220px wide, `--radius-panel`, `var(--bg-elev)` background, `1px solid var(--line)`, `--shadow-2`, 6px padding; rows `--radius-control`, 36px, `var(--bg-sunk)` on hover and focus.
@@ -190,11 +190,11 @@ Anchored to the batch-header Move icon. Opens on Move-icon click OR collection-m
 - Click a collection row → `useMoveBatch` with that id → popover closes; the optimistic cache update flips ✓ to the new row before the server response.
 - Click `(Unsorted)` row → `useMoveBatch` with `collectionId: null` → popover closes.
 - Double-click on a collection row name → swap to inline rename input within the popover (sr-only `<label>`, Enter commits, Esc cancels). The focus trap continues to apply; focus returns to the row button on commit/cancel.
-- New collection: click → inline input below; Enter commits via `useCreateCollection` AND immediately follows with `useMoveBatch({ batchId, collectionId: newId })` so the batch lands in the freshly-created collection; popover closes. Esc cancels.
+- New collection: click → inline input below with a visible **Move** button beside it in a flex row, gap 6px, aligned center. Input flexes with `min-width: 0`; Move composes ink-primary, height 36px, padding 0 12px, `--text-xs`; input and button have 44px minimum height under the touch gate. Move and Enter share `useInlineEdit.commit` → `useCreateCollection` → `useMoveBatch({ batchId, collectionId: newId })`; success closes the popover. Empty trimmed names disable Move; empty Enter retains cancellation. A synchronous local guard spans both mutations, disabling Move (`aria-busy`) and draft editing while displaying the entered name. Failure shows the actual error toast and permits deliberate retry. Tab or pointer focus within the create row retains the draft; leaving it cancels without stealing focus. Esc cancels to the remounted New collection button, then closes on the next Escape; IME, rename, dismissal and late mutation semantics remain unchanged. The prototype Move mock has no create input and records this production-only exception in its CSS comments.
 
 **Focus + dismiss**:
 - Focus trap reuses the Lightbox recipe (no library). Tab cycles within the popover; Shift+Tab cycles backward.
-- Esc closes; click-outside closes; focus returns to the Move icon on close (captured at open time).
+- Esc closes; click-outside closes; focus returns to the trigger captured at open time. If the collection token disappears after a move to Unsorted, focus falls back to the persistent Move icon.
 - Reduced motion: the shared rule set (see Motion) turns enter and leave into an 80ms opacity change; the sheet swaps its slide for the same fade.
 
 ### Tile (Image)
@@ -272,7 +272,7 @@ Longer videos are built by extending: a done video tile grows a clip-chain, one 
 
 **Textarea**: borderless, transparent bg, no resize handle, sans `--text-md` (`--text-base` on phone), line-height 1.5, min-height 48, max-height 180. Grows with its content (`field-sizing: content` where supported). Placeholder "Describe an image…" in `var(--ink-3)`.
 
-**Limited-height image Composer**: only `@media (width >= 768px) and (height <= 620px)` compacts the image-mode body, excluding inventory/error-only cards and video mode. Top padding becomes 10px; horizontal padding, the 10px row gap, 10px bottom padding, 10px footer-to-status gap and 22px status rail stay unchanged, keeping Generate anchored. A grid uses `auto minmax(0, 1fr)` columns with all flow children spanning both. Without reference chips, Attach and the image prompt share the first row; the textarea's actual width reserves the existing absolute Minimize hit region by subtracting its canonical 28px width plus 16px from the grid cell's end, using 44px plus 16px under the touch gate. With references they retain separate rows and existing footprint animation. The prompt has a 32px minimum, raised to 44px under `@media (hover: none), (any-pointer: coarse)`, and `max-height: calc(3lh + 10px)` with natural vertical scrolling beyond three lines. Minimize position, handlers, focus and the existing mode ViewTransition remain. Phone widths below 768px retain their layout. The prototype has only the image textarea and footer, so it mirrors the matching padding and textarea rules without adding Attach, reference, Minimize, video or dock surfaces; the target reservation applies only to production's compact no-reference row. These scoped extensions reuse existing sizes and introduce no tokens; the root comment is synchronized across all root owners.
+**Limited-height image Composer**: only `@media (width >= 768px) and (height <= 620px)` compacts the image-mode body, excluding inventory/error-only cards and video mode. Top padding becomes 10px; horizontal padding, the 10px row gap, 10px bottom padding, 10px footer-to-status gap and 22px status rail stay unchanged, keeping Generate anchored. A grid uses `auto minmax(0, 1fr)` columns with all flow children spanning both. Without reference chips, Attach and the image prompt share the first row; the textarea's actual width reserves the existing absolute Minimize hit region by subtracting its canonical 28px width plus 16px from the grid cell's end, using 44px plus 16px under the touch gate. With references, when the Composer content box is at least 640px, the reference row (Attach and chips) takes the first column, top-aligned, capped at 40cqi and wrapping inside it, with 4px end padding so 44px coarse-pointer remove targets keep clear of the prompt. The prompt takes the second column with the same Minimize reservation. Narrower Composers keep separate rows. Chip part motion and footprint animation are unchanged. The prompt has a 32px minimum, raised to 44px under `@media (hover: none), (any-pointer: coarse)`, and `max-height: calc(3lh + 10px)` with natural vertical scrolling beyond three lines. Minimize position, handlers, focus and the existing mode ViewTransition remain. Phone widths below 768px retain their layout. The prototype has only the image textarea and footer, so it mirrors the matching padding and textarea rules without adding Attach, reference, Minimize, video or dock surfaces; the target reservation applies only to production's compact shared row. The approved reference, Move and copy exceptions are recorded in matching root comments across all three CSS owners; existing token values are unchanged. These scoped extensions reuse existing sizes and introduce no tokens; the root comment is synchronized across all root owners.
 
 **Chip row (`.composer-row`)**: flex row, 8px gap, wraps.
 
@@ -615,7 +615,7 @@ Every empty, error and crash surface shows an etched still life in a plate; noth
 
 - **Medium**: copperplate-style line art of studio instruments, black line on transparent, no figures, no lettering, no frame. Each asset is a lossy WebP alpha mask at 2x its largest display width in `web/src/assets/etch/`, imported through Vite so the hash busts the cache.
 - **Owner**: `web/src/components/Etching` is the only component that sets an artwork mask: `<Etching id>` maps an `EtchingId` to its URL, aspect ratio and desktop/phone widths. The element is `aria-hidden`, filled with `var(--etch-ink)` and masked by the asset (`mask: url(…) center / contain no-repeat`, `mask-mode: alpha`), so one file serves both themes; under `forced-colors` the fill is `CanvasText`.
-- **Plate**: `StateView`'s `art` prop puts the etching in `.plate` (`var(--bg-sunk)`, `box-shadow: var(--plate-mark)`, `--radius-tile`, 24px padding, 16px on phone). `restPlate` is the empty plate at rest for loading states and `LazyFallback`.
+- **Plate**: `StateView`'s `art` prop puts the etching in `.plate` (`var(--bg-sunk)`, `box-shadow: var(--plate-mark)`, `--radius-tile`, 24px padding, 16px on phone, 8px in the short actionable row). `restPlate` is the empty plate at rest for loading states and `LazyFallback`.
 
 | id | Surface | Width desktop / phone |
 |---|---|---|
@@ -628,7 +628,7 @@ Every empty, error and crash surface shows an etched still life in a plate; noth
 | `empty-picker` | Prompt Picker with no templates | 120 |
 | `empty-brainstorm` | Brainstorm, before any ideas | 280 |
 | `empty-text-models` | Text models, no providers | 220 / 160 |
-| `state-error` | `ErrorState` (history and library errors) | 160 / 120 |
+| `state-error` | `ErrorState` (history and library errors) | 160 / 120 (48 in the short actionable row) |
 | `crash` | ErrorBoundary crash card | 320 / 220 |
 
 ### Brand mark

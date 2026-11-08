@@ -53,6 +53,49 @@ describe('ImageTile frame semantics', () => {
     expect(image.getAttribute('loading')).toBe('eager');
     expect(image.getAttribute('fetchpriority')).toBe('high');
   });
+
+  for (const name of ['Open image 1', 'Expand tile 1']) {
+    test(`${name} owns focus before opening once from another focused control`, () => {
+      const onOpen = mock(() => {
+        expect(document.activeElement).toBe(screen.getByRole('button', { name }));
+      });
+      const onDownload = mock();
+      const onDelete = mock();
+      render(<>
+        <button type="button">Elsewhere</button>
+        <ImageTile tile={tile} index={0} ratio="1:1" aspectRatio="1 / 1" onOpen={onOpen} onDownload={onDownload} onDelete={onDelete} />
+      </>);
+      const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+      elsewhere.focus();
+      expect(document.activeElement).toBe(elsewhere);
+
+      const opener = screen.getByRole('button', { name });
+      // A click on the image still belongs to its native frame button.
+      fireEvent.click(name === 'Open image 1' ? within(opener).getByRole('img') : opener);
+
+      expect(onOpen).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(opener);
+      expect(onDownload).not.toHaveBeenCalled();
+      expect(onDelete).not.toHaveBeenCalled();
+    });
+
+    test(`${name} stays natively disabled without opening or taking focus`, () => {
+      const onOpen = mock();
+      render(<>
+        <button type="button">Elsewhere</button>
+        <ImageTile tile={tile} index={0} ratio="1:1" aspectRatio="1 / 1" disabled onOpen={onOpen} onDownload={mock()} onDelete={mock()} />
+      </>);
+      const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+      elsewhere.focus();
+      const opener = screen.getByRole('button', { name });
+      expect(opener.hasAttribute('disabled')).toBe(true);
+
+      opener.click();
+
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(elsewhere);
+    });
+  }
 });
 
 describe('ImageTile media failure', () => {
@@ -101,9 +144,13 @@ describe('ImageTile media failure', () => {
 
     expect(container.querySelector('img')).toBeNull();
     const retry = screen.getByRole('button', { name: 'Image 1 failed to load. Retry' });
+    const elsewhere = screen.getByRole('button', { name: 'Download tile' });
+    elsewhere.focus();
+    expect(document.activeElement).toBe(elsewhere);
     fireEvent.click(retry);
 
     expect(onOpen).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(elsewhere);
     expect(container.querySelector('img')?.getAttribute('src')).toBe('http://atelier.test/api/img/tile-1/thumb');
     expect(screen.getByRole('button', { name: 'Open image 1' })).toBeTruthy();
   });

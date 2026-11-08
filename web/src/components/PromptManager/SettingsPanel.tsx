@@ -87,11 +87,13 @@ function TextModelsSection() {
 
   return (
     <ViewTransition key="loaded" default="none" enter="part-enter" exit="part-exit">
-    <section className={styles.panel} aria-label="Prompt Library text model settings">
+    <section className={styles.panel} aria-label="Your text model settings">
       <div className={styles.head} data-zone="head">
-        <h2 className={styles.headTitle}>Text models</h2>
+        <h2 className={styles.headTitle}>Your text models</h2>
         <p className={styles.headNote}>
-          Pick which model writes for each feature. Default uses what your admin set.
+          {data.models.length === 0
+            ? 'Ask your admin to connect a text model.'
+            : 'Choose which model writes for you in each feature; Default uses what your admin set for everyone.'}
         </p>
       </div>
       <div className={styles.body} data-zone="body">
@@ -129,7 +131,7 @@ function TextModelsSection() {
               <div className={styles.rowControl}>
                 <ChipSelect<string>
                   ariaLabel={`Text model for ${label}, currently ${display}`}
-                  valueDisplay={display}
+                  valueDisplay={activePick === undefined ? <span className={styles.unsetValue}>{display}</span> : display}
                   options={modelOptions(data.models, defaultName)}
                   value={picked?.id ?? DEFAULT_PICK}
                   disabled={rowSaving}
@@ -147,13 +149,18 @@ function TextModelsSection() {
                 {activePick?.reasoningLevels.length === 0 ? (
                   <p className={styles.effortFixed}>Effort fixed by the model</p>
                 ) : (
+                  <span
+                    className={styles.effortSlot}
+                    style={{ visibility: activePick === undefined ? 'hidden' : undefined }}
+                    inert={activePick === undefined}
+                    aria-hidden={activePick === undefined ? true : undefined}
+                  >
                   <ChipSelect<EffortValue>
                     ariaLabel={`Reasoning effort for ${label}, currently ${effortDisplay}`}
                     valueDisplay={effortDisplay}
                     options={activePick === undefined ? [{ value: 'default', label: 'Default' }] : effortOptions(activePick.reasoningLevels)}
                     value={effort}
                     disabled={activePick === undefined || rowSaving}
-                    {...(activePick === undefined ? { tip: 'Pick a model to choose its reasoning effort' } : {})}
                     onChange={(next) => {
                       if (activePick === undefined) return;
                       setPick.mutateAsync({ task: row.task, modelId: activePick.id, effort: next === 'default' ? null : next })
@@ -162,6 +169,7 @@ function TextModelsSection() {
                         });
                     }}
                   />
+                  </span>
                 )}
               </div>
             </div>

@@ -53,7 +53,7 @@ function wrapper() {
   };
 }
 
-function renderLightbox(
+async function renderLightbox(
   batch: Batch = allDoneBatch,
   modelById: ReadonlyMap<string, Model> = new Map([[imageModel.id, imageModel]]),
 ) {
@@ -70,6 +70,7 @@ function renderLightbox(
     />,
     { wrapper: wrapper() },
   );
+  await act(async () => { await import('./Content'); });
   return { onClose, unmount: rendered.unmount };
 }
 
@@ -121,7 +122,7 @@ describe('Lightbox Edit action', () => {
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const { onClose } = renderLightbox(
+    const { onClose } = await renderLightbox(
       allDoneBatch,
       new Map([[imageModel.id, imageModel], [plainModel.id, plainModel]]),
     );
@@ -142,12 +143,12 @@ describe('Lightbox Edit action', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  test('does not offer Edit for videos or models without reference-image support', () => {
-    const { unmount } = renderLightbox({ ...allDoneBatch, tiles: [videoTile] });
+  test('does not offer Edit for videos or models without reference-image support', async () => {
+    const { unmount } = await renderLightbox({ ...allDoneBatch, tiles: [videoTile] });
     expect(screen.queryByRole('button', { name: 'Edit from this image' })).toBeNull();
     unmount();
 
-    renderLightbox(
+    await renderLightbox(
       { ...allDoneBatch, modelId: plainModel.id, modelLabel: plainModel.name },
       new Map([[plainModel.id, plainModel]]),
     );

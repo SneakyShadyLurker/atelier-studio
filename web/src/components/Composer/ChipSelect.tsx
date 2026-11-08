@@ -5,6 +5,7 @@ import { useOutsidePointer } from '../../hooks/useOutsidePointer';
 import { useExitTransition } from '../../hooks/useExitTransition';
 import { useIsPhone } from '../../hooks/useIsPhone';
 import { useKeyboardScopeActive, useKeyboardScoped } from '../../hooks/useKeyboard';
+import { runWhenReachable } from '../../lib/focus';
 import { I } from '../icons/I';
 import anchors from '../../styles/anchors.module.css';
 import styles from './index.module.css';
@@ -78,6 +79,7 @@ export default function ChipSelect<TValue extends string | number>({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
+  const returnFocusRef = useRef<{ trigger: HTMLButtonElement; menu: HTMLDivElement | null } | null>(null);
   // Menu dismissals play the shared exit before the listbox unmounts.
   const { closing, requestClose, cancelClose } = useExitTransition(() => { setOpen(false); }, open);
   const [activeIdx, setActiveIdx] = useState(() =>
@@ -98,6 +100,55 @@ export default function ChipSelect<TValue extends string | number>({
   // this instance's own id, declared on both ends, so repeated chips cannot
   // cross-bind.
   const anchor = { '--named-anchor': `--chip-${reactId.replace(/[^\w-]/g, '')}` } as CSSProperties;
+  // A selection can focus the chip before its save disables it and drops focus
+  // to body. Keep that return owned through the exit and disabled interval.
+  useEffect(() => {
+    const cancelReturn = () => { returnFocusRef.current = null; };
+    const onFocus = (event: FocusEvent) => {
+      const intent = returnFocusRef.current;
+      if (intent && event.target !== intent.trigger
+        && !(event.target instanceof Node && intent.menu?.contains(event.target))) cancelReturn();
+    };
+    document.addEventListener('focusin', onFocus, true);
+    document.addEventListener('pointerdown', cancelReturn, true);
+    window.addEventListener('keydown', cancelReturn, true);
+    return () => {
+      cancelReturn();
+      document.removeEventListener('focusin', onFocus, true);
+      document.removeEventListener('pointerdown', cancelReturn, true);
+      window.removeEventListener('keydown', cancelReturn, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    const intent = returnFocusRef.current;
+    if (open || disabled || !intent) return;
+    runWhenReachable(() => {
+      if (returnFocusRef.current !== intent) return;
+      returnFocusRef.current = null;
+      const active = document.activeElement;
+      if (!intent.trigger.disabled && (active === document.body || active === intent.trigger || intent.menu?.contains(active))) {
+        intent.trigger.focus();
+      }
+    }, intent.trigger);
+    return () => {
+      if (returnFocusRef.current === intent) returnFocusRef.current = null;
+    };
+  }, [open, disabled]);
+
+  const selectOption = (opt: ChipSelectOption<TValue>) => {
+    const trigger = triggerRef.current;
+    const intent = opt.keepOpenOnSelect === true || !trigger ? null : { trigger, menu: menuRef.current };
+    // Arm before onChange: an alternate action may give a dialog focus now.
+    returnFocusRef.current = intent;
+    onChange(opt.value);
+    if (opt.keepOpenOnSelect !== true) {
+      requestClose();
+      const active = document.activeElement;
+      if (intent && returnFocusRef.current === intent
+        && (active === document.body || active === intent.trigger || intent.menu?.contains(active))) intent.trigger.focus();
+    }
+  };
   // Closes over activeIdx / options / onChange directly: useKeyboardScoped
   // already keeps its own latest-handler ref, so mirroring them into local refs
   // here was a second copy of the same mechanism.
@@ -126,13 +177,7 @@ export default function ChipSelect<TValue extends string | number>({
     } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       const opt = opts[activeIdx];
-      if (opt) {
-        onChange(opt.value);
-        if (opt.keepOpenOnSelect !== true) {
-          requestClose();
-          triggerRef.current?.focus();
-        }
-      }
+      if (opt) selectOption(opt);
     } else if (event.key === 'Tab') {
       triggerRef.current?.focus();
       requestClose();
@@ -163,7 +208,10 @@ export default function ChipSelect<TValue extends string | number>({
     }
   }
 
-  const close = requestClose;
+  const close = () => {
+    returnFocusRef.current = null;
+    requestClose();
+  };
   const outsideRefs = [menuRef, triggerRef];
 
   // Desktop: dismiss on any outside pointerdown (non-modal popover). Phone: the
@@ -200,6 +248,7 @@ export default function ChipSelect<TValue extends string | number>({
         style={anchor}
         onClick={() => {
           if (disabled) return;
+          returnFocusRef.current = null;
           if (closing) {
             // Mid-fade re-toggle: abort the exit and snap the menu back
             // instead of swallowing the click.
@@ -286,13 +335,7 @@ export default function ChipSelect<TValue extends string | number>({
                       suppressHoverRef.current = false;
                       setActiveIdx(flatIdx);
                     }}
-                    onClick={() => {
-                      onChange(opt.value);
-                      if (opt.keepOpenOnSelect !== true) {
-                        close();
-                        triggerRef.current?.focus();
-                      }
-                    }}
+                    onClick={() => { selectOption(opt); }}
                   >
                     <span className={styles.menuOptionLabel}>{opt.label}</span>
                     {opt.hint && <span className={styles.menuOptionHint}>{opt.hintIcon}{opt.hint}</span>}

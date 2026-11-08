@@ -12,7 +12,7 @@ import { useAtelierStore, type AppView } from '../../store/atelier';
 import BatchView, { type BatchAction, type TileAction, type TileHandoff } from '../Batch';
 import { InfiniteStatus, useStatusFootprint } from '../InfiniteStatus';
 import { ManagedViewHeader } from '../ManagedViewHeader';
-import { StateView, LoadingState, ErrorState } from '../StateView';
+import { StateView, LoadingState } from '../StateView';
 import styles from './index.module.css';
 
 interface CanvasProps {
@@ -113,7 +113,8 @@ function EmptyCanvas() {
       title="What would you like to make?"
       body={
         <>
-          Write a prompt, pick a model, press <kbd>⌘</kbd> <kbd>↵</kbd>.
+          <span className={styles.keyboardHint}>Write a prompt, pick a model, press <kbd>⌘</kbd> <kbd>↵</kbd>.</span>
+          <span className={styles.touchHint}>Write a prompt, pick a model, tap Generate.</span>
         </>
       }
     />
@@ -130,8 +131,8 @@ function SearchEmptyCanvas({ q }: { q: string }) {
   );
 }
 
-function HistoryErrorCanvas({ error, onRetry }: { error: string; onRetry?: () => void }) {
-  return <ErrorState message={error} {...(onRetry ? { onRetry } : {})} />;
+function HistoryErrorCanvas({ error, scopeTitle, onRetry }: { error: string; scopeTitle: string; onRetry?: () => void }) {
+  return <StateView art="state-error" title={`Couldn’t load ${scopeTitle}.`} body={error} {...(onRetry ? { action: { label: 'Retry', onClick: onRetry } } : {})} />;
 }
 
 function LoadingCanvas() {
@@ -471,7 +472,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
         data-state={!blockingError && (isLoading || batches.length === 0) ? 'true' : undefined}
       >
       {blockingError ? (
-        <HistoryErrorCanvas error={blockingError} {...(onRetry ? { onRetry } : {})} />
+        <HistoryErrorCanvas error={blockingError} scopeTitle={scopeTitle(activeView, collections)} {...(onRetry ? { onRetry } : {})} />
       ) : isLoading ? (
         <LoadingCanvas />
       ) : batches.length === 0 && trimmedQ ? (

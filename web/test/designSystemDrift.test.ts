@@ -429,7 +429,7 @@ describe('design system drift guards', () => {
       'web/src/components/Composer/InFlightIndicator.tsx',
       'web/src/components/Composer/CollapsedBar.tsx',
       'web/src/components/PromptPicker/index.tsx',
-      'web/src/components/Lightbox/index.tsx',
+      'web/src/components/Lightbox/Content.tsx',
       'web/src/components/Sidebar/index.tsx',
       'web/src/components/PromptManager/index.tsx',
       'web/src/components/PromptManager/SettingsPanel.tsx',

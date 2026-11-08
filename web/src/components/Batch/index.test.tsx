@@ -1,5 +1,5 @@
 import type { Batch, Tile } from '@atelier/shared';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useLayoutEffect, type PropsWithChildren } from 'react';
@@ -94,6 +94,8 @@ describe('BatchView save-to-templates button', () => {
       'Archive tile',
       'Expand tile 1',
       'Archive batch',
+      'Re-roll',
+      'Move to collection',
     ]) {
       const controls = screen.getAllByLabelText(label);
       for (const control of controls) {
@@ -104,7 +106,7 @@ describe('BatchView save-to-templates button', () => {
 
     // Overflow menu items are disabled under readOnlyActions (open the menu to check)
     fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
-    for (const name of ['Re-roll', 'Move to collection', 'Pin batch']) {
+    for (const name of ['Pin batch']) {
       const item = screen.getByRole('menuitem', { name: new RegExp(name, 'i') });
       if (!(item instanceof HTMLButtonElement)) throw new Error(`expected button for ${name}`);
       expect(item.disabled).toBe(true);
@@ -153,19 +155,110 @@ describe('BatchView save-to-templates button', () => {
     expect(onBatchAction).toHaveBeenCalledWith('saveTemplate', batch);
   });
 
-  test('visible action row is archive + more; overflow menu has copy, reroll, move', () => {
+  test('direct actions keep their order and leave no duplicate paths in More', () => {
     renderBatch(true);
-    // Direct header buttons: Archive and More actions only (no pinned star since batch.pinned=false)
+    // Direct actions follow the approved order, without duplicate menu paths.
     const actions = screen.getByLabelText('Archive batch').parentElement;
     if (!actions) throw new Error('action cluster not found');
     const headerLabels = Array.from(actions.querySelectorAll('button')).map((b) => b.getAttribute('aria-label'));
-    expect(headerLabels).toEqual(['Archive batch', 'More actions']);
+    expect(headerLabels).toEqual(['Copy prompt', 'Re-roll', 'Move to collection', 'Archive batch', 'More actions']);
     // Overflow menu contains the collapsed actions
     fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
-    expect(screen.getByRole('menuitem', { name: /copy prompt/i })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /re-roll/i })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /move to collection/i })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /copy prompt/i })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /re-roll/i })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /move to collection/i })).toBeNull();
     expect(screen.getByRole('menuitem', { name: /save to templates/i })).toBeTruthy();
+  });
+
+  test('one direct activation dispatches Copy and Re-roll exactly once with the current batch', () => {
+    const { onBatchAction } = renderBatch(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy prompt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Re-roll' }));
+    expect(onBatchAction.mock.calls).toEqual([['copy', batch], ['reroll', batch]]);
+  });
+
+  test('More focuses its invoker before opening when activation leaves another control focused', () => {
+    renderBatch(false);
+    const trigger = screen.getByRole('button', { name: 'More actions' });
+    screen.getByRole('button', { name: 'Archive batch' }).focus();
+    const expandedAtFocus: (string | null)[] = [];
+    trigger.addEventListener('focus', () => { expandedAtFocus.push(trigger.getAttribute('aria-expanded')); });
+    fireEvent.click(trigger);
+    expect(expandedAtFocus).toEqual(['false']);
+    expect(screen.getByRole('menu', { name: 'Batch actions' })).toBeTruthy();
+  });
+
+  test('More disappears with its final canonical item and cannot retain an orphan menu', () => {
+    const props = { batch, modelById: new Map(fixtureModels.map((model) => [model.id, model])), activeView: APP_VIEW_UNSORTED,
+      promptsEnabled: false, onBatchAction: mock(), onTileAction: mock(), onOpenTile: mock(), q: '' };
+    const { rerender } = render(<BatchView {...props} />, { wrapper: wrap() });
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Pin batch' })).toBeTruthy();
+    rerender(<BatchView {...props} batch={{ ...batch, pinned: true }} />);
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+    expect(screen.queryByRole('menu', { name: 'Batch actions' })).toBeNull();
+    rerender(<BatchView {...props} />);
+    expect(screen.getByRole('button', { name: 'More actions' }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  test.each([false, true])('optimistic Pin removes final More after menu cleanup and respects move-on=%s', async (moveOn) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const key = historyKeys.scoped(APP_VIEW_UNSORTED, '');
+    const initial = { pages: [{ items: [batch], nextCursor: null }], pageParams: [undefined] };
+    client.setQueryData(key, initial);
+    const writes: unknown[] = [];
+    let release!: (response: Response) => void;
+    globalThis.fetch = mock((_input: RequestInfo | URL, init?: RequestInit) => {
+      writes.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as unknown);
+      return new Promise<Response>((resolve) => { release = resolve; });
+    }) as unknown as typeof fetch;
+    function CachedBatch() {
+      const query = useQuery({ queryKey: key, queryFn: () => Promise.resolve(initial), enabled: false });
+      const current = query.data?.pages[0]?.items[0];
+      if (!current) throw new Error('missing cached batch');
+      return <BatchView batch={current} modelById={new Map(fixtureModels.map((model) => [model.id, model]))}
+        activeView={APP_VIEW_UNSORTED} promptsEnabled={false} onBatchAction={mock()} onTileAction={mock()} onOpenTile={mock()} q="" />;
+    }
+    render(<CachedBatch />, { wrapper: wrapperFor(client) });
+    const more = screen.getByRole('button', { name: 'More actions' });
+    fireEvent.click(more);
+    const pin = screen.getByRole('menuitem', { name: 'Pin batch' });
+    act(() => { pin.focus(); });
+    fireEvent.click(pin);
+    // OverflowMenu flushes closure before the mutation's async onMutate.
+    expect(screen.queryByRole('menu') === null).toBe(true);
+    expect(more.isConnected).toBe(true);
+    const copy = screen.getByRole('button', { name: 'Copy prompt' });
+    if (moveOn) act(() => { copy.focus(); });
+    const move = screen.getByRole('button', { name: 'Move to collection' });
+    await waitFor(() => {
+      expect(writes).toEqual([{ pinned: true }]);
+      expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+      expect(document.activeElement === (moveOn ? copy : move)).toBe(true);
+    });
+    expect(move.isConnected).toBe(true);
+    await act(async () => { release(Response.json({ ...batch, pinned: true })); await Promise.resolve(); });
+    await waitFor(() => { expect(client.isMutating()).toBe(0); });
+    expect(document.activeElement === (moveOn ? copy : move)).toBe(true);
+  });
+
+  test.each(['trigger', 'menu', 'elsewhere', 'body'] as const)('canonical availability removal preserves focus owned by %s', async (owner) => {
+    const props = { batch, modelById: new Map(fixtureModels.map((model) => [model.id, model])), activeView: APP_VIEW_UNSORTED,
+      promptsEnabled: false, onBatchAction: mock(), onTileAction: mock(), onOpenTile: mock(), q: '' };
+    const { rerender } = render(<BatchView {...props} />, { wrapper: wrap() });
+    const more = screen.getByRole('button', { name: 'More actions' });
+    if (owner === 'menu') {
+      fireEvent.click(more);
+      act(() => { screen.getByRole('menuitem', { name: 'Pin batch' }).focus(); });
+    } else act(() => { (owner === 'trigger' || owner === 'body' ? more : screen.getByRole('button', { name: 'Copy prompt' })).focus(); });
+    if (owner === 'body') act(() => { more.blur(); });
+    rerender(<BatchView {...props} batch={{ ...batch, pinned: true }} />);
+    await act(async () => { await Promise.resolve(); });
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(document.activeElement === (owner === 'body' ? document.body : screen.getByRole('button', { name: owner === 'elsewhere' ? 'Copy prompt' : 'Move to collection' }))).toBe(true);
+    });
   });
 
   test('marks only the first tile in the above-fold batch as high fetch priority', () => {
@@ -405,6 +498,47 @@ describe('BatchView tile memoization (SSE re-render path)', () => {
 });
 
 describe('BatchView move scope', () => {
+  test('the collection token names its current collection and retains the move handler', async () => {
+    const currentCollection = { id: 'collection-1', name: 'Portraits', count: 1, archivedCount: 0, createdAt: 1 };
+    const moves: unknown[] = [];
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith('/collections')) return Response.json({
+        items: [currentCollection],
+        summary: { totalCount: 1, pinnedCount: 0, unsortedCount: 0, archivedTotalCount: 0, archivedPinnedCount: 0, archivedUnsortedCount: 0 },
+      });
+      if (url.endsWith('/history/b1') && init?.method === 'PATCH') {
+        moves.push(JSON.parse(typeof init.body === 'string' ? init.body : '{}'));
+        return Response.json({ ...batch, collectionId: null });
+      }
+      throw new Error(`Unexpected ${url}`);
+    }) as unknown as typeof fetch;
+    render(
+      <BatchView
+        batch={{ ...batch, collectionId: currentCollection.id }}
+        currentCollection={currentCollection}
+        modelById={new Map(fixtureModels.map((model) => [model.id, model]))}
+        activeView={APP_VIEW_UNSORTED}
+        promptsEnabled={false}
+        onBatchAction={mock()}
+        onTileAction={mock()}
+        onOpenTile={mock()}
+        q=""
+      />,
+      { wrapper: wrap() },
+    );
+    const token = screen.getByRole('button', { name: 'Portraits, move to collection' });
+    expect(token.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(token.getAttribute('aria-expanded')).toBe('false');
+    expect((token as HTMLButtonElement).disabled).toBe(false);
+    expect(token.hasAttribute('data-tip')).toBe(false);
+    fireEvent.click(token);
+    expect(await screen.findByRole('dialog', { name: 'Move to collection' })).toBeTruthy();
+    expect(token.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: '(Unsorted)' }));
+    await waitFor(() => { expect(moves).toEqual([{ collectionId: null }]); });
+  });
+
   test('MovePopover moves against the debounced prop scope instead of live store search', async () => {
     useAtelierStore.setState({ view: { kind: 'pinned' }, q: 'live' });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -451,9 +585,7 @@ describe('BatchView move scope', () => {
       { wrapper: wrapperFor(client) },
     );
 
-    // Move is now in the overflow menu
-    fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /move to collection/i }));
+    fireEvent.click(screen.getByRole('button', { name: /move to collection/i }));
     fireEvent.click(await screen.findByText('Portraits'));
 
     await waitFor(() => {

@@ -17,6 +17,7 @@ import { scopeTitle, shouldShowComposer } from './lib/viewChrome';
 import { viewNavDirection, type ViewNavDirection } from './lib/viewNav';
 import Canvas, { type CanvasHandle } from './components/Canvas';
 import Composer from './components/Composer';
+import Lightbox from './components/Lightbox';
 import { runWhenReachable } from './lib/focus';
 import ConfirmDialog from './components/ConfirmDialog';
 import StoryDialog, { type StoryDialogSource } from './components/StoryDialog';
@@ -120,7 +121,6 @@ const VIEW_ENTER: Record<ViewNavDirection, string> = {
 const Archive = lazy(() => import('./components/Archive'));
 const PromptManager = lazy(() => import('./components/PromptManager'));
 const TextModels = lazy(() => import('./components/TextModels'));
-const Lightbox = lazy(() => import('./components/Lightbox'));
 const LazyByokDialog = lazy(() =>
   import('./components/ByokDialog').then((m) => ({ default: m.ByokDialog })),
 );
@@ -702,9 +702,8 @@ function AppContent() {
       action={{ label: 'Reload composer', onClick: () => { setComposerResetKey((key) => key + 1); } }}
     />
   );
-  // Lightbox is lazy() + has the most complex render logic (pointer-gesture
-  // math, blob fetch); without this boundary a render or chunk-load error
-  // escapes to the root boundary and tears down the whole SPA, losing composer
+  // The shell retains app-level containment as well as its inner body boundary.
+  // A shell failure must not tear down the whole SPA, losing composer
   // draft + scroll position. Closing keeps the underlying view with all state
   // intact, so the label names that view's scope;
   // resetKeys=[lightbox.tileId] clears a latched error when the user navigates
@@ -911,11 +910,11 @@ function AppContent() {
       </main>
       {lightbox && visibleLightboxBatch && (
         <ErrorBoundary resetKeys={[lightbox.masterSequenceId ?? lightbox.tileId]} fallback={lightboxErrorFallback}>
-        <Suspense fallback={<LazyFallback label="Loading image viewer" overlay />}>
         <Lightbox
           batch={visibleLightboxBatch}
           modelById={modelById}
           triggerKey={lightbox.tileId}
+          returnLabel={`Back to ${scopeTitle(view, collectionsQuery.data?.items ?? EMPTY_COLLECTIONS)}`}
           deleteVariant={view.kind === 'archive' ? 'permanent' : 'archive'}
           onClose={() => {
             setLightboxPermanentDeleteTileId(null);
@@ -934,7 +933,6 @@ function AppContent() {
           }}
           {...(lightboxMaster ? { master: lightboxMaster } : {})}
         />
-        </Suspense>
         </ErrorBoundary>
       )}
       {storySource && (

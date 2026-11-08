@@ -16,10 +16,11 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scroll-padding-top: 14px;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
   padding: 14px 36px calc(var(--composer-top, 156px) + 24px);
-  container-type: inline-size;
+  container-type: size;
   container-name: feed;
   /* TanStack Virtual's canonical Dynamic example sets both — without
      `overflow-anchor: none` the browser auto-adjusts scrollTop when content
@@ -87,4 +88,18 @@
 .feedColumn {
   display: flex;
   flex-direction: column;
+}
+.touchHint {
+  display: none;
+}
+
+/* Copy selection matches Composer help; this is not a touch-target floor. */
+@media (hover: none) and (pointer: coarse) {
+  .keyboardHint {
+    display: none;
+  }
+
+  .touchHint {
+    display: inline;
+  }
 }

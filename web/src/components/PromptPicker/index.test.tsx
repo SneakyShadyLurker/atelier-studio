@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import type { PropsWithChildren } from 'react';
 import App from '../../App';
 import { promptKeys } from '../../api/prompts';
+import { textModelKeys } from '../../api/textModels';
 import { fixtureModels } from '../../../test/fixtures/models';
 import { historyFixture } from '../../../test/fixtures/batches';
 import { APP_VIEW_UNSORTED, useAtelierStore } from '../../store/atelier';
@@ -87,10 +88,11 @@ const TEST_MODEL_PROPS = {
   modelId: 'gpt-image-2.5-sunburst',
 } as const;
 
-function renderPicker(options: { phone?: boolean; library?: PromptLibraryResponse } = {}) {
+function renderPicker(options: { phone?: boolean; library?: PromptLibraryResponse; noTextModels?: boolean } = {}) {
   installMatchMedia(options.phone ?? false);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(promptKeys.library(), options.library ?? library);
+  if (options.noTextModels) client.setQueryData(textModelKeys.all(), { models: [], tasks: [], defaults: { byTask: {} }, writers: {} });
   const onClose = mock();
   render(
     <PromptPicker open onClose={onClose} {...TEST_MODEL_PROPS} />,
@@ -288,6 +290,22 @@ describe('PromptPicker', () => {
       return text.includes('Characters:') && text.includes(`8 / ${MAX_PROMPT_CHARS}`);
     }).length).toBeGreaterThan(0);
     expect(screen.getByText(/AI fills expand at Generate/i)).toBeTruthy();
+    expect(screen.getByText('Simulate to preview')).toBeTruthy();
+    expect(screen.getByLabelText('Prompt preview')).toBeTruthy();
+    expect(screen.queryByLabelText('Resolved prompt preview')).toBeNull();
+    expect(document.querySelector('[data-tip="AI fills at Generate"]')).toBeTruthy();
+  });
+
+  test('pending fills explain conclusive model absence without disabling prompt actions', () => {
+    renderPicker({ library: aiFillLibrary, noTextModels: true });
+    fireEvent.click(screen.getByRole('button', { name: /AI fill portrait/i }));
+    expect(screen.getByLabelText('Prompt preview')).toBeTruthy();
+    expect(screen.getByText('AI fills need a text model')).toBeTruthy();
+    expect(screen.queryByText('AI fills expand at Generate')).toBeNull();
+    expect(screen.queryByText('Simulate to preview')).toBeNull();
+    expect(document.querySelector('[data-tip="Needs a text model"]')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use prompt' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: /^Simulate/ }).hasAttribute('disabled')).toBe(false);
   });
 
   test('Use prompt with no pins pastes the unresolved body verbatim (full re-roll) and drops the Enhance anchor', async () => {
@@ -1157,6 +1175,7 @@ describe('PromptPicker Simulate (in-window preview)', () => {
       fireEvent.click(screen.getByRole('button', { name: /AI fill portrait/i }));
       // Before Simulate: the preview shows the inert chip (literal instruction).
       expect(screen.getByText(/a color/)).toBeTruthy();
+      expect(screen.getByLabelText('Prompt preview')).toBeTruthy();
 
       fireEvent.click(screen.getByRole('button', { name: /^Simulate/ }));
       // After the server resolves the fill, the preview shows the FINAL prompt.
@@ -1164,6 +1183,7 @@ describe('PromptPicker Simulate (in-window preview)', () => {
       expect(aiFillCalls.length).toBe(1);
       // Header flips to the simulated label and the chip instruction is gone.
       expect(screen.getByText('Simulated prompt')).toBeTruthy();
+      expect(screen.getByLabelText('Simulated prompt preview').textContent).toContain('crimson silk gown');
       expect(screen.queryByText(/a color/)).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
@@ -1224,6 +1244,7 @@ describe('PromptPicker Simulate (in-window preview)', () => {
       await waitFor(() => { expect(screen.queryByText(/crimson silk gown/)).toBeNull(); });
       expect(screen.getByText(/a color/)).toBeTruthy();
       expect(screen.getByText(/resolving AI fills/i)).toBeTruthy();
+      expect(screen.getByLabelText('Prompt preview').parentElement?.getAttribute('aria-busy')).toBe('true');
 
       releaseSecond();
       expect(await screen.findByText(/emerald velvet gown/)).toBeTruthy();

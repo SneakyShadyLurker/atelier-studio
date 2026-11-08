@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import type { PublicTextModel, TaskRow, TextModelsResponse } from '@atelier/shared';
 import { TEXT_TASK_LABELS, TEXT_TASKS } from '@atelier/shared';
@@ -80,12 +80,21 @@ describe('SettingsPanel text models', () => {
   test('introduces the section and renders a row for every task on its default', async () => {
     renderPanel();
 
-    expect(await screen.findByText('Text models')).toBeTruthy();
-    expect(screen.getByText('Pick which model writes for each feature. Default uses what your admin set.')).toBeTruthy();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Your text models' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Your text model settings' })).toBeTruthy();
+    expect(screen.getByText('Choose which model writes for you in each feature; Default uses what your admin set for everyone.')).toBeTruthy();
     for (const task of TEXT_TASKS) {
       expect(screen.getByRole('button', { name: `Text model for ${TEXT_TASK_LABELS[task]}, currently Default (Kimi K3)` })).toBeTruthy();
     }
     expect(screen.getAllByRole('button', { name: /^Text model for / })).toHaveLength(TEXT_TASKS.length);
+  });
+
+  test('zero models keeps every row and asks the admin to connect a model', async () => {
+    renderPanel({ ...settings(), models: [], tasks: [], defaults: { byTask: {} } });
+    expect(await screen.findByRole('heading', { name: 'Your text models' })).toBeTruthy();
+    expect(screen.getByText('Ask your admin to connect a text model.')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /^Text model for .*currently Default$/ })).toHaveLength(TEXT_TASKS.length);
+    expect(screen.queryByRole('link')).toBeNull();
   });
 
   test('lists the default first, then models grouped by provider, offline ones disabled', async () => {
@@ -218,14 +227,58 @@ describe('SettingsPanel text models', () => {
 });
 
 describe('SettingsPanel reasoning effort', () => {
-  test('stays at the default and disabled without an active pick', async () => {
-    renderPanel(settings({ brainstorm: { pick: 'glm', effort: 'high', effectiveModelId: 'kimi', pickState: 'offline' } }));
+  test('keeps inactive and offline effort slots mounted, hidden and inert without a tip', async () => {
+    const { container } = renderPanel(settings({ brainstorm: { pick: 'glm', effort: 'high', effectiveModelId: 'kimi', pickState: 'offline' } }));
+    await screen.findByRole('heading', { name: 'Your text models' });
+    for (const label of ['AI fill', 'Brainstorm']) {
+      const button = container.querySelector(`button[aria-label="Reasoning effort for ${label}, currently Default effort"]`);
+      expect(button).toBeTruthy();
+      expect(button?.hasAttribute('disabled')).toBe(true);
+      expect(button?.hasAttribute('data-tip')).toBe(false);
+      expect(button?.parentElement?.style.visibility).toBe('hidden');
+      expect(button?.parentElement?.hasAttribute('inert')).toBe(true);
+      expect(button?.parentElement?.getAttribute('aria-hidden')).toBe('true');
+    }
+    expect(screen.queryByRole('button', { name: /^Reasoning effort for / })).toBeNull();
+    expect(screen.getByText('GLM 5.3 is offline right now; Brainstorm is using the default.')).toBeTruthy();
+  });
 
-    const unpicked = await screen.findByRole('button', { name: 'Reasoning effort for AI fill, currently Default effort' });
-    expect(unpicked.hasAttribute('disabled')).toBe(true);
-    // An offline pick is skipped, so its stored effort is not in use either.
-    const offline = screen.getByRole('button', { name: 'Reasoning effort for Brainstorm, currently Default effort' });
-    expect(offline.hasAttribute('disabled')).toBe(true);
+  test('saving and clearing a usable pick reveals and hides the same mounted effort slot', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    let current = settings();
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      if (!urlOf(input).includes('/text-models')) return Response.json({});
+      if (init?.method === 'PUT') {
+        const body = JSON.parse(init.body as string) as { modelId: string | null };
+        current = body.modelId === null ? settings() : settings({ 'ai-fill': { pick: body.modelId, effectiveModelId: body.modelId, pickState: 'active' } });
+      }
+      return Response.json(current);
+    }) as unknown as typeof fetch;
+    const { container } = render(<SettingsPanel />, { wrapper: wrapper(client) });
+    const model = await screen.findByRole('button', { name: /^Text model for AI fill/ });
+    const effort = container.querySelector<HTMLButtonElement>('button[aria-label="Reasoning effort for AI fill, currently Default effort"]');
+    if (!effort) throw new Error('expected mounted effort control');
+    const slot = effort.parentElement;
+    fireEvent.click(model);
+    await act(() => Bun.sleep(0));
+    fireEvent.click(screen.getByRole('option', { name: 'Kimi K3' }));
+    await act(() => Bun.sleep(300));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Reasoning effort for AI fill/ }) === effort).toBe(true);
+      expect(model.hasAttribute('disabled')).toBe(false);
+    });
+    expect(slot?.hasAttribute('inert')).toBe(false);
+    expect(slot?.hasAttribute('aria-hidden')).toBe(false);
+    expect(slot?.style.visibility).toBe('');
+    expect(screen.queryByRole('listbox') === null).toBe(true);
+    fireEvent.click(model);
+    fireEvent.click(screen.getByRole('option', { name: 'Use default (Kimi K3)' }));
+    await waitFor(() => { expect(slot?.hasAttribute('inert')).toBe(true); });
+    expect(slot?.style.visibility).toBe('hidden');
+    expect(slot?.contains(effort)).toBe(true);
+    expect(screen.queryByRole('button', { name: /^Reasoning effort for AI fill/ })).toBeNull();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof mock>;
+    expect(putCalls(fetchMock).map(([, init]) => JSON.parse((init as RequestInit).body as string) as unknown)).toEqual([{ modelId: 'kimi' }, { modelId: null }]);
   });
 
   test('offers only the levels the picked model accepts and shows the stored one', async () => {
@@ -252,7 +305,8 @@ describe('SettingsPanel reasoning effort', () => {
 
     expect(await screen.findByText('Effort fixed by the model')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Reasoning effort for List drafts/ })).toBeNull();
-    expect(screen.getAllByRole('button', { name: /^Reasoning effort for / })).toHaveLength(TEXT_TASKS.length - 1);
+    expect(screen.queryByRole('button', { name: /^Reasoning effort for / })).toBeNull();
+    expect(document.querySelectorAll('button[aria-label^="Reasoning effort for "]')).toHaveLength(TEXT_TASKS.length - 1);
   });
 
   test('selecting an effort saves it with the pick; Default sends null', async () => {
@@ -473,7 +527,7 @@ describe('SettingsPanel model steps', () => {
 
   test('is hidden when the user has no models', async () => {
     renderSteps([]);
-    expect(await screen.findByText('Text models')).toBeTruthy();
+    expect(await screen.findByText('Your text models')).toBeTruthy();
     await waitFor(() => {
       expect((globalThis.fetch as unknown as ReturnType<typeof mock>).mock.calls.some(([url]) => String(url).includes('/settings/model-steps'))).toBe(true);
     });

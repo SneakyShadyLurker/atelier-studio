@@ -928,16 +928,28 @@ describe('Composer minimized bar (desktop)', () => {
     expect(screen.queryByRole('textbox', { name: 'Prompt' })).toBeNull();
   });
 
-  test('a minimized bar offers Stop, not Generate, while a drain is running', async () => {
-    installDesktop();
-    useAtelierStore.setState({ draining: true });
-    renderComposer({ prompt: 'a red fox' });
-    // Minimizing moves focus in a microtask; flush it inside act.
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Minimize composer' })); await Promise.resolve(); });
-    expect(screen.getByRole('button', { name: 'Stop working through the queue' })).toBeDefined();
-    expect(screen.queryByRole('button', { name: /^Generate/ })).toBeNull();
-    act(() => { useAtelierStore.setState({ draining: false }); });
-  });
+  // A press while the queue drains joins the queue, and a drain held back by
+  // the server's queued-batch cap can run for minutes, so Generate stays.
+  for (const collapsed of [false, true]) {
+    test(`the ${collapsed ? 'minimized bar' : 'expanded composer'} offers Stop beside a pressable Generate while a drain is running`, async () => {
+      installDesktop();
+      useAtelierStore.setState({ draining: true });
+      try {
+        const submit = mock();
+        const stop = mock();
+        renderComposer({ prompt: 'a red fox', onSubmit: submit, onStopDraining: stop });
+        // Minimizing moves focus in a microtask; flush it inside act.
+        if (collapsed) await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Minimize composer' })); await Promise.resolve(); });
+        fireEvent.click(screen.getByRole('button', { name: /^Generate/ }));
+        fireEvent.click(screen.getByRole('button', { name: /^Generate/ }));
+        expect(submit).toHaveBeenCalledTimes(2);
+        fireEvent.click(screen.getByRole('button', { name: 'Stop working through the queue' }));
+        expect(stop).toHaveBeenCalledTimes(1);
+      } finally {
+        act(() => { useAtelierStore.setState({ draining: false }); });
+      }
+    });
+  }
 
   for (const collapsed of [false, true]) {
     test(`standalone replay capacity exposes Stop in the ${collapsed ? 'collapsed' : 'expanded'} composer without activating the queue`, async () => {
@@ -952,6 +964,7 @@ describe('Composer minimized bar (desktop)', () => {
       expect(submit).not.toHaveBeenCalled();
       // Minimizing moves focus in a microtask; flush it inside act.
       if (collapsed) await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Minimize composer' })); await Promise.resolve(); });
+      expect(screen.queryByRole('button', { name: /^Generate/ })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Stop working through the queue' }));
       expect(stop).toHaveBeenCalledTimes(1);
       expect(useAtelierStore.getState().draining).toBe(false);

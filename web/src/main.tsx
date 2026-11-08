@@ -14,6 +14,7 @@ import { promptKeys } from './api/prompts';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { createIDBPersister, PERSIST_CACHE_VERSION, preparePersistenceScope, shouldDehydrateQuery } from './lib/persister';
 import { createPreloadErrorHandler } from './lib/preloadRecovery';
+import { reportRecoverableError } from './lib/recoverableError';
 import { loadComposerPrefs, setComposerPrefsScope } from './lib/composerPrefs';
 import { loadRollQueue, persistRollQueue, setRollQueueScope } from './lib/rollQueuePersist';
 import { useAtelierStore } from './store/atelier';
@@ -129,7 +130,7 @@ function SessionScopedApp() {
 }
 
 prepareQueueLiveRegion();
-createRoot(root).render(
+createRoot(root, { onRecoverableError: reportRecoverableError }).render(
   <React.StrictMode>
     <ErrorBoundary>
       <SessionScopedApp />

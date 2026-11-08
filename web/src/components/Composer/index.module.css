@@ -1197,10 +1197,14 @@
   border-color: var(--ink-2);
 }
 
-/* Stop variant: while the queue is draining the primary button becomes a
-   neutral, hollow Stop so it doesn't read as the accent "go" action. Hollow →
-   filled on hover (ink/bg only — no new tokens). */
+/* Stop variant: while the queue is draining a neutral, hollow Stop joins
+   Generate (never replaces it, so presses keep queueing) and doesn't read as
+   the accent "go" action. It sizes to its label, at every width, beside the
+   fixed or stretched Generate. Hollow → filled on hover (ink/bg only — no new
+   tokens). */
 .go[data-stop] {
+  flex: 0 0 auto;
+  width: auto;
   background: transparent;
   color: var(--ink);
 }
@@ -1498,8 +1502,9 @@
 /* A narrow desktop composer (the open 240px rail at 820px) cannot fit the
    template and Enhance chips on one row beside a fixed-width Generate, and
    the toolbar falls to three rows. There Generate sizes to its label so the
-   toolbar holds two. Wider composers keep the fixed width (no shift between
-   Generate and Stop); phones stack the dock and fill it instead. */
+   toolbar holds two. Wider composers keep the fixed width (no shift as the
+   roll count or spinner comes and goes); phones stack the dock and fill it
+   instead. */
 @media (width >= 768px) {
   @container composer (width < 560px) {
     .go {

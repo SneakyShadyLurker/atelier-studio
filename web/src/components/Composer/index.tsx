@@ -5,7 +5,7 @@ import { addTransitionType, memo, startTransition, useEffect, useId, useLayoutEf
 import { useQuery } from '@tanstack/react-query';
 import { textModelsOpts } from '../../api/textModels';
 import { refImageUrl, uploadRefImage } from '../../api/uploads';
-import { COMPOSER_BODY_UPDATE, COMPOSER_PARTS_TRANSITION } from '../../lib/composerMotion';
+import { COMPOSER_BODY_UPDATE, COMPOSER_PARTS_TRANSITION, composerPartsReshaped } from '../../lib/composerMotion';
 import { beginSourceHandoff, supersedeSourceHandoffs } from '../../lib/composerSourceHandoff';
 import { isModelAvailable } from '../../lib/effectiveModel';
 import { I2V_ESTIMATED_LABEL } from '../../lib/i2v';
@@ -237,8 +237,10 @@ function Composer({
   // never touches it: the prompt is not in it. Handlers act on the live
   // queue and refs (a view transition holds the deferred commit). The commit
   // carries COMPOSER_PARTS_TRANSITION, the only type the frame and mode body
-  // animate for (useDeferredValue cannot carry a type), so a batch entering
-  // the feed never captures the Composer and Generate stays pressable.
+  // animate for (useDeferredValue cannot carry a type), and only when a part
+  // appears or leaves (composerPartsReshaped), so neither a batch entering the
+  // feed nor a press bumping the queue count captures the Composer, and
+  // Generate stays pressable.
   const noModels = models.length === 0;
   const liveParts = useMemo(() => ({
     banner: noModels && !modelsPending ? (error ?? 'Models unavailable') : null,
@@ -248,9 +250,12 @@ function Composer({
     isI2VMode,
   }), [noModels, modelsPending, error, rollQueue, refImages, isI2VMode]);
   const [parts, setParts] = useState(liveParts);
+  const scheduledPartsRef = useRef(liveParts);
   useEffect(() => {
+    const reshaped = composerPartsReshaped(scheduledPartsRef.current, liveParts, useAtelierStore.getState().draining);
+    scheduledPartsRef.current = liveParts;
     startTransition(() => {
-      addTransitionType(COMPOSER_PARTS_TRANSITION);
+      if (reshaped) addTransitionType(COMPOSER_PARTS_TRANSITION);
       setParts(liveParts);
     });
   }, [liveParts]);
@@ -816,7 +821,7 @@ function Composer({
           placeholder={isI2VMode ? 'Describe the motion…' : undefined}
           refCount={parts.isI2VMode ? (i2vSourceUploadId ? 1 : 0) : parts.refImages.length}
           queueLength={parts.rollQueue.length}
-          canSubmit={canSubmitNow}
+          canSubmit={canSubmitNow && !retryingPrepared}
           draining={canStop}
           onStop={onStopDraining}
           dangerTint={dangerTint}
@@ -1196,6 +1201,9 @@ function Composer({
             >
               Clear
             </button>
+            {/* Stop sits beside Generate, never in its place: a press while
+                the queue drains joins the queue, so Generate stays pressable
+                for as long as the server holds rolls back at capacity. */}
             {canStop ? (
               <button
                 className={styles.go}
@@ -1208,19 +1216,20 @@ function Composer({
                 Stop
                 <span className={styles.spinner} aria-hidden="true" />
               </button>
-            ) : (
+            ) : null}
+            {retryingPrepared ? null : (
               <button
                 className={styles.go}
                 type="button"
                 aria-disabled={generateDisabled || undefined}
                 aria-describedby={generateDisabled && statusMessage ? statusId : undefined}
-                data-working={resolving > 0 ? '' : undefined}
+                data-working={resolving > 0 && !canStop ? '' : undefined}
                 data-tip={selectedModelOffline ? `${selectedModel.name} is offline` : undefined}
                 onClick={submit}
               >
                 {generateBaseLabel}
                 {showRollCount ? <>{' '}<span className={styles.goCount}>{totalToFire}</span></> : null}
-                {resolving > 0 ? <span className={styles.spinner} aria-hidden="true" /> : null}
+                {resolving > 0 && !canStop ? <span className={styles.spinner} aria-hidden="true" /> : null}
               </button>
             )}
           </div>

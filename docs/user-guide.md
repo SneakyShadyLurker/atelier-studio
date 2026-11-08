@@ -18,6 +18,9 @@ or [Deployment](deployment.md).
 4. Press **Generate**, or **Cmd+Enter** on macOS / **Ctrl+Enter** elsewhere while
    editing the prompt. Each press queues one more batch, so press it as many
    times as you want variations; there is no need to wait for the last one.
+   Once your waiting batches reach the server's limit (20 by default), further
+   presses wait in the roll queue and start as capacity frees; **Stop** appears
+   beside Generate while that queue drains.
 5. Watch the tiles. Some providers stream previews; others return only the
    finished image. A queued batch waits for capacity. Local models show the
    sampler step (for example `12/25`) and, after a few steps, the estimated

@@ -217,14 +217,20 @@ export function installOfflineResponses(): void {
   // `generate=1` accepts every Generate press after `generateDelay` ms
   // (default 250) and streams one running tile for it that never finishes, so
   // each press enters the feed. The accepted count is window.__studioGenerated.
+  // `generateCap=N` accepts only the first N presses and answers every later
+  // one with the server's QUEUE_FULL 429, so further presses build a roll queue.
   const generates = motionParams.get('generate') === '1';
   const generateDelay = Number(motionParams.get('generateDelay') ?? 250);
+  const generateCap = Number(motionParams.get('generateCap') ?? Number.POSITIVE_INFINITY);
   const studioWindow = window as Window & { __studioGenerated?: number };
   studioWindow.__studioGenerated = 0;
   const offlineFetch = Object.assign((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
     if (generates && method === 'POST' && url.pathname === '/api/generate') {
+      if ((studioWindow.__studioGenerated ?? 0) >= generateCap) {
+        return Promise.resolve(json({ error: 'queue full', code: 'QUEUE_FULL', retry_after_seconds: 5 }, 429));
+      }
       studioWindow.__studioGenerated = (studioWindow.__studioGenerated ?? 0) + 1;
       const batchId = `studio-generated-${String(studioWindow.__studioGenerated)}`;
       return new Promise((resolve) => {

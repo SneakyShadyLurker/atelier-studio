@@ -7,7 +7,7 @@ interface CollapsedBarProps {
   refCount: number;
   queueLength?: number;
   canSubmit: boolean;
-  /** Admission is stoppable: the bar offers Stop, never Generate. */
+  /** Admission is stoppable: the bar offers Stop beside Generate. */
   draining?: boolean;
   onStop?: () => void;
   dangerTint: boolean;
@@ -62,7 +62,7 @@ export function CollapsedBar({
           </ViewTransition>
         )}
       </button>
-      {draining ? (
+      {draining && (
         <button
           type="button"
           className={styles.go}
@@ -73,7 +73,8 @@ export function CollapsedBar({
           Stop
           <span className={styles.spinner} aria-hidden="true" />
         </button>
-      ) : canSubmit && (
+      )}
+      {canSubmit && (
         <button type="button" className={styles.go} onClick={onSubmit}>
           Generate
         </button>

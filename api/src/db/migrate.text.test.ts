@@ -29,7 +29,7 @@ const SEED: TextSeed = {
     'glm-abliterated': 'glm-x',
     gpt: 'gpt-x',
   },
-  sunburstImageModelIds: ['gpt-image-2.5-sunburst'],
+  sunburstImageModelIds: ['gpt-image-2.6-sunburst'],
   gptImageModelIds: ['gpt-image-2'],
 };
 
@@ -100,8 +100,8 @@ describe('migration 58 - text providers', () => {
     const db = new Database(':memory:');
     try {
       migrate(db, dataDir);
-      expect(BINARY_SCHEMA_VERSION).toBe(58);
-      expect(schemaVersion(db)).toBe(58);
+      expect(BINARY_SCHEMA_VERSION).toBeGreaterThanOrEqual(58);
+      expect(schemaVersion(db)).toBe(BINARY_SCHEMA_VERSION);
       const tables = tableNames(db);
       for (const table of NEW_TABLES) {
         expect(tables).toContain(table);
@@ -132,7 +132,7 @@ describe('migration 58 - text providers', () => {
     const { db, dataDir } = openV57WithPins();
     try {
       const logs = migrateLogged(db, dataDir, { textSeed: SEED });
-      expect(schemaVersion(db)).toBe(58);
+      expect(schemaVersion(db)).toBe(BINARY_SCHEMA_VERSION);
       const tables = tableNames(db);
       for (const table of NEW_TABLES) expect(tables).toContain(table);
       expect(tables).not.toContain('user_text_backends');
@@ -197,7 +197,7 @@ describe('migration 58 - text providers', () => {
           JOIN text_models m ON m.id = w.text_model_id ORDER BY w.image_model_id
       `).all()).toEqual([
         { image_model_id: 'gpt-image-2', mode: 'prefer', legacy_key: 'gpt' },
-        { image_model_id: 'gpt-image-2.5-sunburst', mode: 'lock', legacy_key: 'gpt' },
+        { image_model_id: 'gpt-image-2.6-sunburst', mode: 'lock', legacy_key: 'gpt' },
       ]);
       expect(db.query(`
         SELECT u.user_id, u.task, m.legacy_key, u.updated_at, u.effort FROM user_text_models u
@@ -231,7 +231,7 @@ describe('migration 58 - text providers', () => {
       // kimi and grok both point at one upstream id, and so do mimo and gpt.
       const seed: TextSeed = { ...SEED, modelIds: { ...SEED.modelIds, grok: 'kimi-x', gpt: 'mimo-x' } };
       const logs = migrateLogged(db, dataDir, { textSeed: seed });
-      expect(schemaVersion(db)).toBe(58);
+      expect(schemaVersion(db)).toBe(BINARY_SCHEMA_VERSION);
       expect(db.query(`
         SELECT legacy_key, model_id, reasoning_levels, reasoning_default, temperature, top_p,
                prompt_variant, screen_requests, sort_order
@@ -254,7 +254,7 @@ describe('migration 58 - text providers', () => {
           JOIN text_models m ON m.id = w.text_model_id ORDER BY w.image_model_id
       `).all()).toEqual([
         { image_model_id: 'gpt-image-2', mode: 'prefer', legacy_key: 'gpt', screen_requests: 1 },
-        { image_model_id: 'gpt-image-2.5-sunburst', mode: 'lock', legacy_key: 'gpt', screen_requests: 1 },
+        { image_model_id: 'gpt-image-2.6-sunburst', mode: 'lock', legacy_key: 'gpt', screen_requests: 1 },
       ]);
       // Each carried pin lands on its own slot's row (grok on grok, not kimi).
       expect(db.query(`
@@ -270,8 +270,10 @@ describe('migration 58 - text providers', () => {
       const before = snapshot();
       migrate(db, dataDir, { textSeed: seed });
       expect(snapshot()).toEqual(before);
-      db.run('DELETE FROM schema_versions WHERE version = 58');
+      // Drop 58 and every later marker so migrate() actually reruns 58.
+      db.run('DELETE FROM schema_versions WHERE version >= 58');
       migrate(db, dataDir, { textSeed: seed });
+      expect(count(db, 'SELECT COUNT(*) AS count FROM schema_versions WHERE version = 58')).toBe(1);
       expect(snapshot()).toEqual(before);
     } finally {
       db.close();
@@ -283,11 +285,13 @@ describe('migration 58 - text providers', () => {
     try {
       migrate(db, dataDir, { textSeed: SEED });
       const before = NEW_TABLES.map((table) => db.query(`SELECT * FROM ${table} ORDER BY 1`).all());
-      // Simulate a crash after the fn returned but before the version marker.
-      db.run('DELETE FROM schema_versions WHERE version = 58');
+      // Simulate a crash after the fn returned but before the version marker;
+      // later markers go too, or migrate() would skip 58 entirely.
+      db.run('DELETE FROM schema_versions WHERE version >= 58');
       migrate(db, dataDir, { textSeed: SEED });
+      expect(count(db, 'SELECT COUNT(*) AS count FROM schema_versions WHERE version = 58')).toBe(1);
       expect(NEW_TABLES.map((table) => db.query(`SELECT * FROM ${table} ORDER BY 1`).all())).toEqual(before);
-      expect(schemaVersion(db)).toBe(58);
+      expect(schemaVersion(db)).toBe(BINARY_SCHEMA_VERSION);
     } finally {
       db.close();
     }
@@ -342,7 +346,7 @@ describe('migration 58 - text providers', () => {
 
       db.run('DROP TRIGGER crash_before_pins');
       migrate(db, dataDir, { textSeed: SEED });
-      expect(schemaVersion(db)).toBe(58);
+      expect(schemaVersion(db)).toBe(BINARY_SCHEMA_VERSION);
       expect(count(db, 'SELECT COUNT(*) AS count FROM text_providers')).toBe(1);
       expect(count(db, 'SELECT COUNT(*) AS count FROM text_models')).toBe(7);
       expect(count(db, 'SELECT COUNT(*) AS count FROM user_text_models')).toBe(CARRIED_PINS.length);
@@ -389,6 +393,55 @@ describe('migration 58 - text providers', () => {
   });
 });
 
+describe('migration 59 - GPT Image 2.6 writer', () => {
+  interface WriterRow { image_model_id: string; text_model_id: string; mode: string; updated_at: number }
+  const writers = (db: Database): WriterRow[] =>
+    db.query<WriterRow, []>('SELECT image_model_id, text_model_id, mode, updated_at FROM image_model_writers ORDER BY image_model_id').all();
+
+  /** A v58 database seeded the way production was: GPT locked to the 2.5 Sunburst id. */
+  function openV58OnRetiredSunburst(): { db: Database; dataDir: string } {
+    const { db, dataDir } = openV57WithPins();
+    migrate(db, dataDir, {
+      textSeed: { ...SEED, sunburstImageModelIds: ['gpt-image-2.5-sunburst'] },
+      targetVersion: 58,
+    });
+    expect(schemaVersion(db)).toBe(58);
+    return { db, dataDir };
+  }
+
+  test('moves the retired 2.5 Sunburst writer to the 2.6 id, keeping its model, mode and timestamp', () => {
+    const { db, dataDir } = openV58OnRetiredSunburst();
+    try {
+      const before = writers(db);
+      const retired = before.find((row) => row.image_model_id === 'gpt-image-2.5-sunburst');
+      expect(retired?.mode).toBe('lock');
+      migrate(db, dataDir);
+      expect(schemaVersion(db)).toBe(59);
+      expect(writers(db)).toEqual(
+        before
+          .map((row) => (row === retired ? { ...row, image_model_id: 'gpt-image-2.6-sunburst' } : row))
+          .sort((a, b) => a.image_model_id.localeCompare(b.image_model_id)),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  test('an existing 2.6 writer wins and the retired row is dropped', () => {
+    const { db, dataDir } = openV58OnRetiredSunburst();
+    try {
+      const retired = writers(db).find((row) => row.image_model_id === 'gpt-image-2.5-sunburst');
+      const other = db.query<{ id: string }, [string]>('SELECT id FROM text_models WHERE id != ? LIMIT 1').get(retired?.text_model_id ?? '');
+      db.run("INSERT INTO image_model_writers (image_model_id, text_model_id, mode, updated_at) VALUES ('gpt-image-2.6-sunburst', ?, 'prefer', 99)", [other?.id ?? '']);
+      migrate(db, dataDir);
+      const rows = writers(db).filter((row) => row.image_model_id.startsWith('gpt-image-2.'));
+      expect(rows).toEqual([{ image_model_id: 'gpt-image-2.6-sunburst', text_model_id: other?.id ?? '', mode: 'prefer', updated_at: 99 }]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe('legacy text seed', () => {
   test('LEGACY_SEED reproduces the frozen legacy wire constants', () => {
     expect(LEGACY_SEED.models.map((m): string => m.legacyKey)).toEqual(Object.keys(TEXT_BACKEND_DEFAULT_REASONING_EFFORT));
@@ -411,7 +464,7 @@ describe('legacy text seed', () => {
 
   test('legacyTextSeed reads the configured ids and splits the registry into Sunburst and other GPT image models', () => {
     const config = testConfig({ CLIPROXY_BASE_URL: 'http://cliproxy.lan:8317', CLIPROXY_TEXT_MODEL_GPT: 'gpt-custom' });
-    const seed = legacyTextSeed(config, ['gpt-image-2.5-sunburst', 'gpt-image-2', 'gemini-3-pro-image', 'krea-2-x', 'mock-fast']);
+    const seed = legacyTextSeed(config, ['gpt-image-2.6-sunburst', 'gpt-image-2', 'gemini-3-pro-image', 'krea-2-x', 'mock-fast']);
     expect(seed).toEqual({
       baseUrl: 'http://cliproxy.lan:8317',
       modelIds: {
@@ -423,12 +476,12 @@ describe('legacy text seed', () => {
         'glm-abliterated': 'glm-5.3',
         gpt: 'gpt-custom',
       },
-      sunburstImageModelIds: ['gpt-image-2.5-sunburst'],
+      sunburstImageModelIds: ['gpt-image-2.6-sunburst'],
       gptImageModelIds: ['gpt-image-2'],
     });
     // The real registry registers Sunburst.
     const registryIds = registryForConfig(config).map((entry) => entry.model.id);
-    expect(legacyTextSeed(config, registryIds)?.sunburstImageModelIds).toEqual(['gpt-image-2.5-sunburst']);
+    expect(legacyTextSeed(config, registryIds)?.sunburstImageModelIds).toEqual(['gpt-image-2.6-sunburst']);
   });
 
   test('legacyTextModelEnvVars lists only the set legacy model variables', () => {

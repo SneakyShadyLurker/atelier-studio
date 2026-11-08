@@ -8,8 +8,8 @@ import { initialAtelierState, useAtelierStore } from '../../store/atelier';
 import { allDoneBatch } from '../../../test/fixtures/batches';
 
 const imageModel: Model = {
-  id: 'gpt-image-2.5-sunburst-cloud',
-  name: 'GPT Image 2.5 Sunburst',
+  id: 'gpt-image-2.6-sunburst-cloud',
+  name: 'GPT Image 2.6 Sunburst',
   backend: 'cloud',
   tag: 'cloud',
   latency: 'fast',

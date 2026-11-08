@@ -14,7 +14,7 @@ function seed(batchStatus: string, tileStatuses: string[]): void {
   db.run("INSERT OR IGNORE INTO users (id, created_at) VALUES ('u1', ?)", [Date.now()]);
   db.run(
     `INSERT INTO batches (id, user_id, prompt, model_id, model_label, ratio, created_at, status, pool)
-     VALUES ('b1', 'u1', 'p', 'gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst', '1:1', ?, ?, 'shared')`,
+     VALUES ('b1', 'u1', 'p', 'gpt-image-2.6-sunburst', 'GPT Image 2.6 Sunburst', '1:1', ?, ?, 'shared')`,
     [Date.now(), batchStatus],
   );
   tileStatuses.forEach((status, index) => {

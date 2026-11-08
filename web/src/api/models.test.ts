@@ -6,8 +6,8 @@ import { fetchModels, mergeModelsByAvailabilityFreshness, modelKeys, modelsOpts 
 
 function model(overrides: Partial<Model> = {}): Model {
   return {
-    id: 'gpt-image-2.5-sunburst',
-    name: 'GPT Image 2.5 Sunburst',
+    id: 'gpt-image-2.6-sunburst',
+    name: 'GPT Image 2.6 Sunburst',
     backend: 'cloud',
     tag: 'cloud',
     latency: 'medium',
@@ -141,7 +141,7 @@ describe('modelsOpts structuralSharing', () => {
     const first = setModels(client, [model(), model({ id: 'retired', name: 'Retired' })]);
     const second = setModels(client, [model()]);
 
-    expect(second.map((entry) => entry.id)).toEqual(['gpt-image-2.5-sunburst']);
+    expect(second.map((entry) => entry.id)).toEqual(['gpt-image-2.6-sunburst']);
     expect(second[0]).toBe(first[0]);
   });
 });
@@ -185,7 +185,7 @@ describe('mergeModelsByAvailabilityFreshness', () => {
 describe('fetchModels', () => {
   test('rejects malformed model responses', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify([{ id: 'gpt-image-2.5-sunburst' }]), {
+    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify([{ id: 'gpt-image-2.6-sunburst' }]), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))) as unknown as typeof fetch;

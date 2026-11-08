@@ -18,7 +18,7 @@ async function rejects(p: Promise<unknown>): Promise<boolean> {
   try { await p; return false; } catch { return true; }
 }
 
-const REQ = { staticSegments: ['A woman, ', ', golden hour.'], instructions: ['her swimsuit'], modelId: 'gpt-image-2.5-sunburst' };
+const REQ = { staticSegments: ['A woman, ', ', golden hour.'], instructions: ['her swimsuit'], modelId: 'gpt-image-2.6-sunburst' };
 const BATCH_REQ = { items: [{ staticSegments: REQ.staticSegments, instructions: REQ.instructions }], modelId: REQ.modelId };
 
 describe('resolveAiFill', () => {

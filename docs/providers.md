@@ -54,7 +54,7 @@ interface RegistryEntry {
 
 ## CLIProxyAPI (cloud)
 
-[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) or another compatible upstream at `CLIPROXY_BASE_URL`. Optional: set `CLIPROXY_BASE_URL` and `CLIPROXY_TOKEN` together or not at all, and GPT Image is registered only when they are set. Keep it on a private network; it is never exposed through the ingress proxy. Auth: `Authorization: Bearer ${CLIPROXY_TOKEN}`. Serves image generation/editing (`gpt-image-2.5-sunburst`). Text features do not use this connection; they use the [text providers and models](#text-providers-and-models) configured in the app.
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) or another compatible upstream at `CLIPROXY_BASE_URL`. Optional: set `CLIPROXY_BASE_URL` and `CLIPROXY_TOKEN` together or not at all, and GPT Image is registered only when they are set. Keep it on a private network; it is never exposed through the ingress proxy. Auth: `Authorization: Bearer ${CLIPROXY_TOKEN}`. Serves image generation/editing (`gpt-image-2.6-sunburst`). Text features do not use this connection; they use the [text providers and models](#text-providers-and-models) configured in the app.
 
 ### GPT-only input moderation
 
@@ -70,12 +70,12 @@ Which text model writes prompts for GPT Image is a routing setting: an admin can
 
 ### `/v1/images/generations`
 
-`POST /v1/images/generations` (OpenAI-compatible). Atelier explicitly sends `model: gpt-image-2.5-sunburst`. Omitting `model` is unsafe because a proxy may default to a retired id.
+`POST /v1/images/generations` (OpenAI-compatible). Atelier explicitly sends `model: gpt-image-2.6-sunburst`. Omitting `model` is unsafe because a proxy may default to a retired id.
 
 **Request** (JSON):
 ```json
 {
-  "model": "gpt-image-2.5-sunburst",
+  "model": "gpt-image-2.6-sunburst",
   "prompt": "<user prompt>",
   "size": "2880x2880",
   "quality": "xhigh",
@@ -101,16 +101,16 @@ Which text model writes prompts for GPT Image is a routing setting: an admin can
 - *Plain HTTP non-2xx* (failure before the stream opens): status forwarded verbatim. `400 invalid_request_error` (unsupported model) → `'upstream rejected'`; `400 moderation_blocked` → `'content-policy violation'`; `429` / `502` / `503` / `504` enter the transient-retry path; other `5xx` → `'internal error'` after sanitization.
 - *In-stream `event: error` frames*: CLIProxyAPI commits HTTP 200 up front on streamed image calls, so server-side failures arrive mid-stream, not as non-2xx. The adapter classifies them by body (`inStreamErrorReason` in `cliproxy.ts`, match order load-bearing): moderation/safety/content-policy text → stamped `400` (policy surface, never retried); `did not return image` → typed `reason {kind:'no-image'}` → `'upstream rejected'`, **never retried** — this is how the retired gpt-image-2 **output-stage** moderation manifested on the Codex path (a clean `moderation_blocked` 400 is rare), its body carries `type:"server_error"` so it must be matched *before* the server-class pattern, and retrying it would burn pool slots and trip the breaker on moderation storms (a manual re-roll with a fresh seed genuinely can pass — that choice stays with the user); rate-limit text (incl. the shared-org `gpt-image-2-codex` pool limit) → stamped `429`; server-class text (`auth_unavailable` / `auth_not_found` / `server_error` / `internal_server_error` / `stream disconnected`) → stamped `502` so a first-yield occurrence is retried and exhaustion lands on `'service unavailable'`; anything else → `400` → `'upstream rejected'`. Notable body: `auth_unavailable: no auth available (…)` means the proxy's upstream credential is in a post-401 cooldown (an infrastructure outage, not a prompt problem).
 
-**Retry / backoff**: gpt-image-2.5-sunburst is wrapped in `resilientImageProvider` with its own circuit-breaker state for the `shared` pool. Gemini is not wrapped because users spend their own BYOK quota and Google error semantics are adapter-owned. Transient statuses `{429, 502, 503, 504}` are retried (`IMAGE_RETRY_MAX_ATTEMPTS`, default 3). The backoff honors the upstream `Retry-After` header (integer seconds or HTTP-date, parsed in `providers/retryAfter.ts`) but clamps it to the normal envelope: never longer than `maxBackoffMs` (so a rate-limited tile cannot pin a pool slot for the upstream's full cool-down) and, for 429 specifically, never shorter than a 5s floor (so a `Retry-After: 0` / past-date / sub-floor header cannot hammer an already-throttled upstream). Longer cool-downs are handled by the `IMAGE_BREAKER` circuit breaker, not by holding the slot. See `lifecycle/resilient-call.ts` `buildResilientPolicy`.
+**Retry / backoff**: gpt-image-2.6-sunburst is wrapped in `resilientImageProvider` with its own circuit-breaker state for the `shared` pool. Gemini is not wrapped because users spend their own BYOK quota and Google error semantics are adapter-owned. Transient statuses `{429, 502, 503, 504}` are retried (`IMAGE_RETRY_MAX_ATTEMPTS`, default 3). The backoff honors the upstream `Retry-After` header (integer seconds or HTTP-date, parsed in `providers/retryAfter.ts`) but clamps it to the normal envelope: never longer than `maxBackoffMs` (so a rate-limited tile cannot pin a pool slot for the upstream's full cool-down) and, for 429 specifically, never shorter than a 5s floor (so a `Retry-After: 0` / past-date / sub-floor header cannot hammer an already-throttled upstream). Longer cool-downs are handled by the `IMAGE_BREAKER` circuit breaker, not by holding the slot. See `lifecycle/resilient-call.ts` `buildResilientPolicy`.
 
-**Operational invariant**: atelier-api pins `model=gpt-image-2.5-sunburst` exactly and relies on no proxy alias scheme; a proxy model alias that rewrites that id breaks image routing.
+**Operational invariant**: atelier-api pins `model=gpt-image-2.6-sunburst` exactly and relies on no proxy alias scheme; a proxy model alias that rewrites that id breaks image routing.
 
 ### `/v1/images/edits` (reference-image editing)
 
-`POST /v1/images/edits` (OpenAI-compatible), same `gpt-image-2.5-sunburst` model gate, auth, and host. atelier-api uses the `application/json` branch exclusively:
+`POST /v1/images/edits` (OpenAI-compatible), same `gpt-image-2.6-sunburst` model gate, auth, and host. atelier-api uses the `application/json` branch exclusively:
 ```json
 {
-  "model": "gpt-image-2.5-sunburst",
+  "model": "gpt-image-2.6-sunburst",
   "prompt": "<user prompt>",
   "images": [{ "image_url": "data:image/png;base64,<b64>" }],
   "size": "2880x2880",

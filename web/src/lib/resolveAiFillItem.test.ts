@@ -24,20 +24,20 @@ describe('buildAiFillRequest', () => {
   });
 
   test('masks tokens, resolves var/random in the static text, returns resolved segments + instructions', () => {
-    const build = buildAiFillRequest('A {{var::mood}} day, {{ai-fill: the yard}}.', lib, 1, 'gpt-image-2.5-sunburst');
+    const build = buildAiFillRequest('A {{var::mood}} day, {{ai-fill: the yard}}.', lib, 1, 'gpt-image-2.6-sunburst');
     expect(build).not.toBeNull();
     if (!build) return;
     expect(build.request.instructions).toEqual(['the yard']);
     expect(build.request.staticSegments).toEqual(['A sunny day, ', '.']);
-    expect(build.request.modelId).toBe('gpt-image-2.5-sunburst');
+    expect(build.request.modelId).toBe('gpt-image-2.6-sunburst');
   });
 
   test('preserves the legacy request and splice byte-for-byte', () => {
-    const build = buildAiFillRequest('A {{var::mood}} day, {{ai-fill: the yard}}.', lib, 1, 'gpt-image-2.5-sunburst');
+    const build = buildAiFillRequest('A {{var::mood}} day, {{ai-fill: the yard}}.', lib, 1, 'gpt-image-2.6-sunburst');
     expect(build?.request).toEqual({
       staticSegments: ['A sunny day, ', '.'],
       instructions: ['the yard'],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     });
     expect(assembleAiFillPrompt(build?.request.staticSegments ?? [], ['a quiet yard']))
       .toBe('A sunny day, a quiet yard.');
@@ -48,17 +48,17 @@ describe('buildAiFillRequest', () => {
       'A {{card-notes}}{{var::mood}} day, {{ai-fill: the yard}}.',
       lib,
       1,
-      'gpt-image-2.5-sunburst',
+      'gpt-image-2.6-sunburst',
     );
     expect(build?.request).toEqual({
       staticSegments: ['A sunny day, ', '.'],
       instructions: ['the yard'],
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
     });
   });
 
   test('resolves nested {{var}} INSIDE the instruction', () => {
-    const build = buildAiFillRequest('scene: {{ai-fill: a {{var::mood}} backyard}}', lib, 1, 'gpt-image-2.5-sunburst');
+    const build = buildAiFillRequest('scene: {{ai-fill: a {{var::mood}} backyard}}', lib, 1, 'gpt-image-2.6-sunburst');
     expect(build).not.toBeNull();
     if (!build) return;
     expect(build.request.instructions).toEqual(['a sunny backyard']);
@@ -70,7 +70,7 @@ describe('buildAiFillRequest', () => {
       'scene: {{ai-fill: a place in {{random::the 1950s::the 1950s}} that fits}}',
       lib,
       1,
-      'gpt-image-2.5-sunburst',
+      'gpt-image-2.6-sunburst',
     );
     expect(build).not.toBeNull();
     if (!build) return;
@@ -79,7 +79,7 @@ describe('buildAiFillRequest', () => {
   });
 
   test('omits the simulate flag by default (Generate path)', () => {
-    const build = buildAiFillRequest('A {{var::mood}} day, {{ai-fill: the yard}}.', lib, 1, 'gpt-image-2.5-sunburst');
+    const build = buildAiFillRequest('A {{var::mood}} day, {{ai-fill: the yard}}.', lib, 1, 'gpt-image-2.6-sunburst');
     expect(build).not.toBeNull();
     if (!build) return;
     expect(build.request.simulate).toBeUndefined();
@@ -90,7 +90,7 @@ describe('buildAiFillRequest', () => {
       'A {{card-notes}}{{var::mood}} day, {{ai-fill: the yard}}.',
       lib,
       1,
-      'gpt-image-2.5-sunburst',
+      'gpt-image-2.6-sunburst',
       true,
     );
     expect(build).not.toBeNull();
@@ -99,7 +99,7 @@ describe('buildAiFillRequest', () => {
   });
 
   test('a retired card-notes token without an ai-fill token produces no ai-fill request', () => {
-    expect(buildAiFillRequest('plain {{card-notes}} prompt', lib, 1, 'gpt-image-2.5-sunburst')).toBeNull();
+    expect(buildAiFillRequest('plain {{card-notes}} prompt', lib, 1, 'gpt-image-2.6-sunburst')).toBeNull();
   });
 
   test('malformed/unclosed {{ai-fill: returns null (caller passes literal through, no brick)', () => {
@@ -110,9 +110,9 @@ describe('buildAiFillRequest', () => {
 
   test('empty {{ai-fill:}} returns null (server rejects .min(1); pass literal through)', () => {
     // An empty instruction would POST instructions:[''] → server 400 → silent drop.
-    expect(buildAiFillRequest('a {{ai-fill:}} scene', lib, 1, 'gpt-image-2.5-sunburst')).toBeNull();
-    expect(buildAiFillRequest('a {{ai-fill:   }} scene', lib, 1, 'gpt-image-2.5-sunburst')).toBeNull();
+    expect(buildAiFillRequest('a {{ai-fill:}} scene', lib, 1, 'gpt-image-2.6-sunburst')).toBeNull();
+    expect(buildAiFillRequest('a {{ai-fill:   }} scene', lib, 1, 'gpt-image-2.6-sunburst')).toBeNull();
     // A blank slot alongside a valid one still returns null (whole item literal).
-    expect(buildAiFillRequest('{{ai-fill: the yard}} and {{ai-fill:}}', lib, 1, 'gpt-image-2.5-sunburst')).toBeNull();
+    expect(buildAiFillRequest('{{ai-fill: the yard}} and {{ai-fill:}}', lib, 1, 'gpt-image-2.6-sunburst')).toBeNull();
   });
 });

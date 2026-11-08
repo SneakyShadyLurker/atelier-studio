@@ -42,7 +42,7 @@ const BATCH: Batch = {
   id: 'batch-1',
   prompt: 'harness batch',
   ratio: '1:1',
-  modelId: 'gpt-image-2.5-sunburst',
+  modelId: 'gpt-image-2.6-sunburst',
   modelLabel: 'GPT Image',
   createdAt: 1,
   collectionId: null,
@@ -196,7 +196,7 @@ function MenuCase() {
 }
 
 const MODEL: Model = {
-  id: 'gpt-image-2.5-sunburst',
+  id: 'gpt-image-2.6-sunburst',
   name: 'GPT Image',
   backend: 'cloud',
   tag: 'cloud',

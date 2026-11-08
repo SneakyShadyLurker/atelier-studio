@@ -76,7 +76,7 @@ describe('model steps settings routes', () => {
 
   test('PUT 404s for unknown and step-less models', async () => {
     const rt = testRuntime(LOCAL_ON);
-    for (const modelId of ['no-such-model', 'gpt-image-2.5-sunburst']) {
+    for (const modelId of ['no-such-model', 'gpt-image-2.6-sunburst']) {
       const res = await put(rt, modelId, { steps: 10 });
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: 'not found' });

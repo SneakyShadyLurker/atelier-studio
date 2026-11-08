@@ -7,7 +7,7 @@ import { DRAFT_LIST_SYSTEM_PROMPT } from './draftListSystemPrompt';
 import { SKIN_MARKING_BAN, WET_LOOK_BAN } from './skinRenderRules';
 import { imageAuthoringSystemPrompt, isSunburstModel, SUNBURST_ENHANCE_SYSTEM_PROMPT, SUNBURST_PROMPT_RULES } from './gptSystemPrompt';
 
-const modelId = 'gpt-image-2.5-sunburst';
+const modelId = 'gpt-image-2.6-sunburst';
 
 describe('Sunburst prompt contract', () => {
   test('every Sunburst image writer uses the dedicated guidance without legacy overrides', () => {
@@ -33,7 +33,7 @@ describe('Sunburst prompt contract', () => {
 
   test('the guidance is exclusive to the exact image model, not the text backend or GPT family', () => {
     expect(isSunburstModel(modelId)).toBe(true);
-    for (const other of ['gpt-6.1-sol', 'gpt-image-2.5-flare', 'gemini-3-pro-image-preview']) {
+    for (const other of ['gpt-6.1-sol', 'gpt-image-2.6-flare', 'gemini-3-pro-image-preview']) {
       expect(isSunburstModel(other)).toBe(false);
       expect(imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, other)).toBe(DRAFT_TEMPLATE_SYSTEM_PROMPT);
       expect(buildAiFillSystemPrompt({ modelId: other, slotCount: 1, perSlotWordBudget: 20 })).not.toContain(SUNBURST_PROMPT_RULES);

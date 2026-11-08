@@ -461,7 +461,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
       }));
       await parseSse(res);
     };
-    await call({ prompt: 'cat', modelId: 'gpt-image-2.5-sunburst' });
+    await call({ prompt: 'cat', modelId: 'gpt-image-2.6-sunburst' });
     await call({ prompt: 'cat', modelId: 'gemini-3-pro-image-preview' });
     await call({ prompt: 'cat' });
     await call({ prompt: 'cat', modelId: 'krea-2-gonzalomo' });
@@ -503,7 +503,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
     };
     await call({ prompt: 'cat', modelId: 'gemini-3-pro-image-preview' });
     await call({ prompt: 'cat' });
-    await call({ prompt: 'cat', modelId: 'gpt-image-2.5-sunburst' });
+    await call({ prompt: 'cat', modelId: 'gpt-image-2.6-sunburst' });
     expect(seen[0]).toBeUndefined();
     expect(seen[1]).toBeUndefined();
     expect(seen[2]).toBe(SUNBURST_ENHANCE_SYSTEM_PROMPT);
@@ -604,7 +604,7 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
     };
     await call('gemini-3-pro-image-preview');
     await call('krea-2-gonzalomo');
-    await call('gpt-image-2.5-sunburst');
+    await call('gpt-image-2.6-sunburst');
     expect(efforts).toEqual(['max', 'max', undefined]);
   });
 
@@ -635,8 +635,8 @@ describe('POST /api/enhance-prompt — quota error surfacing', () => {
 
     await call({ prompt: 'portrait without references' });
     await call({ prompt: 'portrait with a reference', refImageIds: [uploadId] });
-    await call({ prompt: 'portrait without references', modelId: 'gpt-image-2.5-sunburst' });
-    await call({ prompt: 'portrait with a reference', refImageIds: [uploadId], modelId: 'gpt-image-2.5-sunburst' });
+    await call({ prompt: 'portrait without references', modelId: 'gpt-image-2.6-sunburst' });
+    await call({ prompt: 'portrait with a reference', refImageIds: [uploadId], modelId: 'gpt-image-2.6-sunburst' });
 
     expect(requests.map((body) => body.model)).toEqual([
       TEXT_MODELS.kimi,
@@ -771,7 +771,7 @@ describe('enhance text model routing failures', () => {
   test('a turned-off locked writer → 409 TEXT_MODEL_UNAVAILABLE', async () => {
     const runtime = testRuntime({ seedLegacyText: true });
     runtime.text.store.updateModel(legacyTextModelId(runtime.db, 'gpt'), { enabled: false });
-    const res = await postEnhance(runtime.app, { prompt: 'a cat', modelId: 'gpt-image-2.5-sunburst' });
+    const res = await postEnhance(runtime.app, { prompt: 'a cat', modelId: 'gpt-image-2.6-sunburst' });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('TEXT_MODEL_UNAVAILABLE');
   });

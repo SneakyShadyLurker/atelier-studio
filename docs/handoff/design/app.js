@@ -142,16 +142,16 @@ function sampleQueuedBatch() {
     id: 'sample-queued',
     prompt: 'A bronze observatory at dusk, etched glass, precise architectural lighting',
     ratio: '1:1',
-    modelId: 'gpt-image-2.5-sunburst',
-    modelLabel: 'GPT Image 2.5 Sunburst',
+    modelId: 'gpt-image-2.6-sunburst',
+    modelLabel: 'GPT Image 2.6 Sunburst',
     createdAt,
     collectionId: null,
     pinned: false,
     status: 'queued',
     queueLengthAhead: 3,
     tiles: [
-      { id: 'sample-queued-1', status: 'loading', modelId: 'gpt-image-2.5-sunburst', seed: 101, startedAt: createdAt },
-      { id: 'sample-queued-2', status: 'loading', modelId: 'gpt-image-2.5-sunburst', seed: 102, startedAt: createdAt },
+      { id: 'sample-queued-1', status: 'loading', modelId: 'gpt-image-2.6-sunburst', seed: 101, startedAt: createdAt },
+      { id: 'sample-queued-2', status: 'loading', modelId: 'gpt-image-2.6-sunburst', seed: 102, startedAt: createdAt },
     ],
   };
 }

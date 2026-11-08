@@ -20,7 +20,7 @@ function model(o: Partial<Model> & Pick<Model, 'id' | 'backend'>): Model {
   };
 }
 
-const gpt = model({ id: 'gpt-image-2.5-sunburst', backend: 'cloud' });
+const gpt = model({ id: 'gpt-image-2.6-sunburst', backend: 'cloud' });
 const cloud2 = model({ id: 'cloud-2', backend: 'cloud', pool: 'shared' });
 const comfyOnline = model({ id: 'zib-distilled', backend: 'local', pool: 'local' });
 const comfyOffline = model({

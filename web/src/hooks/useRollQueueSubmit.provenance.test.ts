@@ -4,7 +4,7 @@ import { useAtelierStore, initialAtelierState } from '../store/atelier';
 import { useRollQueueSubmit } from './useRollQueueSubmit';
 import type { GenerateRequest, Model } from '@atelier/shared';
 
-const model = { id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', pool: 'shared', backend: 'cloud', supportsReferenceImages: false } as unknown as Model;
+const model = { id: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst', pool: 'shared', backend: 'cloud', supportsReferenceImages: false } as unknown as Model;
 
 describe('useRollQueueSubmit — per-roll provenance', () => {
   beforeEach(() => { useAtelierStore.setState(initialAtelierState, true); });

@@ -186,7 +186,7 @@ describe('RoutingPanel', () => {
   test('prompt writers: one row per registered image model, "No writer" by default, no mode until chosen', async () => {
     renderPanel();
     await screen.findByRole('region', { name: 'Routing for everyone' });
-    expect(screen.getByRole('button', { name: 'Prompt writer for GPT Image 2.5 Sunburst, currently No writer' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Prompt writer for GPT Image 2.6 Sunburst, currently No writer' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Prompt writer for Krea 2, currently No writer' })).toBeTruthy();
     expect(screen.queryByRole('radio')).toBeNull();
   });

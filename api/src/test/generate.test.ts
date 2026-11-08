@@ -120,7 +120,7 @@ describe('generate', () => {
 
     expect(res.status).toBe(200);
     const models = (await res.json()) as { id: string; maxRefBytesPerBatch?: number }[];
-    expect(models.find((model) => model.id === 'gpt-image-2.5-sunburst')?.maxRefBytesPerBatch).toBe(1234);
+    expect(models.find((model) => model.id === 'gpt-image-2.6-sunburst')?.maxRefBytesPerBatch).toBe(1234);
   });
 
   test('rejects Gemini generate when user has no Google key', async () => {
@@ -351,7 +351,7 @@ describe('generate', () => {
     expect(row?.last_used_at).toBeGreaterThan(0);
   });
 
-  test('gpt-image-2.5-sunburst accepts refImageIds, routes to edits, and emits provenance', async () => {
+  test('gpt-image-2.6-sunburst accepts refImageIds, routes to edits, and emits provenance', async () => {
     allowJevForProviderTests();
     let seenPath = '';
     const baseUrl = serve((req) => {
@@ -363,7 +363,7 @@ describe('generate', () => {
 
     const events = await generateEvents(runtime.app, {
       prompt: 'use the reference',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
       refImageIds: [uploadId],
@@ -404,7 +404,7 @@ describe('generate', () => {
     for (const uploadId of [crypto.randomUUID(), bobUpload]) {
       const res = await jsonRequest(runtime.app, '/api/generate', {
         prompt: 'x',
-        modelId: 'gpt-image-2.5-sunburst',
+        modelId: 'gpt-image-2.6-sunburst',
         ratio: '1:1',
         count: 1,
         refImageIds: [uploadId],
@@ -419,7 +419,7 @@ describe('generate', () => {
     const uploadId = await seedUpload(runtime, 'alice');
     const res = await jsonRequest(runtime.app, '/api/generate', {
       prompt: 'x',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
       refImageIds: [uploadId, uploadId],
@@ -435,7 +435,7 @@ describe('generate', () => {
     const uploadId = await seedUpload(runtime, 'alice', { sizeBytes: 11 });
     const res = await jsonRequest(runtime.app, '/api/generate', {
       prompt: 'x',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
       refImageIds: [uploadId],
@@ -452,7 +452,7 @@ describe('generate', () => {
     try {
       const res = await jsonRequest(runtime.app, '/api/generate', {
         prompt: 'x',
-        modelId: 'gpt-image-2.5-sunburst',
+        modelId: 'gpt-image-2.6-sunburst',
         ratio: '1:1',
         count: 1,
         refImageIds: [uploadId],
@@ -469,7 +469,7 @@ describe('generate', () => {
     const uploadId = await seedUpload(runtime, 'alice', { sizeBytes: pngFixture.byteLength });
     const res = await jsonRequest(runtime.app, '/api/generate', {
       prompt: 'x',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
       refImageIds: [uploadId],
@@ -484,7 +484,7 @@ describe('generate', () => {
     const runtime = testRuntime();
     const empty = await jsonRequest(runtime.app, '/api/generate', {
       prompt: 'x',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       ratio: '1:1',
       count: 1,
       refImageIds: [],
@@ -706,13 +706,13 @@ describe('generate', () => {
   });
 
   describe('GPT Image needs CLIProxyAPI', () => {
-    const gptImage = { prompt: 'a lighthouse', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 };
+    const gptImage = { prompt: 'a lighthouse', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 };
 
     test('without CLIPROXY_* GPT Image is not registered', async () => {
       const runtime = testRuntime({ CLIPROXY_BASE_URL: '', CLIPROXY_TOKEN: '' });
       const models = await runtime.app.request('/api/models', { headers: { 'Remote-User': 'alice' } });
       const ids = ((await models.json()) as { id: string }[]).map((model) => model.id);
-      expect(ids).not.toContain('gpt-image-2.5-sunburst');
+      expect(ids).not.toContain('gpt-image-2.6-sunburst');
       const res = await jsonRequest(runtime.app, '/api/generate', gptImage, 'alice');
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({
@@ -725,7 +725,7 @@ describe('generate', () => {
       const runtime = testRuntime();
       const models = await runtime.app.request('/api/models', { headers: { 'Remote-User': 'alice' } });
       const ids = ((await models.json()) as { id: string }[]).map((model) => model.id);
-      expect(ids).toContain('gpt-image-2.5-sunburst');
+      expect(ids).toContain('gpt-image-2.6-sunburst');
     });
   });
 });

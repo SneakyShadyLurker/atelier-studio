@@ -8,8 +8,8 @@ import { flushSeenBatches, getSeenBatches, markBatchSeen, resetSeenBatches, SEEN
 import { APP_VIEW_ARCHIVE, APP_VIEW_PINNED, APP_VIEW_PROMPTS, APP_VIEW_UNSORTED, collectionView, type AppView, useAtelierStore } from '../src/store/atelier';
 
 const models: readonly Model[] = [{
-  id: 'gpt-image-2.5-sunburst-cloud',
-  name: 'GPT Image 2.5 Sunburst',
+  id: 'gpt-image-2.6-sunburst-cloud',
+  name: 'GPT Image 2.6 Sunburst',
   backend: 'cloud',
   tag: 'cloud',
   latency: 'fast',
@@ -30,8 +30,8 @@ function batch(overrides: Partial<Batch> = {}): Batch {
     id: 'batch-logo',
     prompt: 'Logo mark for a Nordic espresso bar',
     ratio: '1:1',
-    modelId: 'gpt-image-2.5-sunburst-cloud',
-    modelLabel: 'GPT Image 2.5 Sunburst',
+    modelId: 'gpt-image-2.6-sunburst-cloud',
+    modelLabel: 'GPT Image 2.6 Sunburst',
     createdAt: 1,
     collectionId: null,
       pinned: false,

@@ -121,7 +121,7 @@ Supporting rails: the ai-fill system prompt (`api/src/prompts/aiFillSystemPrompt
 
 ## Prompting guidance for the cloud production model
 
-Sunburst has a dedicated prompt contract in [`gptSystemPrompt.ts`](../api/src/prompts/gptSystemPrompt.ts), based on [OpenAI's GPT Image 2.5 prompting guide](https://developers.openai.com/api/docs/guides/image-prompting).
+Sunburst has a dedicated prompt contract in [`gptSystemPrompt.ts`](../api/src/prompts/gptSystemPrompt.ts), based on [OpenAI's GPT Image 2.6 prompting guide](https://developers.openai.com/api/docs/guides/image-prompting).
 
 Describe the intended result through concrete subjects, composition, materials, light and action. Keep simple requests concise; use labeled sections when a complex brief benefits from them. Distinguish each subject and its relationships. Preserve the requested medium, level of polish and visible identifying details. Intentional grain, natural skin characteristics and weather are valid details, not automatic defects.
 

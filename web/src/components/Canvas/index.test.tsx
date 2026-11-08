@@ -38,7 +38,7 @@ const canvasProps = {
 } as const;
 
 const model: Model = {
-  id: 'gpt-image-2.5-sunburst',
+  id: 'gpt-image-2.6-sunburst',
   name: 'GPT Image',
   backend: 'cloud',
   tag: 'cloud',

@@ -137,7 +137,7 @@ function buildMockEntries(config: Config): RegistryEntryDraft[] {
   ];
 }
 
-// Resilient-policy tuning for the gpt-image-2.5-sunburst image upstream. buildResilientPolicy
+// Resilient-policy tuning for the gpt-image-2.6-sunburst image upstream. buildResilientPolicy
 // constructs a fresh breaker per call, so the gpt-image entry gets its own breaker
 // instance — only the config literal is factored out here.
 function imageResilientPolicyOptions(config: Config) {
@@ -174,7 +174,7 @@ function buildRealEntries(config: Config): RegistryEntryDraft[] {
     {
       model: {
         id: CLIPROXY_MODEL_ID,
-        name: 'GPT Image 2.5 Sunburst',
+        name: 'GPT Image 2.6 Sunburst',
         backend: 'cloud',
         pool: 'shared',
         tag: 'cloud',

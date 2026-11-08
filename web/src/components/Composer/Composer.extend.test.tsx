@@ -8,7 +8,7 @@ import { modelSelectionPatch } from '../../lib/modelSelection';
 import { initialAtelierState, toGenerateRequest, useAtelierStore } from '../../store/atelier';
 
 const imageModel: Model = {
-  id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', backend: 'cloud', tag: 'cloud', latency: 'fast',
+  id: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst', backend: 'cloud', tag: 'cloud', latency: 'fast',
   supportedRatios: ['1:1', '16:9'], pool: 'shared', concurrencyCapPerUser: 4, maxCountPerBatch: 4,
 };
 const videoModel: Model = {

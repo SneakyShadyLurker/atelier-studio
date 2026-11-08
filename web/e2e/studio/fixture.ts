@@ -15,7 +15,7 @@ const stills = [
 ] as const;
 
 export const models: readonly Model[] = [
-  { id: 'gpt-image-2.5-sunburst', name: 'GPT Image', backend: 'cloud', pool: 'shared', tag: 'cloud', latency: 'slow', supportedRatios: ['1:1', '4:5', '3:4'], defaultRatio: '1:1', supportsReferenceImages: true, concurrencyCapPerUser: 4, maxCountPerBatch: 4 },
+  { id: 'gpt-image-2.6-sunburst', name: 'GPT Image', backend: 'cloud', pool: 'shared', tag: 'cloud', latency: 'slow', supportedRatios: ['1:1', '4:5', '3:4'], defaultRatio: '1:1', supportsReferenceImages: true, concurrencyCapPerUser: 4, maxCountPerBatch: 4 },
   { id: 'krea-2-test-alpha', name: 'Test Alpha', backend: 'local', pool: 'local', tag: 'comfyui', latency: 'slow', supportedRatios: ['1:1', '4:5', '3:4'], defaultRatio: '3:4', supportsReferenceImages: true, concurrencyCapPerUser: 1, maxCountPerBatch: 1, availability: { ok: true, checkedAt: now } },
 ];
 
@@ -42,7 +42,7 @@ export const batches: readonly Batch[] = prompts.map((prompt, index) => ({
   id: `studio-batch-${index + 1}`,
   prompt,
   ratio: index === 1 ? '4:5' : '1:1',
-  modelId: index === 3 ? 'krea-2-test-alpha' : 'gpt-image-2.5-sunburst',
+  modelId: index === 3 ? 'krea-2-test-alpha' : 'gpt-image-2.6-sunburst',
   modelLabel: index === 3 ? 'Test Alpha' : 'GPT Image',
   createdAt: now - (3 - index) * 60_000,
   collectionId: index < 2 ? 'campaign' : index === 2 ? 'moodboards' : null,
@@ -178,7 +178,7 @@ export function installOfflineResponses(): void {
       id: `studio-extra-${String(index + 1)}`,
       prompt: `Archive study ${String(index + 1)}, overcast harbour light`,
       ratio: '1:1',
-      modelId: 'gpt-image-2.5-sunburst',
+      modelId: 'gpt-image-2.6-sunburst',
       modelLabel: 'GPT Image',
       status: 'done',
       collectionId: null,

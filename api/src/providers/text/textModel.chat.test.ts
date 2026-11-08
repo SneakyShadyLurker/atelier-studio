@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { brainstormDefaults } from './textBudgets';
 import type { ChatResponseFormat } from './featureHelpers';
-// These suites use modelId 'gpt-image-2.5-sunburst' → the GPT (anatomy-safe) constraints variant.
+// These suites use modelId 'gpt-image-2.6-sunburst' → the GPT (anatomy-safe) constraints variant.
 import {
   BRAINSTORM_FIELD_SEPARATOR,
   BRAINSTORM_RECORD_SEPARATOR,
@@ -90,7 +90,7 @@ describe('chat backend brainstorm', () => {
     const bodies: Record<string, unknown>[] = [];
     const out = `${contentFrame(`a\n${BRAINSTORM_RECORD_SEPARATOR}\n`)}data: [DONE]\n\n`;
     const baseUrl = serveCapture(bodies, out);
-    const chunks = await drain(chatProvider(baseUrl).brainstormCharacters({ count: 5, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal));
+    const chunks = await drain(chatProvider(baseUrl).brainstormCharacters({ count: 5, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal));
     const body = bodies[0];
     if (body === undefined) {
       const failed = chunks.find((chunk) => chunk.type === 'failed');
@@ -114,7 +114,7 @@ describe('chat backend brainstorm', () => {
     const record = ['scene', 'subject', 'details'].join(`\n${BRAINSTORM_FIELD_SEPARATOR}\n`);
     const out = `${reasoning}${contentFrame(`${record}\n${BRAINSTORM_RECORD_SEPARATOR}\n`)}data: [DONE]\n\n`;
     const baseUrl = serveCapture([], out);
-    const chunks = await drain(chatProvider(baseUrl).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal));
+    const chunks = await drain(chatProvider(baseUrl).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal));
     expect(chunks.filter((c) => c.type === 'prompt').map((c) => c.text)).toEqual([
       `Scene / Image type: scene\nSubject: subject\nDetails: details\n${BRAINSTORM_CONSTRAINTS_GPT}`,
     ]);
@@ -122,14 +122,14 @@ describe('chat backend brainstorm', () => {
 
   test('surfaces a content_filter finish_reason as a tagged failure', async () => {
     const baseUrl = serveCapture([], `${finishFrame('content_filter')}data: [DONE]\n\n`);
-    const chunks = await drain(chatProvider(baseUrl).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal));
+    const chunks = await drain(chatProvider(baseUrl).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal));
     expect(chunks.some((c) => c.type === 'failed' && c.kind === 'content-filter' && c.detail === 'content_filter')).toBe(true);
     expect(chunks.some((c) => c.type === 'done')).toBe(false);
   });
 
   test('surfaces insufficient_system_resource as a tagged failure', async () => {
     const baseUrl = serveCapture([], `${finishFrame('insufficient_system_resource')}data: [DONE]\n\n`);
-    const chunks = await drain(chatProvider(baseUrl).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal));
+    const chunks = await drain(chatProvider(baseUrl).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal));
     expect(chunks.some((c) => c.type === 'failed' && c.detail === 'insufficient_system_resource')).toBe(true);
     expect(chunks.some((c) => c.type === 'done')).toBe(false);
   });
@@ -138,7 +138,7 @@ describe('chat backend brainstorm', () => {
     // One complete prompt, then the model hits the token cap mid-set.
     const record = ['scene', 'subject', 'details'].join(`\n${BRAINSTORM_FIELD_SEPARATOR}\n`);
     const out = `${contentFrame(`${record}\n${BRAINSTORM_RECORD_SEPARATOR}\n`)}${finishFrame('length')}data: [DONE]\n\n`;
-    const chunks = await drain(chatProvider(serveCapture([], out)).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal));
+    const chunks = await drain(chatProvider(serveCapture([], out)).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal));
     expect(chunks.some((c) => c.type === 'failed' && c.detail === 'length')).toBe(true);
     expect(chunks.some((c) => c.type === 'done')).toBe(false);
   });
@@ -146,7 +146,7 @@ describe('chat backend brainstorm', () => {
   test('does not salvage a short record from a token-truncated stream', async () => {
     const out = `${contentFrame(`incomplete prose\n${BRAINSTORM_RECORD_SEPARATOR}\n`)}${finishFrame('length')}data: [DONE]\n\n`;
     const chunks = await drain(chatProvider(serveCapture([], out)).brainstormCharacters(
-      { count: 1, modelId: 'gpt-image-2.5-sunburst' },
+      { count: 1, modelId: 'gpt-image-2.6-sunburst' },
       new AbortController().signal,
     ));
 
@@ -157,7 +157,7 @@ describe('chat backend brainstorm', () => {
     // No false positive: the requested count is met, so length is not a truncation.
     const record = ['scene', 'subject', 'details'].join(`\n${BRAINSTORM_FIELD_SEPARATOR}\n`);
     const combined = `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: `${record}\n${BRAINSTORM_RECORD_SEPARATOR}\n` }, finish_reason: 'length' }] })}\n\n`;
-    const chunks = await drain(chatProvider(serveCapture([], `${combined}data: [DONE]\n\n`)).brainstormCharacters({ count: 1, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal));
+    const chunks = await drain(chatProvider(serveCapture([], `${combined}data: [DONE]\n\n`)).brainstormCharacters({ count: 1, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal));
     expect(chunks.filter((c) => c.type === 'prompt').map((c) => c.text)).toEqual([
       `Scene / Image type: scene\nSubject: subject\nDetails: details\n${BRAINSTORM_CONSTRAINTS_GPT}`,
     ]);
@@ -166,7 +166,7 @@ describe('chat backend brainstorm', () => {
   });
 
   test('a terminal stream that produced zero prompts fails instead of done{count:0}', async () => {
-    const chunks = await drain(chatProvider(serveCapture([], `${finishFrame('stop')}data: [DONE]\n\n`)).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.5-sunburst' }, new AbortController().signal));
+    const chunks = await drain(chatProvider(serveCapture([], `${finishFrame('stop')}data: [DONE]\n\n`)).brainstormCharacters({ count: 3, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal));
     expect(chunks.some((c) => c.type === 'failed' && c.detail === 'stream ended without content')).toBe(true);
     expect(chunks.some((c) => c.type === 'done')).toBe(false);
   });

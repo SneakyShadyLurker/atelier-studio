@@ -24,7 +24,7 @@ function seed(batchId = 'b1'): void {
   db.run("INSERT OR IGNORE INTO users (id, created_at) VALUES ('u1', ?)", [Date.now()]);
   db.run(
     `INSERT INTO batches (id, user_id, prompt, model_id, model_label, ratio, created_at, status, pool)
-     VALUES (?, 'u1', 'p', 'gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst', '1:1', ?, 'running', 'shared')`,
+     VALUES (?, 'u1', 'p', 'gpt-image-2.6-sunburst', 'GPT Image 2.6 Sunburst', '1:1', ?, 'running', 'shared')`,
     [batchId, Date.now()],
   );
   db.run(
@@ -37,7 +37,7 @@ function seed(batchId = 'b1'): void {
 const entry: QueueEntry = {
   batchId: 'b1',
   userId: 'u1',
-  modelId: 'gpt-image-2.5-sunburst',
+  modelId: 'gpt-image-2.6-sunburst',
   count: 1,
   queuedAt: Date.now(),
   epoch: 0,
@@ -49,7 +49,7 @@ function ctx(overrides: Partial<DequeueContext> = {}): DequeueContext {
     config: { DATA_DIR: dataDir, LOCAL_MODELS_USERS: new Set(['u1']) } as Config,
     logger: { error: () => undefined, warn: () => undefined, info: () => undefined },
     registry: {
-      findModel: () => ({ model: { id: 'gpt-image-2.5-sunburst', pool: 'shared', maxCountPerBatch: 4 } }),
+      findModel: () => ({ model: { id: 'gpt-image-2.6-sunburst', pool: 'shared', maxCountPerBatch: 4 } }),
       healthSnapshot: () => new Map(),
     },
     ...overrides,
@@ -82,9 +82,9 @@ test('revalidateAtDequeue rejects a model whose host is offline', () => {
   const result = revalidateAtDequeue(
     ctx({
       registry: {
-        findModel: () => ({ model: { id: 'gpt-image-2.5-sunburst', pool: 'shared', maxCountPerBatch: 4 } }),
+        findModel: () => ({ model: { id: 'gpt-image-2.6-sunburst', pool: 'shared', maxCountPerBatch: 4 } }),
         healthSnapshot: () => new Map([
-          ['gpt-image-2.5-sunburst', { ok: false, reason: 'unavailable' as const }],
+          ['gpt-image-2.6-sunburst', { ok: false, reason: 'unavailable' as const }],
         ]),
       },
     }),
@@ -99,8 +99,8 @@ test('revalidateAtDequeue lets a recovered batch through before the first health
   const result = revalidateAtDequeue(
     ctx({
       registry: {
-        findModel: () => ({ model: { id: 'gpt-image-2.5-sunburst', pool: 'shared', maxCountPerBatch: 4 } }),
-        healthSnapshot: () => new Map([['gpt-image-2.5-sunburst', { ok: false }]]),
+        findModel: () => ({ model: { id: 'gpt-image-2.6-sunburst', pool: 'shared', maxCountPerBatch: 4 } }),
+        healthSnapshot: () => new Map([['gpt-image-2.6-sunburst', { ok: false }]]),
       },
     }),
     entry,

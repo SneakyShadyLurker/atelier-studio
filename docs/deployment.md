@@ -456,6 +456,8 @@ and saved text-model picks are dropped. The moved provider reads its key from
 `CLIPROXY_TOKEN` on every request, so leave that set while you use it. Set
 `TEXT_PROVIDER_ADMINS` before the upgrade so someone can open the view.
 
+Schema v59 follows the cloud image model from `gpt-image-2.5-sunburst` to `gpt-image-2.6-sunburst`: it moves the prompt-writer assignment for the retired id to the new one and leaves batch history untouched. Batches made with the retired id stay viewable, but re-rolling them is rejected because that id is no longer registered. Once v59 is recorded, a v58 image refuses the database, so the previous image is not a rollback target.
+
 Follow these steps for a release:
 
 1. **Lock.** Hold one deploy lock per compose directory so a deploy and host maintenance never overlap. `infra/docker/deploy-lock.sh` is a bash 3.2 lock library (BSD and Linux) for this: an owner record in `infra/docker/.deploy.lock`, stale-lock recovery under a kernel flock on `infra/docker/.deploy-reclaim.flock`, and a refusal while a live owner or child holds it. Never delete `.deploy-reclaim.flock`; keep both paths gitignored.

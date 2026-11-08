@@ -11,8 +11,8 @@ const originalFetch = globalThis.fetch;
 
 const models: readonly Model[] = [
   {
-    id: 'gpt-image-2.5-sunburst-cloud',
-    name: 'GPT Image 2.5 Sunburst',
+    id: 'gpt-image-2.6-sunburst-cloud',
+    name: 'GPT Image 2.6 Sunburst',
     backend: 'cloud',
     tag: 'cloud',
     latency: 'fast',
@@ -124,7 +124,7 @@ function composerElement(overrides: Partial<Parameters<typeof Composer>[0]> = {}
       models={models}
       modelById={new Map(models.map((model) => [model.id, model]))}
       prompt="make an image"
-      modelId="gpt-image-2.5-sunburst-cloud"
+      modelId="gpt-image-2.6-sunburst-cloud"
       ratio="1:1"
       count={1}
       onPromptChange={mock()}
@@ -216,8 +216,8 @@ describe('Composer BYOK model gating', () => {
     renderComposer();
     openModelMenu();
 
-    const sunburst = screen.getByRole('option', { name: /GPT Image 2\.5 Sunburst/ });
-    expect(sunburst.textContent).toBe('GPT Image 2.5 Sunburst');
+    const sunburst = screen.getByRole('option', { name: /GPT Image 2\.6 Sunburst/ });
+    expect(sunburst.textContent).toBe('GPT Image 2.6 Sunburst');
     expect(screen.getByRole('option', { name: /ZIB Distilled/ }).textContent).toContain('ComfyUI');
   });
 
@@ -561,7 +561,7 @@ describe('Composer local-pool count lock', () => {
 
   test('a shared-pool model leaves the Count chip enabled and untouched', () => {
     const onCountChange = mock();
-    renderComposer({ modelId: 'gpt-image-2.5-sunburst-cloud', count: 4, onCountChange });
+    renderComposer({ modelId: 'gpt-image-2.6-sunburst-cloud', count: 4, onCountChange });
     const countChip = screen.getByRole('button', { name: 'Count' });
     expect(countChip.hasAttribute('disabled')).toBe(false);
     expect(onCountChange).not.toHaveBeenCalled();
@@ -626,7 +626,7 @@ describe('Composer textarea autosize', () => {
         models={models}
         modelById={new Map(models.map((model) => [model.id, model]))}
         prompt="make a taller image prompt"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={mock()}
@@ -660,7 +660,7 @@ describe('Composer enhance', () => {
         models={models}
         modelById={new Map(models.map((model) => [model.id, model]))}
         prompt="original"
-        modelId="gpt-image-2.5-sunburst-cloud"
+        modelId="gpt-image-2.6-sunburst-cloud"
         ratio="1:1"
         count={1}
         onPromptChange={mock()}

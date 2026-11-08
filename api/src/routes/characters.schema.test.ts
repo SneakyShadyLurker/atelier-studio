@@ -5,7 +5,7 @@ import { BrainstormCharactersRequestSchema } from './characters.schema';
 
 describe('BrainstormCharactersRequestSchema', () => {
   it('accepts a minimal valid request', () => {
-    const r = BrainstormCharactersRequestSchema.safeParse({ count: 12, modelId: 'gpt-image-2.5-sunburst' });
+    const r = BrainstormCharactersRequestSchema.safeParse({ count: 12, modelId: 'gpt-image-2.6-sunburst' });
     expect(r.success).toBe(true);
   });
 

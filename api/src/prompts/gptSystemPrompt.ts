@@ -1,12 +1,12 @@
 /** Current GPT image target. Update this contract and guard together when replacing it. */
 export function isSunburstModel(modelId: string | undefined): boolean {
-  return modelId === 'gpt-image-2.5-sunburst';
+  return modelId === 'gpt-image-2.6-sunburst';
 }
 
-// OpenAI GPT Image 2.5 prompting guide:
+// OpenAI GPT Image 2.6 prompting guide:
 // https://developers.openai.com/api/docs/guides/image-prompting
 // Shared by Sunburst writers; each caller supplies its own output protocol.
-export const SUNBURST_PROMPT_RULES = `Target image model: GPT Image 2.5 Sunburst.
+export const SUNBURST_PROMPT_RULES = `Target image model: GPT Image 2.6 Sunburst.
 
 Write an executable visual brief. Preserve the requested subject, purpose, medium, style, composition and explicit details. Add only details needed to make an underspecified request drawable; do not invent a new concept or embellish an already precise one. Follow applicable safety requirements; never invent sexual content, obscure age or consent, or disguise a prohibited request.
 
@@ -20,7 +20,7 @@ For edits, state the requested change first and constrain its scope. Preserve re
 
 Use only relevant constraints, expressed directly. Resolve an accidental contradiction with the smallest change consistent with the brief; do not erase deliberate contrasts. Keep model, quality, output size and format as application settings, not invented prompt commands. Do not claim an output was generated, checked or guaranteed.`;
 
-export const SUNBURST_ENHANCE_SYSTEM_PROMPT = `You refine image prompts exclusively for GPT Image 2.5 Sunburst.
+export const SUNBURST_ENHANCE_SYSTEM_PROMPT = `You refine image prompts exclusively for GPT Image 2.6 Sunburst.
 
 ${SUNBURST_PROMPT_RULES}
 

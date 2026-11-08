@@ -3,7 +3,7 @@ import type { Ratio } from '@atelier/shared';
 export type CliproxyQuality = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
 export type CliproxyOutputFormat = 'png' | 'jpeg' | 'webp';
 
-export const CLIPROXY_MODEL_ID = 'gpt-image-2.5-sunburst';
+export const CLIPROXY_MODEL_ID = 'gpt-image-2.6-sunburst';
 export const CLIPROXY_GENERATIONS_PATH = '/v1/images/generations';
 export const CLIPROXY_EDITS_PATH = '/v1/images/edits';
 export const CLIPROXY_AUTHORIZATION_HEADER = 'Authorization';

@@ -24,7 +24,7 @@ function preparedFixture(): PreparedBatch & { userId: string; pool: Pool; count:
   db.run("INSERT OR IGNORE INTO users (id, created_at) VALUES ('u1', ?)", [Date.now()]);
   db.run(
     `INSERT INTO batches (id, user_id, prompt, model_id, model_label, ratio, created_at, status, pool)
-     VALUES ('b1', 'u1', 'p', 'gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst', '1:1', ?, 'running', 'shared')`,
+     VALUES ('b1', 'u1', 'p', 'gpt-image-2.6-sunburst', 'GPT Image 2.6 Sunburst', '1:1', ?, 'running', 'shared')`,
     [Date.now()],
   );
   db.run(
@@ -37,8 +37,8 @@ function preparedFixture(): PreparedBatch & { userId: string; pool: Pool; count:
       user_id: 'u1',
       prompt: 'p',
       ratio: '1:1',
-      model_id: 'gpt-image-2.5-sunburst',
-      model_label: 'GPT Image 2.5 Sunburst',
+      model_id: 'gpt-image-2.6-sunburst',
+      model_label: 'GPT Image 2.6 Sunburst',
       created_at: Date.now(),
       archived_at: null,
       collection_id: null,
@@ -78,7 +78,7 @@ function preparedFixture(): PreparedBatch & { userId: string; pool: Pool; count:
 
 function ctx(overrides: Partial<StartDetachedContext> = {}): StartDetachedContext {
   const provider: Provider = {
-    id: 'gpt-image-2.5-sunburst',
+    id: 'gpt-image-2.6-sunburst',
     backend: 'cloud',
     async *generate() {
       await Promise.resolve();
@@ -87,8 +87,8 @@ function ctx(overrides: Partial<StartDetachedContext> = {}): StartDetachedContex
   };
   const registryEntry: RegistryEntry = {
     model: {
-      id: 'gpt-image-2.5-sunburst',
-      name: 'GPT Image 2.5 Sunburst',
+      id: 'gpt-image-2.6-sunburst',
+      name: 'GPT Image 2.6 Sunburst',
       backend: 'cloud',
       tag: 'test',
       latency: 'medium',
@@ -107,7 +107,7 @@ function ctx(overrides: Partial<StartDetachedContext> = {}): StartDetachedContex
     config: {} as Config,
     text: testTextServices(db),
     userId: 'u1',
-    request: { prompt: 'p', modelId: 'gpt-image-2.5-sunburst', ratio: '1:1', count: 1 },
+    request: { prompt: 'p', modelId: 'gpt-image-2.6-sunburst', ratio: '1:1', count: 1 },
     registryEntry,
     boundProvider: provider,
     disconnectSignal: new AbortController().signal,

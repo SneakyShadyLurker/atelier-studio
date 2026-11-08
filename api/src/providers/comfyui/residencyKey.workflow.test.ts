@@ -63,7 +63,7 @@ describe('residency keys', () => {
     for (const model of LOCAL_MODELS) {
       if (!model.id.startsWith('minimax-h3-')) expect(localResidencyKey(model.id)).toBe(model.id);
     }
-    expect(localResidencyKey('gpt-image-2.5-sunburst')).toBe('gpt-image-2.5-sunburst');
+    expect(localResidencyKey('gpt-image-2.6-sunburst')).toBe('gpt-image-2.6-sunburst');
   });
 
   test('rows sharing a residency key load identical weight nodes and weight files', () => {

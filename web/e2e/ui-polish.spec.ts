@@ -3225,6 +3225,10 @@ for (const layout of releaseLayouts) {
           } else if (leave === 'Escape') {
             await page.keyboard.press('Escape');
             await expect(create).toBeFocused();
+            await expect(create).toHaveAttribute('aria-disabled', 'true');
+            await expect(create).toHaveAttribute('aria-busy', 'true');
+            await page.keyboard.press('Enter');
+            await expect(input).toHaveCount(0);
           } else {
             if (layout.phone) {
               const backdrop = page.getByRole('button', { name: 'Close move popover' });
@@ -3241,6 +3245,8 @@ for (const layout of releaseLayouts) {
           await expect(input).toHaveCount(0);
           expect(await focused.evaluate((element) => element === document.activeElement && element?.isConnected)).toBe(true);
           if (leave === 'Escape') {
+            await expect(create).toHaveAttribute('aria-disabled', 'false');
+            await expect(create).toHaveAttribute('aria-busy', 'false');
             await page.keyboard.press('Escape');
             await expect(panel).toHaveCount(0);
           } else if (leave !== 'dismiss') await expect(panel).toBeVisible();

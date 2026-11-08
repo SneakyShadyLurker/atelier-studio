@@ -87,6 +87,13 @@ describe('MovePopover pending ownership', () => {
         } else {
           await waitFor(() => { expect(screen.queryByRole('textbox') === null).toBe(true); });
           await waitFor(() => { expect(document.activeElement === (leave === 'Escape' ? screen.getByRole('button', { name: 'New collection' }) : other)).toBe(true); });
+          if (leave === 'Escape') {
+            const create = screen.getByRole('button', { name: 'New collection' });
+            expect(create.getAttribute('aria-disabled')).toBe('true');
+            expect(create.getAttribute('aria-busy')).toBe('true');
+            fireEvent.click(create);
+            expect(screen.queryByRole('textbox')).toBeNull();
+          }
         }
         const focus = document.activeElement;
         await act(async () => { pending.release(success); await Promise.resolve(); });
@@ -98,12 +105,29 @@ describe('MovePopover pending ownership', () => {
         expect(document.activeElement === focus).toBe(true);
         expect(pending.onClose).toHaveBeenCalledTimes(leave === 'close' ? 1 : 0);
         if (leave === 'Escape') {
+          await waitFor(() => { expect(screen.getByRole('button', { name: 'New collection' }).getAttribute('aria-disabled')).toBe('false'); });
           fireEvent.keyDown(screen.getByRole('button', { name: 'New collection' }), { key: 'Escape' });
           await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
           expect(screen.queryByRole('dialog') === null).toBe(true);
         }
       });
     }
+
+    test(`${stage} draft survives a cancelled pointer gesture before and after failure`, async () => {
+      const pending = await pendingCreate(stage);
+      const other = screen.getByRole('button', { name: 'Other collection' });
+      for (const settled of [false, true]) {
+        if (settled) {
+          await act(async () => { pending.release(); await Promise.resolve(); });
+          await waitFor(() => { expect(pending.input.readOnly).toBe(false); });
+        }
+        fireEvent.pointerDown(other, { pointerType: 'touch', pointerId: 1 });
+        fireEvent.pointerCancel(other, { pointerType: 'touch', pointerId: 1 });
+        expect(pending.input.isConnected).toBe(true);
+        expect(pending.input.value).toBe('Draft');
+        expect(pending.onClose).not.toHaveBeenCalled();
+      }
+    });
 
     test.each(['button', 'input'] as const)(`${stage} failure preserves a pending submission when %s loses focus to body`, async (origin) => {
       const pending = await pendingCreate(stage, origin === 'button');

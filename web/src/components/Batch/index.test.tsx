@@ -242,7 +242,7 @@ describe('BatchView save-to-templates button', () => {
     expect(document.activeElement === (moveOn ? copy : move)).toBe(true);
   });
 
-  test.each(['trigger', 'menu', 'elsewhere'] as const)('canonical availability removal preserves focus owned by %s', async (owner) => {
+  test.each(['trigger', 'menu', 'elsewhere', 'body'] as const)('canonical availability removal preserves focus owned by %s', async (owner) => {
     const props = { batch, modelById: new Map(fixtureModels.map((model) => [model.id, model])), activeView: APP_VIEW_UNSORTED,
       promptsEnabled: false, onBatchAction: mock(), onTileAction: mock(), onOpenTile: mock(), q: '' };
     const { rerender } = render(<BatchView {...props} />, { wrapper: wrap() });
@@ -250,12 +250,14 @@ describe('BatchView save-to-templates button', () => {
     if (owner === 'menu') {
       fireEvent.click(more);
       act(() => { screen.getByRole('menuitem', { name: 'Pin batch' }).focus(); });
-    } else act(() => { (owner === 'trigger' ? more : screen.getByRole('button', { name: 'Copy prompt' })).focus(); });
+    } else act(() => { (owner === 'trigger' || owner === 'body' ? more : screen.getByRole('button', { name: 'Copy prompt' })).focus(); });
+    if (owner === 'body') act(() => { more.blur(); });
     rerender(<BatchView {...props} batch={{ ...batch, pinned: true }} />);
+    await act(async () => { await Promise.resolve(); });
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
       expect(screen.queryByRole('menu')).toBeNull();
-      expect(document.activeElement === screen.getByRole('button', { name: owner === 'elsewhere' ? 'Copy prompt' : 'Move to collection' })).toBe(true);
+      expect(document.activeElement === (owner === 'body' ? document.body : screen.getByRole('button', { name: owner === 'elsewhere' ? 'Copy prompt' : 'Move to collection' }))).toBe(true);
     });
   });
 

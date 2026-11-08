@@ -226,7 +226,7 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
       runWhenReachable(() => {
         const current = document.activeElement;
         if (owner.isConnected || (current !== document.body && current?.isConnected)) return;
-        if (target && !target.disabled) target.focus();
+        if (target && !target.disabled) target.focus({ preventScroll: true });
       }, target);
     };
   }, []);
@@ -335,6 +335,11 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
         // Portalled menu focus bubbles through its owning header in React.
         moreFocusRef.current = target === moreBtnRef.current
           || target.closest('[role="menu"][aria-label="Batch actions"]') ? target : null;
+      }} onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof HTMLElement && (next === moreBtnRef.current
+          || next.closest('[role="menu"][aria-label="Batch actions"]'))) return;
+        moreFocusRef.current = null;
       }}>
         <BatchPrompt prompt={batch.prompt} />
         <div className={styles.headerControls}>

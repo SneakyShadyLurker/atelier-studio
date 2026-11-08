@@ -303,7 +303,7 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
           cancelInline(context, false);
         }
       }}
-      onPointerDownCapture={(event) => {
+      onClickCapture={(event) => {
         const context = liveInlineContextRef.current;
         if (context?.kind === 'creating' && !createRowRef.current?.contains(event.target as Node)) {
           cancelInline(context, false);
@@ -441,6 +441,8 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
           className={`${styles.row} ${styles.newButton}`}
           type="button"
           tabIndex={0}
+          aria-disabled={pendingCreateName !== null}
+          aria-busy={pendingCreateName !== null}
           onClick={(event) => {
             if (closing || createInFlightRef.current) return;
             event.currentTarget.focus({ preventScroll: true });

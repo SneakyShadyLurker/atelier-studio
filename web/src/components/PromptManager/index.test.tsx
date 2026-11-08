@@ -119,6 +119,110 @@ afterEach(() => {
 const emptyLibrary: PromptLibraryResponse = { templates: [], variableLists: [], dimensions: [] };
 
 describe('PromptManager', () => {
+  describe('resource reorder preserves editor', () => {
+    const firstList = library.variableLists[0];
+    const firstOption = firstList?.options[0];
+    if (!firstList || !firstOption) throw new Error('Missing reorder list fixture');
+    const seed: PromptLibraryResponse = {
+      ...library,
+      templates: [0, 1, 2].map((index) => ({ ...template, id: `template-${index}`, name: `Study ${index}`, body: `Body ${index}`, sortOrder: index })),
+      variableLists: [0, 1, 2].map((index) => ({
+        ...firstList, id: `list-${index}`, name: `axis-${index}`, sortOrder: index,
+        options: [{ ...firstOption, id: `option-${index}`, listId: `list-${index}`, value: `Value ${index}` }],
+      })),
+    };
+    // No property-testing library is installed. Exercise every non-identity
+    // permutation through the real rail's keyboard reorder callbacks instead.
+    const permutations = [[0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+
+    for (const kind of ['templates', 'variableLists'] as const) {
+      for (const selection of ['implicit', 'explicit', ...(kind === 'templates' ? ['new'] as const : [])] as const) {
+        for (const [permutation, rollback] of [...permutations.map((order) => [order, false] as const), [[1, 2, 0], true] as const]) {
+          test(`${kind}: ${selection} selection survives ${permutation.join('')} ${rollback ? 'rollback' : 'success'}`, async () => {
+            const { client } = renderManager(seed);
+            const resourceId = (index: number) => {
+              const item = seed[kind][index];
+              if (!item) throw new Error('Missing reorder resource');
+              return item.id;
+            };
+            let current = seed;
+            const sent: string[][] = [];
+            let settle: (ok: boolean) => void = () => { throw new Error('No reorder pending'); };
+            globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+              const url = input instanceof Request ? input.url : String(input);
+              if (url.endsWith(`/prompts/${kind === 'templates' ? 'templates' : 'lists'}/order`) && init?.method === 'PUT' && typeof init.body === 'string') {
+                const { orderedIds } = JSON.parse(init.body) as { orderedIds: string[] };
+                sent.push(orderedIds);
+                return new Promise<Response>((resolve) => {
+                  settle = (ok) => {
+                    if (!ok) { resolve(Response.json({ error: 'Reorder refused' }, { status: 500 })); return; }
+                    current = { ...current, [kind]: orderedIds.map((id) => {
+                      const item = current[kind].find((item) => item.id === id);
+                      if (!item) throw new Error('Unknown reordered resource');
+                      return item;
+                    }) };
+                    resolve(Response.json(current));
+                  };
+                });
+              }
+              return Response.json(current);
+            }) as unknown as typeof fetch;
+            if (kind === 'variableLists') fireEvent.click(await screen.findByRole('tab', { name: 'Variable lists' }));
+            const rail = await screen.findByRole('complementary', { name: kind === 'templates' ? 'Templates' : 'Lists' });
+            const row = (index: number) => within(rail).getByRole('button', { name: kind === 'templates' ? `Study ${index}` : `Edit list axis-${index}, 1 option` });
+            const selected = selection === 'explicit' ? 2 : 0;
+            if (selection === 'explicit') fireEvent.click(row(selected));
+            if (selection === 'new') {
+              fireEvent.click(within(rail).getByRole('button', { name: /New/ }));
+              const inlineName = within(rail).getByRole('textbox', { name: 'Template name' });
+              fireEvent.change(inlineName, { target: { value: 'Uncreated study' } });
+              fireEvent.keyDown(inlineName, { key: 'Enter' });
+            }
+            const body = () => screen.getByRole<HTMLInputElement | HTMLTextAreaElement>('textbox', { name: kind === 'templates' ? 'Body' : /^Option 1:/ });
+            fireEvent.change(body(), { target: { value: 'Unsaved resource draft' } });
+            const assertEditor = () => {
+              expect(body().value).toBe('Unsaved resource draft');
+              expect(screen.getByRole<HTMLInputElement>('textbox', { name: kind === 'templates' ? 'Template name' : 'Variable list name' }).value)
+                .toBe(selection === 'new' ? 'Uncreated study' : kind === 'templates' ? `Study ${selected}` : `axis-${selected}`);
+              for (const index of [0, 1, 2]) expect(row(index).getAttribute('aria-pressed')).toBe(String(selection !== 'new' && index === selected));
+            };
+            let order = [0, 1, 2];
+            for (let dest = 0; dest < permutation.length; dest++) {
+              const id = permutation[dest];
+              if (id === undefined) throw new Error('Missing permutation entry');
+              while (order.indexOf(id) > dest) {
+                const previous = order.slice();
+                const from = order.indexOf(id);
+                const next = order.slice();
+                next.splice(from, 1); next.splice(from - 1, 0, id);
+                const count = sent.length;
+                fireEvent.keyDown(row(id), { key: 'ArrowUp', altKey: true });
+                await waitFor(() => { expect(sent).toHaveLength(count + 1); });
+                expect(sent[count]).toEqual(next.map(resourceId));
+                await waitFor(() => { expect(client.getQueryData<PromptLibraryResponse>(promptKeys.library())?.[kind].map((item) => item.id)).toEqual(sent[count]); });
+                try { assertEditor(); } finally {
+                  settle(!rollback);
+                  await waitFor(() => { expect(client.isMutating()).toBe(0); });
+                }
+                order = rollback ? previous : next;
+                await waitFor(() => { expect(client.getQueryData<PromptLibraryResponse>(promptKeys.library())?.[kind].map((item) => item.id)).toEqual(order.map(resourceId)); });
+                assertEditor();
+                if (rollback) break;
+              }
+              if (rollback) break;
+            }
+            expect(sent.length).toBeGreaterThan(0);
+            const other = selected === 0 ? 1 : 0;
+            fireEvent.click(row(other));
+            expect(body().value).toBe(kind === 'templates' ? `Body ${other}` : `Value ${other}`);
+            fireEvent.click(row(selected));
+            expect(body().value).toBe(selection === 'new' ? 'Body 0' : 'Unsaved resource draft');
+          });
+        }
+      }
+    }
+  });
+
   test('keeps template edits across resource switches and leaving the library', async () => {
     const second = { ...template, id: 'second-template', name: 'Second study', body: 'baseline' };
     const { rerender, onBack } = renderManager({ ...library, templates: [template, second] });

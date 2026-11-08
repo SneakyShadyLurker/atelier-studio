@@ -4,11 +4,127 @@ import { TEXT_TASKS } from '@atelier/shared';
 import type * as ReactApi from 'react';
 import type * as ReactDomApi from 'react-dom/client';
 import type * as StateViewApi from '../src/components/StateView';
-import { batches as viewerFixtureBatches } from './studio/fixture';
+import { batches as viewerFixtureBatches, promptLibrary as reorderLibrary } from './studio/fixture';
 
 const VIEWER_FRAME = 'dialog > div[data-media][aria-busy]';
 const VIEWER_DOCK = 'dialog > div[data-media]:not([aria-busy])';
 const VIEWER_BODY_MODULE = /\/src\/components\/Lightbox\/Content\.tsx(?:\?.*)?$/;
+
+test.describe('resource reorder preserves editor:', () => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    for (const input of ['pointer', 'keyboard'] as const) {
+      test(`${colorScheme} desktop ${input}`, async ({ browser }, testInfo) => {
+        const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme });
+        try {
+          for (const kind of ['templates', 'variableLists'] as const) {
+            const firstTemplate = reorderLibrary.templates[0];
+            const firstList = reorderLibrary.variableLists[0];
+            const firstOption = firstList?.options[0];
+            if (!firstTemplate || !firstList || !firstOption) throw new Error('Missing reorder fixtures');
+            const seed: PromptLibraryResponse = {
+              ...reorderLibrary,
+              templates: [0, 1, 2].map((index) => ({ ...firstTemplate, id: `reorder-template-${index}`, name: `Reorder study ${index}`, body: `Saved body ${index}`, sortOrder: index })),
+              variableLists: [0, 1, 2].map((index) => ({
+                ...firstList, id: `reorder-list-${index}`, name: `reorder-axis-${index}`, sortOrder: index,
+                options: [{ ...firstOption, id: `reorder-option-${index}`, listId: `reorder-list-${index}`, value: `Saved value ${index}` }],
+              })),
+            };
+            const displayed = seed[kind][0];
+            if (!displayed) throw new Error('Missing displayed resource');
+            const resourceId = (index: number) => {
+              const item = seed[kind][index];
+              if (!item) throw new Error('Missing reorder resource');
+              return item.id;
+            };
+            const page = await context.newPage();
+            let current = seed;
+            const orders: string[][] = [];
+            await page.route('**/api/prompts/*/order', async (route) => {
+              const { orderedIds } = route.request().postDataJSON() as { orderedIds: string[] };
+              orders.push(orderedIds);
+              current = { ...current, [kind]: orderedIds.map((id) => {
+                const item = current[kind].find((item) => item.id === id);
+                if (!item) throw new Error('Unknown reordered resource');
+                return item;
+              }) };
+              await route.fulfill({ json: current });
+            });
+            // Keep the existing offline fixture for every other request. Only
+            // resource reads and reorder writes use this bounded test fixture.
+            await page.addInitScript((library: PromptLibraryResponse) => {
+              const nativeFetch = window.fetch.bind(window);
+              let inner = nativeFetch;
+              const fixture = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+                const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+                if (url.pathname === '/api/prompts') return Response.json(library);
+                if (/^\/api\/prompts\/(templates|lists)\/order$/.test(url.pathname)) {
+                  const response = await nativeFetch(input, init);
+                  if (response.ok) library = await response.clone().json() as PromptLibraryResponse;
+                  return response;
+                }
+                return inner(input, init);
+              };
+              Object.defineProperty(window, 'fetch', { configurable: true, get: () => fixture, set: (value: typeof fetch) => { inner = value; } });
+            }, seed);
+            await page.goto('/e2e/studio/index.html?view=prompts');
+            await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+            if (kind === 'variableLists') await page.getByRole('tab', { name: 'Variable lists', exact: true }).click();
+            const rail = page.getByRole('complementary', { name: kind === 'templates' ? 'Templates' : 'Lists', exact: true });
+            const rows = rail.locator('button[aria-pressed]');
+            const row = (index: number) => rail.getByRole('button', { name: kind === 'templates' ? `Reorder study ${index}` : `Edit list reorder-axis-${index}, 1 option`, exact: true });
+            const editor = page.getByRole('form', { name: kind === 'templates' ? 'Edit template Reorder study 0' : 'Edit variable list reorder-axis-0', exact: true });
+            const field = editor.getByRole('textbox', { name: kind === 'templates' ? 'Body' : /^Option 1:/ });
+            const draft = `Unsaved ${kind} draft`;
+            await field.fill(draft);
+            const originalField = await field.elementHandle();
+            const assertEditor = async () => {
+              await expect(editor).toBeVisible();
+              await expect(editor.getByRole('textbox', { name: kind === 'templates' ? 'Template name' : 'Variable list name', exact: true }))
+                .toHaveValue(displayed.name);
+              await expect(field).toHaveValue(draft);
+              await expect(row(0)).toHaveAttribute('aria-pressed', 'true');
+              expect(await field.evaluate((element, original) => element === original, originalField)).toBe(true);
+            };
+            const names = (order: number[]) => order.map((index) => kind === 'templates' ? `Reorder study ${index}` : `reorder-axis-${index}1`);
+            await expect(rows).toHaveText(names([0, 1, 2]));
+            if (input === 'pointer') {
+              const start = await row(0).boundingBox();
+              const end = await row(2).boundingBox();
+              if (!start || !end) throw new Error('Missing native drag rows');
+              const x = start.x + 12;
+              await page.mouse.move(x, start.y + start.height / 2);
+              await page.mouse.down();
+              await page.mouse.move(x, end.y + end.height - 2, { steps: 12 });
+              await expect(rail.locator('[data-drag-active]')).toHaveAttribute('data-drag-active', 'true');
+              await page.mouse.up();
+              await expect(rows).toHaveText(names([1, 2, 0]));
+              await expect.poll(() => orders).toEqual([[1, 2, 0].map(resourceId)]);
+            } else {
+              await row(0).press('Alt+ArrowDown');
+              await expect(rows).toHaveText(names([1, 0, 2]));
+              await expect.poll(() => orders).toEqual([[1, 0, 2].map(resourceId)]);
+            }
+            await assertEditor();
+            // Reordering another focused row must not select it either.
+            await row(1).press('Alt+ArrowDown');
+            const finalOrder = input === 'pointer' ? [2, 1, 0] : [0, 1, 2];
+            await expect(rows).toHaveText(names(finalOrder));
+            await expect.poll(() => orders.length).toBe(2);
+            expect(orders[1]).toEqual(finalOrder.map(resourceId));
+            await assertEditor();
+            await row(2).click();
+            await expect(page.getByRole('textbox', { name: kind === 'templates' ? 'Body' : /^Option 1:/ }))
+              .toHaveValue(kind === 'templates' ? 'Saved body 2' : 'Saved value 2');
+            await row(0).click();
+            await expect(field).toHaveValue(draft);
+            await testInfo.attach(`${kind}-${input}-identity.json`, { body: JSON.stringify({ colorScheme, input, displayedId: displayed.id, displayedName: displayed.name, draft, orders, finalOrder, sameFieldBeforeExplicitClick: true, explicitClickChangedEditor: true }), contentType: 'application/json' });
+            await page.close();
+          }
+        } finally { await context.close(); }
+      });
+    }
+  }
+});
 
 function viewerHold() {
   let release!: () => void;

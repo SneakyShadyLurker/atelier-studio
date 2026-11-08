@@ -291,7 +291,10 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
 
   const templateReorder = useVerticalDragReorder({
     ids: templateIds,
-    onReorder: (orderedIds) => { reorderTemplates.mutate({ orderedIds }); },
+    onReorder: (orderedIds) => {
+      setSelectedTemplateId(selectedTemplate?.id ?? null);
+      reorderTemplates.mutate({ orderedIds });
+    },
     getRowElement: (id) => templateLiRefs.current.get(id) ?? null,
     thresholdPx: 4,
     dropIndicator: true,
@@ -301,7 +304,10 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
 
   const listReorder = useVerticalDragReorder({
     ids: listIds,
-    onReorder: (orderedIds) => { reorderLists.mutate({ orderedIds }); },
+    onReorder: (orderedIds) => {
+      setSelectedListId(selectedList?.id ?? null);
+      reorderLists.mutate({ orderedIds });
+    },
     getRowElement: (id) => listLiRefs.current.get(id) ?? null,
     thresholdPx: 4,
     dropIndicator: true,

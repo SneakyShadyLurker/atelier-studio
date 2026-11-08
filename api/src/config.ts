@@ -231,7 +231,13 @@ const ConfigSchema = z.object({
   // global slots; infer/rescue use the full maxTotal ceiling.
   MAX_CONCURRENT_LLM_ENHANCE_GLOBAL_CAP: numericString(18).pipe(z.number().int().min(1).max(64)),
   MAX_CONCURRENT_LLM_DRAFT_GLOBAL_CAP: numericString(8).pipe(z.number().int().min(1).max(64)),
-  MAX_QUEUED_BATCHES_PER_USER: numericString(20),
+  // Per-user batches waiting in the server queue (durable rows that keep running
+  // after the tab closes); past it /api/generate answers QUEUE_FULL and the
+  // browser's roll queue holds the overflow. Bounds one user's share of the
+  // single local GPU, committed cloud spend, and the per-batch event streams a
+  // tab keeps open (an HTTP/2 connection allows ~100), so keep it well below
+  // that.
+  MAX_QUEUED_BATCHES_PER_USER: numericString(60),
   // Background health-probe cadence for `pool: 'local'` providers (ComfyUI).
   // 15s = fast enough that an outage flips the chip to "Offline" before a
   // typical user composes their next prompt, slow enough that a healthy host

@@ -35,7 +35,7 @@ describe('loadConfig', () => {
     expect(cfg.MAX_SEQUENCE_SEGMENTS).toBe(12);
     expect(cfg.SEQUENCE_STITCH_TIMEOUT_MS).toBe(120_000);
     expect(cfg.SEQUENCE_MASTER_MAX_BYTES).toBe(1_073_741_824);
-    expect(cfg.MAX_QUEUED_BATCHES_PER_USER).toBe(20);
+    expect(cfg.MAX_QUEUED_BATCHES_PER_USER).toBe(60);
     expect(cfg.LOG_LEVEL).toBe('info');
     expect(Object.isFrozen(cfg)).toBe(true);
   });

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { emitHistoryInvalidate, onHistoryInvalidate, resetBroadcastForTests } from '../src/hooks/broadcastHistory';
+import { QueryClient } from '@tanstack/react-query';
+import { createHistoryBroadcastMutationCache, emitHistoryInvalidate, onHistoryInvalidate, resetBroadcastForTests } from '../src/hooks/broadcastHistory';
+import { HISTORY_WRITE_MUTATION_KEY } from '../src/hooks/historyWrites';
 
 const originalBroadcastChannel = window.BroadcastChannel;
 
@@ -86,5 +88,29 @@ describe('broadcastHistory', () => {
 
     expect(received).toEqual([]);
     unsubscribe();
+  });
+
+  test('every settled history write tells sibling tabs, other mutations stay local', async () => {
+    setBroadcastChannel(MockChannel as never);
+    const client = new QueryClient({ mutationCache: createHistoryBroadcastMutationCache() });
+    const run = (mutationKey: readonly unknown[], variables: unknown, fail = false) => client.getMutationCache()
+      .build(client, { mutationKey, mutationFn: () => (fail ? Promise.reject(new Error('nope')) : Promise.resolve(null)) })
+      .execute(variables)
+      .catch(() => undefined);
+
+    await run(['generate'], { batchId: 'b0' });
+    expect(MockChannel.messages).toEqual([]);
+    await run(HISTORY_WRITE_MUTATION_KEY, { batchId: 'b1' });
+    // A failed write can still have changed server state (a cancel that lost
+    // the race), so siblings re-read on failure too.
+    await run(HISTORY_WRITE_MUTATION_KEY, { batchId: 'b2' }, true);
+    // Writes without one batch still carry a string id: older bundles in other
+    // tabs drop an invalidate whose batchId is not a string.
+    await run(HISTORY_WRITE_MUTATION_KEY, { tileIds: ['t1'] });
+    expect(MockChannel.messages).toEqual([
+      { type: 'invalidate', batchId: 'b1' },
+      { type: 'invalidate', batchId: 'b2' },
+      { type: 'invalidate', batchId: '' },
+    ]);
   });
 });

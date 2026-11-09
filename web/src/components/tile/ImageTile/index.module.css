@@ -206,6 +206,20 @@
     flex-basis: 100%;
   }
 
+  /* No hover state on touch: WebKit keeps :hover on a tapped tile until the
+     next tap elsewhere, which would hold the lift, shadow and full scrim
+     after the Lightbox closes. The press below is the touch acknowledgement;
+     real focus still raises the scrim. */
+  .tile:hover {
+    border-color: var(--line);
+    box-shadow: none;
+    transform: none;
+  }
+
+  .tile:hover:not(:focus-within) .overlay {
+    opacity: 0.7;
+  }
+
   /* The shell's resting transform transition eases the release. */
   .tile:active {
     transform: scale(var(--m-press-row));

@@ -1,14 +1,20 @@
-// Cross-tab history channel. When Tab A cancels a generation
-// (useCancel.onMutate), it posts here; every other tab of the same browser
-// profile receives the message and invalidates its history queries. Cancel
-// messages also let the tab that owns the SSE stream abort its local
-// controller. Same-origin same-profile only; cross-device propagation is out
-// of scope for v1.
+// Cross-tab history channel. Every settled history write
+// (HISTORY_WRITE_MUTATION_KEY, through the app's MutationCache), each accepted
+// generation and a cancel's early signal post an invalidate here; every other
+// tab of the same browser profile receives it and refetches its history, so
+// sibling feeds converge without waiting for window focus. Cancel messages
+// also let the tab that owns the SSE stream abort its local controller.
+// Same-origin same-profile only; cross-device propagation is out of scope.
+import { matchMutation, MutationCache } from '@tanstack/react-query';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 
 export const MY_TAB_ID = crypto.randomUUID();
 
 interface InvalidateMessage {
   readonly type: 'invalidate';
+  /** Informational: receivers refetch every history scope. Always a string,
+      because bundles before the MutationCache broadcast drop any invalidate
+      without one, and tabs of both bundles share the channel during a deploy. */
   readonly batchId: string;
 }
 
@@ -56,6 +62,21 @@ function getChannel(): BroadcastChannelLike | null {
 export function emitHistoryInvalidate(batchId: string): void {
   const message: InvalidateMessage = { type: 'invalidate', batchId };
   getChannel()?.postMessage(message);
+}
+
+function batchIdOf(variables: unknown): string {
+  return typeof variables === 'object' && variables !== null && 'batchId' in variables && typeof variables.batchId === 'string'
+    ? variables.batchId
+    : '';
+}
+
+/** The app's MutationCache: one owner that tells sibling tabs about every settled history write. */
+export function createHistoryBroadcastMutationCache(): MutationCache {
+  return new MutationCache({
+    onSettled: (_data, _error, variables, _onMutateResult, mutation) => {
+      if (matchMutation({ mutationKey: HISTORY_WRITE_MUTATION_KEY }, mutation)) emitHistoryInvalidate(batchIdOf(variables));
+    },
+  });
 }
 
 export function emitHistoryCancel(batchId: string, originTabId: string = MY_TAB_ID): void {

@@ -80,10 +80,10 @@ export function useCancel(scope: Partial<ActiveScope> = {}): {
     onError: () => {
       addToast("Couldn't cancel — the generation may still finish.", 'error');
     },
-    onSettled: async (_data, _error, input) => {
-      // The early signal may have made siblings read before DELETE committed.
-      // Notify them again even on failure, when the generation may survive.
-      emitHistoryInvalidate(input.batchId);
+    // The early signal may have made siblings read before DELETE committed;
+    // the app MutationCache notifies them again once this write settles, even
+    // on failure, when the generation may survive.
+    onSettled: async () => {
       await invalidateLibrary(queryClient);
       await queryClient.invalidateQueries({ queryKey: historyKeys.all() });
     },

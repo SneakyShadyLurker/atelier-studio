@@ -89,6 +89,10 @@ archived results, or delete them permanently. Archived work is retained for
 30 days before expiry; permanent deletion and **Empty archive** cannot be
 undone. Download anything you want to keep before permanently deleting it.
 
+Atelier tabs open in the same browser stay in step: a batch you generate,
+archive, move, pin or cancel in one tab shows up in the others without a
+reload. Other browsers and devices catch up when you return to them.
+
 Your history lives on the server. Changing browser, or clearing browser storage,
 does not delete it. Signing in under a different username gives you a different
 history; the server does not merge usernames automatically.

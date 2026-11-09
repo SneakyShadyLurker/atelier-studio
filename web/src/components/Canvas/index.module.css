@@ -5,6 +5,17 @@
   min-height: 0;
 }
 
+/* The scroller is focusable (a keyboard user scrolls the region), but its
+   mask clips its own outline. Draw the ring on the unmasked shell instead. */
+.shell:has(> .canvas:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.canvas:focus-visible {
+  outline: none;
+}
+
 /* The scope title (ManagedViewHeader) owns the hamburger clearance when the
    sidebar is collapsed and on phones, so the feed reserves no band of its own. */
 .head {

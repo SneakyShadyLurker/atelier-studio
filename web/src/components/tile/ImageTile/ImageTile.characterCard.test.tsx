@@ -81,10 +81,11 @@ describe('ImageTile Character card action', () => {
     expect(onCreateCard).toHaveBeenCalledTimes(1);
   });
 
-  test('a remount while creating shows the spinner on a disabled button', () => {
+  test('a remount while creating shows the spinner on a busy (aria-disabled, focusable) button', () => {
     render(tileElement({ canCreateCard: true, creatingCard: true, onCreateCard: () => Promise.resolve(true) }));
     const button = screen.getByRole<HTMLButtonElement>('button', { name: cardButtonName });
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
     expect(button.getAttribute('aria-busy')).toBe('true');
     expect(button.getAttribute('data-tip')).toBe('Writing card…');
     expect(button.querySelector('svg')).toBeNull();

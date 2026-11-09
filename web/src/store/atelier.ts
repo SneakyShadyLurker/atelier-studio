@@ -567,7 +567,7 @@ const createComposerSlice: StateCreator<AtelierState, [], [], ComposerSlice> = (
     let removed: RefImageDraft | null = null;
     set((state) => {
       removed = state.draft.refImages.find((ref) => ref.clientId === clientId) ?? null;
-      if (!removed) return {};
+      if (!removed) return state;
       revokePreviewUrl(removed);
       return {
         draft: {
@@ -597,7 +597,7 @@ const createComposerSlice: StateCreator<AtelierState, [], [], ComposerSlice> = (
     set((state) => {
       const refs = [...state.draft.refImages];
       const index = refs.findIndex((ref) => ref.clientId === clientId);
-      if (index === -1) return {};
+      if (index === -1) return state;
       const current = refs[index];
       if (current) revokePreviewUrl(current);
       refs.splice(index, 1, ...restored);
@@ -606,7 +606,7 @@ const createComposerSlice: StateCreator<AtelierState, [], [], ComposerSlice> = (
   },
   clearRefImages: () => {
     set((state) => {
-      if (state.draft.refImages.length === 0) return {};
+      if (state.draft.refImages.length === 0) return state;
       for (const ref of state.draft.refImages) revokePreviewUrl(ref);
       return { draft: { ...state.draft, refImages: [] } };
     });
@@ -636,7 +636,7 @@ const createComposerSlice: StateCreator<AtelierState, [], [], ComposerSlice> = (
     set((state) => {
       const next = [...state.draft.rollQueue];
       const [moved] = next.splice(fromIdx, 1);
-      if (!moved) return {};
+      if (!moved) return state;
       next.splice(toIdx, 0, moved);
       return { draft: { ...state.draft, rollQueue: next } };
     });
@@ -785,7 +785,7 @@ const createPromptLibraryUiSlice: StateCreator<AtelierState, [], [], PromptLibra
   },
   clearPickerPin: (listId) => {
     set((state) => {
-      if (pinAt(state.promptPickerDraft.pins, listId) === undefined) return {};
+      if (pinAt(state.promptPickerDraft.pins, listId) === undefined) return state;
       return { promptPickerDraft: { ...state.promptPickerDraft, pins: withoutPin(state.promptPickerDraft.pins, listId) } };
     });
   },
@@ -876,7 +876,7 @@ const createPreviewsSlice: StateCreator<AtelierState, [], [], PreviewsSlice> = (
     // updateLoadingTilePreview when previews were stored on the cache.
     set((state) => {
       const existing = state.previews.get(tileId);
-      if (existing && preview.index <= existing.index) return {};
+      if (existing && preview.index <= existing.index) return state;
       const next = new Map(state.previews);
       next.set(tileId, preview);
       return { previews: next };
@@ -884,14 +884,14 @@ const createPreviewsSlice: StateCreator<AtelierState, [], [], PreviewsSlice> = (
   },
   clearTilePreview: (tileId) => {
     set((state) => {
-      if (!state.previews.has(tileId)) return {};
+      if (!state.previews.has(tileId)) return state;
       const next = new Map(state.previews);
       next.delete(tileId);
       return { previews: next };
     });
   },
   clearAllTilePreviews: () => {
-    set((state) => (state.previews.size === 0 ? {} : { previews: new Map<string, TilePreview>() }));
+    set((state) => (state.previews.size === 0 ? state : { previews: new Map<string, TilePreview>() }));
   },
 });
 
@@ -900,19 +900,19 @@ const createProgressSlice: StateCreator<AtelierState, [], [], ProgressSlice> = (
   setTileProgress: (tileId, update, now = Date.now()) => {
     set((state) => {
       const prev = state.tileProgress[tileId];
-      if (prev?.progress === update.progress && sameSteps(prev, update)) return {};
+      if (prev?.progress === update.progress && sameSteps(prev, update)) return state;
       return { tileProgress: { ...state.tileProgress, [tileId]: nextTileProgress(prev, update, now) } };
     });
   },
   clearTileProgress: (tileId) => {
     set((state) => {
-      if (!(tileId in state.tileProgress)) return {};
+      if (!(tileId in state.tileProgress)) return state;
       const { [tileId]: _removed, ...tileProgress } = state.tileProgress;
       return { tileProgress };
     });
   },
   clearAllTileProgress: () => {
-    set((state) => (Object.keys(state.tileProgress).length === 0 ? {} : { tileProgress: {} }));
+    set((state) => (Object.keys(state.tileProgress).length === 0 ? state : { tileProgress: {} }));
   },
 });
 
@@ -920,7 +920,7 @@ const createCharacterCardSlice: StateCreator<AtelierState, [], [], CharacterCard
   cardPendingTileIds: new Set<string>(),
   setCardPending: (tileId, pending) => {
     set((state) => {
-      if (state.cardPendingTileIds.has(tileId) === pending) return {};
+      if (state.cardPendingTileIds.has(tileId) === pending) return state;
       const next = new Set(state.cardPendingTileIds);
       if (pending) next.add(tileId);
       else next.delete(tileId);

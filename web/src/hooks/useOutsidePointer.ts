@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useEffectEvent } from 'react';
 
 interface OutsidePointerOptions {
   event?: 'pointerdown' | 'mousedown';
@@ -30,16 +30,19 @@ export function useOutsidePointer(
 ): void {
   const eventName = options.event ?? 'pointerdown';
   const enabled = options.enabled ?? true;
+  // The listener reads the latest callback and refs without re-binding on
+  // every render that passes a fresh closure or array.
+  const onPointer = useEffectEvent((event: Event) => {
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (refs.some((ref) => ref.current?.contains(target))) return;
+    onOutside(event);
+  });
 
   useEffect(() => {
     if (!enabled) return;
-    const onPointer = (event: Event) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (refs.some((ref) => ref.current?.contains(target))) return;
-      onOutside(event);
-    };
-    document.addEventListener(eventName, onPointer);
-    return () => { document.removeEventListener(eventName, onPointer); };
-  }, [enabled, eventName, onOutside, refs]);
+    const controller = new AbortController();
+    document.addEventListener(eventName, onPointer, { signal: controller.signal });
+    return () => { controller.abort(); };
+  }, [enabled, eventName]);
 }

@@ -23,6 +23,8 @@ import { RelativeTime } from './RelativeTime';
 import { canExtendVideoTile, isSequenceTail, sequenceChipLabel, storyChipLabel } from '../../lib/videoSequences';
 import { useExtendFromTile } from '../../hooks/useExtendFromTile';
 import buttons from '../../styles/buttons.module.css';
+import { batchSuccessor, focusSuccessor } from '../../lib/focusSuccessor';
+import { createPortal } from 'react-dom';
 import styles from './index.module.css';
 
 export type BatchAction =
@@ -129,6 +131,11 @@ function TileRowImpl({
   onCreateCardTile,
   creatingCard,
 }: TileRowProps) {
+  // A tile whose terminal body replaces its loading plate in place has
+  // already entered: the ImageTile or FailedTile shell mounts without the
+  // entrance that would otherwise make it flash and rise a second time.
+  const [enteredLoading] = useState(tile.status === 'loading');
+  const entered = enteredLoading && tile.status !== 'loading';
   if (tile.status === 'loading') {
     return (
       <TilePlaceholder
@@ -151,6 +158,7 @@ function TileRowImpl({
         tile={tile}
         aspectRatio={aspectRatio}
         seen={seen}
+        entered={entered}
         disabled={readOnlyActions}
         onRetry={() => { onTileAction('retry', batch, tile); }}
         onDismiss={() => { onTileAction('dismiss', batch, tile); }}
@@ -167,6 +175,7 @@ function TileRowImpl({
       ratio={ratio}
       aspectRatio={aspectRatio}
       seen={seen}
+      entered={entered}
       disabled={readOnlyActions}
       promptPreview={batch.prompt}
       videoSrc={inlineVideoSrc}
@@ -328,7 +337,7 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
   };
 
   return (
-    <section className={styles.batch} data-batch-id={batch.id} data-first={isFirstBatch ? 'true' : undefined} data-seen={seen ? 'true' : undefined}>
+    <section className={styles.batch} data-batch-id={batch.id} data-first={isFirstBatch ? 'true' : undefined} data-seen={seen ? 'true' : undefined} data-entering={seen ? undefined : 'true'}>
       <h2 className="srOnly">{headingPrompt}, {modelName}</h2>
       <header className={styles.header} onFocusCapture={(event) => {
         const target = event.target;
@@ -399,6 +408,9 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
               data-tip="Unpin batch"
               onClick={(event) => {
                 event.stopPropagation();
+                // The star leaves with the pin; Move keeps the keyboard in the header.
+                // In the Pinned view the whole row leaves, so the next row takes it.
+                focusSuccessor(activeView.kind === 'pinned' ? batchSuccessor(event.currentTarget) : moveBtnRef.current);
                 togglePin.mutate({ batchId: batch.id, pinned: false });
               }}
             >
@@ -443,7 +455,7 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
           >
             <I.folderPlus />
           </button>
-          <button className={buttons.iconAction} data-size="28" type="button" aria-label="Archive batch" data-tip="Archive batch" disabled={readOnlyActions} onClick={() => { onBatchAction('delete', batch); }}>
+          <button className={buttons.iconAction} data-size="28" type="button" aria-label="Archive batch" data-tip="Archive batch" disabled={readOnlyActions} onClick={(event) => { focusSuccessor(batchSuccessor(event.currentTarget)); onBatchAction('delete', batch); }}>
             <I.archive />
           </button>
           {hasMoreItems && <button
@@ -545,7 +557,10 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
           </ViewTransition>
         ))}
       </div>
-      <div className="srOnly" role="status" aria-live="polite">{everActive ? liveStatus : ''}</div>
+      {/* The row's progress announcement lives outside the row's view-transition
+          boundary: a text change inside it would activate the row's update on
+          every tile completion and hold the whole row non-hit-testable. */}
+      {createPortal(<div className="srOnly" role="status" aria-live="polite">{everActive ? liveStatus : ''}</div>, document.body)}
     </section>
   );
 }

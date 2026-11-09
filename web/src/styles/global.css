@@ -29,6 +29,15 @@ button {
   touch-action: manipulation;
 }
 
+/* The press feedback is the tokenised :active scale on every control; the
+   UA's square tap highlight would paint over it on iOS and Android. */
+button,
+[role='button'],
+a,
+summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* Global :focus-visible fallback. Component-level rules below override this
    with hue-appropriate tints (Lightbox uses white-on-dark, Composer routes
    through --focus-ring). Any interactive that forgets to declare its own
@@ -318,7 +327,7 @@ div[data-toast-host='contained'] {
   opacity: 1;
   transform: none;
   transition: none;
-  animation: tip-reveal var(--tip-reveal-duration) var(--ease-out) 360ms both;
+  animation: tip-reveal var(--tip-reveal-duration) var(--ease-out) var(--delay-hover-intent) both;
 }
 
 /* Backwards fill holds the hidden state through the reveal delay, including

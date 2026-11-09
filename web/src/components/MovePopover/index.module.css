@@ -56,7 +56,7 @@
   display: inline-flex;
   align-items: center;
   color: var(--ink);
-  animation: global(atelier-check-in) var(--dur-sheet) var(--ease-out) both;
+  animation: global(atelier-check-in) var(--dur-overlay) var(--ease-out) both;
 }
 
 .name {

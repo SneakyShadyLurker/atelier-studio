@@ -8,6 +8,7 @@ import { modelKeys } from '../api/models';
 import { resetAnnouncedBatchesForTests } from '../lib/queueLiveAnnouncer';
 import { useAtelierStore } from '../store/atelier';
 import { emitHistoryCancel, MY_TAB_ID, resetBroadcastForTests } from './broadcastHistory';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 import { getBatch, registerBatch, resetInFlightForTests } from './inFlightBatches';
 import type { HistoryData } from './historyCache';
 import { useGenerate } from './useGenerate';
@@ -1264,6 +1265,172 @@ describe('useGenerate history reads in flight', () => {
       releaseStream?.();
       await generation;
     });
+    unsubscribe();
+  });
+});
+
+describe('useGenerate writes beyond the Unsorted scope', () => {
+  const encoder = new TextEncoder();
+  const batchId = '00000000-0000-4000-8000-000000000e01';
+  const row = (overrides: Partial<Batch> = {}): Batch => ({
+    id: batchId, prompt: 'make an image', ratio: '1:1', modelId: 'mock-slow', modelLabel: 'Mock Slow',
+    createdAt: 1_700_000_000_000, collectionId: null, pinned: false, status: 'running',
+    tiles: [{ id: 't1', seed: 1, status: 'loading' }],
+    ...overrides,
+  });
+  const doneTile = { tileId: 't1', tileIndex: 0, status: 'done', url: '/api/img/t1', ext: 'png', mime: 'image/png', completedAt: 1_700_000_000_500 };
+  function streamFetch(options: { refresh?: (body: unknown) => Response; historyReads?: () => void } = {}) {
+    const refreshBodies: unknown[] = [];
+    const historyUrls: string[] = [];
+    let releaseStream: (() => void) | undefined;
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://local');
+      if (url.pathname === '/api/history') {
+        historyUrls.push(url.search);
+        options.historyReads?.();
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      }
+      if (url.pathname === '/api/history/refresh') {
+        const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        refreshBodies.push(body);
+        return Promise.resolve(options.refresh ? options.refresh(body) : Response.json({ items: [], missingBatchIds: [] }));
+      }
+      if (url.pathname === '/api/generate') {
+        return Promise.resolve(Response.json({ batchId, status: 'running', pool: 'shared', tiles: [{ tileId: 't1', tileIndex: 0, seed: 1 }] }, { status: 201 }));
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`event: batch\ndata: ${JSON.stringify({ batchId, status: 'running', createdAt: 1_700_000_000_000, tiles: [{ tileId: 't1', tileIndex: 0, seed: 1 }] })}\n\n`));
+          releaseStream = () => {
+            controller.enqueue(encoder.encode(`event: tile\ndata: ${JSON.stringify(doneTile)}\n\n`));
+            controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify({ batchId })}\n\n`));
+            controller.close();
+          };
+          init?.signal?.addEventListener('abort', () => { controller.error(init.signal?.reason); }, { once: true });
+        },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    }) as unknown as typeof fetch;
+    return { refreshBodies, historyUrls, release: () => releaseStream?.() };
+  }
+
+  test('a terminal tile reaches every cached scope that shows the batch, not only Unsorted', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const pinnedKey = historyKeys.scoped({ kind: 'pinned' }, '');
+    client.setQueryData<HistoryData>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [null] });
+    const { release } = streamFetch();
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    let generation: Promise<unknown> | undefined;
+    act(() => { generation = result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 1 }); });
+    const unsortedTiles = () => client.getQueryData<HistoryData>(historyKeys.list())?.pages[0]?.items[0]?.tiles;
+    await waitFor(() => { expect(unsortedTiles()?.[0]?.status).toBe('loading'); });
+    // The user pinned it meanwhile and is looking at Pinned: that cache holds the row too.
+    client.setQueryData<HistoryData>(pinnedKey, { pages: [{ items: [row({ pinned: true })], nextCursor: null }], pageParams: [null] });
+
+    await act(async () => { release(); await generation; await flushQueryNotifications(); });
+    expect(unsortedTiles()?.[0]?.status).toBe('done');
+    expect(client.getQueryData<HistoryData>(pinnedKey)?.pages[0]?.items[0]?.tiles[0]?.status).toBe('done');
+    expect(client.getQueryData<HistoryData>(pinnedKey)?.pages[0]?.items[0]?.status).toBe('done');
+  });
+
+  test('a clean stream settles with one bounded refresh of its batch instead of refetching every page', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const serverRow = { ...row({ status: 'done', provenance: { templateId: null, templateName: 'Still life', rollSeed: 7, pins: {} } }), tiles: [{ id: 't1', seed: 1, status: 'done', url: '/api/img/t1', ext: 'png', mime: 'image/png', completedAt: 1_700_000_000_500 }] };
+    const { refreshBodies, historyUrls, release } = streamFetch({ refresh: () => Response.json({ items: [serverRow], missingBatchIds: [] }) });
+    await client.infiniteQuery(historyOpts());
+    const observer = new InfiniteQueryObserver(client, historyOpts());
+    const unsubscribe = observer.subscribe(() => undefined);
+    const readsBefore = historyUrls.length;
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    let generation: Promise<unknown> | undefined;
+    act(() => { generation = result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 1 }); });
+    const batchInCache = () => client.getQueryData<HistoryData>(historyKeys.list())?.pages[0]?.items.find((item) => item.id === batchId);
+    await waitFor(() => { expect(batchInCache()).toBeDefined(); });
+    await act(async () => { release(); await generation; await flushQueryNotifications(); });
+    await waitFor(() => { expect(batchInCache()?.provenance?.templateName).toBe('Still life'); });
+    expect(refreshBodies).toEqual([{ batchIds: [batchId], storyIds: [] }]);
+    expect(historyUrls.length).toBe(readsBefore);
+    unsubscribe();
+  });
+
+  test('a stream finishing during a history write marks history stale and reads once the write has settled', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const { refreshBodies, historyUrls, release } = streamFetch();
+    await client.infiniteQuery(historyOpts());
+    const observer = new InfiniteQueryObserver(client, historyOpts());
+    const unsubscribe = observer.subscribe(() => undefined);
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    let generation: Promise<unknown> | undefined;
+    act(() => { generation = result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 1 }); });
+    await waitFor(() => { expect(client.getQueryData<HistoryData>(historyKeys.list())?.pages[0]?.items.find((item) => item.id === batchId)).toBeDefined(); });
+    const readsBefore = historyUrls.length;
+    // An archive (or move, pin, cancel) is in flight when the stream ends.
+    const write = Promise.withResolvers<null>();
+    const settled = client.getMutationCache()
+      .build(client, { mutationKey: HISTORY_WRITE_MUTATION_KEY, mutationFn: () => write.promise })
+      .execute(undefined);
+    await act(async () => { release(); await generation; await flushQueryNotifications(); });
+    // Neither the targeted refresh nor a scope GET runs over the pending write.
+    expect(refreshBodies).toEqual([]);
+    expect(historyUrls.length).toBe(readsBefore);
+    expect(client.getQueryState(historyKeys.list())?.isInvalidated).toBe(true);
+    // The next generation's insert finds the stale mark; its re-issued read
+    // waits behind the write too.
+    let second: Promise<unknown> | undefined;
+    act(() => { second = result.current.generate({ prompt: 'another image', modelId: 'mock-slow', ratio: '1:1', count: 1 }); });
+    await waitFor(() => { expect(getBatch(batchId)).toBeDefined(); });
+    await act(async () => { await flushQueryNotifications(); });
+    expect(historyUrls.length).toBe(readsBefore);
+    await act(async () => { write.resolve(null); await settled; await flushQueryNotifications(); });
+    await waitFor(() => { expect(historyUrls.length).toBe(readsBefore + 1); });
+    await act(async () => { release(); await second; await flushQueryNotifications(); });
+    unsubscribe();
+  });
+
+  test('a batch insert during a settle or sibling refetch re-issues that read instead of dropping it', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    let holdRead: PromiseWithResolvers<Response> | undefined;
+    const reads: string[] = [];
+    const older = { id: '00000000-0000-4000-8000-000000000e00', prompt: 'older', ratio: '1:1', modelId: 'mock-slow', modelLabel: 'Mock Slow', createdAt: 1_600_000_000_000, collectionId: null, pinned: false, status: 'done', tiles: [] };
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://local');
+      if (url.pathname === '/api/history') {
+        reads.push(url.search);
+        if (reads.length === 2) {
+          holdRead = Promise.withResolvers<Response>();
+          return holdRead.promise;
+        }
+        return Promise.resolve(Response.json({ items: reads.length >= 3 ? [row(), older] : [older], nextCursor: null }));
+      }
+      if (url.pathname === '/api/generate') {
+        return Promise.resolve(Response.json({ batchId, status: 'running', pool: 'shared', tiles: [{ tileId: 't1', tileIndex: 0, seed: 1 }] }, { status: 201 }));
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`event: batch\ndata: ${JSON.stringify({ batchId, status: 'running', createdAt: 1_700_000_000_000, tiles: [{ tileId: 't1', tileIndex: 0, seed: 1 }] })}\n\n`));
+          init?.signal?.addEventListener('abort', () => { controller.error(init.signal?.reason); }, { once: true });
+        },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    }) as unknown as typeof fetch;
+
+    await client.infiniteQuery(historyOpts());
+    const observer = new InfiniteQueryObserver(client, historyOpts());
+    const unsubscribe = observer.subscribe(() => undefined);
+    // A settled write elsewhere: invalidate + refetch, held in flight.
+    const invalidation = client.invalidateQueries({ queryKey: historyKeys.list(), exact: true });
+    await waitFor(() => { expect(holdRead).toBeDefined(); });
+
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    act(() => { void result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 1 }).catch(() => undefined); });
+    const ids = () => client.getQueryData<HistoryData>(historyKeys.list())?.pages.flatMap((page) => page.items.map((item) => item.id));
+    await waitFor(() => { expect(ids()).toContain(batchId); });
+    await act(async () => { await invalidation.catch(() => undefined); await flushQueryNotifications(); });
+    // The held read was cancelled by the insert; a fresh one was sent after it.
+    await waitFor(() => { expect(reads.length).toBe(3); });
+    await waitFor(() => { expect(client.getQueryState(historyKeys.list())?.fetchStatus).toBe('idle'); });
+    expect(ids()).toEqual([batchId, older.id]);
+    expect(client.getQueryState(historyKeys.list())?.isInvalidated).toBe(false);
     unsubscribe();
   });
 });

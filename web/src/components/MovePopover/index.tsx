@@ -12,6 +12,10 @@ import { useMoveBatch } from '../../hooks/useMoveBatch';
 import { useAnchoredPopover } from '../../hooks/useNativeAnchor';
 import { useOutsidePointer } from '../../hooks/useOutsidePointer';
 import { useExitTransition } from '../../hooks/useExitTransition';
+import { batchSuccessor, focusSuccessor } from '../../lib/focusSuccessor';
+
+/** A pointer click waits this long for a possible double-click (rename) before it moves. */
+const DOUBLE_CLICK_WINDOW_MS = 260;
 import { useRenameCollection } from '../../hooks/useRenameCollection';
 import { useAtelierStore, type AppView } from '../../store/atelier';
 import { describeError } from '../../lib/errorCopy';
@@ -101,6 +105,36 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
     returnFocusTo: anchorRef,
     ...(returnFocusFallbackRef ? { returnFocusFallback: returnFocusFallbackRef } : {}),
   });
+  // A move out of the scope on screen removes the row the trap's restore
+  // targets sit in. The successor (the next row) is chosen when the move
+  // starts and focused once the popover has closed: while it is open every
+  // other body child is inert, so an earlier focus would be refused, and the
+  // trap's own restore (declared above, so cleaned up first) finds no target.
+  const leaveSuccessorRef = useRef<HTMLElement | null>(null);
+  // The row's neighbour at open time: where focus goes when the row leaves
+  // under the open popover without a move of this instance's own (a
+  // create-and-move chain a dismissed instance started, a sibling tab, the
+  // poll), so neither the trigger nor the panel is left to restore to. The
+  // row, not the anchor: the anchor may be the collection chip, which a move
+  // to Unsorted removes while the row stays (the trap then restores to the
+  // persistent Move button).
+  const openSuccessorRef = useRef<HTMLElement | null>(null);
+  const popoverOpenRef = useRef(false);
+  useEffect(() => {
+    if (!open) return;
+    popoverOpenRef.current = true;
+    const anchor = anchorRef.current;
+    const row = anchor?.closest('[data-batch-id]') ?? null;
+    openSuccessorRef.current = anchor ? batchSuccessor(anchor) : null;
+    return () => {
+      popoverOpenRef.current = false;
+      const rowGone = row !== null && !row.isConnected;
+      const target = leaveSuccessorRef.current ?? (rowGone ? openSuccessorRef.current : null);
+      leaveSuccessorRef.current = null;
+      openSuccessorRef.current = null;
+      focusSuccessor(target);
+    };
+  }, [anchorRef, open]);
   // Phone renders a backdrop that dismisses on click — see the touch rule in
   // useOutsidePointer.
   useOutsidePointer([panelRef, anchorRef], () => {
@@ -204,9 +238,19 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
   // A dismissed popover keeps focus on its row through the exit fade, so every
   // side-effect entry point refuses while closing (Escape then Enter). A move
   // already scheduled before the dismissal keeps the render it was armed in.
+  // A move out of the scope on screen removes the row the popover's restore
+  // target sits in; the keyboard goes to the next row instead. Chosen right
+  // before the move (existing destination or a collection created here).
+  const leaveSuccessor = (collectionId: string | null): HTMLElement | null => {
+    const leavesScope = (view.kind === 'unsorted' && collectionId !== null)
+      || (view.kind === 'collection' && collectionId !== view.id);
+    return leavesScope && anchorRef.current ? batchSuccessor(anchorRef.current) : null;
+  };
+
   const moveTo = (collectionId: string | null) => {
     if (closing) return;
     clearPendingMove();
+    leaveSuccessorRef.current = leaveSuccessor(collectionId);
     moveBatch.mutate({ batchId: batch.id, collectionId });
     requestClose();
   };
@@ -217,7 +261,7 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
     pendingMoveRef.current = window.setTimeout(() => {
       pendingMoveRef.current = null;
       moveTo(collectionId);
-    }, 260);
+    }, DOUBLE_CLICK_WINDOW_MS);
   };
 
   const startRename = (collection: Collection) => {
@@ -230,7 +274,10 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
 
   const onCollectionClick = (event: ReactMouseEvent<HTMLButtonElement>, collection: Collection) => {
     if (event.detail > 1) return;
-    scheduleMove(collection.id);
+    // A keyboard activation (detail 0) cannot become a double-click rename:
+    // it moves at once instead of waiting out the window.
+    if (event.detail === 0) moveTo(collection.id);
+    else scheduleMove(collection.id);
   };
 
   function commitRename(collection: Collection, draft: string) {
@@ -269,13 +316,23 @@ export default function MovePopover({ batch, anchorRef, returnFocusFallbackRef, 
       context.created = { id: collection.id, name };
       return collection;
     }))
-      .then((collection) => moveBatch.mutateAsync({ batchId: batch.id, collectionId: collection.id }))
+      .then((collection) => {
+        const successor = leaveSuccessor(collection.id);
+        if (popoverOpenRef.current) leaveSuccessorRef.current = successor;
+        // Dismissed while the collection was being created: that close already
+        // restored focus to the row's trigger, which this move removes. Hand
+        // focus on now, while the leaving row still owns it.
+        else if (successor && anchorRef.current?.closest('[data-batch-id]')?.contains(document.activeElement)) focusSuccessor(successor);
+        return moveBatch.mutateAsync({ batchId: batch.id, collectionId: collection.id });
+      })
       .then(() => {
         if (liveInlineContextRef.current !== context) return;
         setInlineContext(null);
         requestClose();
       })
       .catch((mutationError: unknown) => {
+        // The row stays (the move rolled back), so a later close restores the trigger.
+        leaveSuccessorRef.current = null;
         useAtelierStore.getState().addToast(describeError(mutationError, "Couldn't save the collection."), 'error');
         if (liveInlineContextRef.current === context) inlineEdit.begin('creating', draft);
       })

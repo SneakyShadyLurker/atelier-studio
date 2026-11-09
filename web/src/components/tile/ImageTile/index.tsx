@@ -6,6 +6,7 @@ import TextModelNote from '../../TextModelNote';
 import { I } from '../../icons/I';
 import ClipFrame from '../ClipFrame';
 import { Meta } from '../../Meta';
+import { focusSuccessor, tileSuccessor } from '../../../lib/focusSuccessor';
 import buttons from '../../../styles/buttons.module.css';
 import styles from './index.module.css';
 
@@ -23,6 +24,8 @@ interface ImageTileProps {
   ratio: string;
   aspectRatio: string;
   seen?: boolean;
+  /** The tile already stood here as a loading plate: no shell entrance, the develop alone marks completion. */
+  entered?: boolean;
   disabled?: boolean;
   promptPreview?: string;
   /** Inline playback-only override; download and lightbox keep tile.url. */
@@ -77,7 +80,10 @@ function TileActionButton({ label, tip, busyTip = 'Preparing…', icon, disabled
       aria-label={label}
       data-tip={busy ? busyTip : tip}
       aria-busy={busy || undefined}
-      disabled={disabled || busy}
+      // Busy is aria-disabled, never `disabled`: a focused control that becomes
+      // disabled drops keyboard focus to <body>.
+      aria-disabled={busy || undefined}
+      disabled={disabled}
       onClick={(event) => {
         // The tile frame is a button underneath; keep the click off it.
         event.stopPropagation();
@@ -130,7 +136,7 @@ function TellStoryAction({ label, disabled, onTellStory }: { label: string; disa
   );
 }
 
-function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen = false, disabled = false, promptPreview, videoSrc, canAnimate = false, canTellStory = false, canExtend = false, extending = false, canEdit = false, canCreateCard = false, creatingCard = false, onOpen, onDownload, onDelete, onEdit, onAnimate, onTellStory, onExtend, onCreateCard }: ImageTileProps) {
+function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen = false, entered = false, disabled = false, promptPreview, videoSrc, canAnimate = false, canTellStory = false, canExtend = false, extending = false, canEdit = false, canCreateCard = false, creatingCard = false, onOpen, onDownload, onDelete, onEdit, onAnimate, onTellStory, onExtend, onCreateCard }: ImageTileProps) {
   // Lazy initializer freezes the decision at mount — no re-evaluation per render.
   const [showReveal] = useState(() => Date.now() - tile.completedAt < REVEAL_FRESHNESS_MS);
   // Give SR users the prompt context the Lightbox already provides instead of
@@ -161,7 +167,7 @@ function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen 
   };
 
   return (
-    <div className={styles.tile} data-seen={seen ? 'true' : undefined}>
+    <div className={styles.tile} data-feed-tile={tile.id} data-seen={seen || entered ? 'true' : undefined}>
       <button
         type="button"
         aria-label={mediaFailed ? `Image ${index + 1} failed to load. Retry` : `Open image ${index + 1}${promptContext}`}
@@ -231,7 +237,7 @@ function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen 
             <button type="button" className={buttons.tileAction} aria-label="Download tile" data-tip="Download" disabled={disabled} onClick={(event) => { event.stopPropagation(); onDownload(); }}>
               <I.download />
             </button>
-            <button type="button" className={buttons.tileAction} aria-label="Archive tile" data-tip="Archive" disabled={disabled} onClick={(event) => { event.stopPropagation(); onDelete(); }}>
+            <button type="button" className={buttons.tileAction} aria-label="Archive tile" data-tip="Archive" disabled={disabled} onClick={(event) => { event.stopPropagation(); focusSuccessor(tileSuccessor(event.currentTarget)); onDelete(); }}>
               <I.archive />
             </button>
             <button type="button" className={buttons.tileAction} aria-label={`Expand tile ${index + 1}`} data-tip="Expand" data-tip-place="above-end" disabled={disabled} onClick={(event) => { event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); onOpen(); }}>

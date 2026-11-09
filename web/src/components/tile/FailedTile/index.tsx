@@ -2,12 +2,15 @@ import type { Tile, TileErrorCategory } from '@atelier/shared';
 import type { CSSProperties } from 'react';
 import { I } from '../../icons/I';
 import { moderationCopy, useModerationNotice } from '../../../lib/moderationNotice';
+import { focusSuccessor, tileSuccessor } from '../../../lib/focusSuccessor';
 import styles from './index.module.css';
 
 interface FailedTileProps {
   tile: Extract<Tile, { status: 'failed' }>;
   aspectRatio: string;
   seen?: boolean;
+  /** The tile already stood here as a loading plate: no shell entrance. */
+  entered?: boolean;
   disabled?: boolean;
   onRetry: () => void;
   onDismiss: () => void;
@@ -53,13 +56,13 @@ function failureMessage(bucket: FailureBucket): string {
   }
 }
 
-function FailedTile({ tile, aspectRatio, seen = false, disabled = false, onRetry, onDismiss }: FailedTileProps) {
+function FailedTile({ tile, aspectRatio, seen = false, entered = false, disabled = false, onRetry, onDismiss }: FailedTileProps) {
   const bucket = classifyFailure(tile.error);
   const showRetry = bucket !== 'content-policy';
   const moderation = tile.moderation;
   const copy = moderation ? moderationCopy(moderation) : null;
   return (
-    <div className={styles.tile} data-seen={seen ? 'true' : undefined} data-moderation={moderation ? 'true' : undefined}>
+    <div className={styles.tile} data-feed-tile={tile.id} data-seen={seen || entered ? 'true' : undefined} data-moderation={moderation ? 'true' : undefined}>
       {/* The ratio travels as a custom property so the phone layout can drop
           the image footprint (the tile collapses to its content there). */}
       <div className={styles.frame} style={{ '--tile-ratio': aspectRatio } as CSSProperties}>
@@ -81,7 +84,7 @@ function FailedTile({ tile, aspectRatio, seen = false, disabled = false, onRetry
                 Retry
               </button>
             ) : null}
-            <button className={styles.mini} type="button" aria-label="Dismiss failed tile" disabled={disabled} onClick={onDismiss}>
+            <button className={styles.mini} type="button" aria-label="Dismiss failed tile" disabled={disabled} onClick={(event) => { focusSuccessor(tileSuccessor(event.currentTarget)); onDismiss(); }}>
               <I.close />
               Dismiss
             </button>

@@ -42,8 +42,9 @@ function renderToast(
     // announce via the shared polite/assertive live regions. An actionable
     // toast raised under the phone drawer is announced through the polite region
     // instead (mirrored), so its visible copy carries no second status role.
+    <div key={message.id} className={styles.slot} data-closing={message.leaving ? 'true' : undefined}>
+    <div className={styles.slotInner}>
     <div
-      key={message.id}
       className={className}
       data-closing={message.leaving ? 'true' : undefined}
       role={message.action && !mirrored ? 'status' : undefined}
@@ -60,6 +61,8 @@ function renderToast(
           {message.action.label}
         </button>
       ) : null}
+    </div>
+    </div>
     </div>
   );
 }

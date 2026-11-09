@@ -3,10 +3,28 @@
   cursor: zoom-in;
 }
 
-.tile:hover {
-  border-color: var(--line-2);
-  box-shadow: var(--shadow-2);
-  transform: translateY(-2px);
+/* Hover is declared only for hover-capable pointers: WebKit keeps :hover on a
+   tapped element until the next tap elsewhere, which held the lift, shadow
+   and scrim after the Lightbox closed. The press below is every pointer's
+   acknowledgement; a press on a tile action scales the action, not the tile. */
+@media (hover: hover) {
+  .tile:hover {
+    border-color: var(--line-2);
+    box-shadow: var(--shadow-2);
+    transform: translateY(-2px);
+  }
+
+  .tile:hover .overlay {
+    opacity: 1;
+  }
+
+  .frame[data-media-failed='true']:hover .mediaFailed {
+    color: var(--ink-2);
+  }
+}
+
+.tile:active:not(:has(.buttons :active)) {
+  transform: scale(var(--m-press-row));
 }
 
 .tile[data-seen='true'] .frame video {
@@ -27,6 +45,7 @@
 .tile:has(.frame:focus-visible) {
   border-color: var(--line-2);
   box-shadow: var(--shadow-2);
+  transform: translateY(-2px);
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -65,10 +84,7 @@
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--ink-3);
-}
-
-.frame[data-media-failed='true']:hover .mediaFailed {
-  color: var(--ink-2);
+  transition: color var(--dur-hover) var(--ease-out);
 }
 
 .frame img {
@@ -121,7 +137,6 @@
   background: linear-gradient(180deg, transparent 60%, var(--scrim-tile) 100%);
 }
 
-.tile:hover .overlay,
 .tile:focus-within .overlay {
   opacity: 1;
 }
@@ -206,43 +221,18 @@
     flex-basis: 100%;
   }
 
-  /* No hover state on touch: WebKit keeps :hover on a tapped tile until the
-     next tap elsewhere, which would hold the lift, shadow and full scrim
-     after the Lightbox closes. The press below is the touch acknowledgement;
-     real focus still raises the scrim. */
-  .tile:hover {
-    border-color: var(--line);
-    box-shadow: none;
-    transform: none;
-  }
-
-  .tile:hover:not(:focus-within) .overlay {
-    opacity: 0.7;
-  }
-
-  /* The shell's resting transform transition eases the release. */
-  .tile:active {
-    transform: scale(var(--m-press-row));
-  }
 }
 
+/* Reduced motion: the tokens already collapse every duration here (the lift
+   and press to 0, the develop to --dur-reduced), so the readiness mat and the
+   cached-image skip keep working; only the blur develop is removed. */
 @media (prefers-reduced-motion: reduce) {
-  .tile {
-    transition: none;
-  }
-
   .frame img {
-    animation-duration: var(--dur-reduced);
-    animation-name: global(atelier-fade-in);
     filter: none;
   }
 
-  .reveal {
-    animation: none;
-    display: none;
-  }
-
-  .tile:hover {
+  .tile:hover,
+  .tile:has(.frame:focus-visible) {
     transform: none;
   }
 }

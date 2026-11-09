@@ -8,11 +8,18 @@
   border-radius: var(--radius-tile);
   overflow: hidden;
   transition: transform var(--dur-transform) var(--ease-out), box-shadow var(--dur-transform) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
-  animation: global(atelier-tile-in) var(--dur-entrance) var(--ease-out) both;
+  /* backwards, not both: a held end pose (transform: translateY(0)) would
+     outrank the hover lift and the touch press on every fresh tile. */
+  animation: global(atelier-tile-in) var(--dur-entrance) var(--ease-out) backwards;
   width: min(100%, calc(var(--tile-cap) * var(--tile-ratio-num, 1)));
   margin-inline: auto;
 }
 
-.shell[data-seen='true'] {
+/* A seen tile replays no entrance; neither does a tile whose terminal state
+   replaced its loading plate in place (data-seen set by the row). Inside a
+   batch that is itself entering, the sheet owns the entrance: the tiles
+   arrive with it instead of rising a second time at the same moment. */
+.shell[data-seen='true'],
+:global([data-entering='true']) .shell {
   animation: none;
 }

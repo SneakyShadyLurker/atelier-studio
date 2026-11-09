@@ -2,7 +2,7 @@ import type { ArchivedTile, ArchivePage } from '@atelier/shared';
 import { infiniteQueryOptions } from '@tanstack/react-query';
 import { ApiError, apiImageUrl, apiPath, isArchivePage, requestJsonValidated, requestNoContent } from './client';
 import type { ArchiveScope } from '../store/atelier';
-import { deleteKeepingUploads } from './history';
+import { deleteKeepingUploads, historyWriteSignal } from './history';
 
 const ARCHIVE_ALL_SCOPE: ArchiveScope = { kind: 'all' };
 
@@ -57,7 +57,7 @@ export function fetchArchivePage(
 }
 
 export function restoreArchive(tileId: string): Promise<void> {
-  return requestNoContent(apiPath('/archive/:tileId/restore', { tileId }), { method: 'POST' });
+  return requestNoContent(apiPath('/archive/:tileId/restore', { tileId }), { method: 'POST', signal: historyWriteSignal() });
 }
 
 export function permanentDelete(tileId: string): Promise<void> {

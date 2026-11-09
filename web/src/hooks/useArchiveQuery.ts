@@ -26,7 +26,6 @@ export function useArchiveQuery(scope: ArchiveScope = { kind: 'all' }, enabled =
     isError: query.isError,
     error: query.error,
     hasNextPage: query.hasNextPage,
-    isFetching: query.isFetching,
     isFetchingNextPage: query.isFetchingNextPage,
     isFetchNextPageError: query.isFetchNextPageError,
     fetchNextPage: query.fetchNextPage,

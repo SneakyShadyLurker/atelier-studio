@@ -4,6 +4,8 @@ import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, test } from 'bun:test';
 import { historyKeys, historyOpts } from '../api/history';
 import {
+  findTileInAnyScope,
+  historyScopesWithBatch,
   removeBatchFromCache,
   removeTileFromCache,
   updateBatchTile,
@@ -325,5 +327,50 @@ describe('history order invariants', () => {
     expect(put(failed(20))).toEqual(failed(20));
     // Equal completion times keep the incoming tile.
     expect(put(done(20))).toEqual(done(20));
+  });
+});
+
+describe('history writes against a missing or invalidated cache', () => {
+  const at = (id: string, createdAt: number): Batch => ({ ...batch(id, [{ id: `${id}-t1`, seed: 1, status: 'loading' }]), createdAt });
+  const done = { id: 'a-t1', seed: 1, status: 'done' as const, url: '/api/img/a-t1', ext: 'png' as const, mime: 'image/png' as const, completedAt: 10 };
+
+  test('tile, status and removal writes create nothing when the scope has no cache', () => {
+    const client = new QueryClient();
+    updateBatchTile(client, key, 'a', done);
+    updateBatchStatus(client, key, 'a', { status: 'done' });
+    removeTileFromCache(client, key, 'a', 'a-t1');
+    removeBatchFromCache(client, key, 'a');
+    expect(client.getQueryCache().find({ queryKey: key, exact: true })).toBeUndefined();
+    // The insert is the one write that may seed a missing scope.
+    upsertNewBatch(client, key, at('a', 5));
+    expect(client.getQueryData<HistoryData>(key)?.pages[0]?.items.map((item) => item.id)).toEqual(['a']);
+  });
+
+  test('a stream write keeps a pending invalidation and the last server read\'s freshness clock', async () => {
+    const client = new QueryClient();
+    client.setQueryData(key, historyData([at('a', 5)]), { updatedAt: 1_000 });
+    await client.invalidateQueries({ queryKey: key, refetchType: 'none' });
+    expect(client.getQueryState(key)).toMatchObject({ isInvalidated: true, dataUpdatedAt: 1_000 });
+
+    updateBatchTile(client, key, 'a', done);
+    upsertNewBatch(client, key, at('b', 6));
+    updateBatchStatus(client, key, 'a', { status: 'done' });
+
+    expect(client.getQueryData<HistoryData>(key)?.pages[0]?.items.map((item) => item.id)).toEqual(['b', 'a']);
+    expect(client.getQueryState(key)).toMatchObject({ isInvalidated: true, dataUpdatedAt: 1_000 });
+    expect(client.getQueryCache().find({ queryKey: key, exact: true })?.isStale()).toBe(true);
+  });
+
+  test('historyScopesWithBatch lists every cached scope holding the batch', () => {
+    const client = new QueryClient();
+    const pinnedKey = historyKeys.scoped({ kind: 'pinned' }, '');
+    const otherKey = historyKeys.scoped({ kind: 'collection', id: 'c1' }, '');
+    client.setQueryData(key, historyData([at('a', 5)]));
+    client.setQueryData(pinnedKey, historyData([{ ...at('a', 5), pinned: true }]));
+    client.setQueryData(otherKey, historyData([at('z', 1)]));
+    const keys = historyScopesWithBatch(client, historyKeys.all(), 'a').map((scope) => JSON.stringify(scope));
+    expect(keys.toSorted()).toEqual([JSON.stringify(key), JSON.stringify(pinnedKey)].toSorted());
+    expect(findTileInAnyScope(client, historyKeys.all(), 'a', 'a-t1')?.status).toBe('loading');
+    expect(findTileInAnyScope(client, historyKeys.all(), 'nope', 'a-t1')).toBeUndefined();
   });
 });

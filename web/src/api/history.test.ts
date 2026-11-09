@@ -212,19 +212,20 @@ describe('active history refresh cadence', () => {
     expect(callRefetchInterval(pages)).toBe(30_000);
 
     // First observed at batchAt + 25 s; past the 30-minute client-observed cap
-    // the poll stops and the stuck toast fires once.
+    // the poll drops to a slow reconcile (the server may still settle the
+    // work) and the stuck toast fires once.
     Date.now = () => batchAt + 25_000 + 31 * 60_000;
-    expect(callRefetchInterval(pages)).toBe(false);
+    expect(callRefetchInterval(pages)).toBe(120_000);
     expect(useAtelierStore.getState().toasts.map((toast) => toast.text)).toEqual([
       'Generation seems stuck — refresh to retry.',
     ]);
   });
 
-  test('returns false after persistent refetch errors even with loading tiles', () => {
+  test('keeps polling through refetch errors while tiles are loading (recovery after a server restart)', () => {
     const pages: HistoryPage<Batch>[] = [
       { items: [makeBatch([loadingTile])], nextCursor: null },
     ];
-    expect(callRefetchInterval(pages, 4)).toBe(false);
+    expect(callRefetchInterval(pages, 4)).toBe(3000);
   });
 
   test('uses client-observed loading time instead of server createdAt for the stuck cap', () => {
@@ -237,12 +238,12 @@ describe('active history refresh cadence', () => {
     expect(useAtelierStore.getState().toasts).toHaveLength(0);
 
     Date.now = () => 41 * 60_000;
-    expect(callRefetchInterval(pages)).toBe(false);
+    expect(callRefetchInterval(pages)).toBe(120_000);
     expect(useAtelierStore.getState().toasts.map((toast) => toast.text)).toEqual([
       'Generation seems stuck — refresh to retry.',
     ]);
 
-    expect(callRefetchInterval(pages)).toBe(false);
+    expect(callRefetchInterval(pages)).toBe(120_000);
     expect(useAtelierStore.getState().toasts).toHaveLength(1);
   });
 
@@ -342,7 +343,7 @@ describe('active history refresh cadence', () => {
     expect(callRefetchInterval(pages)).toBe(3000);
 
     Date.now = () => 31 * 60_000;
-    expect(callRefetchInterval(pages)).toBe(false);
+    expect(callRefetchInterval(pages)).toBe(120_000);
     expect(useAtelierStore.getState().toasts.map((toast) => toast.text)).toEqual([
       'Generation seems stuck — refresh to retry.',
     ]);
@@ -356,7 +357,7 @@ describe('active history refresh cadence', () => {
     expect(callRefetchInterval(loadingPages)).toBe(3000);
 
     Date.now = () => 31 * 60_000;
-    expect(callRefetchInterval(loadingPages)).toBe(false);
+    expect(callRefetchInterval(loadingPages)).toBe(120_000);
     expect(useAtelierStore.getState().toasts).toHaveLength(1);
 
     const terminalPages: HistoryPage<Batch>[] = [
@@ -369,7 +370,7 @@ describe('active history refresh cadence', () => {
     expect(callRefetchInterval(loadingPages)).toBe(3000);
 
     Date.now = () => 63 * 60_000;
-    expect(callRefetchInterval(loadingPages)).toBe(false);
+    expect(callRefetchInterval(loadingPages)).toBe(120_000);
     expect(useAtelierStore.getState().toasts.map((toast) => toast.text)).toEqual([
       'Generation seems stuck — refresh to retry.',
     ]);

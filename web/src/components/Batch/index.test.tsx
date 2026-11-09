@@ -591,7 +591,9 @@ describe('BatchView move scope', () => {
     await waitFor(() => {
       expect(client.getQueryData<typeof initialData>(propScopedKey)?.pages[0]?.items).toEqual([]);
     });
-    expect(client.getQueryData<typeof initialData>(liveScopedKey)?.pages[0]?.items).toEqual([batch]);
+    // Every other cached scope holding the batch drops it as well, so no
+    // scope paints the stale row when the user returns to it.
+    expect(client.getQueryData<typeof initialData>(liveScopedKey)?.pages[0]?.items).toEqual([]);
   });
 });
 
@@ -769,7 +771,8 @@ describe('BatchView live status', () => {
       { wrapper: wrap() },
     );
   }
-  const liveRegion = (container: HTMLElement) => container.querySelector('[role="status"][aria-live="polite"]')?.textContent;
+  // The row's announcement is portalled out of its view-transition boundary.
+  const liveRegion = (_container: HTMLElement) => document.body.querySelector(':scope > [role="status"][aria-live="polite"]')?.textContent;
   const pageRegion = () => document.querySelector('[data-atelier-queue-live]')?.textContent;
   afterEach(() => { resetAnnouncedBatchesForTests(); });
 

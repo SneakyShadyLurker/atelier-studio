@@ -190,15 +190,9 @@
   transform: scale(var(--m-press-icon));
 }
 
-.refThumb:hover,
 .refThumbActive {
   border-color: var(--glass-on-dark-34);
   background: var(--glass-on-dark-12);
-}
-
-.refThumb:focus-visible {
-  outline: 2px solid var(--glass-on-dark-100);
-  outline-offset: 2px;
 }
 
 .imageError {
@@ -315,13 +309,14 @@
   transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
 }
 
-.btn:hover {
-  background: var(--glass-on-dark-10);
-  color: var(--glass-on-dark-100);
+/* Labelled buttons press at the button amplitude, not the icon one. */
+.btn:active:where(:not(:disabled, [aria-busy='true'])) {
+  transform: scale(var(--m-press));
 }
 
-.btn:active:not(:disabled) {
-  transform: scale(var(--m-press-icon));
+.btn[aria-busy='true'] {
+  opacity: 0.4;
+  cursor: progress;
 }
 
 .animateAction,
@@ -340,17 +335,48 @@
   color: var(--glass-on-dark-100);
 }
 
-.animateAction:hover,
 .animateAction:focus-visible,
-.zoomAction:hover,
 .zoomAction:focus-visible {
   background: var(--glass-on-dark-10);
   border-color: var(--glass-on-dark-12);
   color: var(--glass-on-dark-100);
 }
 
-.animateAction[disabled] {
-  cursor: progress;
+@media (hover: hover) {
+  .btn:hover:where(:not(:disabled, [aria-busy='true'])) {
+    background: var(--glass-on-dark-10);
+    color: var(--glass-on-dark-100);
+  }
+
+  .danger:hover:where(:not(:disabled, [aria-busy='true'])) {
+    background: color-mix(in oklch, var(--danger) 40%, transparent);
+  }
+
+  .animateAction:hover:where(:not(:disabled, [aria-busy='true'])),
+  .zoomAction:hover:where(:not(:disabled, [aria-busy='true'])) {
+    background: var(--glass-on-dark-10);
+    border-color: var(--glass-on-dark-12);
+    color: var(--glass-on-dark-100);
+  }
+
+  /* A pressed toggle stays as lit when hovered as it is at rest. */
+  .zoomAction[aria-pressed='true']:hover {
+    background: var(--glass-on-dark-15);
+  }
+
+  .close:hover {
+    background: var(--glass-on-dark-15);
+    transform: rotate(90deg);
+  }
+
+  .nav:hover:not(:disabled) {
+    background: var(--glass-on-dark-12);
+  }
+
+  .refThumb:hover {
+    border-color: var(--glass-on-dark-34);
+    background: var(--glass-on-dark-12);
+  }
 }
 
 /* On-glass pending ring shown while the source still is fetched + uploaded.
@@ -359,17 +385,16 @@
   composes: ring from '../../styles/spinner.module.css';
 }
 
+/* One on-dark ring for every control on the glass bar: --focus-ring is ink,
+   invisible on the dark panel in the light theme. */
 .btn:focus-visible,
+.animateAction:focus-visible,
 .zoomAction:focus-visible,
 .close:focus-visible,
 .nav:focus-visible,
 .refThumb:focus-visible {
   outline: 2px solid var(--glass-on-dark-70);
   outline-offset: 2px;
-}
-
-.danger:hover {
-  background: color-mix(in oklch, var(--danger) 40%, transparent);
 }
 
 .close {
@@ -389,11 +414,6 @@
   justify-content: center;
   z-index: calc(var(--z-lightbox) + 1);
   transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
-}
-
-.close:hover {
-  background: var(--glass-on-dark-15);
-  transform: rotate(90deg);
 }
 
 .close:active {
@@ -419,10 +439,6 @@
   transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
 }
 
-.nav:hover {
-  background: var(--glass-on-dark-12);
-}
-
 /* Compose with the vertical-centering translate — a bare scale() would
    yank the button off its axis. */
 .nav:active:not(:disabled) {
@@ -438,7 +454,7 @@
 }
 
 .nav:disabled {
-  opacity: 0.2;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 

@@ -350,7 +350,7 @@ describe('Edit model: Test model', () => {
 
   test('says when it was last tested, and shows the stored report', () => {
     setup({ model: { ...SCOUT, verifiedAt: Date.now() - 5 * 60_000, lastTest: REPORT } });
-    expect(screen.getByText('Last tested 5m ago')).toBeTruthy();
+    expect(screen.getByText(/Last tested/).textContent).toBe('Last tested 5m ago');
     expect(screen.getByText(/The model replied./)).toBeTruthy();
   });
 

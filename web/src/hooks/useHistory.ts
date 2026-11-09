@@ -65,7 +65,9 @@ export function useHistory(view: AppView = { kind: 'unsorted' }, q = '') {
     // visible (isPlaceholderData), so the spinner shows only on a cold load.
     isLoading: query.isLoading,
     isPlaceholderData: query.isPlaceholderData,
-    isFetching: query.isFetching,
+    // `isFetching` is deliberately not exposed: TanStack tracks the result
+    // fields a component reads, and nothing reads it, so exposing it would
+    // re-render the app root on every history fetch start and end.
     isFetchingNextPage: query.isFetchingNextPage,
     isFetchNextPageError: query.isFetchNextPageError,
     fetchNextPage: query.fetchNextPage,

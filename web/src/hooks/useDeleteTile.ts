@@ -12,6 +12,7 @@ import {
   rollbackCanonicalMirror,
   type ActiveScope,
   type HistoryData,
+  type ScopeSnapshot,
 } from './scopedHistoryMutation';
 import { useArchiveUndoToast } from './useArchiveUndoToast';
 import { useCancel } from './useCancel';
@@ -26,8 +27,8 @@ interface DeleteTileInput {
 
 interface MutationContext {
   readonly activeKey: QueryKey;
-  readonly canonicalKey?: QueryKey;
-  readonly canonicalPrevious?: HistoryData | undefined;
+  readonly keys: readonly QueryKey[];
+  readonly snapshots: readonly ScopeSnapshot[];
   readonly previous: HistoryData | undefined;
   readonly wasLoading: boolean;
   // What the server archives (done tiles; failed ones are hard-deleted): the
@@ -63,13 +64,10 @@ export function useDeleteTile(scope: Partial<ActiveScope> = {}) {
         // here and `useCancel.onMutate`'s own cancelQueries can resurrect
         // the optimistically-removed tile before the server delete lands.
         await queryClient.cancelQueries({ queryKey: historyKeys.all() });
-        return { activeKey, previous: undefined, wasLoading, archivedTileIds: [] };
+        return { activeKey, keys: [activeKey], snapshots: [], previous: undefined, wasLoading, archivedTileIds: [] };
       }
-      const mirror = await beginCanonicalMirror(queryClient, activeKey);
-      removeTileFromCache(queryClient, activeKey, input.batchId, input.tileId);
-      if (mirror.canonicalKey) {
-        removeTileFromCache(queryClient, mirror.canonicalKey, input.batchId, input.tileId);
-      }
+      const mirror = await beginCanonicalMirror(queryClient, activeKey, input.batchId);
+      for (const key of mirror.keys) removeTileFromCache(queryClient, key, input.batchId, input.tileId);
       // Drops a possible in-flight preview entry. Same rationale as
       // useDeleteBatch — closes the partial-arrives-after-remove gap.
       clearTilePreview(input.tileId);

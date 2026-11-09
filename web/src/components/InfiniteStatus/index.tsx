@@ -9,6 +9,8 @@ export interface InfiniteStatusProps {
   fetchNextPage: () => void;
   itemCount: number;
   endLabel: string;
+  /** The scroll container holding this row; the prefetch margin is measured against it. */
+  scrollRoot?: React.RefObject<HTMLElement | null>;
   rootMargin?: string;
   enabled?: boolean;
 }
@@ -32,6 +34,7 @@ export function InfiniteStatus({
   fetchNextPage,
   itemCount,
   endLabel,
+  scrollRoot,
   rootMargin,
   enabled = true,
 }: InfiniteStatusProps) {
@@ -42,6 +45,7 @@ export function InfiniteStatus({
     fetchNextPage,
     itemCount,
     enabled,
+    ...(scrollRoot ? { root: scrollRoot } : {}),
     ...(rootMargin !== undefined ? { rootMargin } : {}),
   });
   const footprint = useStatusFootprint(hasNextPage);
@@ -71,9 +75,9 @@ export function InfiniteStatus({
           <button
             type="button"
             className={styles.fallbackButton}
-            onClick={() => { fetchNextPage(); }}
-            disabled={isFetchingNextPage}
-            aria-busy={isFetchingNextPage}
+            onClick={() => { if (!isFetchingNextPage) fetchNextPage(); }}
+            aria-disabled={isFetchingNextPage || undefined}
+            aria-busy={isFetchingNextPage || undefined}
           >
             {isFetchNextPageError ? 'Retry loading more' : 'Load more'}
           </button>

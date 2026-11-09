@@ -12,6 +12,7 @@ import {
   rollbackCanonicalMirror,
   type ActiveScope,
   type HistoryData,
+  type ScopeSnapshot,
 } from './scopedHistoryMutation';
 import { useArchiveUndoToast } from './useArchiveUndoToast';
 import { useCancel } from './useCancel';
@@ -26,8 +27,8 @@ interface DeleteBatchInput {
 interface MutationContext {
   readonly allLoading: boolean;
   readonly activeKey: QueryKey;
-  readonly canonicalKey?: QueryKey;
-  readonly canonicalPrevious?: HistoryData | undefined;
+  readonly keys: readonly QueryKey[];
+  readonly snapshots: readonly ScopeSnapshot[];
   readonly hadAnyLoading: boolean;
   readonly previous: HistoryData | undefined;
   readonly previewTileIds: readonly string[];
@@ -46,6 +47,8 @@ function batchMutationContext(
   const tiles = batch?.tiles ?? [];
   return {
     activeKey,
+    keys: [activeKey],
+    snapshots: [],
     allLoading: tiles.length > 0 && tiles.every((tile) => tile.status === 'loading'),
     hadAnyLoading: tiles.some((tile) => tile.status === 'loading'),
     previous: undefined,
@@ -83,7 +86,7 @@ export function useDeleteBatch(scope: Partial<ActiveScope> = {}) {
         await queryClient.cancelQueries({ queryKey: historyKeys.all() });
         return context;
       }
-      const mirror = await beginCanonicalMirror(queryClient, activeKey);
+      const mirror = await beginCanonicalMirror(queryClient, activeKey, input.batchId);
       // Snapshot loading tile IDs BEFORE removing the batch so we can drop
       // their preview entries from the Zustand store. The LoadingTile
       // unmount effect would also catch this, but the explicit cleanup
@@ -106,10 +109,7 @@ export function useDeleteBatch(scope: Partial<ActiveScope> = {}) {
         : (findBatchInCache(queryClient, activeKey, input.batchId)?.tiles ?? [])
           .filter((tile) => tile.status === 'done')
           .map((tile) => tile.id);
-      removeBatchFromCache(queryClient, activeKey, input.batchId);
-      if (mirror.canonicalKey) {
-        removeBatchFromCache(queryClient, mirror.canonicalKey, input.batchId);
-      }
+      for (const key of mirror.keys) removeBatchFromCache(queryClient, key, input.batchId);
       for (const tileId of previewTileIds) {
         clearTilePreview(tileId);
         clearTileProgress(tileId);

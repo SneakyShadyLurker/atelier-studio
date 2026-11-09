@@ -32,9 +32,45 @@
   border: 1px solid var(--ink);
 }
 
-.primary:hover:not(:disabled) {
-  background: var(--ink-2);
-  border-color: var(--ink-2);
+/* Hover rules live under (hover: hover): WebKit keeps :hover on a tapped
+   control until the next tap elsewhere, which read as a stuck state. */
+@media (hover: hover) {
+  .primary:hover:not(:disabled) {
+    background: var(--ink-2);
+    border-color: var(--ink-2);
+  }
+
+  .secondary:hover:not(:disabled) {
+    background: var(--bg-sunk);
+    /* One step past the resting --line-control so the hover border is an actual
+       signal, not a no-op repaint. */
+    border-color: var(--ink-3);
+  }
+
+  .danger:hover:not(:disabled) {
+    filter: brightness(1.12);
+  }
+
+  .ai:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .icon:hover:not(:disabled) {
+    border-color: var(--ink-3);
+    color: var(--ink);
+  }
+
+  .iconAction:hover:where(:not(:disabled, [aria-busy='true'])),
+  .starBtn:hover:where(:not(:disabled, [aria-busy='true'])) {
+    background: var(--bg-sunk);
+    color: var(--ink);
+    border-color: var(--line);
+  }
+
+  .tileAction:hover:where(:not(:disabled, [aria-busy='true'])) {
+    background: var(--scrim-strong);
+    color: var(--glass-on-dark-100);
+  }
 }
 
 .secondary {
@@ -45,21 +81,10 @@
   border: 1px solid var(--line-control);
 }
 
-.secondary:hover:not(:disabled) {
-  background: var(--bg-sunk);
-  /* One step past the resting --line-control so the hover border is an actual
-     signal, not a no-op repaint. */
-  border-color: var(--ink-3);
-}
-
 .danger {
   background: var(--danger);
   color: var(--bg);
   border: 1px solid var(--danger);
-}
-
-.danger:hover:not(:disabled) {
-  filter: brightness(1.12);
 }
 
 /* AI-action vocabulary. --accent is reserved for AI actions per project
@@ -68,10 +93,6 @@
   background: var(--accent);
   color: var(--bg);
   border: 1px solid var(--accent);
-}
-
-.ai:hover:not(:disabled) {
-  filter: brightness(1.08);
 }
 
 .primary:active:not(:disabled),
@@ -119,11 +140,6 @@
     border-color var(--dur-hover) var(--ease-out),
     color var(--dur-hover) var(--ease-out),
     transform var(--dur-transform) var(--ease-tactile);
-}
-
-.icon:hover:not(:disabled) {
-  border-color: var(--ink-3);
-  color: var(--ink);
 }
 
 .icon:active:not(:disabled) {
@@ -179,9 +195,7 @@
   height: 28px;
 }
 
-.iconAction:hover:where(:not(:disabled, [aria-busy='true'])),
 .iconAction:focus-visible,
-.starBtn:hover:where(:not(:disabled, [aria-busy='true'])),
 .starBtn:focus-visible {
   background: var(--bg-sunk);
   color: var(--ink);
@@ -234,7 +248,6 @@
     transform var(--dur-transform) var(--ease-tactile);
 }
 
-.tileAction:hover:where(:not(:disabled, [aria-busy='true'])),
 .tileAction:focus-visible {
   background: var(--scrim-strong);
   color: var(--glass-on-dark-100);

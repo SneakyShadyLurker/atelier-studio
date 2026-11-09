@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { InfiniteStatus } from '../src/components/InfiniteStatus';
 
@@ -98,7 +98,7 @@ describe('InfiniteStatus', () => {
     expect(fetchNextPage).toHaveBeenCalledTimes(1);
   });
 
-  test('keeps sentinel and fallback button mounted across the idle→loading transition (button disabled while loading)', () => {
+  test('keeps sentinel and fallback button mounted across the idle→loading transition (button busy, never disabled, so focus holds)', () => {
     // Regression: previously the sentinel + button only rendered when state==='idle',
     // so an in-flight fetch unmounted them. The observer kept a reference to a
     // detached node and the next fresh sentinel was unobserved — auto-load
@@ -115,10 +115,14 @@ describe('InfiniteStatus', () => {
     // Same observer, same sentinel node — no churn.
     expect(expectObserver()).toBe(observerBefore);
     expect(observerBefore.observed[0]).toBe(sentinelBefore);
-    // Button is still in the DOM but disabled.
+    // Button is still in the DOM, busy and inert to clicks, but not `disabled`:
+    // a focused control that becomes disabled drops focus to <body>.
     const button = screen.getByRole('button', { name: /load more/i });
-    expect(button.hasAttribute('disabled')).toBe(true);
+    expect(button.hasAttribute('disabled')).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
     expect(button.getAttribute('aria-busy')).toBe('true');
+    fireEvent.click(button);
+    expect(fetchNextPage).not.toHaveBeenCalled();
   });
 
   test('does not observe when enabled is false', () => {

@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef } from 'react';
 import { isAbortError } from '../lib/abort';
 import type { ApiErrorCode, Batch, GenerateRequest, Model, Tile } from '@atelier/shared';
+import type { QueryKey } from '@tanstack/react-query';
 import { ApiError, apiImageUrl } from '../api/client';
 import { generateStream, type GenerateAcceptance } from '../api/generate';
 import { collectionKeys } from '../api/collections';
@@ -11,9 +12,11 @@ import { historyKeys } from '../api/history';
 import { modelKeys } from '../api/models';
 import { useAtelierStore } from '../store/atelier';
 import { emitHistoryInvalidate, MY_TAB_ID, onHistoryCancel, onHistoryInvalidate } from './broadcastHistory';
-import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
-import { invalidateLibrary } from './invalidateLibrary';
-import { findTileInCache, removeTileFromCache, updateBatchStatus, updateBatchTile, upsertNewBatch } from './historyCache';
+import { HISTORY_WRITE_MUTATION_KEY, lastHistoryWriteId } from './historyWrites';
+import { invalidateHistoryBehindWrites, invalidateLibrary } from './invalidateLibrary';
+import { findTileInAnyScope, historyScopesWithBatch, removeBatchFromCache, removeTileFromCache, updateBatchStatus, updateBatchTile, upsertNewBatch } from './historyCache';
+import { refreshHistory } from '../api/historyRefresh';
+import { replaceBatchInScope } from './scopedHistoryMutation';
 import { getBatch, registerBatch, unregisterBatch } from './inFlightBatches';
 import { isPhoneViewport } from './useIsPhone';
 import { useBackgroundCompletionTitle } from './useBackgroundCompletionTitle';
@@ -106,6 +109,10 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
       owned.clear();
     };
   }, []);
+  // A history write (archive, move, pin, cancel, restore) is pending: a GET
+  // sent now could return pre-commit state and land over its optimistic patch.
+  const historyWriting = () => queryClient.isMutating({ mutationKey: HISTORY_WRITE_MUTATION_KEY }) > 0;
+
   useEffect(() => {
     // Cross-tab convergence: sibling tabs post on the channel when a history
     // write settles, a generation is accepted or a cancel starts. This tab
@@ -117,11 +124,15 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
     // waits: a read of pre-commit server state would land over the write's
     // optimistic patch. The MutationCache reports when the last write ends,
     // success or failure, and the deferred re-read runs then.
+    // A hidden tab waits too: nobody is looking, and a sibling draining its
+    // queue would otherwise keep every background tab re-reading the whole
+    // library for the duration. The deferred re-read runs when it is shown.
     let refreshing = false;
     let pending = false;
     const writing = () => queryClient.isMutating({ mutationKey: HISTORY_WRITE_MUTATION_KEY }) > 0;
+    const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
     const refreshFromSibling = (): void => {
-      if (refreshing || writing()) {
+      if (refreshing || writing() || hidden()) {
         pending = true;
         return;
       }
@@ -135,6 +146,10 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
     const unsubscribeWrites = queryClient.getMutationCache().subscribe(() => {
       if (pending && !refreshing && !writing()) refreshFromSibling();
     });
+    const onVisible = () => {
+      if (pending && !hidden()) refreshFromSibling();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     const unsubscribeInvalidate = onHistoryInvalidate(refreshFromSibling);
     const unsubscribeCancel = onHistoryCancel((batchId, originTabId) => {
       if (originTabId === MY_TAB_ID) return;
@@ -142,11 +157,50 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
       refreshFromSibling();
     });
     return () => {
+      document.removeEventListener('visibilitychange', onVisible);
       unsubscribeWrites();
       unsubscribeInvalidate();
       unsubscribeCancel();
     };
   }, [queryClient]);
+
+  // One batch's server row, written into every cached scope that shows it (a
+  // scope it no longer belongs to drops it). Falls back to invalidating every
+  // history scope (the stream wrote this batch into each of them) when the
+  // read fails, or when a history write was in flight or has started since
+  // the request began: a response read before that write would carry
+  // pre-commit state over its optimistic patch. While such a write is still
+  // pending the fallback only marks the scopes stale, and the re-read runs
+  // once no history write is pending (the write's own settle, or the deferred
+  // read behind it).
+  const settleBatchFromServer = async (batchId: string): Promise<void> => {
+    const writing = historyWriting;
+    const fallback = () => (writing()
+      ? invalidateHistoryBehindWrites(queryClient)
+      : queryClient.invalidateQueries({ queryKey: historyKeys.all() }));
+    const writeEpoch = lastHistoryWriteId(queryClient);
+    if (writing()) {
+      await fallback();
+      return;
+    }
+    let response: Awaited<ReturnType<typeof refreshHistory>>;
+    try {
+      response = await refreshHistory({ batchIds: [batchId], storyIds: [] }, null, '', AbortSignal.timeout(30_000));
+    } catch {
+      await fallback();
+      return;
+    }
+    const row = response.items.find((item) => item.id === batchId);
+    const keys = historyScopesWithBatch(queryClient, historyKeys.all(), batchId);
+    if (writing() || lastHistoryWriteId(queryClient) !== writeEpoch || (!row && !response.missingBatchIds.includes(batchId))) {
+      await fallback();
+      return;
+    }
+    for (const key of keys) {
+      if (row) replaceBatchInScope(queryClient, key, row);
+      else removeBatchFromCache(queryClient, key, batchId);
+    }
+  };
 
   const mutation = useMutation({
     // Offline, fail at once instead of pausing: a stopped queue drain waits for
@@ -161,6 +215,11 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
       // invoking the mutation, so every cache write/read for this stream is
       // pinned to that scope's key. It must NOT follow later navigation.
       const writeKey = historyKeys.list();
+      // Tile and status events reach every cached scope that shows the batch
+      // (Unsorted, Pinned, a collection it was moved into, a search), so the
+      // scope the user is looking at converges with the stream instead of
+      // waiting for the poll. Only the insert is pinned to Unsorted.
+      const scopesWithBatch = (id: string): QueryKey[] => historyScopesWithBatch(queryClient, historyKeys.all(), id);
       const controller = new AbortController();
       pendingControllersRef.current.add(controller);
 
@@ -268,21 +327,40 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
               // existed: a refetch would drop it, and fetchNextPage appends to
               // the pages it started from. Cancel it before the write, as the
               // other history writers do; the pagination sentinel re-requests
-              // a cancelled page and this stream's settle refetches the list.
-              const hadHistory = queryClient.getQueryData(writeKey) !== undefined;
+              // a cancelled page. A cancelled refetch (a settled write's or a
+              // sibling tab's re-read, a focus refetch) is re-issued after the
+              // insert, once the row exists server-side, so no writer's read
+              // is silently dropped; so is an invalidation the insert would
+              // otherwise clear.
+              const writeState = queryClient.getQueryState(writeKey);
+              const hadHistory = writeState?.data !== undefined;
+              // A next-page load is not re-issued: the pagination sentinel
+              // requests the cancelled page again on its own.
+              const interruptedRead = (writeState?.fetchStatus === 'fetching' && !writeState.fetchMeta?.fetchMore)
+                || writeState?.isInvalidated === true;
               await queryClient.cancelQueries({ queryKey: writeKey, exact: true });
               // A sibling-tab cancel or unmount during the await: no phantom row.
               controller.signal.throwIfAborted();
               upsertNewBatch(queryClient, writeKey, batch);
               // A cancelled first load leaves only this row; read the rest now.
               if (!hadHistory) void queryClient.invalidateQueries({ queryKey: writeKey, exact: true });
+              // The re-issued read waits behind a pending history write like
+              // every other re-read (the stale mark the settle fallback left
+              // would otherwise be read right here, over the write's patch).
+              else if (interruptedRead) {
+                void (historyWriting()
+                  ? invalidateHistoryBehindWrites(queryClient)
+                  : queryClient.invalidateQueries({ queryKey: writeKey, exact: true }));
+              }
               setActiveBatchId(batch.id);
               followBatch(batch.id);
             } else if (event.event === 'queue' && batchId) {
-              updateBatchStatus(queryClient, writeKey, batchId, {
-                status: 'running',
-                ...(event.data.startedAt === undefined ? {} : { startedAt: event.data.startedAt }),
-              });
+              for (const key of scopesWithBatch(batchId)) {
+                updateBatchStatus(queryClient, key, batchId, {
+                  status: 'running',
+                  ...(event.data.startedAt === undefined ? {} : { startedAt: event.data.startedAt }),
+                });
+              }
               if (!announcedRunning) {
                 announceGenerationStarted(modelLabel(modelById, request.modelId));
                 announcedRunning = true;
@@ -297,12 +375,12 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
                 // listening to. The old `updateLoadingTilePreview` had the
                 // equivalent guard inline; this restores it now that the
                 // write target is in a separate store.
-                const cachedTile = findTileInCache(queryClient, writeKey, batchId, event.data.tileId);
+                const cachedTile = findTileInAnyScope(queryClient, historyKeys.all(), batchId, event.data.tileId);
                 if (cachedTile?.status !== 'loading') continue;
                 setTilePreview(event.data.tileId, { url: event.data.preview, index: event.data.index });
                 previewTileIds.add(event.data.tileId);
               } else if (event.data.status === 'progress') {
-                const cachedTile = findTileInCache(queryClient, writeKey, batchId, event.data.tileId);
+                const cachedTile = findTileInAnyScope(queryClient, historyKeys.all(), batchId, event.data.tileId);
                 if (cachedTile?.status !== 'loading') continue;
                 const { progress, step, totalSteps, pass, passCount } = event.data;
                 // sse.ts strips an incoherent step set, so the four travel together.
@@ -320,7 +398,7 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
                   continue;
                 }
                 seenTerminalTileIds.add(event.data.tileId);
-                removeTileFromCache(queryClient, writeKey, batchId, event.data.tileId);
+                for (const key of scopesWithBatch(batchId)) removeTileFromCache(queryClient, key, batchId, event.data.tileId);
                 clearTilePreview(event.data.tileId);
                 clearTileProgress(event.data.tileId);
                 previewTileIds.delete(event.data.tileId);
@@ -354,7 +432,7 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
                       completedAt: event.data.completedAt,
                       ...requestRefs(),
                     };
-                updateBatchTile(queryClient, writeKey, batchId, tile);
+                for (const key of scopesWithBatch(batchId)) updateBatchTile(queryClient, key, batchId, tile);
                 // BatchView swaps LoadingTile → ImageTile/FailedTile on the
                 // same render that processes this update, so the preview
                 // entry is no longer read after this point. Drop it now to
@@ -367,7 +445,7 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
               }
             } else if (event.event === 'done') {
               sawDone = true;
-              if (batchId) updateBatchStatus(queryClient, writeKey, batchId, { status: 'done' });
+              if (batchId) for (const key of scopesWithBatch(batchId)) updateBatchStatus(queryClient, key, batchId, { status: 'done' });
               if (selectedModel?.outputsVideo === true && doneTileCount > 0) markBackgroundCompletion();
               if (batchId) announceBatchSettled(batchId, doneTileCount, failedTileCount);
             }
@@ -417,13 +495,19 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
         // URLs would linger in the store until full page reload.
         for (const tileId of previewTileIds) clearTilePreview(tileId);
         for (const tileId of progressTileIds) clearTileProgress(tileId);
-        // Successful streams only need the pinned write scope refreshed.
-        // Stream loss or deliberate aborts may require cross-scope recovery:
-        // the server can keep generating and the next history fetch is the
-        // signal that surfaces or converges those rows.
-        void queryClient.invalidateQueries({
-          queryKey: needsBroadHistoryReconcile || accepted.replayed ? historyKeys.all() : writeKey,
-        });
+        // Stream loss, deliberate aborts and replays may require cross-scope
+        // recovery: the server can keep generating and the next history fetch
+        // is the signal that surfaces or converges those rows. A clean stream
+        // already wrote every tile; it only needs this batch's server row
+        // (one bounded POST) rather than a refetch of every loaded page,
+        // which a queue drain would restart on each settle.
+        if (needsBroadHistoryReconcile || accepted.replayed) {
+          void queryClient.invalidateQueries({ queryKey: historyKeys.all() });
+        } else if (batchId !== null && sawDone) {
+          void settleBatchFromServer(batchId);
+        } else {
+          void queryClient.invalidateQueries({ queryKey: writeKey, exact: true });
+        }
       }
     },
     onError: (error, variables) => {

@@ -111,10 +111,11 @@ async function box(locator: Locator): Promise<Box> {
 }
 
 // Entrance animations and transitions move a surface by a few pixels;
-// geometry is read once they have finished.
+// geometry is read once they, and those of the surface's descendants (a
+// toast's slot track opening), have finished.
 async function settle(locator: Locator): Promise<void> {
   await locator.evaluate((element) => Promise.all(
-    element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+    element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)),
   ));
 }
 
@@ -1354,7 +1355,8 @@ const picker = (page: Page) => page.getByRole('dialog').filter({ has: page.getBy
 const libraryChip = (page: Page) => page.getByRole('button', { name: 'Templates', exact: true });
 const composerWrap = (page: Page) => page.locator('#atelier-composer');
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
-const toastStack = (page: Page) => undoButton(page).locator('xpath=../..');
+// Undo → toast → slot inner → slot → the anchored stack host.
+const toastStack = (page: Page) => undoButton(page).locator('xpath=../../../..');
 
 for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tablet: VIEWPORTS.tablet })) {
   test.describe(`composer · ${name}`, () => {

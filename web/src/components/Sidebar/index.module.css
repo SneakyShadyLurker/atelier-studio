@@ -499,8 +499,10 @@
   border: 1px solid transparent;
   background: transparent;
   color: inherit;
-  /* backwards, not both: a held end pose would override the press transform. */
-  animation: global(atelier-drop-in) var(--dur-settle) var(--ease-out) backwards;
+  /* The same rise as the feed sheet it mirrors (both lists append at the
+     bottom), on the entrance beat. backwards, not both: a held end pose would
+     override the press transform. */
+  animation: global(atelier-rise-in) var(--dur-entrance) var(--ease-out) backwards;
 }
 
 /* A seen row (virtual remount, reopened drawer) replays no entrance. */
@@ -515,9 +517,14 @@
 
 /* Selected state is the managed-row vocabulary: the global 2px --ink
    railActiveBar plus the sunk fill. */
-.item:hover,
 .itemActive {
   background: var(--bg-sunk);
+}
+
+@media (hover: hover) {
+  .item:hover {
+    background: var(--bg-sunk);
+  }
 }
 
 .item:active {

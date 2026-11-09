@@ -236,7 +236,7 @@ describe('delete hooks loading-row cancel delegation', () => {
     expect(unsortedCacheAfterBatch).toBeUndefined();
   });
 
-  test('useDeleteTile on a loading tile toasts Canceled and aborts the local controller after DELETE', async () => {
+  test('useDeleteTile on a loading tile toasts Canceled and leaves the batch stream open (the server cancels the one tile)', async () => {
     const calls: { url: string; method: string }[] = [];
     globalThis.fetch = okDeleteMock(calls);
     const controller = new AbortController();
@@ -252,7 +252,7 @@ describe('delete hooks loading-row cancel delegation', () => {
     });
 
     expect(calls).toEqual([{ url: '/api/history/batch-1/tile-loading', method: 'DELETE' }]);
-    expect(controller.signal.aborted).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
   });
 
   test('useDeleteTile on a done tile with archive intent keeps Archived toast', async () => {

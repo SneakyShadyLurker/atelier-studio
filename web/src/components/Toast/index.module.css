@@ -20,9 +20,52 @@
   z-index: var(--z-toast);
   display: grid;
   justify-items: center;
-  gap: 8px;
   pointer-events: none;
   transition: opacity var(--dur-overlay) var(--ease-out);
+}
+
+/* Each toast sits in a grid-track slot that opens from 0fr as it enters and
+   closes back to 0fr as it leaves, so the toasts beside it slide instead of
+   jumping by its height. The 8px gap between toasts is the slot's own top
+   padding (inside the collapsing track), so it closes with the slot; the
+   first slot carries none. */
+.slot {
+  display: grid;
+  grid-template-rows: 1fr;
+  justify-items: center;
+  transition: grid-template-rows var(--dur-settle) var(--ease-tactile);
+
+  @starting-style {
+    grid-template-rows: 0fr;
+  }
+}
+
+.slot[data-closing='true'] {
+  grid-template-rows: 0fr;
+  transition-duration: var(--dur-overlay);
+  transition-timing-function: var(--ease-exit);
+}
+
+.slotInner {
+  min-height: 0;
+  overflow: clip;
+  /* Room for the toast's own rise and settle inside the clipped track. */
+  overflow-clip-margin: 8px;
+  padding-top: 8px;
+  transition: padding-top var(--dur-overlay) var(--ease-exit);
+}
+
+.slot:not(.slot ~ .slot) > .slotInner {
+  padding-top: 0;
+}
+
+/* The track growth is geometry no token collapses: under reduced motion the
+   slot opens and closes at once and only the toast's own fade remains. */
+@media (prefers-reduced-motion: reduce) {
+  .slot,
+  .slotInner {
+    transition: none;
+  }
 }
 
 /* anchor() takes its fallback when no Composer is mounted: the stack then
@@ -87,9 +130,14 @@
   transform: scale(var(--m-press));
 }
 
-.action:hover,
 .action:focus-visible {
   background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+@media (hover: hover) {
+  .action:hover {
+    background: color-mix(in srgb, currentColor 12%, transparent);
+  }
 }
 
 .action:focus-visible {

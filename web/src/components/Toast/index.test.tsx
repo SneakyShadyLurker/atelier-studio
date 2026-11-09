@@ -180,7 +180,8 @@ describe('Toast host placement', () => {
     const { rerender } = render(<Shell />);
     addUndoToast();
     const undo = onlyUndo();
-    const stack = undo.parentElement?.parentElement;
+    // Undo → its toast → slot inner → slot → the portalled stack.
+    const stack = undo.parentElement?.parentElement?.parentElement?.parentElement;
     const home = stack?.parentElement;
     if (!stack || !home) throw new Error('missing toast home');
     const move = mock((node: Node) => {
@@ -263,8 +264,8 @@ describe('phone drawer covers the stack', () => {
   });
 
   function stack(): HTMLElement {
-    // Undo → its toast → the portalled stack.
-    const element = onlyUndo().parentElement?.parentElement;
+    // Undo → its toast → slot inner → slot → the portalled stack.
+    const element = onlyUndo().parentElement?.parentElement?.parentElement?.parentElement;
     if (!element) throw new Error('missing toast stack');
     return element;
   }

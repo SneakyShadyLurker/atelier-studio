@@ -1,5 +1,5 @@
 import { SseTerminalErrorSchema, TILE_MIMES } from '@atelier/shared';
-import { nextSseFrame, parseSseFrame } from '@atelier/shared/sse';
+import { nextSseFrame, parseSseFrame, SSE_TERMINATOR_REWIND } from '@atelier/shared/sse';
 import type { BatchEvent, BrainstormSseEvent, DoneEvent, EnhanceSseEvent, QueueEvent, TileEvent } from '@atelier/shared';
 import type { SseFrame } from '@atelier/shared/sse';
 import { ApiError, apiFetch, extractApiError, request, responseRequestId } from './client';
@@ -139,17 +139,27 @@ export async function* readSseFrames(
   stream: ReadableStream<Uint8Array>,
   options: Readonly<ReadSseFramesOptions> = {},
 ): AsyncGenerator<SseFrame> {
+  // The frame scan resumes where the last miss stopped: a partial-preview
+  // frame is hundreds of KB of base64 arriving in many chunks, and a scan
+  // from zero per chunk grew quadratic in the frame size.
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let searchFrom = 0;
   const shownModeration = new Set<string>();
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      for (let next = nextSseFrame(buffer); next; next = nextSseFrame(buffer)) {
+      let next = nextSseFrame(buffer, searchFrom);
+      if (!next) {
+        searchFrom = Math.max(0, buffer.length - SSE_TERMINATOR_REWIND);
+        continue;
+      }
+      for (; next; next = nextSseFrame(buffer)) {
         buffer = next.rest;
+        searchFrom = 0;
         options.onRead?.();
         const frame = parseSseFrame(next.raw);
         if (frame) {

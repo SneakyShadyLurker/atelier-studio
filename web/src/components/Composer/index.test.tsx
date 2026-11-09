@@ -1149,7 +1149,9 @@ describe('Composer prerequisite readiness', () => {
       client.setQueryData(textModelKeys.all(), { models: [{ id: 'writer' }], tasks: [], defaults: { byTask: {} }, writers: {} });
       await Promise.resolve();
     });
-    await waitFor(() => { expect(screen.queryByText(readinessStatus)).toBeNull(); });
+    // The observer update lands on TanStack's deferred batch; under a loaded
+    // runner that can exceed the default 1s wait.
+    await waitFor(() => { expect(screen.queryByText(readinessStatus)).toBeNull(); }, { timeout: 4000 });
     expect(screen.getByRole('button', { name: 'Enhance' }).getAttribute('data-tip')).toBe('Rewrite prompt');
   });
 

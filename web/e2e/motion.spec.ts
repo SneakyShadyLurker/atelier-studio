@@ -1105,7 +1105,7 @@ test.describe('scroll-edge fades and rail entrance gating', () => {
     await page.evaluate(() => {
       document.body.dataset.railEntrances = '';
       document.addEventListener('animationstart', (event) => {
-        if (event.animationName === 'atelier-drop-in' && (event.target as Element).closest('[data-testid="sidebar-feed"]')) {
+        if (event.animationName === 'atelier-rise-in' && (event.target as Element).closest('[data-testid="sidebar-feed"]')) {
           document.body.dataset.railEntrances = `${document.body.dataset.railEntrances ?? ''}|${event.animationName}`;
         }
       });
@@ -2073,5 +2073,131 @@ test.describe('layout stability (T9)', () => {
     if (supported) expect(names.has('atelier-fade-in'), [...names].join(', ')).toBe(true);
     expect(names.has('atelier-shrink-out'), 'a placeholder row played a tile exit').toBe(false);
     expect(names.has('atelier-tile-in'), 'a real row played a tile entrance').toBe(false);
+  });
+});
+
+/*
+ * Feed micro-interactions (audit 2026-11-09): the hover lift on a tile whose
+ * entrance just played, no stuck hover after a tap, keyboard focus after a
+ * removal, and a loading tile that finishes without a second entrance.
+ */
+test.describe('feed micro-interactions', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+  });
+
+  test('a tile whose entrance just played still lifts on hover', async ({ page }) => {
+    await openWritableFeed(page);
+    const frame = page.locator(`${GRID('studio-batch-4')} > :first-child`);
+    // Entrances have finished (--dur-entrance 380ms) but the fill must not hold their end pose.
+    await page.waitForTimeout(500);
+    expect(await frame.evaluate((element) => getComputedStyle(element).transform)).toBe('none');
+    await frame.hover();
+    await expect.poll(() => frame.evaluate((element) => getComputedStyle(element).transform)).toBe('matrix(1, 0, 0, 1, 0, -2)');
+    await page.mouse.move(2, 2);
+    await expect.poll(() => frame.evaluate((element) => getComputedStyle(element).transform)).toBe('none');
+  });
+
+  test('archiving a tile hands keyboard focus to the next tile, archiving a batch to the next row', async ({ page }) => {
+    await openWritableFeed(page, 3);
+    const grid = page.locator(GRID('studio-batch-4'));
+    await grid.locator('> :first-child').hover();
+    await grid.getByRole('button', { name: 'Archive tile' }).first().click();
+    await expect(grid).toHaveAttribute('data-tile-count', '1');
+    const focusedTile = await page.evaluate(() => document.activeElement?.closest('[data-feed-tile]')?.getAttribute('data-feed-tile') ?? null);
+    expect(focusedTile).toBeTruthy();
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+
+    await page.waitForTimeout(600);
+    const before = await page.locator('[data-testid="canvas-scroller"] [data-index][data-batch-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-batch-id')));
+    await page.locator(FEED_BATCH('studio-batch-4')).getByRole('button', { name: 'Archive batch' }).click();
+    await expect(page.locator(FEED_BATCH('studio-batch-4'))).toHaveCount(0);
+    const focusedRow = await page.evaluate(() => document.activeElement?.closest('[data-batch-id]')?.getAttribute('data-batch-id') ?? null);
+    expect(focusedRow).toBeTruthy();
+    expect(focusedRow).not.toBe('studio-batch-4');
+    expect(before).toContain(focusedRow);
+  });
+
+  test('moving a batch out of the scope by keyboard hands focus to the next row once the popover closes', async ({ page }) => {
+    await openWritableFeed(page, 3);
+    const move = page.locator(FEED_BATCH('studio-batch-4')).getByRole('button', { name: 'Move to collection' });
+    await move.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Move to collection' });
+    await expect(dialog).toBeVisible();
+    // Enter on a collection row moves at once (no double-click window).
+    await dialog.getByRole('button', { name: /^Campaign studies/ }).focus();
+    await page.keyboard.press('Enter');
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator(FEED_BATCH('studio-batch-4'))).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => document.activeElement !== document.body)).toBe(true);
+    const focusedRow = await page.evaluate(() => document.activeElement?.closest('[data-batch-id]')?.getAttribute('data-batch-id') ?? null);
+    expect(focusedRow).toBeTruthy();
+    expect(focusedRow).not.toBe('studio-batch-4');
+  });
+
+  test('a loading tile that finishes develops in place without a second shell entrance', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto('/e2e/studio/index.html?generate=1&generateDelay=100&generateFinish=900');
+    await expect(page.locator(FEED_BATCH('studio-batch-4'))).toBeVisible();
+    await page.waitForTimeout(500);
+    await page.evaluate(() => {
+      document.body.dataset.tileEntrances = '0';
+      document.addEventListener('animationstart', (event) => {
+        if (event.animationName !== 'atelier-tile-in') return;
+        if (!(event.target as Element).closest('section[data-batch-id^="studio-generated-"]')) return;
+        document.body.dataset.tileEntrances = String(Number(document.body.dataset.tileEntrances ?? '0') + 1);
+      });
+    });
+    await page.getByRole('textbox', { name: 'Prompt' }).fill('a brass lamp');
+    await page.getByRole('button', { name: 'Generate' }).click();
+    const generated = page.locator('section[data-batch-id="studio-generated-1"]');
+    await expect(generated.getByRole('button', { name: 'Cancel generation' })).toBeVisible();
+    await expect(generated.getByRole('button', { name: /^Open image 1/ })).toBeVisible({ timeout: 5000 });
+    await page.waitForTimeout(500);
+    // The batch sheet entered once (its tiles enter with it); the finished
+    // tile's shell carries data-seen and plays no entrance of its own.
+    expect(await page.locator('body').getAttribute('data-tile-entrances')).toBe('0');
+    await expect(generated.locator('[data-feed-tile]')).toHaveAttribute('data-seen', 'true');
+    // The done image still develops: the reveal mat was present for the handoff.
+    expect(await generated.locator('[data-feed-tile] button').first().getAttribute('data-develop')).toBe('true');
+  });
+});
+
+test.describe('feed touch micro-interactions', () => {
+  test('a tapped header action and a tapped tile keep no hover state after the Lightbox closes', async ({ browser }) => {
+    const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    try {
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.goto('/e2e/studio/index.html');
+      const batch = page.locator(FEED_BATCH('studio-batch-4'));
+      await expect(batch).toBeVisible();
+      await page.waitForTimeout(600);
+      const tile = batch.locator('[data-feed-tile]').first();
+      const resting = await tile.evaluate((element) => getComputedStyle(element).boxShadow);
+      await tile.getByRole('button', { name: /^Open image 1/ }).tap();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await page.getByRole('button', { name: 'Close lightbox' }).tap();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await page.waitForTimeout(300);
+      // No lift, no hover shadow: the tile shows the resting shell and only
+      // real focus raises the scrim.
+      expect(await tile.evaluate((element) => getComputedStyle(element).transform)).toBe('none');
+      expect(await tile.evaluate((element) => getComputedStyle(element).boxShadow)).toBe(resting);
+
+      const reroll = batch.getByRole('button', { name: 'Move to collection' });
+      const untouched = batch.getByRole('button', { name: 'Archive batch' });
+      await reroll.tap();
+      await expect(page.getByRole('dialog', { name: /Move/ })).toBeVisible();
+      await page.getByRole('button', { name: 'Close move popover' }).tap();
+      await expect(page.getByRole('dialog', { name: /Move/ })).toHaveCount(0);
+      await page.waitForTimeout(300);
+      // The tapped header action looks like its untouched neighbour again.
+      expect(await reroll.evaluate((element) => getComputedStyle(element).backgroundColor))
+        .toBe(await untouched.evaluate((element) => getComputedStyle(element).backgroundColor));
+    } finally {
+      await context.close();
+    }
   });
 });

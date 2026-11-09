@@ -1,9 +1,11 @@
-// Unsorted (historyKeys.list()) is the canonical SSE channel scope — every mutation touching batch tiles must mirror the optimistic patch into Unsorted in addition to the active scope.
+// A cancel removes the tile or batch from every cached history scope that
+// shows it (the acted-on scope, the canonical Unsorted feed the SSE stream
+// writes, and any other cached scope holding the row).
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { deleteBatch, deleteTile, historyKeys, isDefaultHistoryScopeKey } from '../api/history';
+import { deleteBatch, deleteTile, historyKeys } from '../api/history';
 import { useAtelierStore } from '../store/atelier';
 import { emitHistoryCancel, emitHistoryInvalidate } from './broadcastHistory';
-import { loadingTileIdsInBatch, removeBatchFromCache, removeTileFromCache } from './historyCache';
+import { historyScopesWithBatch, loadingTileIdsInBatch, removeBatchFromCache, removeTileFromCache } from './historyCache';
 import { invalidateLibrary } from './invalidateLibrary';
 import { activeScopeKey, liveActiveScopeKey, type ActiveScope } from './scopedHistoryMutation';
 import { getBatch } from './inFlightBatches';
@@ -31,8 +33,16 @@ export function useCancel(scope: Partial<ActiveScope> = {}): {
   const { mutateAsync } = useMutation({
     mutationKey: HISTORY_WRITE_MUTATION_KEY,
     mutationFn: async (input: CancelInput): Promise<void> => {
-      if (input.kind === 'tile') await deleteTile(input.batchId, input.tileId);
-      else await deleteBatch(input.batchId);
+      if (input.kind === 'tile') {
+        // Per-tile cancel is server-mediated: the server aborts that tile's
+        // work and the events stream delivers its `canceled` terminal, while
+        // the batch's other tiles keep rendering on the same stream. Aborting
+        // the stream here would drop their previews and progress and leave
+        // their terminals to the poll.
+        await deleteTile(input.batchId, input.tileId);
+        return;
+      }
+      await deleteBatch(input.batchId);
       getBatch(input.batchId)?.controller.abort(new DOMException('canceled by user', 'AbortError'));
     },
     // Fire-and-forget-with-reconcile: optimistically remove, then let
@@ -46,34 +56,28 @@ export function useCancel(scope: Partial<ActiveScope> = {}): {
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: historyKeys.all() });
       const activeKey = resolveActiveKey();
-      const canonicalKey = historyKeys.list();
-      const hasCanonicalCache = queryClient.getQueryData(canonicalKey) !== undefined;
-      const shouldMirrorToCanonical = !isDefaultHistoryScopeKey(activeKey) && hasCanonicalCache;
+      // The active key first (a scope whose cache is missing still gets the
+      // no-op), then every other cached scope that holds the batch.
+      const keys = [activeKey, ...historyScopesWithBatch(queryClient, historyKeys.all(), input.batchId)
+        .filter((key) => JSON.stringify(key) !== JSON.stringify(activeKey))];
       if (input.kind === 'tile') {
-        removeTileFromCache(queryClient, activeKey, input.batchId, input.tileId);
-        if (shouldMirrorToCanonical) {
-          removeTileFromCache(queryClient, canonicalKey, input.batchId, input.tileId);
-        }
+        for (const key of keys) removeTileFromCache(queryClient, key, input.batchId, input.tileId);
         clearTilePreview(input.tileId);
         clearTileProgress(input.tileId);
       } else {
-        const tileIds = new Set(loadingTileIdsInBatch(queryClient, activeKey, input.batchId));
-        if (shouldMirrorToCanonical) {
-          for (const tileId of loadingTileIdsInBatch(queryClient, canonicalKey, input.batchId)) {
-            tileIds.add(tileId);
-          }
+        const tileIds = new Set<string>();
+        for (const key of keys) {
+          for (const tileId of loadingTileIdsInBatch(queryClient, key, input.batchId)) tileIds.add(tileId);
         }
         for (const tileId of tileIds) {
           clearTilePreview(tileId);
           clearTileProgress(tileId);
         }
-        removeBatchFromCache(queryClient, activeKey, input.batchId);
-        if (shouldMirrorToCanonical) {
-          removeBatchFromCache(queryClient, canonicalKey, input.batchId);
-        }
+        for (const key of keys) removeBatchFromCache(queryClient, key, input.batchId);
       }
       emitHistoryInvalidate(input.batchId);
-      emitHistoryCancel(input.batchId);
+      // Only a batch cancel ends the stream; the owning tab aborts on this.
+      if (input.kind === 'batch') emitHistoryCancel(input.batchId);
     },
     // The optimistic removal hid the tile, so a failed DELETE would otherwise
     // be invisible until onSettled's refetch quietly brings it back.

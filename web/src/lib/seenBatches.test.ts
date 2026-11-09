@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { renderHook } from '@testing-library/react';
 import {
   flushSeenBatches,
   getSeenBatches,
@@ -9,6 +10,7 @@ import {
   SEEN_BATCHES_MAX_ENTRIES,
   SEEN_BATCHES_STORAGE_KEY,
   subscribeSeenBatches,
+  useSeenBatches,
 } from './seenBatches';
 
 afterEach(() => {
@@ -54,6 +56,39 @@ describe('seenBatches', () => {
     expect(notified).toBe(0);
     expect(getSeenBatches()).toBe(before);
     expect(sessionStorage.getItem(SEEN_BATCHES_STORAGE_KEY)).toBeNull();
+  });
+
+  test('re-marking an older id moves it to the young end so the cap evicts left-behind batches first', () => {
+    markBatchesSeen(['batch-old', 'batch-mid']);
+    let notified = 0;
+    const unsubscribe = subscribeSeenBatches(() => { notified += 1; });
+    markBatchSeen('batch-old');
+    unsubscribe();
+    expect(notified).toBe(0);
+    expect([...getSeenBatches()]).toEqual(['batch-mid', 'batch-old']);
+    for (let index = 0; index < SEEN_BATCHES_MAX_ENTRIES - 2; index += 1) markBatchSeen(`fill-${String(index)}`);
+    expect(getSeenBatches().size).toBe(SEEN_BATCHES_MAX_ENTRIES);
+    markBatchSeen('batch-new');
+    expect(getSeenBatches().has('batch-mid')).toBe(false);
+    expect(getSeenBatches().has('batch-old')).toBe(true);
+  });
+
+  test('each feed has its own view: a batch the rail rendered is still unseen for the canvas, persisted ids are seen for both', () => {
+    sessionStorage.setItem(SEEN_BATCHES_STORAGE_KEY, JSON.stringify({ ids: ['batch-persisted'] }));
+    resetSeenBatches();
+    let canvasNotified = 0;
+    const unsubscribe = subscribeSeenBatches(() => { canvasNotified += 1; }, 'canvas');
+    markBatchesSeen(['batch-new'], 'rail');
+    expect(canvasNotified).toBe(0);
+    expect(getSeenBatches().has('batch-new')).toBe(true);
+    const canvas = renderHook(() => useSeenBatches('canvas'));
+    const rail = renderHook(() => useSeenBatches('rail'));
+    expect(canvas.result.current.has('batch-new')).toBe(false);
+    expect(canvas.result.current.has('batch-persisted')).toBe(true);
+    expect(rail.result.current.has('batch-new')).toBe(true);
+    unsubscribe();
+    canvas.unmount();
+    rail.unmount();
   });
 
   test('loadSeenBatches round-trips persisted ids', () => {

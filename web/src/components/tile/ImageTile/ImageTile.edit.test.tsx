@@ -67,7 +67,11 @@ describe('ImageTile Edit action', () => {
     fireEvent.click(button);
     expect(onEdit).toHaveBeenCalledTimes(1);
     expect(button.getAttribute('aria-busy')).toBe('true');
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    // Busy keeps the control focusable: `disabled` would drop keyboard focus.
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(button);
+    expect(onEdit).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       resolveEdit?.(true);

@@ -26,14 +26,15 @@ export function historyRefreshTargets(batches: readonly Batch[], pendingStoryId?
   return { batchIds: [...batchIds], storyIds: [...storyIds] };
 }
 
+/** `view: null` reads the batches unscoped (every collection and pin state), for a caller that applies scope membership itself. */
 export async function refreshHistory(
   targets: HistoryRefreshTargets,
-  view: AppView,
+  view: AppView | null,
   q: string,
   signal: AbortSignal,
 ): Promise<HistoryRefreshResponse> {
   const params = new URLSearchParams();
-  applyHistoryScopeParams(params, view);
+  if (view) applyHistoryScopeParams(params, view);
   const collectionId = params.get('collectionId');
   const scope = {
     ...(collectionId === null ? {} : { collectionId }),

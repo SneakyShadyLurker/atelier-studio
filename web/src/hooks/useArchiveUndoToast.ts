@@ -1,3 +1,4 @@
+import { focusWhenPresent } from '../lib/focusSuccessor';
 import { useAtelierStore } from '../store/atelier';
 import { useRestore } from './useRestore';
 
@@ -14,7 +15,7 @@ export function useArchiveUndoToast() {
   const addToast = useAtelierStore((state) => state.addToast);
   const dismissToast = useAtelierStore((state) => state.dismissToast);
   const restore = useRestore();
-  const restoreMutate = restore.mutate;
+  const restoreMutateAsync = restore.mutateAsync;
 
   return (text: string, archivedTileIds: readonly string[]): void => {
     if (archivedTileIds.length === 0) {
@@ -29,7 +30,13 @@ export function useArchiveUndoToast() {
         if (undone) return;
         undone = true;
         dismissToast(toastId);
-        restoreMutate(tileIds);
+        // The toast takes the keyboard with it; once the restore's re-read
+        // lands, the restored tile is where the user was working.
+        const [first] = tileIds;
+        void restoreMutateAsync(tileIds).then(
+          () => { if (first) focusWhenPresent(`[data-feed-tile="${first}"]`); },
+          () => undefined,
+        );
       },
     });
   };

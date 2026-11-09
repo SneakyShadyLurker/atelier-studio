@@ -1,9 +1,9 @@
 import type { Batch, GenerateRequest, Model } from '@atelier/shared';
-import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { InfiniteQueryObserver, onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { historyKeys } from '../api/history';
+import { historyKeys, historyOpts } from '../api/history';
 import { modelKeys } from '../api/models';
 import { resetAnnouncedBatchesForTests } from '../lib/queueLiveAnnouncer';
 import { useAtelierStore } from '../store/atelier';
@@ -1115,5 +1115,155 @@ describe('useGenerate idempotent replay', () => {
 
     expect(getBatch(batchId)?.controller).toBe(foreign);
     expect(foreign.signal.aborted).toBe(false);
+  });
+});
+
+describe('useGenerate history reads in flight', () => {
+  test('a history read sent before the batch existed cannot erase the streamed row', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const batchId = '00000000-0000-4000-8000-000000000c01';
+    const olderRow = {
+      id: '00000000-0000-4000-8000-000000000c00', prompt: 'older', ratio: '1:1', modelId: 'mock-slow', modelLabel: 'Mock Slow',
+      createdAt: 1_600_000_000_000, collectionId: null, pinned: false, status: 'done',
+      tiles: [],
+    };
+    let historyReads = 0;
+    let releaseStaleRead: (() => void) | undefined;
+    let releaseStream: (() => void) | undefined;
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://local');
+      if (url.pathname === '/api/history') {
+        historyReads += 1;
+        const page = Response.json({ items: [olderRow], nextCursor: null });
+        if (historyReads === 1) return Promise.resolve(page);
+        // The focus refetch was read before the batch row was committed.
+        return new Promise<Response>((resolve) => { releaseStaleRead = () => { resolve(page); }; });
+      }
+      if (url.pathname === '/api/generate') {
+        return Promise.resolve(Response.json({
+          batchId, status: 'running', pool: 'shared', tiles: [{ tileId: 't1', tileIndex: 0, seed: 1 }],
+        }, { status: 201 }));
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`event: batch\ndata: ${JSON.stringify({
+            batchId, status: 'running', createdAt: 1_700_000_000_000, tiles: [{ tileId: 't1', tileIndex: 0, seed: 1 }],
+          })}\n\n`));
+          releaseStream = () => {
+            controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify({ batchId })}\n\n`));
+            controller.close();
+          };
+          init?.signal?.addEventListener('abort', () => { controller.error(init.signal?.reason); }, { once: true });
+        },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    }) as unknown as typeof fetch;
+
+    await client.infiniteQuery(historyOpts());
+    const staleRefetch = client.refetchQueries({ queryKey: historyKeys.list(), exact: true });
+    await waitFor(() => { expect(historyReads).toBe(2); });
+
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    let generation: Promise<unknown> | undefined;
+    act(() => {
+      generation = result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 1 });
+    });
+    const ids = () => client.getQueryData<HistoryData>(historyKeys.list())?.pages.flatMap((page) => page.items.map((item) => item.id));
+    await waitFor(() => { expect(ids()).toContain(batchId); });
+
+    await act(async () => {
+      releaseStaleRead?.();
+      await staleRefetch.catch(() => undefined);
+      await flushQueryNotifications();
+    });
+    expect(ids()).toEqual([batchId, olderRow.id]);
+
+    await act(async () => {
+      releaseStream?.();
+      await generation;
+    });
+  });
+
+  test('a next-page load in flight cannot erase the streamed row, and the page is re-requested', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const batchId = '00000000-0000-4000-8000-000000000d01';
+    const row = (id: string, createdAt: number) => ({
+      id, prompt: id, ratio: '1:1', modelId: 'mock-slow', modelLabel: 'Mock Slow',
+      createdAt, collectionId: null, pinned: false, status: 'done', tiles: [],
+    });
+    const newer = row('00000000-0000-4000-8000-000000000d00', 1_600_000_000_000);
+    const older = row('00000000-0000-4000-8000-0000000000d0', 1_500_000_000_000);
+    const cursors: (string | null)[] = [];
+    let releaseFirstNextPage: (() => void) | undefined;
+    let releaseStream: (() => void) | undefined;
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://local');
+      if (url.pathname === '/api/history') {
+        const cursor = url.searchParams.get('cursor');
+        cursors.push(cursor);
+        if (cursor === null) return Promise.resolve(Response.json({ items: [newer], nextCursor: 'c1' }));
+        const page = Response.json({ items: [older], nextCursor: null });
+        // The first next-page read began before the batch row existed.
+        if (cursors.filter((value) => value === 'c1').length === 1) {
+          return new Promise<Response>((resolve) => { releaseFirstNextPage = () => { resolve(page); }; });
+        }
+        return Promise.resolve(page);
+      }
+      if (url.pathname === '/api/generate') {
+        return Promise.resolve(Response.json({
+          batchId, status: 'running', pool: 'shared', tiles: [{ tileId: 't1', tileIndex: 0, seed: 1 }],
+        }, { status: 201 }));
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`event: batch\ndata: ${JSON.stringify({
+            batchId, status: 'running', createdAt: 1_700_000_000_000, tiles: [{ tileId: 't1', tileIndex: 0, seed: 1 }],
+          })}\n\n`));
+          releaseStream = () => {
+            controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify({ batchId })}\n\n`));
+            controller.close();
+          };
+          init?.signal?.addEventListener('abort', () => { controller.error(init.signal?.reason); }, { once: true });
+        },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    }) as unknown as typeof fetch;
+
+    const observer = new InfiniteQueryObserver(client, historyOpts());
+    const unsubscribe = observer.subscribe(() => undefined);
+    await waitFor(() => { expect(observer.getCurrentResult().hasNextPage).toBe(true); });
+    const nextPage = observer.fetchNextPage();
+    await waitFor(() => { expect(cursors).toEqual([null, 'c1']); });
+
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    let generation: Promise<unknown> | undefined;
+    act(() => {
+      generation = result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 1 });
+    });
+    const ids = () => client.getQueryData<HistoryData>(historyKeys.list())?.pages.flatMap((page) => page.items.map((item) => item.id));
+    await waitFor(() => { expect(ids()).toEqual([batchId, newer.id]); });
+
+    await act(async () => {
+      releaseFirstNextPage?.();
+      await nextPage;
+      await flushQueryNotifications();
+    });
+    // The cancelled page left no error behind and is simply requested again.
+    expect(ids()).toEqual([batchId, newer.id]);
+    expect(observer.getCurrentResult()).toMatchObject({ hasNextPage: true, isFetchNextPageError: false, isFetchingNextPage: false });
+    await act(async () => { await observer.fetchNextPage(); });
+    expect(ids()).toEqual([batchId, newer.id, older.id]);
+
+    await act(async () => {
+      releaseStream?.();
+      await generation;
+    });
+    unsubscribe();
   });
 });

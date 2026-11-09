@@ -235,3 +235,95 @@ describe('upsertNewBatch ordering across pages', () => {
     expect(pages).toEqual([['p0-a', 'p0-b'], ['p1-a', 'late', 'p1-b']]);
   });
 });
+
+describe('history order invariants', () => {
+  const at = (id: string, createdAt: number): Batch => ({ ...batch(id, []), createdAt });
+  const flatIds = (data: HistoryData | undefined) => data?.pages.flatMap((page) => page.items.map((item) => item.id));
+
+  test('an emptied earlier page does not capture an older late arrival', () => {
+    const client = new QueryClient();
+    client.setQueryData(key, {
+      pages: [
+        { items: [], nextCursor: 'c1' },
+        { items: [at('p1-a', 40), at('p1-b', 30)], nextCursor: null },
+      ],
+      pageParams: [null, 'c1'],
+    });
+
+    upsertNewBatch(client, key, at('late', 20));
+    upsertNewBatch(client, key, at('newest', 50));
+
+    expect(flatIds(client.getQueryData<HistoryData>(key))).toEqual(['newest', 'p1-a', 'p1-b', 'late']);
+  });
+
+  test('any upsert sequence keeps the cache in canonical created_at DESC, id DESC order', () => {
+    // Deterministic pseudo-random permutations over pages with empty gaps,
+    // ties and late arrivals; every state must flatten to the server order.
+    let seed = 7;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let run = 0; run < 200; run += 1) {
+      const client = new QueryClient();
+      const pageCount = 1 + Math.floor(next() * 4);
+      client.setQueryData(key, {
+        pages: Array.from({ length: pageCount }, (_, index) => ({ items: [], nextCursor: index === pageCount - 1 ? null : `c${index}` })),
+        pageParams: Array.from({ length: pageCount }, (_, index) => (index === 0 ? null : `c${index - 1}`)),
+      });
+      const inserted: Batch[] = [];
+      for (let step = 0; step < 12; step += 1) {
+        const item = at(`b${run}-${step}`, Math.floor(next() * 6));
+        inserted.push(item);
+        upsertNewBatch(client, key, item);
+        if (next() < 0.5) {
+          const victim = inserted.splice(Math.floor(next() * inserted.length), 1)[0];
+          if (victim) removeBatchFromCache(client, key, victim.id);
+        }
+      }
+      const expected = inserted
+        .toSorted((a, b) => (b.createdAt - a.createdAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+        .map((item) => item.id);
+      expect(flatIds(client.getQueryData<HistoryData>(key))).toEqual(expected);
+    }
+  });
+
+  test('a refetch read before an SSE terminal never regresses a finished tile to loading', () => {
+    const structuralSharing = historyOpts().structuralSharing;
+    if (typeof structuralSharing !== 'function') throw new Error('history structural sharing missing');
+    const client = new QueryClient({ defaultOptions: { queries: { structuralSharing } } });
+    const loading = { ...batch('a', [
+      { id: 'a-1', seed: 1, status: 'loading' },
+      { id: 'a-2', seed: 2, status: 'loading' },
+    ]), createdAt: 5, status: 'running' as const };
+    const stale = { pages: [{ items: [loading, at('older', 1)], nextCursor: null }], pageParams: [null] };
+    client.setQueryData(key, stale);
+    const done = { id: 'a-1', seed: 1, status: 'done' as const, url: '/api/img/a-1', ext: 'png' as const, mime: 'image/png' as const, completedAt: 10 };
+    updateBatchTile(client, key, 'a', done);
+
+    // The refetch snapshot predates the terminal event and has no duplicates.
+    client.setQueryData(key, stale);
+
+    const cached = client.getQueryData<HistoryData>(key);
+    expect(cached?.pages[0]?.items[0]?.tiles).toEqual([done, { id: 'a-2', seed: 2, status: 'loading' }]);
+    expect(cached?.pages[0]?.items[0]?.status).toBe('running');
+    expect(cached?.loadingTileCount).toBe(1);
+  });
+
+  test('the newest terminal wins in both directions; equal times keep the incoming tile', () => {
+    const structuralSharing = historyOpts().structuralSharing;
+    if (typeof structuralSharing !== 'function') throw new Error('history structural sharing missing');
+    const client = new QueryClient({ defaultOptions: { queries: { structuralSharing } } });
+    const done = (completedAt: number) => ({ id: 'a-1', seed: 1, status: 'done' as const, url: `/api/img/a-1?${String(completedAt)}`, ext: 'png' as const, mime: 'image/png' as const, completedAt });
+    const failed = (completedAt: number) => ({ id: 'a-1', seed: 1, status: 'failed' as const, error: 'interrupted' as const, completedAt });
+    const put = (tile: Batch['tiles'][number]) => {
+      client.setQueryData(key, { pages: [{ items: [{ ...batch('a', [tile]), createdAt: 5 }], nextCursor: null }], pageParams: [null] });
+      return client.getQueryData<HistoryData>(key)?.pages[0]?.items[0]?.tiles[0];
+    };
+
+    expect(put(done(10))).toEqual(done(10));
+    // An older terminal from a stale read loses.
+    expect(put(failed(5))).toEqual(done(10));
+    // A newer server terminal (startup reconcile marks interrupted work failed) wins.
+    expect(put(failed(20))).toEqual(failed(20));
+    // Equal completion times keep the incoming tile.
+    expect(put(done(20))).toEqual(done(20));
+  });
+});

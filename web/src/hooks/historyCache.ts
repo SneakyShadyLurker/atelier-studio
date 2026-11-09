@@ -145,13 +145,20 @@ export function retagHistoryData(data: HistoryData): HistoryData {
   return { ...data, pages, loadingTileCount, activeByModel: activeByModelFromPages(pages) };
 }
 
+type TerminalTile = Exclude<Tile, { status: 'loading' }>;
+
 /**
- * A delayed optimistic batch may sit beyond a fetched page's cursor. When a
- * later page reaches it, keep the later page's row and authoritative payload.
- * Its server page also puts intervening rows back in canonical order.
- * Cursor/pageParam coverage stays intact.
- * Used at Query's structural-sharing boundary, so writers and readers see the
- * same normalized cache rather than hiding duplicates only in the view.
+ * Normalizes every history write at Query's structural-sharing boundary, so
+ * writers and readers see the same cache rather than hiding fixes in the view.
+ *
+ * - A delayed optimistic batch may sit beyond a fetched page's cursor. When a
+ *   later page reaches it, keep the later page's row and authoritative
+ *   payload; its server page also puts intervening rows back in canonical
+ *   order. Cursor/pageParam coverage stays intact.
+ * - Tiles only move loading -> terminal. A fetch read before an SSE terminal
+ *   landed must not flip a finished tile back to a spinner (or to an older
+ *   terminal), so the newest terminal seen for a tile wins. Tile membership
+ *   and page placement still come from the incoming data.
  */
 export function reconcileHistoryPages(data: HistoryData, previous?: HistoryData): HistoryData {
   const latest = new Map<string, Batch>();
@@ -162,23 +169,24 @@ export function reconcileHistoryPages(data: HistoryData, previous?: HistoryData)
       latest.set(batch.id, batch);
     }
   }
-  if (duplicateIds.size === 0) return data;
-  // A fetched page can have been read before an SSE terminal landed. Keep its
-  // page placement and tile membership, but never regress overlapping tiles
-  // to loading or to an older terminal result while reconciling duplicates.
-  const terminals = new Map<string, Map<string, Exclude<Tile, { status: 'loading' }>>>();
+  const terminals = new Map<string, Map<string, TerminalTile>>();
   const remember = (batch: Batch) => {
-    if (!duplicateIds.has(batch.id)) return;
-    const known = terminals.get(batch.id) ?? new Map<string, Exclude<Tile, { status: 'loading' }>>();
     for (const tile of batch.tiles) {
       if (tile.status === 'loading') continue;
+      let known = terminals.get(batch.id);
+      if (!known) terminals.set(batch.id, (known = new Map<string, TerminalTile>()));
       const existing = known.get(tile.id);
       if (!existing || tile.completedAt >= existing.completedAt) known.set(tile.id, tile);
     }
-    terminals.set(batch.id, known);
   };
   for (const page of previous?.pages ?? []) for (const batch of page.items) remember(batch);
   for (const page of data.pages) for (const batch of page.items) remember(batch);
+  const newerTerminal = (batchId: string, tile: Tile): TerminalTile | undefined => {
+    const terminal = terminals.get(batchId)?.get(tile.id);
+    return terminal && (tile.status === 'loading' || terminal.completedAt > tile.completedAt) ? terminal : undefined;
+  };
+  const regressed = data.pages.some((page) => page.items.some((batch) => batch.tiles.some((tile) => newerTerminal(batch.id, tile))));
+  if (duplicateIds.size === 0 && !regressed) return data;
   const seen = new Set<string>();
   const pages = data.pages.toReversed().map((page) => ({
     ...page,
@@ -186,15 +194,10 @@ export function reconcileHistoryPages(data: HistoryData, previous?: HistoryData)
       if (seen.has(batch.id)) return [];
       seen.add(batch.id);
       const incoming = latest.get(batch.id) ?? batch;
-      const known = terminals.get(batch.id);
-      if (!known) return [incoming];
-      const tiles = incoming.tiles.map((tile) => {
-        const terminal = known.get(tile.id);
-        return terminal && (tile.status === 'loading' || terminal.completedAt > tile.completedAt) ? terminal : tile;
-      });
+      const tiles = incoming.tiles.map((tile) => newerTerminal(batch.id, tile) ?? tile);
+      if (tiles.every((tile, index) => tile === incoming.tiles[index])) return [incoming];
       const status: Batch['status'] = tiles.length > 0 && tiles.every((tile) => tile.status !== 'loading') ? 'done' : incoming.status;
-      const changed = status !== incoming.status || tiles.some((tile, index) => tile !== incoming.tiles[index]);
-      return [changed ? { ...incoming, tiles, status } : incoming];
+      return [{ ...incoming, tiles, status }];
     }),
   })).reverse();
   return retagHistoryData({ ...data, pages });
@@ -266,9 +269,11 @@ export function upsertHistoryBatch(data: HistoryData, batch: Batch): HistoryData
   const anyPageChanged = cleaned.some((page, idx) => page !== data.pages[idx]);
   const sourcePages = anyPageChanged ? cleaned : data.pages;
   const nextBatch = preserveSequenceFields(batch, existingBatch);
+  // An emptied page (every row deleted) carries no position: skip it, or an
+  // older late arrival would land ahead of the newer rows on later pages.
   const target = sourcePages.findIndex((page) => {
     const last = page.items.at(-1);
-    return last === undefined || sortsBefore(nextBatch, last);
+    return last !== undefined && sortsBefore(nextBatch, last);
   });
   const pageIndex = target === -1 ? Math.max(0, sourcePages.length - 1) : target;
   const page = sourcePages[pageIndex] ?? { items: [], nextCursor: null };

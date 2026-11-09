@@ -5,11 +5,13 @@ import type { Batch, CollectionsResponse, HistoryPage, Model } from '@atelier/sh
 import type { InfiniteData } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
 import { historyKeys } from '../src/api/history';
+import { archiveKeys } from '../src/api/archive';
 import { collectionKeys } from '../src/api/collections';
+import { HISTORY_WRITE_MUTATION_KEY } from '../src/hooks/historyWrites';
 import { buildLibraryRows } from '../src/components/Sidebar/rows';
 import type { HistoryData } from '../src/hooks/historyCache';
 import { useCollections } from '../src/hooks/useCollections';
-import { emitHistoryInvalidate, resetBroadcastForTests } from '../src/hooks/broadcastHistory';
+import { emitHistoryCancel, emitHistoryInvalidate, resetBroadcastForTests } from '../src/hooks/broadcastHistory';
 import { getBatch, resetInFlightForTests } from '../src/hooks/inFlightBatches';
 import { useGenerate } from '../src/hooks/useGenerate';
 
@@ -640,7 +642,7 @@ describe('useGenerate', () => {
     expect(getBatch('batch-live')).toBeUndefined();
   });
 
-  test('BroadcastChannel invalidation invalidates history queries', async () => {
+  test('BroadcastChannel invalidation re-reads history, archive and Library counts', async () => {
     setBroadcastChannel(MockChannel as never);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     const invalidateQueries = mock(() => Promise.resolve());
@@ -649,6 +651,83 @@ describe('useGenerate', () => {
     renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
     emitHistoryInvalidate('batch-cross-tab');
 
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: historyKeys.all() });
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: archiveKeys.all() });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: collectionKeys.list() });
+  });
+
+  test('a burst of sibling invalidations joins the running re-read plus one trailing read', async () => {
+    setBroadcastChannel(MockChannel as never);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const reads: PromiseWithResolvers<undefined>[] = [];
+    const historyReads = mock(() => {
+      const read = Promise.withResolvers<undefined>();
+      reads.push(read);
+      return read.promise;
+    });
+    client.invalidateQueries = (filters?: { queryKey?: readonly unknown[] }) => (
+      filters?.queryKey?.[0] === 'history' ? historyReads() : Promise.resolve()
+    );
+
+    renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
+    for (let index = 0; index < 5; index += 1) emitHistoryInvalidate(`burst-${String(index)}`);
+    expect(historyReads).toHaveBeenCalledTimes(1);
+
+    await act(async () => { reads[0]?.resolve(undefined); await Promise.resolve(); await Promise.resolve(); });
+    await waitFor(() => { expect(historyReads).toHaveBeenCalledTimes(2); });
+    await act(async () => { reads[1]?.resolve(undefined); await Promise.resolve(); await Promise.resolve(); });
+    expect(historyReads).toHaveBeenCalledTimes(2);
+  });
+
+  for (const outcome of ['succeeds', 'fails'] as const) {
+    test(`a sibling message during this tab's own history write re-reads once the write ${outcome}`, async () => {
+      setBroadcastChannel(MockChannel as never);
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+      const invalidateQueries = mock((_filters?: { queryKey?: readonly unknown[] }) => Promise.resolve());
+      client.invalidateQueries = invalidateQueries;
+      const write = Promise.withResolvers<null>();
+      // No settle re-read of its own, like a write whose error path only toasts.
+      const settled = client.getMutationCache()
+        .build(client, { mutationKey: HISTORY_WRITE_MUTATION_KEY, mutationFn: () => write.promise })
+        .execute(undefined)
+        .catch(() => undefined);
+
+      renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
+      emitHistoryInvalidate('batch-cross-tab');
+      emitHistoryInvalidate('batch-cross-tab-2');
+
+      // A read now would land pre-commit server state over the optimistic patch.
+      expect(invalidateQueries).not.toHaveBeenCalled();
+      await act(async () => {
+        if (outcome === 'succeeds') write.resolve(null);
+        else write.reject(new Error('write failed'));
+        await settled;
+      });
+      await waitFor(() => {
+        expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: historyKeys.all() });
+      });
+      // Both deferred messages collapse into one re-read.
+      expect(invalidateQueries.mock.calls.filter(([filters]) => filters?.queryKey?.[0] === 'history')).toHaveLength(1);
+    });
+  }
+
+  test('a sibling cancel during this tab\'s own history write defers its re-read too', async () => {
+    setBroadcastChannel(MockChannel as never);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const invalidateQueries = mock(() => Promise.resolve());
+    client.invalidateQueries = invalidateQueries;
+    const write = Promise.withResolvers<null>();
+    const settled = client.getMutationCache()
+      .build(client, { mutationKey: HISTORY_WRITE_MUTATION_KEY, mutationFn: () => write.promise })
+      .execute(undefined);
+
+    renderHook(() => useGenerate(emptyModelsById), { wrapper: wrapper(client) });
+    emitHistoryCancel('batch-cross-tab', 'sibling-tab');
+
+    expect(invalidateQueries).not.toHaveBeenCalled();
+    await act(async () => { write.resolve(null); await settled; });
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: historyKeys.all() });
     });

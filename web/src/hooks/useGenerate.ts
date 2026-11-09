@@ -10,7 +10,9 @@ import { apiErrorCode, describeError } from '../lib/errorCopy';
 import { historyKeys } from '../api/history';
 import { modelKeys } from '../api/models';
 import { useAtelierStore } from '../store/atelier';
-import { MY_TAB_ID, onHistoryCancel, onHistoryInvalidate } from './broadcastHistory';
+import { emitHistoryInvalidate, MY_TAB_ID, onHistoryCancel, onHistoryInvalidate } from './broadcastHistory';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
+import { invalidateLibrary } from './invalidateLibrary';
 import { findTileInCache, removeTileFromCache, updateBatchStatus, updateBatchTile, upsertNewBatch } from './historyCache';
 import { getBatch, registerBatch, unregisterBatch } from './inFlightBatches';
 import { isPhoneViewport } from './useIsPhone';
@@ -105,18 +107,42 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
     };
   }, []);
   useEffect(() => {
-    // Cross-tab cancel propagation: when another tab fires useCancel, it posts
-    // on the channel. This tab invalidates its history queries so canceled
-    // batch/tile state reflects the server without a manual refetch.
-    const unsubscribeInvalidate = onHistoryInvalidate(() => {
-      void queryClient.invalidateQueries({ queryKey: historyKeys.all() });
+    // Cross-tab convergence: sibling tabs post on the channel when a history
+    // write settles, a generation is accepted or a cancel starts. This tab
+    // re-reads the library (history, archive, counts) the way its own writes
+    // settle. One re-read at a time: a burst (a sibling draining its queue)
+    // joins the running read plus one trailing read, instead of restarting
+    // the multi-page history refetch on every message. While this tab's own
+    // history write is in flight (its settle re-read included) the re-read
+    // waits: a read of pre-commit server state would land over the write's
+    // optimistic patch. The MutationCache reports when the last write ends,
+    // success or failure, and the deferred re-read runs then.
+    let refreshing = false;
+    let pending = false;
+    const writing = () => queryClient.isMutating({ mutationKey: HISTORY_WRITE_MUTATION_KEY }) > 0;
+    const refreshFromSibling = (): void => {
+      if (refreshing || writing()) {
+        pending = true;
+        return;
+      }
+      pending = false;
+      refreshing = true;
+      void invalidateLibrary(queryClient).finally(() => {
+        refreshing = false;
+        if (pending) refreshFromSibling();
+      });
+    };
+    const unsubscribeWrites = queryClient.getMutationCache().subscribe(() => {
+      if (pending && !refreshing && !writing()) refreshFromSibling();
     });
+    const unsubscribeInvalidate = onHistoryInvalidate(refreshFromSibling);
     const unsubscribeCancel = onHistoryCancel((batchId, originTabId) => {
       if (originTabId === MY_TAB_ID) return;
       getBatch(batchId)?.controller.abort(new DOMException('canceled by sibling tab', 'AbortError'));
-      void queryClient.invalidateQueries({ queryKey: historyKeys.all() });
+      refreshFromSibling();
     });
     return () => {
+      unsubscribeWrites();
       unsubscribeInvalidate();
       unsubscribeCancel();
     };
@@ -165,6 +191,9 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
         // even if its events stream has not attached or rendering is queued.
         void queryClient.invalidateQueries({ queryKey: collectionKeys.list() });
         if (acceptance.replayed) void queryClient.invalidateQueries({ queryKey: historyKeys.all() });
+        // Sibling tabs read the new row now; their active-work refresh then
+        // follows it to completion like any other loading batch.
+        else emitHistoryInvalidate(id);
         onAccepted?.(id);
       };
       // The request's references describe the batch only when this request
@@ -235,7 +264,18 @@ export function useGenerate(modelById: ReadonlyMap<string, Model>) {
                   ...(event.data.refImageIds ? { refImageIds: event.data.refImageIds } : {}),
                 })),
               };
+              // A history read already in flight was sent before this row
+              // existed: a refetch would drop it, and fetchNextPage appends to
+              // the pages it started from. Cancel it before the write, as the
+              // other history writers do; the pagination sentinel re-requests
+              // a cancelled page and this stream's settle refetches the list.
+              const hadHistory = queryClient.getQueryData(writeKey) !== undefined;
+              await queryClient.cancelQueries({ queryKey: writeKey, exact: true });
+              // A sibling-tab cancel or unmount during the await: no phantom row.
+              controller.signal.throwIfAborted();
               upsertNewBatch(queryClient, writeKey, batch);
+              // A cancelled first load leaves only this row; read the rest now.
+              if (!hadHistory) void queryClient.invalidateQueries({ queryKey: writeKey, exact: true });
               setActiveBatchId(batch.id);
               followBatch(batch.id);
             } else if (event.event === 'queue' && batchId) {

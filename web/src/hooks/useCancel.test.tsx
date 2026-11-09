@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
-import { resetBroadcastForTests } from './broadcastHistory';
+import { createHistoryBroadcastMutationCache, resetBroadcastForTests } from './broadcastHistory';
 import { useCancel } from './useCancel';
 
 const originalFetch = globalThis.fetch;
@@ -35,7 +35,11 @@ describe('cross-tab cancel settlement', () => {
         started.resolve(undefined);
         return response.promise;
       }) as unknown as typeof fetch;
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+      // The app's MutationCache owns the settle broadcast (main.tsx).
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+        mutationCache: createHistoryBroadcastMutationCache(),
+      });
       const wrapper = ({ children }: PropsWithChildren) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
       const { result } = renderHook(() => useCancel(), { wrapper });
       let cancellation: Promise<void> | undefined;

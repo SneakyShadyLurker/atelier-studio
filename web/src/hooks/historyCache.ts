@@ -140,8 +140,17 @@ function tagPage(page: HistoryPageWithLoading, items: readonly Batch[]): History
 }
 
 export function retagHistoryData(data: HistoryData): HistoryData {
-  const pages = data.pages.map((page) => tagPage(page, page.items));
-  const loadingTileCount = pages.reduce((count, page) => count + (page.loadingTileCount ?? 0), 0);
+  return withTaggedPages(data, data.pages.map((page) => tagPage(page, page.items)));
+}
+
+/** A page with new `items`, tagged like every other write; untouched pages keep their identity. */
+export function tagHistoryPageItems(page: HistoryPageWithLoading, items: readonly Batch[]): HistoryPageWithLoading {
+  return tagPage(page, items);
+}
+
+/** `data` over already-tagged `pages`, with the totals recomputed. */
+export function withTaggedPages(data: HistoryData, pages: HistoryPageWithLoading[]): HistoryData {
+  const loadingTileCount = pages.reduce((count, page) => count + (page.loadingTileCount ?? loadingCountForBatches(page.items)), 0);
   return { ...data, pages, loadingTileCount, activeByModel: activeByModelFromPages(pages) };
 }
 
@@ -213,12 +222,69 @@ function setPage(data: HistoryData, index: number, items: readonly Batch[], load
   };
 }
 
+// Every optimistic history write goes through here. Two things a plain
+// `setQueryData` would get wrong:
+//   - Only the insert may create a missing cache. A tile, status or removal
+//     write for a key that holds no data (collected after five minutes away
+//     from the feed, or removed by Clear all) must not synthesize an empty,
+//     end-of-history page that later reads as fresh.
+//   - Freshness and invalidation belong to server reads. `setQueryData` marks
+//     the query fresh and clears `isInvalidated`; a stream writing Unsorted
+//     every few seconds would otherwise keep an inactive scope "fresh" for the
+//     whole burst and swallow the invalidation a settled write left on it, so
+//     the user returns to stale rows. Keep the last server read's clock and
+//     re-mark the invalidation after the write.
 function setHistory(
   queryClient: QueryClient,
   key: QueryKey,
   mutate: (current: HistoryData) => HistoryData,
+  { create = false }: { create?: boolean } = {},
 ): void {
-  queryClient.setQueryData<HistoryData>(key, (current) => mutate(current ?? emptyHistory()));
+  const query = queryClient.getQueryCache().find<HistoryData>({ queryKey: key, exact: true });
+  if (!query) {
+    if (create) queryClient.setQueryData<HistoryData>(key, mutate(emptyHistory()));
+    return;
+  }
+  if (!create && query.state.data === undefined) return;
+  const wasInvalidated = query.state.isInvalidated;
+  const updatedAt = query.state.dataUpdatedAt;
+  queryClient.setQueryData<HistoryData>(
+    key,
+    (current) => mutate(current ?? emptyHistory()),
+    updatedAt > 0 ? { updatedAt } : undefined,
+  );
+  if (wasInvalidated) query.invalidate();
+}
+
+/**
+ * An optimistic write to one cached scope that keeps the scope's server-read
+ * clock and pending invalidation (above); a no-op when the scope has no cache.
+ */
+export function writeHistoryScope(
+  queryClient: QueryClient,
+  key: QueryKey,
+  mutate: (current: HistoryData) => HistoryData,
+): void {
+  setHistory(queryClient, key, mutate);
+}
+
+/** Every cached history scope (under `rootKey`) whose data holds `batchId`. */
+export function historyScopesWithBatch(queryClient: QueryClient, rootKey: QueryKey, batchId: string): QueryKey[] {
+  return queryClient.getQueryCache().findAll({ queryKey: rootKey })
+    .filter((query) => {
+      const data = query.state.data as HistoryData | undefined;
+      return data !== undefined && findPageIndex(data, batchId) !== -1;
+    })
+    .map((query) => query.queryKey);
+}
+
+/** The tile as the first cached scope under `rootKey` holding its batch sees it. */
+export function findTileInAnyScope(queryClient: QueryClient, rootKey: QueryKey, batchId: string, tileId: string): Tile | undefined {
+  for (const key of historyScopesWithBatch(queryClient, rootKey, batchId)) {
+    const tile = findTileInCache(queryClient, key, batchId, tileId);
+    if (tile) return tile;
+  }
+  return undefined;
 }
 
 // The server's canonical order: `ORDER BY created_at DESC, id DESC`
@@ -231,9 +297,7 @@ export function sortsBefore(a: Batch, b: Batch): boolean {
 // already be in canonical order (the only insert path is this function).
 function insertCanonical(items: readonly Batch[], batch: Batch): readonly Batch[] {
   const insertAt = items.findIndex((item) => sortsBefore(batch, item));
-  const next = items.slice();
-  next.splice(insertAt === -1 ? items.length : insertAt, 0, batch);
-  return next;
+  return items.toSpliced(insertAt === -1 ? items.length : insertAt, 0, batch);
 }
 
 function preserveSequenceFields(incoming: Batch, existing: Batch | undefined): Batch {
@@ -247,7 +311,7 @@ function preserveSequenceFields(incoming: Batch, existing: Batch | undefined): B
 }
 
 export function upsertNewBatch(queryClient: QueryClient, key: QueryKey, batch: Batch): void {
-  setHistory(queryClient, key, (data) => upsertHistoryBatch(data, batch));
+  setHistory(queryClient, key, (data) => upsertHistoryBatch(data, batch), { create: true });
 }
 
 /** Canonical page placement shared by streamed and discovered story batches. */

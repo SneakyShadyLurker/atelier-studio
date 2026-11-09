@@ -69,14 +69,19 @@
   transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
 }
 
-.row:hover,
 .row:focus-visible {
   background: var(--bg-sunk);
 }
 
-/* --m-press collapses to 1 under reduced motion (motion.css). */
-.row:active:not(:disabled) {
-  transform: scale(var(--m-press));
+@media (hover: hover) {
+  .row:hover:where(:not(:disabled, [aria-disabled='true'])) {
+    background: var(--bg-sunk);
+  }
+}
+
+/* Rows press at the row amplitude; --m-press-row collapses to 1 under reduced motion (motion.css). */
+.row:active:where(:not(:disabled, [aria-disabled='true'])) {
+  transform: scale(var(--m-press-row));
 }
 
 .row:focus-visible {
@@ -84,7 +89,7 @@
   outline-offset: 2px;
 }
 
-.row:disabled {
+.row:is(:disabled, [aria-disabled='true']) {
   opacity: 0.4;
   cursor: not-allowed;
 }
@@ -98,6 +103,8 @@
 
 .backdrop {
   composes: fade from './surface.module.css';
+  /* The phone sheet slides on --dur-sheet; its backdrop fades on the same beat. */
+  --surface-duration: var(--dur-sheet);
   position: fixed;
   inset: 0;
   border: 0;

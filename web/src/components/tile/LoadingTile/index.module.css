@@ -127,6 +127,8 @@
   background: var(--line-2);
   position: relative;
   overflow: hidden;
+  /* The track follows the veil's dissolve and the step bar's thickening. */
+  transition: background-color var(--dur-reveal) var(--ease-out), height var(--dur-overlay) var(--ease-out);
 }
 
 /* Video renders are long and determinate — give the bar more presence so the
@@ -144,18 +146,20 @@
   /* Ink, not accent: loaders stay monochrome until the image arrives
      (design 1.7 principle 3). */
   background: var(--ink-2);
-  /* Intentional non-token easing — the progress sweep is rhythmic, not
-     directional. Material's linear-out-slow-in (cubic-bezier(.4,0,.2,1))
-     reads as a heartbeat where var(--ease-out) reads as "arriving". */
-  animation: progress var(--cadence-loop) cubic-bezier(.4,0,.2,1) infinite;
+  /* The loop's own curve: the progress sweep is rhythmic, not directional,
+     and reads as a heartbeat where var(--ease-out) reads as "arriving". */
+  animation: progress var(--cadence-loop) var(--ease-loop) infinite;
   transform-origin: left;
+  transition: background-color var(--dur-reveal) var(--ease-out);
 }
 
+/* Percent-only progress glides between events instead of jumping. */
 .bar[data-progress="true"]::after {
   animation: none;
   background: var(--ink-2);
   transform: scaleX(var(--tile-progress));
   transform-origin: left;
+  transition: transform var(--dur-transform) var(--ease-out), background-color var(--dur-reveal) var(--ease-out);
 }
 
 /* Sampler steps: a slightly firmer determinate bar whose fill glides to each
@@ -166,7 +170,7 @@
 }
 
 .bar[data-steps='true']::after {
-  transition: transform var(--tile-step-ms, var(--dur-transform)) linear;
+  transition: transform var(--tile-step-ms, var(--dur-transform)) linear, background-color var(--dur-reveal) var(--ease-out);
 }
 
 /* Finishing: a soft highlight band travels the full bar while the graph
@@ -259,7 +263,8 @@
     animation: none;
   }
 
-  .bar[data-steps='true']::after,
+  .bar,
+  .bar::after,
   .stepNum {
     transition: none;
   }
@@ -269,32 +274,38 @@
     display: none;
   }
 
+  /* Blur is not motion: the veil keeps its softness, only the sharpening
+     tween and the fade are dropped. */
   .preview {
-    filter: none;
     transition: none;
     animation: none;
   }
 }
 
+/* The tile-action vocabulary on the loading plate: glass fill, the hover,
+   press and busy channels of buttons.module.css .tileAction. */
 .cancelBtn {
   position: absolute;
   top: 8px;
   right: 8px;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--scrim-on-image);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid var(--glass-on-dark-8);
-  border-radius: 50%;
-  color: var(--glass-on-dark-100);
+  background: var(--scrim-control);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-on-dark-12);
+  border-radius: var(--radius-control);
+  color: var(--glass-on-dark-90);
   /* Resting opacity is discoverable without hover (touch/stylus have none) —
      this aborts an in-flight paid generation, so it must not be hover-gated. */
-  opacity: 0.7;
-  transition: opacity var(--dur-transform) var(--ease-out);
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) var(--ease-out),
+    background-color var(--dur-hover) var(--ease-out),
+    color var(--dur-hover) var(--ease-out),
+    transform var(--dur-transform) var(--ease-tactile);
   cursor: pointer;
   z-index: 3;
   padding: 0;
@@ -306,25 +317,47 @@
   height: 14px;
 }
 
-.tile:hover .cancelBtn { opacity: 0.85; }
-.cancelBtn:hover { opacity: 1; }
+@media (hover: hover) {
+  .tile:hover .cancelBtn { opacity: 1; }
+
+  .cancelBtn:hover:where(:not([aria-busy='true'])) {
+    opacity: 1;
+    background: var(--scrim-strong);
+    color: var(--glass-on-dark-100);
+  }
+}
+
 .cancelBtn:focus-visible {
   opacity: 1;
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--glass-on-dark-100);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--scrim-strong);
+}
+
+.cancelBtn:active:where(:not([aria-busy='true'])) {
+  transform: scale(var(--m-press-icon));
+}
+
+/* The removal is on its way: dim like every busy action, keep the glass. */
+.cancelBtn[aria-busy='true'] {
+  opacity: 0.4;
+  cursor: progress;
 }
 
 @media (hover: none), (any-pointer: coarse) {
+  /* Hit area >= 44x44 on touch while the visible chrome stays 26x26: the
+     pseudo-element extends the touchable surface without painting. */
+  .cancelBtn::before {
+    content: '';
+    position: absolute;
+    inset: -9px;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
   .cancelBtn {
-    /* Hit area >= 44x44 on touch while keeping visible chrome at 24x24.
-       background-clip: content-box paints the tint only in the inner
-       content area (visible 24x24 circle); 10px padding grows the
-       touchable surface to 24+10+10 = 44. */
-    opacity: 0.75;
-    width: 44px;
-    height: 44px;
-    padding: 10px;
-    background-clip: content-box;
-    border-radius: 999px;
+    background: var(--scrim-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }

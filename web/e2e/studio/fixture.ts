@@ -211,6 +211,8 @@ export function installOfflineResponses(): void {
   const writable = motionParams.get('writable') === '1';
   const writeDelay = Number(motionParams.get('writeDelay') ?? 400);
   const archived = new Set<string>();
+  // `writable=1` also keeps moves and pins (PATCH /history/:id) in memory.
+  const patched = new Map<string, { collectionId?: string | null; pinned?: boolean }>();
   const written = (): Promise<Response> => new Promise((resolve) => {
     window.setTimeout(() => { resolve(new Response(null, { status: 204 })); }, writeDelay);
   });
@@ -222,6 +224,12 @@ export function installOfflineResponses(): void {
   const generates = motionParams.get('generate') === '1';
   const generateDelay = Number(motionParams.get('generateDelay') ?? 250);
   const generateCap = Number(motionParams.get('generateCap') ?? Number.POSITIVE_INFINITY);
+  // `generateFinish=N` lets each accepted generation finish: N ms after its
+  // batch event the stream delivers the tile's `done` terminal and `done`, and
+  // the row is served by `/api/history/refresh` and `/api/history` from then
+  // on, so the loading → done handoff can run against the real App.
+  const generateFinish = Number(motionParams.get('generateFinish') ?? 0);
+  const generatedRows = new Map<string, Batch>();
   const studioWindow = window as Window & { __studioGenerated?: number };
   studioWindow.__studioGenerated = 0;
   const offlineFetch = Object.assign((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -240,10 +248,34 @@ export function installOfflineResponses(): void {
     const generatedEvents = generates ? /^\/api\/batches\/(studio-generated-\d+)\/events$/.exec(url.pathname) : null;
     if (generatedEvents?.[1]) {
       const batchId = generatedEvents[1];
-      const frame = `event: batch\ndata: ${JSON.stringify({ batchId, createdAt: Date.now(), status: 'running', tiles: [{ tileId: `${batchId}-tile`, tileIndex: 0, seed: 1 }] })}\n\n`;
+      const createdAt = Date.now();
+      const tileId = `${batchId}-tile`;
+      const frame = `event: batch\ndata: ${JSON.stringify({ batchId, createdAt, status: 'running', tiles: [{ tileId, tileIndex: 0, seed: 1 }] })}\n\n`;
+      const encoder = new TextEncoder();
       return Promise.resolve(new Response(new ReadableStream({
-        start(controller) { controller.enqueue(new TextEncoder().encode(frame)); },
+        start(controller) {
+          controller.enqueue(encoder.encode(frame));
+          if (generateFinish <= 0) return;
+          window.setTimeout(() => {
+            const completedAt = Date.now();
+            const url = stills[0];
+            generatedRows.set(batchId, {
+              id: batchId, prompt: 'Studio generation', ratio: '1:1', modelId: 'gpt-image-2.6-sunburst', modelLabel: 'GPT Image',
+              createdAt, collectionId: null, pinned: false, status: 'done',
+              tiles: [{ id: tileId, status: 'done', url, ext: 'png', mime: 'image/png', seed: 1, completedAt }],
+            });
+            controller.enqueue(encoder.encode(`event: tile\ndata: ${JSON.stringify({ tileId, tileIndex: 0, status: 'done', url, ext: 'png', mime: 'image/png', completedAt })}\n\n`));
+            controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify({ batchId })}\n\n`));
+            controller.close();
+          }, generateFinish);
+        },
       }), { headers: { 'Content-Type': 'text/event-stream' } }));
+    }
+    if (generates && method === 'POST' && url.pathname === '/api/history/refresh') {
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as { batchIds?: string[] } : {};
+      const wanted = body.batchIds ?? [];
+      const items = wanted.flatMap((id) => { const row = generatedRows.get(id); return row ? [row] : []; });
+      return Promise.resolve(json({ items, missingBatchIds: wanted.filter((id) => !generatedRows.has(id) && !feed.some((batch) => batch.id === id)) }));
     }
     if (method === 'POST' && url.pathname === '/api/prompts/library-diagnosis') return Promise.resolve(json(libraryDiagnosis));
     if (method === 'POST' && url.pathname === '/api/prompts/library-coverage') return Promise.resolve(json(libraryCoverage));
@@ -254,6 +286,17 @@ export function installOfflineResponses(): void {
       if (method === 'DELETE' && tileRoute?.[2]) {
         archived.add(tileRoute[2]);
         return written();
+      }
+      if (method === 'PATCH' && batchRoute?.[1]) {
+        const id = batchRoute[1];
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) as { collectionId?: string | null; pinned?: boolean } : {};
+        const row = [...feed, ...generatedRows.values()].find((batch) => batch.id === id);
+        if (!row) return Promise.resolve(json({ error: 'not found' }, 404));
+        const next = { ...patched.get(id), ...body };
+        patched.set(id, next);
+        return new Promise((resolve) => {
+          window.setTimeout(() => { resolve(json({ ...row, ...next })); }, writeDelay);
+        });
       }
       if (method === 'DELETE' && batchRoute?.[1]) {
         for (const tile of feed.find((batch) => batch.id === batchRoute[1])?.tiles ?? []) archived.add(tile.id);
@@ -287,7 +330,8 @@ export function installOfflineResponses(): void {
       const scope = url.searchParams.get('collectionId');
       const pinned = url.searchParams.get('pinned');
       const query = (url.searchParams.get('q') ?? '').toLowerCase();
-      const live = feed
+      const live = [...feed, ...generatedRows.values()]
+        .map((batch) => (patched.has(batch.id) ? { ...batch, ...patched.get(batch.id) } : batch))
         .map((batch) => (archived.size === 0 ? batch : { ...batch, tiles: batch.tiles.filter((tile) => !archived.has(tile.id)) }))
         .filter((batch) => batch.tiles.length > 0);
       const items = live.filter((batch) => (scope === null || (scope === 'null' ? batch.collectionId === null : batch.collectionId === scope))

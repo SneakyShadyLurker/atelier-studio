@@ -1,18 +1,14 @@
+/* Queued to running is a state crossfade: the overlay beat, the same clock
+   the header's queue badge leaves on. Reduced motion collapses the token. */
 .layer {
   position: absolute;
   inset: 0;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--dur-sheet) var(--ease-out);
+  transition: opacity var(--dur-overlay) var(--ease-out);
 }
 
 .layer[data-visible='true'] {
   opacity: 1;
   pointer-events: auto;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .layer {
-    transition: none;
-  }
 }

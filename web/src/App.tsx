@@ -125,6 +125,20 @@ const LazyByokDialog = lazy(() =>
   import('./components/ByokDialog').then((m) => ({ default: m.ByokDialog })),
 );
 
+async function prepareStorySource(
+  batch: Batch,
+  tile: DoneTile,
+  signal: AbortSignal,
+  uploadTileSource: (tile: DoneTile) => Promise<string>,
+): Promise<StoryDialogSource> {
+  if (isVideoMime(tile.mime)) {
+    const handoff = await createHandoffFrame(tile.id, signal);
+    return { mode: 'extend', sourceUploadId: handoff.uploadId, extendsTileId: tile.id, ratio: batch.ratio };
+  }
+  const sourceUploadId = await uploadTileSource(tile);
+  return { mode: 'i2v', sourceUploadId, sourcePrompt: batch.prompt, ratio: batch.ratio };
+}
+
 function AppContent() {
   const queryClient = useQueryClient();
   const sidebarRef = useRef<HTMLElement | null>(null);
@@ -258,35 +272,20 @@ function AppContent() {
     if (storyPrepRef.current !== null) return false;
     const controller = new AbortController();
     storyPrepRef.current = controller;
-    try {
-      if (isVideoMime(tile.mime)) {
-        const handoff = await createHandoffFrame(tile.id, controller.signal);
-        if (controller.signal.aborted) return false;
-        setStorySource({
-          mode: 'extend',
-          sourceUploadId: handoff.uploadId,
-          extendsTileId: tile.id,
-          ratio: batch.ratio,
-        });
-      } else {
-        const sourceUploadId = await uploadTileSource(tile);
-        if (controller.signal.aborted) return false;
-        setStorySource({
-          mode: 'i2v',
-          sourceUploadId,
-          sourcePrompt: batch.prompt,
-          ratio: batch.ratio,
-        });
-      }
-      return true;
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        addToast(describeError(error, "Couldn't prepare the story source."), 'error');
-      }
+    // Settled as a value rather than try/finally: React Compiler cannot yet
+    // lower a `finally` clause and would skip memoizing the whole app root.
+    const source = await prepareStorySource(batch, tile, controller.signal, uploadTileSource).then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    if (storyPrepRef.current === controller) storyPrepRef.current = null;
+    if (controller.signal.aborted) return false;
+    if (!source.ok) {
+      addToast(describeError(source.error, "Couldn't prepare the story source."), 'error');
       return false;
-    } finally {
-      if (storyPrepRef.current === controller) storyPrepRef.current = null;
     }
+    setStorySource(source.value);
+    return true;
   }, [addToast, uploadTileSource]);
   const clearAll = useClearAll({ activeView: view });
   const { cancelBatch: cancelBatchForStory } = useCancel({ activeView: view, q: debouncedQ });

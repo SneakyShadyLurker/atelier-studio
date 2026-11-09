@@ -68,17 +68,37 @@
   clip-path: none;
   margin: 0;
   padding: 5px 9px;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--line-control);
   border-radius: var(--radius-control);
   background: var(--bg);
   color: var(--ink);
   font: inherit;
   cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out),
+    opacity var(--dur-hover) var(--ease-out),
+    transform var(--dur-transform) var(--ease-tactile);
 }
 
 .fallbackButton:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .root[data-error="true"] .fallbackButton:hover:where(:not([aria-disabled='true'])) {
+    background: var(--bg-sunk);
+    border-color: var(--ink-3);
+  }
+}
+
+.fallbackButton:active:where(:not([aria-disabled='true'])) {
+  transform: scale(var(--m-press));
+}
+
+.fallbackButton[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: progress;
 }
 
 /* Touch floor on capability (the touch gate), for the shown button only. */

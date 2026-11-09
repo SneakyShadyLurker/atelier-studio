@@ -10,6 +10,12 @@ import { reconcileHistoryPages } from '../hooks/historyCache';
 export type { ActiveModelCounts } from '../lib/historyAggregation';
 
 const STUCK_LOADING_POLL_CAP_MS = 30 * 60_000;
+const STUCK_LOADING_RECONCILE_MS = 120_000;
+/** Bounds a history write so a half-open socket cannot hold the write fence (poll, sibling re-reads) for minutes. */
+const HISTORY_WRITE_TIMEOUT_MS = 30_000;
+export function historyWriteSignal(): AbortSignal {
+  return AbortSignal.timeout(HISTORY_WRITE_TIMEOUT_MS);
+}
 const MAX_LOADING_TRACKED_BATCHES = 500;
 const firstSeenLoadingAt = new Map<string, number>();
 const stuckToastBatchIds = new Set<string>();
@@ -130,7 +136,9 @@ export function historyRefreshInterval(query: {
   const pendingStoryDecision = pendingStoryPollDecision(pages, store.pendingStory, Date.now());
   if (pendingStoryDecision === 'clear') store.setPendingStory(null);
   const pendingStory = pendingStoryDecision === 'poll';
-  if ((query.state.fetchFailureCount ?? 0) > 3 && !pendingStory) return false;
+  // No failure cut-off: query-core resets `fetchFailureCount` on every fetch,
+  // and polling through an outage is what recovers work after a restart; the
+  // 10s/30s tiers below already bound the cost.
   const stitching = hasStitchingSequence(pages);
   const activeStory = hasActiveStory(pages);
   const loadingState = loadingStateFromTaggedPages(pages);
@@ -145,7 +153,10 @@ export function historyRefreshInterval(query: {
       }
     } else hasFreshLoadingBatch = true;
   }
-  if (!hasFreshLoadingBatch && !pendingStory) return false;
+  // Every running batch is past the stuck cap: the server may still settle
+  // it (startup reconciliation, a slow host), so keep a slow reconcile
+  // instead of leaving spinners that only a reload would clear.
+  if (!hasFreshLoadingBatch && !pendingStory) return STUCK_LOADING_RECONCILE_MS;
   if (pendingStory) return 3_000;
   // Use actual batch/tile progress. Cache writes also bump dataUpdatedAt and
   // would otherwise keep resetting the backoff clock.
@@ -355,6 +366,7 @@ export function patchBatch(batchId: string, patch: PatchBatchInput): Promise<Bat
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
+    signal: historyWriteSignal(),
   }).then(normalizeBatch);
 }
 
@@ -380,7 +392,7 @@ const MAX_QUERY_KEEP_UPLOADS = 64;
 /** A thread DELETE that sends every held upload (`heldUploadIds`) as `keepUploads`. */
 export function deleteKeepingUploads(path: string, params = new URLSearchParams()): Promise<void> {
   const held = heldUploadIds();
-  const init: RequestInit = { method: 'DELETE' };
+  const init: RequestInit = { method: 'DELETE', signal: historyWriteSignal() };
   if (held.length > MAX_QUERY_KEEP_UPLOADS) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify({ keepUploads: held });

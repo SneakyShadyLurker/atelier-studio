@@ -62,7 +62,10 @@ describe('ImageTile Animate action', () => {
     fireEvent.click(button);
     expect(onAnimate).toHaveBeenCalledTimes(1);
     expect(button.getAttribute('aria-busy')).toBe('true');
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(button);
+    expect(onAnimate).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       resolveAnimate?.(true);

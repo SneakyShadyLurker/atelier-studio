@@ -1,7 +1,7 @@
 import { isVideoMime } from '@atelier/shared';
 import type { CSSProperties } from 'react';
 import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, preload } from 'react-dom';
 import { refImageUrl } from '../../api/uploads';
 import { getDoneTiles } from '../../hooks/lightboxNav';
 import { useExitTransition } from '../../hooks/useExitTransition';
@@ -81,6 +81,15 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
   }, []);
 
   if (!tile || !fullSrc) return null;
+  // The full-size request starts with the shell, not after the lazy body
+  // chunk lands; the neighbours warm at low priority so Prev/Next arrive
+  // decoded. React dedupes repeated hints for one URL.
+  if (!showingVideo) preload(fullSrc, { as: 'image', fetchPriority: 'high' });
+  if (!showingMaster && activeRefImageId === null) {
+    for (const neighbour of [readyTiles[activeIndex - 1], readyTiles[activeIndex + 1]]) {
+      if (neighbour && !isVideoMime(neighbour.mime)) preload(neighbour.url, { as: 'image', fetchPriority: 'low' });
+    }
+  }
   const frameStyle = showingVideo
     ? bodyReady ? undefined : { backgroundColor: 'transparent' }
     : {

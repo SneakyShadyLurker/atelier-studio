@@ -9,6 +9,7 @@ import { I } from '../../icons/I';
 import LoadingTileBody from '../LoadingTile/body';
 import loadingStyles from '../LoadingTile/index.module.css';
 import QueuedTile from '../QueuedTile';
+import { focusSuccessor, tileSuccessor } from '../../../lib/focusSuccessor';
 import styles from './index.module.css';
 
 interface TilePlaceholderProps {
@@ -44,9 +45,11 @@ function TilePlaceholder({
   const [canceling, setCanceling] = useState(false);
   const isQueued = batchStatus === 'queued';
 
-  const triggerCancel = () => {
+  const triggerCancel = (from: HTMLElement) => {
     if (canceling) return;
     setCanceling(true);
+    // The tile leaves with the cancel; the keyboard moves on before it does.
+    focusSuccessor(tileSuccessor(from));
     // Suppress the cancel only when the tile is DEFINITIVELY already
     // terminal in cache (the feed renders a deferred snapshot, so the button
     // can outlive the tile's completion by a frame). A cache miss (undefined)
@@ -63,19 +66,20 @@ function TilePlaceholder({
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      triggerCancel();
+      triggerCancel(event.currentTarget);
     }
   };
 
   return (
-    <div className={loadingStyles.tile} data-seen={seen ? 'true' : undefined}>
+    <div className={loadingStyles.tile} data-feed-tile={tileId} data-seen={seen ? 'true' : undefined}>
       <button
         type="button"
         className={loadingStyles.cancelBtn}
         aria-label="Cancel generation"
-        data-tip="Cancel generation"
+        data-tip={canceling ? 'Canceling…' : 'Cancel generation'}
         data-tip-place="below-end"
-        onClick={(event) => { event.stopPropagation(); triggerCancel(); }}
+        aria-busy={canceling || undefined}
+        onClick={(event) => { event.stopPropagation(); triggerCancel(event.currentTarget); }}
         onKeyDown={onKeyDown}
       >
         <I.close />

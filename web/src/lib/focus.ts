@@ -36,10 +36,5 @@ export function focusRovingItem(
 }
 
 function hasInertAncestor(el: HTMLElement): boolean {
-  let cursor: HTMLElement | null = el;
-  while (cursor) {
-    if (cursor.inert) return true;
-    cursor = cursor.parentElement;
-  }
-  return false;
+  return el.closest('[inert]') !== null;
 }

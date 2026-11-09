@@ -255,11 +255,33 @@ describe('active history refresh', () => {
     expect(result.pageParams).toBe(input.pageParams);
   });
 
-  test('keeps terminal tiles, optimistic scope and removed-tile membership', () => {
+  test('keeps terminal tiles and removed-tile membership; collection and pin follow the server row', () => {
+    // Optimistic scope state is protected by the queryFn's write fence (a
+    // response overlapping a local write is discarded), so the merge itself
+    // takes the server's collection and pin: a change made in another tab or
+    // on another device converges on the next poll.
     const value = done(batch({ collectionId: 'local-collection', pinned: true }));
     const server = { ...value, collectionId: null, pinned: false, tiles: [...value.tiles.map((tile) => ({ id: tile.id, seed: tile.seed, status: 'loading' as const })), { id: 'removed', seed: 1, status: 'loading' as const }] };
     const result = mergeHistoryRefresh({ pages: [{ items: [value], nextCursor: null }], pageParams: [null] }, { items: [server], missingBatchIds: [] });
-    expect(result.pages[0]?.items[0]).toMatchObject({ collectionId: 'local-collection', pinned: true, tiles: value.tiles });
+    expect(result.pages[0]?.items[0]).toMatchObject({ collectionId: null, pinned: false, tiles: value.tiles });
+  });
+
+  test('pages without a refreshed batch keep their identity', () => {
+    const active = batch({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', createdAt: 30 });
+    const idle = done(batch({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', createdAt: 10 }));
+    const input: HistoryData = { pages: [{ items: [active], nextCursor: 'cursor' }, { items: [idle], nextCursor: null }], pageParams: [null, 'cursor'] };
+    const result = mergeHistoryRefresh(input, { items: [done(active)], missingBatchIds: [] });
+    expect(result.pages[0]?.items[0]?.status).toBe('done');
+    expect(result.pages[1]).toBe(input.pages[1]);
+  });
+
+  test('a loaded window emptied by removals still defers a discovered story while a cursor remains', () => {
+    const story = { id: crypto.randomUUID(), status: 'rendering' as const, segmentIndex: 0, segmentCount: 3, logline: 'arc', etaMs: 1 };
+    const discovered = done(batch({ createdAt: 15, story }));
+    const emptied: HistoryData = { pages: [{ items: [], nextCursor: 'more' }], pageParams: [null] };
+    expect(mergeHistoryRefresh(emptied, { items: [discovered], missingBatchIds: [] }, [story.id]).pages[0]?.items).toEqual([]);
+    const exhausted: HistoryData = { pages: [{ items: [], nextCursor: null }], pageParams: [null] };
+    expect(mergeHistoryRefresh(exhausted, { items: [discovered], missingBatchIds: [] }, [story.id]).pages[0]?.items.map((item) => item.id)).toEqual([discovered.id]);
   });
 
   test('defers out-of-window discoveries until the cursor tail is exhausted, including same-time ID order', () => {

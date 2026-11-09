@@ -1,14 +1,17 @@
 import { expect, test, type Page } from '@playwright/test';
 
 // Spamming Generate queues one generation per click. Each accepted press
-// enters the feed through a view transition, and a captured element is not
-// hit-testable while it runs, so the Composer must stay out of transitions it
-// does not own: a press during a batch's entrance has to reach Generate.
+// enters the feed with the batch sheet's CSS entrance (and any Transition the
+// feed commits around it), and a captured element is not hit-testable while a
+// view transition runs, so the Composer must stay out of transitions it does
+// not own: a press during a batch's entrance has to reach Generate.
 
-const viewTransitionRunning = (page: Page) => page.evaluate(() => document.getAnimations()
-  .some((animation) => animation.effect instanceof KeyframeEffect
-    && animation.effect.pseudoElement?.startsWith('::view-transition') === true
-    && animation.playState === 'running'));
+const batchEntering = (page: Page) => page.evaluate(() => document.getAnimations()
+  .some((animation) => {
+    if (!(animation instanceof CSSAnimation) || animation.animationName !== 'atelier-rise-in' || animation.playState !== 'running') return false;
+    const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+    return target instanceof Element && target.closest('section[data-batch-id^="studio-generated-"]') !== null;
+  }));
 
 const generated = (page: Page) => page.evaluate(() => (window as Window & { __studioGenerated?: number }).__studioGenerated ?? 0);
 
@@ -40,7 +43,7 @@ test('every Generate press queues a generation, including presses while a batch 
   for (let press = 2; press <= presses; press += 1) {
     // Wait for the previous press's batch to start entering the feed, then
     // press while that transition is still running.
-    await expect.poll(() => viewTransitionRunning(page), { intervals: [10], timeout: 5000 }).toBe(true);
+    await expect.poll(() => batchEntering(page), { intervals: [10], timeout: 5000 }).toBe(true);
     expect(await hitAt(page, generate)).toBe('Generate');
     expect(await hitAt(page, prompt)).toBe('TEXTAREA');
     await page.mouse.click(generate.x, generate.y);

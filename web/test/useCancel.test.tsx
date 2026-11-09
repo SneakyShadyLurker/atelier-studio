@@ -140,7 +140,29 @@ describe('useCancel', () => {
     expect(items?.[0]?.tiles.map((tile) => tile.id)).toEqual(['tile-done']);
   });
 
-  test('cancelTile aborts the local controller only after DELETE returns', async () => {
+  test('cancelTile leaves the batch stream open: the server cancels the one tile and the others keep streaming', async () => {
+    const calls: { url: string; method: string }[] = [];
+    const deferred = deferredDeleteMock(calls);
+    globalThis.fetch = deferred.fetch;
+    const controller = new AbortController();
+    registerBatch('batch-1', controller);
+    const client = clientWithHistory([batch([
+      { id: 'tile-loading', seed: 1, status: 'loading' },
+      { id: 'tile-other', seed: 2, status: 'loading' },
+    ])]);
+    const { result } = renderHook(() => useCancel(), { wrapper: wrapper(client) });
+
+    const cancelPromise = result.current.cancelTile('batch-1', 'tile-loading');
+    await waitFor(() => { expect(calls).toEqual([{ url: '/api/history/batch-1/tile-loading', method: 'DELETE' }]); });
+
+    deferred.resolveDelete();
+    await act(async () => {
+      await cancelPromise;
+    });
+    expect(controller.signal.aborted).toBe(false);
+  });
+
+  test('cancelBatch aborts the local controller only after DELETE returns', async () => {
     const calls: { url: string; method: string }[] = [];
     const deferred = deferredDeleteMock(calls);
     globalThis.fetch = deferred.fetch;
@@ -149,8 +171,8 @@ describe('useCancel', () => {
     const client = clientWithHistory([batch([{ id: 'tile-loading', seed: 1, status: 'loading' }])]);
     const { result } = renderHook(() => useCancel(), { wrapper: wrapper(client) });
 
-    const cancelPromise = result.current.cancelTile('batch-1', 'tile-loading');
-    await waitFor(() => { expect(calls).toEqual([{ url: '/api/history/batch-1/tile-loading', method: 'DELETE' }]); });
+    const cancelPromise = result.current.cancelBatch('batch-1');
+    await waitFor(() => { expect(calls).toEqual([{ url: '/api/history/batch-1', method: 'DELETE' }]); });
 
     expect(controller.signal.aborted).toBe(false);
     deferred.resolveDelete();
@@ -221,7 +243,7 @@ describe('useCancel', () => {
     ]);
   });
 
-  test('cancelTile posts a cross-tab history invalidation', async () => {
+  test('cancelTile posts a cross-tab history invalidation but no stream cancel', async () => {
     setBroadcastChannel(MockChannel as never);
     const calls: { url: string; method: string }[] = [];
     globalThis.fetch = okDeleteMock(calls);
@@ -230,6 +252,21 @@ describe('useCancel', () => {
 
     await act(async () => {
       await result.current.cancelTile('batch-1', 'tile-loading');
+    });
+
+    expect(MockChannel.messages[0]).toEqual({ type: 'invalidate', batchId: 'batch-1' });
+    expect(MockChannel.messages.some((message) => (message as { type?: unknown }).type === 'cancel')).toBe(false);
+  });
+
+  test('cancelBatch posts a cross-tab history invalidation and a stream cancel', async () => {
+    setBroadcastChannel(MockChannel as never);
+    const calls: { url: string; method: string }[] = [];
+    globalThis.fetch = okDeleteMock(calls);
+    const client = clientWithHistory([batch([{ id: 'tile-loading', seed: 1, status: 'loading' }])]);
+    const { result } = renderHook(() => useCancel(), { wrapper: wrapper(client) });
+
+    await act(async () => {
+      await result.current.cancelBatch('batch-1');
     });
 
     expect(MockChannel.messages[0]).toEqual({ type: 'invalidate', batchId: 'batch-1' });

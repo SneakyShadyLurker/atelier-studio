@@ -1,9 +1,9 @@
 import type { Batch } from '@atelier/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
-import { historyKeys, isDefaultHistoryScopeKey, patchBatch, type PatchBatchInput } from '../api/history';
+import { historyKeys, patchBatch, type PatchBatchInput } from '../api/history';
 import { APP_VIEW_UNSORTED, useAtelierStore, type AppView } from '../store/atelier';
-import { retagHistoryData, type HistoryData } from './historyCache';
+import { historyScopesWithBatch, retagHistoryData, writeHistoryScope, type HistoryData } from './historyCache';
 import { invalidateLibrary } from './invalidateLibrary';
 import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 
@@ -37,45 +37,48 @@ export interface ScopedRollback {
   previous: HistoryData | undefined;
 }
 
+export interface ScopeSnapshot {
+  readonly key: QueryKey;
+  readonly previous: HistoryData | undefined;
+}
+
 export interface CanonicalMirror {
   activeKey: QueryKey;
   previous: HistoryData | undefined;
-  canonicalKey?: QueryKey;
-  canonicalPrevious?: HistoryData | undefined;
+  /** Every cached history scope the write must touch: the active one first, then each other scope holding the batch. */
+  keys: readonly QueryKey[];
+  snapshots: readonly ScopeSnapshot[];
 }
 
-// Begin an optimistic destructive write that must mirror into the canonical
-// Unsorted scope (historyKeys.list() — the SSE channel scope) whenever the
-// user acts on a NON-default scope whose canonical cache is populated. Cancels
-// in-flight refetches on the active key (and the canonical key when mirroring)
-// and snapshots both for rollback. It deliberately does NOT remove anything:
-// the caller applies its entity-specific removal (tile vs batch) to activeKey
-// and — when `canonicalKey` is returned — to canonicalKey, preserving each
-// hook's exact pre/post-removal ordering (e.g. useDeleteBatch's preview-id
-// snapshot between cancel and removal).
+// Begin an optimistic write against every cached history scope that shows the
+// batch: the scope the user acts in, plus any other scope (the canonical
+// Unsorted feed the SSE stream writes, Pinned, a collection, a search) that
+// also holds the row. Cancels in-flight refetches on each and snapshots each
+// for rollback. It deliberately does NOT remove anything: the caller applies
+// its entity-specific removal (tile vs batch) to every key in `keys`,
+// preserving each hook's exact pre/post-removal ordering (e.g. useDeleteBatch's
+// preview-id snapshot between cancel and removal). Writing every scope keeps
+// a revisit from first painting the archived row out of its cache.
 export async function beginCanonicalMirror(
   queryClient: QueryClient,
   activeKey: QueryKey,
+  batchId: string,
 ): Promise<CanonicalMirror> {
-  const canonicalKey = historyKeys.list();
-  const hasCanonicalCache = queryClient.getQueryData(canonicalKey) !== undefined;
-  const shouldMirror = !isDefaultHistoryScopeKey(activeKey) && hasCanonicalCache;
-  await queryClient.cancelQueries({ queryKey: activeKey });
-  if (shouldMirror) await queryClient.cancelQueries({ queryKey: canonicalKey });
-  const previous = queryClient.getQueryData<HistoryData>(activeKey);
-  return {
-    activeKey,
-    previous,
-    ...(shouldMirror ? { canonicalKey, canonicalPrevious: queryClient.getQueryData<HistoryData>(canonicalKey) } : {}),
-  };
+  const keys = [activeKey, ...historyScopesWithBatch(queryClient, historyKeys.all(), batchId).filter((key) => !sameKey(key, activeKey))];
+  await Promise.all(keys.map((key) => queryClient.cancelQueries({ queryKey: key, exact: true })));
+  const snapshots = keys.map((key) => ({ key, previous: queryClient.getQueryData<HistoryData>(key) }));
+  return { activeKey, previous: snapshots[0]?.previous, keys, snapshots };
 }
 
-// Restore both the active scope and (when it was mirrored) the canonical scope
-// from a beginCanonicalMirror snapshot. Pure cache restore — no removal.
+function sameKey(a: QueryKey, b: QueryKey): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// Restore every scope a beginCanonicalMirror snapshot captured. Pure cache
+// restore — no removal.
 export function rollbackCanonicalMirror(queryClient: QueryClient, ctx: CanonicalMirror): void {
-  if (ctx.previous) queryClient.setQueryData(ctx.activeKey, ctx.previous);
-  if (ctx.canonicalKey && ctx.canonicalPrevious) {
-    queryClient.setQueryData(ctx.canonicalKey, ctx.canonicalPrevious);
+  for (const { key, previous } of ctx.snapshots) {
+    if (previous) queryClient.setQueryData(key, previous);
   }
 }
 
@@ -101,43 +104,38 @@ export function updateBatchInActiveScope(
   patch: Partial<Pick<Batch, 'collectionId' | 'pinned'>>,
 ): HistoryData | undefined {
   const previous = queryClient.getQueryData<HistoryData>(activeKey);
-  queryClient.setQueryData<HistoryData>(activeKey, (current) => {
-    if (!current) return current;
-    const activeView = viewFromActiveKey(activeKey);
-    return retagHistoryData({
-      ...current,
-      pages: current.pages.map((page) => ({
-        ...page,
-        items: page.items.flatMap((batch) => {
-          if (batch.id !== batchId) return [batch];
-          const next = { ...batch, ...patch };
-          return belongsToScope(next, activeView) ? [next] : [];
-        }),
-      })),
-    });
-  });
+  const activeView = viewFromActiveKey(activeKey);
+  writeHistoryScope(queryClient, activeKey, (current) => retagHistoryData({
+    ...current,
+    pages: current.pages.map((page) => ({
+      ...page,
+      items: page.items.flatMap((batch) => {
+        if (batch.id !== batchId) return [batch];
+        const next = { ...batch, ...patch };
+        return belongsToScope(next, activeView) ? [next] : [];
+      }),
+    })),
+  }));
   return previous;
 }
 
-function replaceBatchInActiveScope(
+/** Server-truth replacement of one batch in one cached scope; drops it when it no longer belongs there. */
+export function replaceBatchInScope(
   queryClient: QueryClient,
   activeKey: QueryKey,
   returnedBatch: Batch,
 ): void {
-  queryClient.setQueryData<HistoryData>(activeKey, (current) => {
-    if (!current) return current;
-    const activeView = viewFromActiveKey(activeKey);
-    return retagHistoryData({
-      ...current,
-      pages: current.pages.map((page) => ({
-        ...page,
-        items: page.items.flatMap((batch) => {
-          if (batch.id !== returnedBatch.id) return [batch];
-          return belongsToScope(returnedBatch, activeView) ? [returnedBatch] : [];
-        }),
-      })),
-    });
-  });
+  const activeView = viewFromActiveKey(activeKey);
+  writeHistoryScope(queryClient, activeKey, (current) => retagHistoryData({
+    ...current,
+    pages: current.pages.map((page) => ({
+      ...page,
+      items: page.items.flatMap((batch) => {
+        if (batch.id !== returnedBatch.id) return [batch];
+        return belongsToScope(returnedBatch, activeView) ? [returnedBatch] : [];
+      }),
+    })),
+  }));
 }
 
 interface ScopedBatchPatchOptions<TInput extends { batchId: string }> {
@@ -154,23 +152,26 @@ export function useScopedBatchPatch<TInput extends { batchId: string }>(
   return useMutation({
     mutationKey: HISTORY_WRITE_MUTATION_KEY,
     mutationFn: (input: TInput) => patchBatch(input.batchId, options.toPatch(input)),
-    onMutate: async (input): Promise<ScopedRollback> => {
-      await queryClient.cancelQueries({ queryKey: activeKey });
-      const previous = updateBatchInActiveScope(
-        queryClient,
-        activeKey,
-        input.batchId,
-        options.toOptimistic(input),
-      );
-      return { activeKey, previous };
+    // The patch lands in every cached scope that shows the batch, not only the
+    // acted-on one: the canonical Unsorted feed (the SSE write target) and any
+    // other cached scope would otherwise keep the old collection or pin until
+    // their next server read, and while a stream runs that read can be a long
+    // way off. A scope the batch leaves drops it; a scope it would newly join
+    // waits for the settle re-read (canonical placement needs the server row).
+    onMutate: async (input): Promise<CanonicalMirror> => {
+      const mirror = await beginCanonicalMirror(queryClient, activeKey, input.batchId);
+      for (const key of mirror.keys) {
+        updateBatchInActiveScope(queryClient, key, input.batchId, options.toOptimistic(input));
+      }
+      return mirror;
     },
     onError: (_error, _input, rollback) => {
-      if (rollback?.previous) queryClient.setQueryData(rollback.activeKey, rollback.previous);
+      if (rollback) rollbackCanonicalMirror(queryClient, rollback);
     },
-    onSuccess: (batch) => {
-      // Server-truth write into the acted-on scope so the visible feed
+    onSuccess: (batch, _input, mirror) => {
+      // Server-truth write into every touched scope so the visible feed
       // doesn't flash between the optimistic patch and the settle refetch.
-      replaceBatchInActiveScope(queryClient, activeKey, batch);
+      for (const key of mirror.keys) replaceBatchInScope(queryClient, key, batch);
     },
     onSettled: async () => {
       // Default (active) refetch — identical to the original

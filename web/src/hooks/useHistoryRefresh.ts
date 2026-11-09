@@ -1,18 +1,16 @@
 import { useEffect } from 'react';
-import { useIsMutating, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Batch } from '@atelier/shared';
 import type { HistoryRefreshResponse } from '@atelier/shared/wire-schemas';
 import { ApiError } from '../api/client';
 import { historyKeys, historyRefreshInterval, pendingStoryPollDecision, type HistoryData } from '../api/history';
 import { historyRefreshKeys, historyRefreshTargets, refreshHistory } from '../api/historyRefresh';
 import { useAtelierStore, type AppView } from '../store/atelier';
-import { retagHistoryData, sortsBefore, upsertHistoryBatch } from './historyCache';
-import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
+import { sortsBefore, tagHistoryPageItems, upsertHistoryBatch, withTaggedPages } from './historyCache';
+import { HISTORY_WRITE_MUTATION_KEY, lastHistoryWriteId } from './historyWrites';
+import { getBatch } from './inFlightBatches';
 
-function lastHistoryWrite(client: QueryClient): number {
-  return client.getMutationCache().findAll({ mutationKey: HISTORY_WRITE_MUTATION_KEY })
-    .reduce((latest, mutation) => Math.max(latest, mutation.mutationId), 0);
-}
+const lastHistoryWrite = lastHistoryWriteId;
 
 /** Active refreshes change job state, never optimistic scope or tile membership. */
 export function mergeHistoryRefresh(current: HistoryData, response: HistoryRefreshResponse, storyIds: readonly string[] = [], snapshot: HistoryData = current): HistoryData {
@@ -25,24 +23,29 @@ export function mergeHistoryRefresh(current: HistoryData, response: HistoryRefre
   const missing = new Set(response.missingBatchIds.filter(unchanged));
   if (items.length === 0 && missing.size === 0) return current;
   const updates = new Map(items.map((batch) => [batch.id, batch]));
-  const pages = current.pages.map((page) => ({
-    ...page,
-    items: page.items.flatMap((batch): Batch[] => {
-      if (missing.has(batch.id)) return [];
-      const incoming = updates.get(batch.id);
-      if (!incoming) return [batch];
-      const tiles = new Map(batch.tiles.map((tile) => [tile.id, tile]));
-      return [{
-        ...incoming,
-        collectionId: batch.collectionId,
-        pinned: batch.pinned,
-        tiles: incoming.tiles.flatMap((tile) => {
-          const before = tiles.get(tile.id);
-          return before ? [before.status !== 'loading' ? before : tile] : [];
-        }),
-      }];
-    }),
-  }));
+  // Pages with no touched batch keep their identity, so structural sharing
+  // and the row memos skip them without a deep compare.
+  const pages = current.pages.map((page) => (
+    page.items.some((batch) => missing.has(batch.id) || updates.has(batch.id))
+      ? tagHistoryPageItems(page, page.items.flatMap((batch): Batch[] => {
+            if (missing.has(batch.id)) return [];
+            const incoming = updates.get(batch.id);
+            if (!incoming) return [batch];
+            const tiles = new Map(batch.tiles.map((tile) => [tile.id, tile]));
+            // Collection and pin come from the server row: the queryFn already
+            // discards any response that overlapped a local history write, so
+            // an optimistic patch is never overwritten here, and a change made
+            // elsewhere (another tab or device) converges on the next poll.
+            return [{
+              ...incoming,
+              tiles: incoming.tiles.flatMap((tile) => {
+                const before = tiles.get(tile.id);
+                return before ? [before.status !== 'loading' ? before : tile] : [];
+              }),
+            }];
+          }))
+      : page
+  ));
   const stories = new Set(storyIds);
   const tail = current.pages.at(-1);
   const oldest = current.pages.toReversed().find((page) => page.items.length > 0)?.items.at(-1);
@@ -50,8 +53,10 @@ export function mergeHistoryRefresh(current: HistoryData, response: HistoryRefre
     && batch.story !== undefined && stories.has(batch.story.id)
     // Older unloaded story segments belong to future cursor pages. Inserting
     // them now would put those future pages after an older row in the feed.
-    && !(tail?.nextCursor !== null && oldest !== undefined && sortsBefore(oldest, batch)));
-  return added.reduce(upsertHistoryBatch, retagHistoryData({ ...current, pages }));
+    // A loaded window with every row removed gives no position either: it
+    // still waits for pagination while a cursor remains.
+    && !(tail?.nextCursor !== null && (oldest === undefined || sortsBefore(oldest, batch))));
+  return added.reduce(upsertHistoryBatch, withTaggedPages(current, pages));
 }
 
 export function useHistoryRefresh(view: AppView, q: string, data: HistoryData | undefined, enabled: boolean) {
@@ -86,15 +91,23 @@ export function useHistoryRefresh(view: AppView, q: string, data: HistoryData | 
       if (!snapshot || queryClient.isMutating({ mutationKey: HISTORY_WRITE_MUTATION_KEY }) > 0) return null;
       const pending = useAtelierStore.getState().pendingStory;
       const pendingId = pendingStoryPollDecision(snapshot.pages, pending, Date.now()) === 'poll' ? pending?.id : undefined;
-      const targets = historyRefreshTargets(snapshot.pages.flatMap((page) => page.items), pendingId);
+      const all = historyRefreshTargets(snapshot.pages.flatMap((page) => page.items), pendingId);
+      // A batch this tab streams converges through its own events; the poll
+      // covers work whose stream lives elsewhere or has ended.
+      const targets = { ...all, batchIds: all.batchIds.filter((id) => getBatch(id) === undefined) };
       if (targets.batchIds.length === 0 && targets.storyIds.length === 0) return null;
       const response = await refreshHistory(targets, view, q, signal);
       signal.throwIfAborted();
       // User writes invalidate the whole request; SSE/pagination changes are
       // reconciled per batch so independent active jobs can still converge.
+      // A list GET still in flight was read before this response: landing the
+      // merge under it would let the older read drop a batch the merge added,
+      // so the next tick applies it instead.
+      const liveSource = queryClient.getQueryCache().find({ queryKey: sourceKey, exact: true });
       if (queryClient.isMutating({ mutationKey: HISTORY_WRITE_MUTATION_KEY }) > 0
         || lastHistoryWrite(queryClient) !== write
-        || queryClient.getQueryCache().find({ queryKey: sourceKey, exact: true }) !== sourceQuery) return null;
+        || liveSource !== sourceQuery
+        || liveSource?.state.fetchStatus === 'fetching') return null;
       queryClient.setQueryData<HistoryData>(sourceKey, (current) => current ? mergeHistoryRefresh(current, response, targets.storyIds, snapshot) : current);
       return null;
     },

@@ -355,6 +355,7 @@
     --ease-exit: linear;
     --ease-tactile: linear;
     --ease-view: linear;
+    --ease-loop: linear;
   }
 
   ::view-transition-group(*) {

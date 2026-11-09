@@ -137,6 +137,7 @@ function LoadingTileBody({ tileId, batchId, modelName, startedAt, isVideo = fals
           src={backdrop}
           alt=""
           aria-hidden="true"
+          decoding="async"
           data-pass={pass}
           data-source={sourceBackdrop !== undefined ? 'true' : undefined}
         />

@@ -5,6 +5,7 @@ import { flushSync } from 'react-dom';
 import { useIsPhone } from '../../hooks/useIsPhone';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { FEED_SCROLL_END_THRESHOLD_PX, FEED_VIRTUALIZER_ANCHORING, measureFeedScrollMargin, settleFeedScrollMargin, type FeedMarginState } from '../../lib/feedAnchor';
+import { estimateBatchHeight, type FeedGeometry } from '../../lib/feedEstimate';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { markBatchesSeen, useSeenBatches } from '../../lib/seenBatches';
 import { scopeTitle } from '../../lib/viewChrome';
@@ -61,12 +62,9 @@ export interface CanvasHandle {
   scrollToBatch: (batchId: string) => boolean;
 }
 
-// Header + the batch sheet's 16px padding top and bottom; the gap is the
-// sheet's 28px top margin. Measurement corrects any miss.
-const BATCH_ESTIMATE_BASE = 128;
-const BATCH_ESTIMATE_TILE_HEIGHT = 300;
-const BATCH_ESTIMATE_GAP = 28;
 const CANVAS_FALLBACK_BATCHES = 7;
+/** The scroller's inline padding (index.module.css) plus the stable scrollbar gutter. */
+const CANVAS_INLINE_CHROME_PX = { desktop: 36 * 2 + 16, phone: 14 * 2 } as const;
 /** A scroll this soon after a reader's drag or wheel is theirs (covers touch momentum). */
 const READER_SCROLL_WINDOW_MS = 1_000;
 
@@ -97,14 +95,6 @@ export function canvasBatchKey(batches: readonly Pick<Batch, 'id'>[], index: num
   return batches[index]?.id ?? `placeholder-${index}`;
 }
 
-/** Tile rows in a batch — the only thing that varies row height at a given width. */
-function tileRowCount(batch: Batch | undefined): number {
-  return Math.max(1, Math.ceil((batch?.tiles.length ?? 1) / 4));
-}
-
-function estimateBatchHeight(batch: Batch | undefined): number {
-  return BATCH_ESTIMATE_BASE + BATCH_ESTIMATE_TILE_HEIGHT * tileRowCount(batch) + BATCH_ESTIMATE_GAP;
-}
 
 function EmptyCanvas() {
   return (
@@ -236,8 +226,13 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   const marginStateRef = useRef<FeedMarginState>({ margin: null, owed: 0 });
   // The history status row's footprint, on the render it commits in.
   const statusFootprint = useStatusFootprint(hasNextPage);
-  const seenBatchIds = useSeenBatches();
+  const seenBatchIds = useSeenBatches('canvas');
   const getBatchKey = useCallback((index: number) => canvasBatchKey(batches, index), [batches]);
+  // Unmeasured rows are laid out at the estimate, so it reads the geometry
+  // the grid lays out with (lib/feedEstimate). The scroller rect arrives from
+  // the virtualizer's own observer; until then the flat fallback applies.
+  const geometryRef = useRef<FeedGeometry>({ containerWidth: null, viewportWidth: 0, viewportHeight: 0, phone: isPhone });
+  const estimateRow = useCallback((batch: Batch | undefined) => estimateBatchHeight(batch, geometryRef.current), []);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual's useVirtualizer is the canonical virtualization primitive; React Compiler escape hatch.
   const batchVirtualizer = useVirtualizer({
@@ -246,7 +241,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
     // Stable batch ids, NOT indexes — the anchoring below cannot tell a prepend
     // from an append once every index has shifted.
     getItemKey: getBatchKey,
-    estimateSize: (index) => estimateBatchHeight(batches[index]),
+    estimateSize: (index) => estimateRow(batches[index]),
     initialRect: { width: 0, height: 900 },
     overscan: 3,
     scrollMargin,
@@ -295,18 +290,40 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
       return cleanup;
     },
   });
+  const scrollRectWidth = batchVirtualizer.scrollRect?.width ?? 0;
+  const geometry: FeedGeometry = {
+    containerWidth: scrollRectWidth > 0 ? Math.max(0, scrollRectWidth - (isPhone ? CANVAS_INLINE_CHROME_PX.phone : CANVAS_INLINE_CHROME_PX.desktop)) : null,
+    viewportWidth: typeof window === 'undefined' ? 0 : window.innerWidth,
+    viewportHeight: typeof window === 'undefined' ? 0 : window.innerHeight,
+    phone: isPhone,
+  };
+  geometryRef.current = geometry;
+  // The virtualizer memoizes its layout on measured sizes, not on the estimate
+  // function, so the rows laid out before the scroller rect arrived (at the
+  // flat fallback) are re-estimated once, when the first geometry lands and
+  // nothing has been measured yet. Later column changes (a sidebar collapse,
+  // a resize across 480px or 920px) leave measured rows alone and let the
+  // unmeasured ones pick up the new estimate as they mount: clearing the
+  // measurement cache mid-resize threw the feed back by whole rows.
+  const hasGeometry = geometry.containerWidth !== null;
+  const estimatedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!hasGeometry || estimatedRef.current) return;
+    estimatedRef.current = true;
+    batchVirtualizer.measure();
+  }, [batchVirtualizer, hasGeometry]);
   const virtualBatches = batchVirtualizer.getVirtualItems();
   const renderBatches = virtualBatches.length > 0
     ? virtualBatches
     : fallbackVirtualRows(
       batches.length,
       CANVAS_FALLBACK_BATCHES,
-      (index) => estimateBatchHeight(batches[index]),
+      (index) => estimateRow(batches[index]),
       (index) => canvasBatchKey(batches, index),
     );
   const estimatedFeedHeight = useMemo(
-    () => batches.reduce((total, batch) => total + estimateBatchHeight(batch), 0),
-    [batches],
+    () => batches.reduce((total, batch) => total + estimateRow(batch), 0),
+    [batches, estimateRow],
   );
   const virtualFeedHeight = virtualizedHeight(virtualBatches.length > 0, batchVirtualizer.getTotalSize(), estimatedFeedHeight);
   // Keyed on the contiguous virtual window bounds (NOT renderBatches, which is
@@ -394,7 +411,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
 
   useEffect(() => {
     if (renderedBatchIds === '') return;
-    markBatchesSeen(renderedBatchIds.split('\0'));
+    markBatchesSeen(renderedBatchIds.split('\0'), 'canvas');
   }, [renderedBatchIds]);
 
   // The landing reconciliation keeps re-targeting the end while rows measure,
@@ -436,7 +453,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
     // drag too) takes over from the landing. One estimated row of slack: while
     // rows measure, the library shifts scrollTop before the new total commits,
     // so a landing position can briefly read that far from the end.
-    if (landingRef.current && distanceFromEnd > estimateBatchHeight(undefined)) {
+    if (landingRef.current && distanceFromEnd > estimateRow(undefined)) {
       releaseLanding();
     }
 
@@ -498,6 +515,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
             isFetchingNextPage={isFetchingNextPage}
             isFetchNextPageError={isFetchNextPageError}
             fetchNextPage={onLoadMore}
+            scrollRoot={canvasRef}
             itemCount={batches.length}
             endLabel={`Start, ${String(batches.length)} ${batches.length === 1 ? 'batch' : 'batches'}`}
             enabled={!readOnly}

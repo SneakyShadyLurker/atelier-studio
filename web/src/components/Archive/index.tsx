@@ -350,6 +350,7 @@ function Archive({
           isFetchingNextPage={isFetchingNextPage}
           isFetchNextPageError={isFetchNextPageError}
           fetchNextPage={() => { onLoadMore?.(); }}
+          scrollRoot={archiveRef}
           itemCount={items.length}
           endLabel={`End, ${String(total)} archived`}
           enabled={!isLoading && !isError}

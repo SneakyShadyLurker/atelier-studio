@@ -87,6 +87,24 @@ const PERSISTED_HISTORY_PAGE_KEYS = new Set<PropertyKey>(['items', 'nextCursor']
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
 let latestClient: { key: string; client: PersistedClient } | undefined;
 let activeIdbKey: string | undefined;
+// What the last write (or the last snapshot buffered for one) contained. The
+// provider dehydrates on every cache event, including fetch-status flips of
+// queries that never persist (the 3s active-work poll, the 30s models poll),
+// so without this every such event scheduled a full structured-clone write of
+// the whole persisted slice one second later.
+let lastPersistedSignature: string | undefined;
+
+/**
+ * Identity of the persisted slice: which queries, how many times each one's
+ * data was set and when it was last read from the server. The count matters:
+ * optimistic history writes keep the server-read clock on purpose, so two
+ * different snapshots can share a `dataUpdatedAt`.
+ */
+export function persistedClientSignature(client: PersistedClient): string {
+  return `${client.buster}|${client.clientState.queries
+    .map((query) => `${query.queryHash}#${String(query.state.dataUpdateCount)}@${String(query.state.dataUpdatedAt)}`)
+    .join(',')}`;
+}
 
 function scopedIdbKey(cacheScope: string): string {
   return `${IDB_KEY_PREFIX}:${cacheScope}`;
@@ -162,6 +180,7 @@ function clearPendingPersist(): void {
     persistTimer = undefined;
   }
   latestClient = undefined;
+  lastPersistedSignature = undefined;
 }
 
 async function flushLatestClient(): Promise<void> {
@@ -298,10 +317,15 @@ function attachLifecycleFlushOnce(): void {
 export function createIDBPersister(cacheScope: string): Persister {
   const idbKey = scopedIdbKey(cacheScope);
   activeIdbKey = idbKey;
+  // A fresh persister knows nothing about what an earlier one wrote.
+  lastPersistedSignature = undefined;
   attachLifecycleFlushOnce();
   return {
     persistClient: (client: PersistedClient) => {
       if (isSessionLocked() || idbKey !== activeIdbKey) return;
+      const signature = persistedClientSignature(client);
+      if (signature === lastPersistedSignature) return;
+      lastPersistedSignature = signature;
       latestClient = { key: idbKey, client: boundPersistedHistory(client) };
       if (persistTimer) {
         clearTimeout(persistTimer);

@@ -132,6 +132,69 @@ describe('useScopedBatchPatch', () => {
     expect(queryClient.getQueryState(activeKey)?.isInvalidated).toBe(true);
   });
 
+  test('a patch made from another scope lands in the canonical Unsorted cache too', async () => {
+    const activeKey = historyKeys.scoped(APP_VIEW_PINNED, '');
+    const canonicalKey = historyKeys.list();
+    const collectionId = 'collection-1';
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    queryClient.setQueryData(activeKey, page([batch({ pinned: true })]));
+    queryClient.setQueryData(canonicalKey, page([batch({ pinned: true })]));
+
+    let resolveFetch: ((response: Response) => void) | undefined;
+    globalThis.fetch = mock(() => new Promise<Response>((resolve) => { resolveFetch = resolve; })) as unknown as typeof fetch;
+
+    const { result } = renderHook(
+      () => useScopedBatchPatch(
+        { activeView: APP_VIEW_PINNED, q: '' },
+        {
+          toPatch: (input: { batchId: string; collectionId: string | null }) => ({ collectionId: input.collectionId }),
+          toOptimistic: (input) => ({ collectionId: input.collectionId }),
+        },
+      ),
+      { wrapper: wrapper(queryClient) },
+    );
+
+    const mutationPromise = result.current.mutateAsync({ batchId: 'batch-1', collectionId });
+    await waitFor(() => { expect(resolveFetch).toBeDefined(); });
+    // Optimistic: Pinned keeps the (still pinned) row with its new collection; Unsorted drops it.
+    expect(queryClient.getQueryData<InfiniteData<HistoryPage<Batch>>>(activeKey)?.pages[0]?.items[0]?.collectionId).toBe(collectionId);
+    expect(queryClient.getQueryData<InfiniteData<HistoryPage<Batch>>>(canonicalKey)?.pages[0]?.items).toEqual([]);
+
+    await act(async () => {
+      resolveFetch?.(Response.json(batch({ pinned: true, collectionId })));
+      await mutationPromise;
+      await flushQueryNotifications();
+    });
+    expect(queryClient.getQueryData<InfiniteData<HistoryPage<Batch>>>(canonicalKey)?.pages[0]?.items).toEqual([]);
+    expect(queryClient.getQueryState(canonicalKey)?.isInvalidated).toBe(true);
+  });
+
+  test('a rejected patch restores every scope it touched', async () => {
+    const activeKey = historyKeys.scoped(APP_VIEW_PINNED, '');
+    const canonicalKey = historyKeys.list();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    queryClient.setQueryData(activeKey, page([batch({ pinned: true })]));
+    queryClient.setQueryData(canonicalKey, page([batch({ pinned: true })]));
+    globalThis.fetch = mock(() => new Response('nope', { status: 500 })) as unknown as typeof fetch;
+
+    const { result } = renderHook(
+      () => useScopedBatchPatch(
+        { activeView: APP_VIEW_PINNED, q: '' },
+        {
+          toPatch: (input: { batchId: string; pinned: boolean }) => ({ pinned: input.pinned }),
+          toOptimistic: (input) => ({ pinned: input.pinned }),
+        },
+      ),
+      { wrapper: wrapper(queryClient) },
+    );
+    await act(async () => {
+      await result.current.mutateAsync({ batchId: 'batch-1', pinned: false }).catch(() => undefined);
+      await flushQueryNotifications();
+    });
+    expect(queryClient.getQueryData<InfiniteData<HistoryPage<Batch>>>(activeKey)?.pages[0]?.items[0]?.pinned).toBe(true);
+    expect(queryClient.getQueryData<InfiniteData<HistoryPage<Batch>>>(canonicalKey)?.pages[0]?.items[0]?.pinned).toBe(true);
+  });
+
   test('refetches the live scope when navigation changes during a scoped patch', async () => {
     const activeKey = historyKeys.list();
     const collectionId = 'collection-1';

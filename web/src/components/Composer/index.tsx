@@ -276,7 +276,8 @@ function Composer({
     for (const model of modelById.values()) {
       if (!isImageModel(model)) continue;
       if (isModelAvailable(model)) return model.id;
-      firstImageModelId ??= model.id;
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- React Compiler 1.0 cannot lower `??=` and would skip memoizing the whole Composer.
+      if (firstImageModelId === undefined) firstImageModelId = model.id;
     }
     return remembered && isImageModel(remembered) ? remembered.id : firstImageModelId;
   }, [lastImageModelId, modelById]);
@@ -554,24 +555,26 @@ function Composer({
           },
         );
       }
-      try {
-        const refreshedModels = await probePromise;
-        if (modelIntentRef.current !== intent || activeModelIdRef.current !== modelIdAtStart) return;
-        const refreshed = refreshedModels.find((model) => model.id === candidate.id);
-        if (!refreshed || refreshed.availability?.ok === false) {
-          addToast(`${candidate.name} is offline`, 'error');
-          return;
-        }
-        onModelChange(next);
-      } catch (error) {
-        if (modelIntentRef.current !== intent || activeModelIdRef.current !== modelIdAtStart) return;
-        const reason = describeError(error, 'request failed');
+      // Settled as a value rather than try/catch/finally: React Compiler
+      // cannot yet lower a `finally` clause and would skip memoizing the
+      // whole Composer.
+      const settled = await probePromise.then(
+        (refreshedModels) => ({ ok: true as const, refreshedModels }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      if (modelIntentRef.current !== intent || activeModelIdRef.current !== modelIdAtStart) return;
+      setProbingModelId(null);
+      if (!settled.ok) {
+        const reason = describeError(settled.error, 'request failed');
         addToast(`Couldn't re-check ${candidate.name} — ${reason}`, 'error');
-      } finally {
-        if (modelIntentRef.current === intent && activeModelIdRef.current === modelIdAtStart) {
-          setProbingModelId(null);
-        }
+        return;
       }
+      const refreshed = settled.refreshedModels.find((model) => model.id === candidate.id);
+      if (!refreshed || refreshed.availability?.ok === false) {
+        addToast(`${candidate.name} is offline`, 'error');
+        return;
+      }
+      onModelChange(next);
       return;
     }
     // onModelChange owns the draft patch, including video-state cleanup.
@@ -603,23 +606,22 @@ function Composer({
     // A manual source supersedes any tile handoff still in flight, and a tile
     // handoff started during this upload supersedes it in turn.
     const isCurrent = beginSourceHandoff();
-    try {
-      const upload = await uploadRefImage(file);
-      if (!isCurrent()) return;
-      // A manually-uploaded still has no known generation prompt — clear any
-      // i2vSourcePrompt carried over from a prior Animate so the motion enhancer
-      // never anchors this still to a different subject's prompt.
-      setDraft({
-        i2vSourceUploadId: upload.id,
-        i2vSourcePrompt: undefined,
-        extendsTileId: undefined,
-        extendPrevPrompt: undefined,
-      });
-    } catch {
-      if (isCurrent()) addToast('Source still upload failed', 'error');
-    } finally {
-      setSourceUploading(false);
+    const upload = await uploadRefImage(file).catch(() => null);
+    setSourceUploading(false);
+    if (!isCurrent()) return;
+    if (upload === null) {
+      addToast('Source still upload failed', 'error');
+      return;
     }
+    // A manually-uploaded still has no known generation prompt — clear any
+    // i2vSourcePrompt carried over from a prior Animate so the motion enhancer
+    // never anchors this still to a different subject's prompt.
+    setDraft({
+      i2vSourceUploadId: upload.id,
+      i2vSourcePrompt: undefined,
+      extendsTileId: undefined,
+      extendPrevPrompt: undefined,
+    });
   };
 
   const clearSourceStill = () => {

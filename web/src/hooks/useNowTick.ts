@@ -20,6 +20,35 @@ function emit(store: MutableTickStore): void {
   for (const listener of store.listeners) listener();
 }
 
+// Clocks only run while the page is visible: a hidden tab has nothing to
+// repaint, so its readouts wait and catch up with one emit when it is shown.
+function pageHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+function startTicking(store: MutableTickStore, intervalMs: number): void {
+  if (store.intervalId !== null || store.listeners.size === 0 || pageHidden()) return;
+  store.intervalId = window.setInterval(() => { emit(store); }, intervalMs);
+}
+
+function stopTicking(store: MutableTickStore): void {
+  if (store.intervalId === null) return;
+  window.clearInterval(store.intervalId);
+  store.intervalId = null;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    for (const [intervalMs, store] of stores) {
+      if (pageHidden()) stopTicking(store);
+      else if (store.listeners.size > 0) {
+        emit(store);
+        startTicking(store, intervalMs);
+      }
+    }
+  });
+}
+
 function createStore(intervalMs: number): MutableTickStore {
   const store: MutableTickStore = {
     now: Date.now(),
@@ -32,19 +61,16 @@ function createStore(intervalMs: number): MutableTickStore {
         store.now = freshNow;
         listener();
       }
-      store.intervalId ??= window.setInterval(() => { emit(store); }, intervalMs);
+      startTicking(store, intervalMs);
       return () => {
         store.listeners.delete(listener);
-        if (store.listeners.size === 0 && store.intervalId !== null) {
-          // Stop the timer when idle, but keep the store in the map. Deleting it
-          // would let a component that captured this store at render time (before
-          // its subscribe effect commits) resubscribe to an orphaned store while a
-          // fresh store is created for the same cadence — leaking duplicate
-          // intervals. Only a fixed handful of cadences exist, so retaining them
-          // is bounded.
-          window.clearInterval(store.intervalId);
-          store.intervalId = null;
-        }
+        // Stop the timer when idle, but keep the store in the map. Deleting it
+        // would let a component that captured this store at render time (before
+        // its subscribe effect commits) resubscribe to an orphaned store while a
+        // fresh store is created for the same cadence — leaking duplicate
+        // intervals. Only a fixed handful of cadences exist, so retaining them
+        // is bounded.
+        if (store.listeners.size === 0) stopTicking(store);
       };
     },
     getSnapshot() {

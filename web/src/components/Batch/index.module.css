@@ -6,7 +6,8 @@
    collapse through it; measureElement sees the whole footprint. The sheet's
    edge marks the chapter break, so no hairline sits in the gap. */
 .batch {
-  animation: batch-in var(--dur-entrance) var(--ease-out) both;
+  /* The shared rise, backwards so no held end pose outranks later transforms. */
+  animation: global(atelier-rise-in) var(--dur-entrance) var(--ease-out) backwards;
   scroll-margin-top: 12px;
   position: relative;
   margin-top: 28px;
@@ -22,11 +23,6 @@
 
 .batch[data-seen='true'] {
   animation: none;
-}
-
-@keyframes batch-in {
-  from { opacity: 0; transform: translateY(var(--m-shift)); }
-  to { opacity: 1; transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -194,7 +190,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: color var(--dur-hover) var(--ease-out);
+  transition: color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.metaCol:active:not(:disabled) {
+  transform: scale(var(--m-press));
+}
+
+.metaCol:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .metaColName {
@@ -204,9 +209,14 @@
   white-space: nowrap;
 }
 
-.metaCol:hover,
 .metaCol:focus-visible {
   color: var(--ink);
+}
+
+@media (hover: hover) {
+  .metaCol:hover:not(:disabled) {
+    color: var(--ink);
+  }
 }
 
 .metaProvenance {

@@ -558,7 +558,7 @@ describe('MovePopover', () => {
     // The row press comes from the shared menuShell row; it and the check read
     // the tokens that collapse under reduced motion.
     expect(css).toContain("composes: row from '../../styles/menuShell.module.css';");
-    expect(shell).toContain('scale(var(--m-press))');
+    expect(shell).toContain('scale(var(--m-press-row))');
     expect(css).not.toMatch(/scale\(0\.\d+\)/);
     expect(shell).not.toMatch(/scale\(0\.\d+\)/);
     expect(css).toContain('global(atelier-check-in)');

@@ -49,9 +49,9 @@ describe('cross-tab cancel settlement', () => {
           await started.promise;
         });
         // A sibling's early refetch can still see the terminal pre-delete row.
+        // A tile cancel never asks the owning tab to abort its stream.
         expect(messages).toEqual([
           { type: 'invalidate', batchId: 'batch-1', afterSettlement: false },
-          { type: 'cancel', batchId: 'batch-1', afterSettlement: false },
         ]);
         await act(async () => {
           settled = true;

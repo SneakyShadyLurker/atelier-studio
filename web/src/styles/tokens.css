@@ -148,6 +148,7 @@
     --ease-exit: cubic-bezier(.4,0,1,1);
     --ease-tactile: cubic-bezier(.2,.8,.2,1);
     --ease-view: cubic-bezier(.22,1,.36,1);
+    --ease-loop: cubic-bezier(.4,0,.2,1);
     --dur-hover: 120ms;
     --dur-overlay: 160ms;
     --dur-transform: 200ms;
@@ -161,6 +162,7 @@
     --dur-reduced: 80ms;
     --cadence-loop: 1600ms;
     --cadence-loop-fast: 700ms;
+    --delay-hover-intent: 360ms;
     --m-shift: 6px;
     --m-scale: 0.97;
     --m-blur: 6px;

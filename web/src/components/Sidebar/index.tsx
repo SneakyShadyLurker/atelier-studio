@@ -248,6 +248,9 @@ function Sidebar({
   onLoadMore,
   ref,
 }: SidebarProps) {
+  // Live rows (the Canvas renders a deferred snapshot): the rail marks what it
+  // renders in its own seen view (lib/seenBatches 'rail'), so a batch it
+  // commits one urgent pass early never counts as seen for the Canvas.
   const batches = history.items;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const virtualListRef = useRef<HTMLDivElement | null>(null);
@@ -326,7 +329,7 @@ function Sidebar({
   // The rail marks the batches it renders (Canvas marks its own window): a
   // row that scrolls out of the virtual window and back, or a drawer that
   // reopens, then remounts seen and replays no entrance.
-  const seenBatchIds = useSeenBatches();
+  const seenBatchIds = useSeenBatches('rail');
   const renderedBatchIds = hideFeed
     ? ''
     : renderRows.flatMap((row) => {
@@ -335,7 +338,7 @@ function Sidebar({
     }).join('\0');
   useEffect(() => {
     if (renderedBatchIds === '') return;
-    markBatchesSeen(renderedBatchIds.split('\0'));
+    markBatchesSeen(renderedBatchIds.split('\0'), 'rail');
   }, [renderedBatchIds]);
   useLayoutEffect(() => {
     const scroller = feedRef.current;
@@ -816,6 +819,7 @@ function Sidebar({
             isFetchingNextPage={isFetchingNextPage}
             isFetchNextPageError={isFetchNextPageError}
             fetchNextPage={() => { onLoadMore?.(); }}
+            scrollRoot={feedRef}
             itemCount={history.items.length}
             endLabel={`Start, ${String(history.items.length)} ${history.items.length === 1 ? 'batch' : 'batches'}`}
             enabled={!historyReadOnly}

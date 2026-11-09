@@ -60,10 +60,18 @@ function Harness(props: Parameters<typeof useInfiniteScroll>[0]) {
 }
 
 describe('useInfiniteScroll', () => {
-  test('defaults rootMargin to half the viewport height', () => {
+  test('defaults rootMargin to half the root height, measured against the given scroll container', () => {
+    const fetchNextPage = mock(noop);
+    const scroller = document.createElement('div');
+    render(createElement(Harness, { hasNextPage: true, isFetchingNextPage: false, fetchNextPage, itemCount: 0, root: { current: scroller } }));
+    expect(expectObserver().options?.rootMargin).toBe('50% 0px');
+    expect(expectObserver().options?.root).toBe(scroller);
+  });
+
+  test('without a scroll container the observer keeps the viewport root', () => {
     const fetchNextPage = mock(noop);
     render(createElement(Harness, { hasNextPage: true, isFetchingNextPage: false, fetchNextPage, itemCount: 0 }));
-    expect(expectObserver().options?.rootMargin).toBe(`${String(Math.round(window.innerHeight * 0.5))}px 0px`);
+    expect(expectObserver().options?.root).toBeUndefined();
   });
 
   test('observes the sentinel with the provided rootMargin', () => {

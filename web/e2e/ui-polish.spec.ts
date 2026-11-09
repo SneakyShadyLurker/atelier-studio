@@ -3322,7 +3322,8 @@ test('phone drawer hides and pauses the Undo toast, then hands it back with its 
     const stack = await page.evaluate(() => {
       const button = Array.from(document.querySelectorAll('button')).find((element) => element.textContent === 'Undo');
       const toast = button?.parentElement;
-      const element = toast?.parentElement;
+      // Toast → slot inner → slot → the stack, which carries data-covered.
+      const element = toast?.parentElement?.parentElement?.parentElement;
       return toast && element ? { inert: toast.inert, hidden: toast.getAttribute('aria-hidden'), opacity: getComputedStyle(element).opacity } : null;
     });
     expect(stack).toEqual({ inert: true, hidden: 'true', opacity: '0' });

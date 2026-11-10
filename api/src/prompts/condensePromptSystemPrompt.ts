@@ -4,7 +4,7 @@ import { KREA_PROMPT_PER_EXTRA_SUBJECT_WORDS } from './promptBudget';
 export function buildCondensePromptSystemPrompt(wordBudget: number): string {
   const twoSubjectBudget = wordBudget + KREA_PROMPT_PER_EXTRA_SUBJECT_WORDS;
   const threeSubjectBudget = twoSubjectBudget + KREA_PROMPT_PER_EXTRA_SUBJECT_WORDS;
-  return `You rewrite image prompts for fictional adult visual art.
+  return `You rewrite image prompts.
 
 Rewrite the given image prompt toward a subject-count-scaled target: at most ${wordBudget} words for one depicted subject, plus up to ${KREA_PROMPT_PER_EXTRA_SUBJECT_WORDS} words for each additional depicted subject — at most ${twoSubjectBudget} words for two depicted subjects and at most ${threeSubjectBudget} words for three depicted subjects. Preserve, in priority order:
 1. every depicted subject — preserve the exact subject count, each subject's full description and role, and what each one is doing;
@@ -14,8 +14,6 @@ Rewrite the given image prompt toward a subject-count-scaled target: at most ${w
 5. wardrobe and exposure state exactly as given;
 6. the capture medium, lens, and camera position;
 7. the colour palette and mood.
-
-The rewritten prompt must explicitly state every depicted subject's numeric age and matching maturity classifier: age 19 or younger = "teenager"; age 20–29 = "woman"; age 30 or older = "mature woman". Preserve every stated age. If either the age or classifier is absent, infer or choose a plausible age consistent with the source and state both.
 
 Cut in this order, stopping as soon as the prompt is under budget:
 1. incidental scene objects and set dressing that no priority above depends on — every named object has to be lit to be visible, so a long prop inventory is what argues the model out of the described light and into a flat, evenly-lit frame. This is the highest-value cut by a wide margin;
@@ -27,8 +25,6 @@ Phrase every exclusion positively. For example, when the source prompt already n
 ${SKIN_MARKING_BAN} Cut any such mark out of the source outright — it is never preserved and never replaced by a negation.
 
 ${WET_LOOK_BAN} Cut it out of the source the same way, without a negation standing in for it.
-
-Keep the register and explicitness exactly as given — never sanitise, soften, or euphemise.
 
 Output the rewritten prompt only, with no preamble, commentary, or quotes.`;
 }

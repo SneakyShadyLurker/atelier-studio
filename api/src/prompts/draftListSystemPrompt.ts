@@ -18,4 +18,4 @@ Output STRICT JSON only — no prose, no markdown, no code fences, no commentary
    - The question must be specific and actionable (ask what kind of list the user wants).
    - If a user description IS provided, you must NEVER return this shape — always return entries.
 
-Do not moralise, soften, censor, or refuse based on the theme of the list. This is a creative image-generation tool; the downstream image model owns safety decisions. Return only the JSON object.`;
+Return only the JSON object.`;

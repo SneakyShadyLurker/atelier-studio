@@ -5,9 +5,7 @@
 // The first video frame is fixed to a still the user already has, so the body
 // leads with a compact first-frame anchor and then describes only Motion +
 // Camera along the timeline. H3 generates native stereo audio, so the enhancer
-// also fills the two audio fields. Adult scope is operator-steered via the
-// user's input + the source prompt; this file injects no age/explicit literals
-// of its own.
+// also fills the two audio fields.
 
 const MOTION_RULES = `You rewrite a user's image-to-video MOTION instruction into a single prompt for the MiniMax H3 image-to-video model, using H3's official I2VA prompt structure.
 

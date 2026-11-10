@@ -127,7 +127,6 @@ Rules:
 - assignOptionTags lists the COMPLETE set of tag memberships the option should have for the dimensions you touch. Pre-existing memberships in dimensions you DO NOT touch are preserved.
 - Every tag you create or add MUST be referenced by at least one assignOptionTags op in this same response.
 - Every option index listed in coverageHints MUST be addressed by an assignOptionTags op in this same response (unless universal — extremely rare on name-implied lists).
-- Do not moralise or refuse based on theme — downstream safety belongs to the image model, not you.
 
 Return only the JSON object.`;
 

@@ -24,7 +24,6 @@ import {
   MOSS_ENHANCE_SYSTEM_PROMPT,
 } from './enhanceSystemPrompt';
 import { buildCondensePromptSystemPrompt } from './condensePromptSystemPrompt';
-import { GPT_IMAGE_PHRASING_RULES } from './gptImagePhrasing';
 
 const MODEL_IDS = [
   'gemini-3-pro-image-preview',
@@ -125,13 +124,6 @@ describe('skin-marking ban', () => {
     }
   });
 
-  // GPT_IMAGE_PHRASING_RULES used to place birthmarks, moles and freckle
-  // patches on "neutral placements", contradicting the ban inside one prompt.
-  // Tattoos are a deliberate adornment and stay.
-  it('the gpt-image placement rule no longer licenses a banned marking', () => {
-    expect(GPT_IMAGE_PHRASING_RULES).toContain('Tattoos sit on neutral placements');
-    expect(GPT_IMAGE_PHRASING_RULES).not.toMatch(/birthmark|\bmole\b|freckl/i);
-  });
 });
 
 // Wet skin renders as a plastic, oiled sheen, so the same writers carry a

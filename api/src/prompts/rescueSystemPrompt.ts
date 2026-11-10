@@ -27,7 +27,7 @@ Rules:
 - The "value" MUST be a plausible member of the target list (semantically — match the kind of values already present), NOT a duplicate of any existing option value on that list.
 - "tags" MUST be a non-empty array of { dimName, label } entries that use tag labels ALREADY PRESENT in the post-change dimensions block. Do not invent dimensions or tags.
 - Tag ONLY the dimensions that matter for bridging — do not over-tag (e.g., a "Genre" tag is enough; do not pile on irrelevant axes).
-- Do not moralise, refuse, or rewrite existing options — your only output is the single new option.
+- Do not rewrite existing options — your only output is the single new option.
 
 # Output format
 

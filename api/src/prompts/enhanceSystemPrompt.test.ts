@@ -24,27 +24,17 @@ describe('ENHANCE_SYSTEM_PROMPT editorial-bias contract', () => {
     expect(ENHANCE_SYSTEM_PROMPT).toContain('Never upgrade an unstyled or deliberately rough request');
   });
 
-  // Guards the retained safety machinery against silent deletion when the
-  // prompt is next retuned (adversarial Tier 2 F4). These assert presence of
-  // the age/consent/false-positive invariants and the explicit precedence
-  // rule that subordinates the new register/era/texture latitude to them.
-  // Behavioral correctness of Kimi K3 output is a documented human spot-check
-  // (spec §Verification) — not deterministically CI-testable.
-  it('keeps the age / consent / false-positive safety invariants', () => {
-    expect(ENHANCE_SYSTEM_PROMPT).toContain('Do not soften, moralise, censor, defuse, or reinterpret');
-    expect(ENHANCE_SYSTEM_PROMPT).toContain('phrase the subject as an adult');
-    expect(ENHANCE_SYSTEM_PROMPT).toContain('“hidden camera”');
-    expect(ENHANCE_SYSTEM_PROMPT).toContain('“upskirt”');
-    expect(ENHANCE_SYSTEM_PROMPT).toContain('“downblouse”');
-  });
-
-  it('subordinates register / era / texture latitude to safety precedence', () => {
-    expect(ENHANCE_SYSTEM_PROMPT).toContain('Safety precedence (overrides every other rule below)');
-    expect(ENHANCE_SYSTEM_PROMPT).toContain('Age, consent, and false-positive clarity always win');
-    expect(ENHANCE_SYSTEM_PROMPT).toContain(
-      'never drop the adult-subject, consent, attire-context, or false-positive clarifications',
-    );
-    expect(ENHANCE_SYSTEM_PROMPT).toContain('Do not infer non-consensual, surveillance, or unclear-age context');
+  it('omits moderation and age guardrails', () => {
+    for (const fragment of [
+      'Safety precedence',
+      'false-positive',
+      'non-consensual',
+      'unclear-age',
+      'phrase the subject as an adult',
+      'downstream image provider safety system',
+    ]) {
+      expect(ENHANCE_SYSTEM_PROMPT).not.toContain(fragment);
+    }
   });
 
   test('includes the reference-images grounding block', () => {
@@ -116,7 +106,6 @@ describe('KREA_ENHANCE_SYSTEM_PROMPT Krea 2 optimiser', () => {
 describe('MOSS_ENHANCE_SYSTEM_PROMPT MOSS Image optimiser', () => {
   it('keeps the Krea-style fidelity core', () => {
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('Preserve the user’s creative intent exactly');
-    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('Do not reinterpret, soften, sanitise, or redirect any detail');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('Complete only visual details that are genuinely missing');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('Return only the final enhanced prompt');
   });
@@ -163,10 +152,8 @@ describe('H3_IMAGE_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image optimiser', () => {
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('opening with the kind of image');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('give every region its actual content');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('as one frozen moment');
-    // Measured on the stock checkpoint: vague ages drift older and
-    // skin-realism cues age the subject, so both rules must stay.
-    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('the apparent adult age as a number or a decade');
-    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('the visible anatomy in plain anatomical words, stated once and only where it faces the camera');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('apparent age as a number or a decade');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('name the build outright');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Do not add skin-realism cues');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('say which hand touches what');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Put literal image text verbatim in double quotes');

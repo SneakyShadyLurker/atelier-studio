@@ -8,7 +8,7 @@ export function isSunburstModel(modelId: string | undefined): boolean {
 // Shared by Sunburst writers; each caller supplies its own output protocol.
 export const SUNBURST_PROMPT_RULES = `Target image model: GPT Image 2.6 Sunburst.
 
-Write an executable visual brief. Preserve the requested subject, purpose, medium, style, composition and explicit details. Add only details needed to make an underspecified request drawable; do not invent a new concept or embellish an already precise one. Follow applicable safety requirements; never invent sexual content, obscure age or consent, or disguise a prohibited request.
+Write an executable visual brief. Preserve the requested subject, purpose, medium, style, composition and explicit details. Add only details needed to make an underspecified request drawable; do not invent a new concept or embellish an already precise one.
 
 Describe observable shape, material, color, light and action. Specify subject placement, relative scale, gaze, pose and interaction when they matter. Keep multiple subjects distinct. Ground emotion and atmosphere in visible choices. Request photorealism only when a photograph is intended; retain illustration and other media when requested. Camera and lens terms describe an appearance, not guaranteed physical simulation.
 
@@ -32,11 +32,11 @@ export const SUNBURST_FILL_RULES = `You are Atelier's image-prompt blank-filling
 
 ${SUNBURST_PROMPT_RULES}
 
-Read the complete skeleton and all instructions before writing. Render each instruction as concrete visual detail that fits its exact blank, rather than paraphrasing the instruction. Inherit facts without repeating static text. Preserve explicit ages and identity; do not guess or alter an age. Make open choices specific to this scene. Check consistency across fills, especially subject identity, setting, era, lighting, pose and physical contact. Never rewrite static text, emit blank markers, add or remove a blank, or put a whole replacement prompt in a fill. Literal image text may use quotation marks. Output no commentary or section labels around the fragments.`;
+Read the complete skeleton and all instructions before writing. Render each instruction as concrete visual detail that fits its exact blank, rather than paraphrasing the instruction. Inherit facts without repeating static text. Preserve stated subject details and identity. Make open choices specific to this scene. Check consistency across fills, especially subject identity, setting, era, lighting, pose and physical contact. Never rewrite static text, emit blank markers, add or remove a blank, or put a whole replacement prompt in a fill. Literal image text may use quotation marks. Output no commentary or section labels around the fragments.`;
 
 /** Keep library grammar and JSON envelopes separate from visual writing guidance. */
 export function imageAuthoringSystemPrompt(base: string, modelId: string | undefined): string {
   return isSunburstModel(modelId)
-    ? `${SUNBURST_PROMPT_RULES}\n\nApply the visual guidance to authored image-prompt content only. Its safety and fidelity requirements take precedence over conflicting creative-authority or style instructions below. Preserve the library task, macro grammar and output contract below; do not replace its structured answer with a complete image prompt.\n\n${base}`
+    ? `${SUNBURST_PROMPT_RULES}\n\nApply the visual guidance to authored image-prompt content only. Preserve the library task, macro grammar and output contract below; do not replace its structured answer with a complete image prompt.\n\n${base}`
     : base;
 }

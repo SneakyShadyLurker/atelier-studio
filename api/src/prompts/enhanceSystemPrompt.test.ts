@@ -2,6 +2,7 @@ import { describe, expect, it, test } from 'bun:test';
 
 import {
   ENHANCE_SYSTEM_PROMPT,
+  H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
   H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
   MOSS_ENHANCE_SYSTEM_PROMPT,
@@ -143,7 +144,8 @@ describe('H3_IMAGE_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image optimiser', () => {
   it('keeps the shared intent-preservation contract', () => {
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Preserve the user’s creative intent exactly');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Complete only visual details that are genuinely missing');
-    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('takes no image input');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('text-to-image generation with no picture attached');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain('takes no image input');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Return only the final enhanced prompt');
   });
 
@@ -169,5 +171,35 @@ describe('H3_IMAGE_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image optimiser', () => {
       'MOSS', 'two to four paragraphs', '220 to 320', 'printed photo', 'do not add blur', 'fine visible pores']) {
       expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain(fragment);
     }
+  });
+});
+
+describe('H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image reference-edit writer', () => {
+  it('binds the attached pictures to <Picture N> in attachment order', () => {
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('the first is <Picture 1>, the second <Picture 2>, the third <Picture 3>');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('means the matching <Picture N>');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('Look at the pictures before writing');
+  });
+
+  it('follows the vendor order: source definitions, target overview, one relationship per subject, changed detail', () => {
+    const order = ['1. Source definitions.', '2. Target overview. Begin the next sentence with “The target image”',
+      '3. One relationship for every defined subject', '4. Changed and new content only.'];
+    const positions = order.map((fragment) => H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT.indexOf(fragment));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    for (const form of ['“<Subject N> is fully preserved.”', 'Partially preserved:', 'Attribute transfer:', 'Weak reference:']) {
+      expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain(form);
+    }
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('never as a command');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('with the rest of the source image unchanged');
+  });
+
+  it('keeps the H3 Image person, skin and exclusion rules and the plain-text output rule', () => {
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('apparent age as a number or a decade');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('Do not add skin-realism cues');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('state them in one plain closing sentence');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('Return only the final enhanced prompt');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).not.toContain('Krea');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).not.toContain('MOSS');
   });
 });

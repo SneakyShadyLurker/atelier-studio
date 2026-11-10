@@ -226,6 +226,8 @@ function buildLocalEntries(config: Config): RegistryEntryDraft[] {
         ? {
             referenceWorkflowText: loadWorkflowText(def.referenceWorkflowPath, def.id),
             referenceRequiredPlaceholders: [...def.requiredPlaceholders, '{{referenceImage}}'],
+            maxReferenceImages: def.maxReferenceImages ?? 1,
+            ...(def.referenceRatioDims !== undefined ? { referenceRatioDims: def.referenceRatioDims } : {}),
           }
         : {}),
       ...(def.extendWorkflowPath !== undefined
@@ -241,6 +243,7 @@ function buildLocalEntries(config: Config): RegistryEntryDraft[] {
       ratioDims: def.ratioDims,
       modelId: def.id,
       residencyKey: catalog.residencyKey(def.id),
+      ...(def.outputLongEdge !== undefined ? { outputLongEdge: def.outputLongEdge } : {}),
       requiredModelFiles: [...def.requiredModelFiles, ...(def.referenceRequiredModelFiles ?? [])],
       ...(def.outputKind !== undefined ? { outputKind: def.outputKind } : {}),
       ...(def.requiredClipType !== undefined ? { requiredClipType: def.requiredClipType } : {}),
@@ -261,7 +264,7 @@ function buildLocalEntries(config: Config): RegistryEntryDraft[] {
         defaultCount: Math.min(def.defaultCount, config.COMFYUI_BATCH_MAX),
         ...(def.outputKind === 'video' ? { outputsVideo: true } : {}),
         ...(def.outputKind !== 'video' && def.referenceWorkflowPath !== undefined
-          ? { supportsReferenceImages: true, maxRefImages: 1 }
+          ? { supportsReferenceImages: true, maxRefImages: def.maxReferenceImages ?? 1 }
           : {}),
         ...(def.supportedDurations !== undefined ? { supportedDurations: def.supportedDurations } : {}),
         ...(def.defaultDuration !== undefined ? { defaultDuration: def.defaultDuration } : {}),

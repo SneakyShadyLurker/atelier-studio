@@ -51,9 +51,15 @@ export interface ComfyuiProviderConfig {
    */
   extendWorkflowText?: string;
   extendRequiredPlaceholders?: readonly string[];
-  /** Face-reference graph; absent means this host cannot take image references. */
+  /** Reference-image graph; absent means this model cannot take image references. */
   referenceWorkflowText?: string;
   referenceRequiredPlaceholders?: readonly string[];
+  /** Reference images the reference graph accepts. Defaults to 1. */
+  maxReferenceImages?: number;
+  /** Render sizes of the reference graph. Defaults to `ratioDims`. */
+  referenceRatioDims?: Record<string, { width: number; height: number } | undefined>;
+  /** Long edge of the delivered image; fills `{{outputScale}}` from the rendered size. */
+  outputLongEdge?: number;
   /** This model's ratio→dims map. */
   ratioDims: Record<string, { width: number; height: number } | undefined>;
   /** Model id — used to gate the safety-placeholder detector (Task 6). */
@@ -431,7 +437,8 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
       let storagePending = false;
       const terminalIndices = new Set<number>();
       try {
-        const dims = ratioDims[req.ratio];
+        const references = outputKind === 'image' ? req.refImages ?? [] : [];
+        const dims = (references.length > 0 ? config.referenceRatioDims ?? ratioDims : ratioDims)[req.ratio];
         if (!dims) {
           yield* failedTerminals(req, `unsupported ratio: ${req.ratio}`);
           return;
@@ -443,14 +450,17 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
         const useExtendGraph = outputKind === 'video'
           && req.i2vContext !== undefined
           && extendWorkflowText !== undefined;
-        const reference = outputKind === 'image' ? req.refImages?.[0] : undefined;
-        if (reference !== undefined && referenceWorkflowText === undefined) {
-          yield* failedTerminals(req, `model '${modelId}' has no face-reference graph`);
+        if (references.length > 0 && referenceWorkflowText === undefined) {
+          yield* failedTerminals(req, `model '${modelId}' has no reference-image graph`);
           return;
         }
-        const activeWorkflowText = reference !== undefined && referenceWorkflowText !== undefined
+        if (references.length > (config.maxReferenceImages ?? 1)) {
+          yield* failedTerminals(req, `model '${modelId}' takes at most ${config.maxReferenceImages ?? 1} reference images`);
+          return;
+        }
+        const activeWorkflowText = references.length > 0 && referenceWorkflowText !== undefined
           ? referenceWorkflowText : useExtendGraph ? extendWorkflowText : workflowText;
-        const activePlaceholders = reference !== undefined
+        const activePlaceholders = references.length > 0
           ? referenceRequiredPlaceholders : useExtendGraph ? extendRequiredPlaceholders : requiredPlaceholders;
         const contextFrames = useExtendGraph ? (req.i2vContext?.contextFrames ?? 0) : 0;
 
@@ -458,7 +468,7 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
         // It keeps the worker alive throughout model eviction, before uploads.
         if (options?.executionTimeoutMs === undefined) throw new PrivacyNotReadyError('comfyui execution budget required');
         privateJob = await privacy.createJob(signal, options.executionTimeoutMs, outputKind);
-        const inputs = reference !== undefined ? [{ bytes: reference.bytes, image: true }]
+        const inputs = references.length > 0 ? references.map((reference) => ({ bytes: reference.bytes, image: true }))
           : useExtendGraph && req.i2vContext ? [{ bytes: req.i2vContext.bytes, image: false }]
           : activePlaceholders.includes('{{sourceImage}}') && req.i2vSource ? [{ bytes: req.i2vSource.bytes, image: true }] : [];
         privateJob.validateRequest(extractNodeClasses(activeWorkflowText), req.count ?? 1, inputs);
@@ -471,14 +481,14 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
         }
 
         let sourceImage: string | undefined;
-        let referenceImage: string | undefined;
+        const referenceImages: string[] = [];
         let contextVideo: string | undefined;
         // Only graphs that declare a {{sourceImage}} placeholder (I2V) need a
         // source still; the T2V graph conditions on {{prompt}} alone, and the
         // continuation graph on {{contextVideo}}.
-        if (reference !== undefined) {
+        if (references.length > 0) {
           try {
-            referenceImage = await privateJob.upload(reference.bytes, signal);
+            for (const reference of references) referenceImages.push(await privateJob.upload(reference.bytes, signal));
           } catch (error) {
             if (signal.aborted) throw error;
             yield* failedTerminals(req, toErrorPayload(error));
@@ -520,7 +530,10 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
             count: req.count ?? 1,
             ...(req.motionPrompt !== undefined ? { motionPrompt: req.motionPrompt } : {}),
             ...(sourceImage !== undefined ? { sourceImage } : {}),
-            ...(referenceImage !== undefined ? { referenceImage } : {}),
+            ...(referenceImages.length > 0 ? { referenceImages } : {}),
+            ...(config.outputLongEdge !== undefined
+              ? { outputScale: Math.min(1, config.outputLongEdge / Math.max(dims.width, dims.height)) }
+              : {}),
             ...(contextVideo !== undefined ? { contextVideo } : {}),
             // The user's per-model override, resolved once per batch, else the
             // row default; buildWorkflow throws if a graph declares {{steps}}

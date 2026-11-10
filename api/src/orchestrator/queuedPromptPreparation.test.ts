@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import sharp from 'sharp';
+import { H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT } from '../prompts/enhanceSystemPrompt';
+import { storeUpload } from '../storage/uploadStore';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import { testRuntime } from '../test/helpers';
 import { findModel } from '../providers/registry';
@@ -17,13 +20,18 @@ const expandedH3 = `A candid photograph of an adult woman ${Array.from({ length:
 let reply = candidate;
 const gates: (() => void)[] = [];
 const signals: AbortSignal[] = [];
+const seen: { imageWidths: (number | undefined)[]; systemPrompt: string | undefined }[] = [];
 let calls = 0;
 
 function heldProvider(): TestTextFeatureProvider {
   return {
-    async *enhance(_prompt, _images, signal) {
+    async *enhance(_prompt, images, signal, systemPrompt) {
       calls += 1;
       signals.push(signal);
+      seen.push({
+        imageWidths: await Promise.all(images.map(async (image) => (await sharp(image.bytes).metadata()).width)),
+        systemPrompt,
+      });
       await new Promise<void>((resolve) => { gates.push(resolve); });
       // Deliberately ignores cancellation: the preparer must reject late work.
       yield { type: 'delta', text: reply };
@@ -66,7 +74,7 @@ beforeEach(() => {
   resetRegistryForTests();
   resetLlmAdmissionForTests();
   resetConcurrencyForTests();
-  calls = 0; gates.length = 0; signals.length = 0; reply = candidate;
+  calls = 0; gates.length = 0; signals.length = 0; seen.length = 0; reply = candidate;
   setTextModelProviderForTests(heldProvider());
 });
 
@@ -315,6 +323,47 @@ test('a queued short H3 Image prompt is replaced by its expansion and then dispa
   } finally {
     for (const release of releases) release();
   }
+});
+
+// An H3 Image batch with stored pictures bound to its tile in order. The rows
+// exist before the batch is enqueued, as createBatch writes them in production:
+// enqueueing is what triggers preparation.
+async function seedWithPictures(runtime: ReturnType<typeof setup>, id: string, prompt: string, widths: readonly number[]): Promise<void> {
+  runtime.db.run('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, 1)', ['alice']);
+  runtime.db.run(`INSERT INTO batches (id,user_id,prompt,model_id,model_label,ratio,created_at,status,pool)
+    VALUES (?,'alice',?,'minimax-h3-image','H3','1:1',1,'queued','local')`, [id, prompt]);
+  runtime.db.run(`INSERT INTO tiles (id,batch_id,user_id,tile_index,seed,status)
+    VALUES (?,?,'alice',0,1,'loading')`, [`tile-${id}`, id]);
+  for (const [position, width] of widths.entries()) {
+    const { data } = await sharp({ create: { width, height: 32, channels: 3, background: '#336699' } }).png().toUint8Array();
+    const upload = await storeUpload({ db: runtime.db, dataDir: runtime.config.DATA_DIR,
+      logger: runtime.logger, userId: 'alice', bytes: data, signal: new AbortController().signal });
+    runtime.db.run('INSERT INTO tile_ref_images (tile_id, upload_id, position) VALUES (?, ?, ?)', [`tile-${id}`, upload.id, position]);
+  }
+  queue.enqueue('local', { batchId: id, userId: 'alice', modelId: 'minimax-h3-image', count: 1, queuedAt: 1 });
+}
+
+test('a queued short H3 Image prompt with pictures goes to the reference-edit writer with the batch pictures in order', async () => {
+  reply = expandedH3;
+  const runtime = setup();
+  await seedWithPictures(runtime, 'h3', 'make her jacket red', [48, 64]);
+  prepareQueuedPrompts(runtime.db);
+  // The fake writer records what it was given just before it parks on its gate.
+  await until(() => seen.length === 1);
+  expect(seen).toEqual([{ imageWidths: [48, 64], systemPrompt: H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT }]);
+  gates[0]?.();
+  await until(() => queue.entries('local')[0]?.promptPreparation === 'ready');
+  expect(runtime.db.query("SELECT prompt FROM batches WHERE id='h3'").get()).toEqual({ prompt: expandedH3 });
+});
+
+test('a queued H3 Image prompt that already names a picture is ready without a call', async () => {
+  const runtime = setup();
+  const written = 'The cup in <Picture 1> is <Subject 1>. The target image shows <Subject 1> with a blue finish.';
+  await seedWithPictures(runtime, 'h3', written, [48]);
+  prepareQueuedPrompts(runtime.db);
+  expect(queue.entries('local')[0]?.promptPreparation).toBe('ready');
+  expect(calls).toBe(0);
+  expect(runtime.db.query("SELECT prompt FROM batches WHERE id='h3'").get()).toEqual({ prompt: written });
 });
 
 test('a canceled short H3 Image batch keeps its prompt when the expansion lands late', async () => {

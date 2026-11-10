@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { REFERENCE_IMAGE_PLACEHOLDERS } from '../src/providers/comfyui.config';
 import { LocalModelCatalogError, loadLocalModelCatalog, type LocalModelDef } from '../src/providers/comfyui/catalog';
 import { submissionNodeClass } from '../src/providers/comfyui/privacy';
 
@@ -88,7 +89,9 @@ function checkMoss(graph: Graph, model: LocalModelDef, fail: (reason: string) =>
 
 // MiniMax H3 Image: the conditioning node encodes the prompt and emits the
 // latent, and the model's ComfyUI implementation renders batch size 1 only.
-function checkH3Image(graph: Graph, text: string, model: LocalModelDef, fail: (reason: string) => void): void {
+// The same node takes the reference images: `images.image_N` is <Picture N> in
+// the prompt, and with the VAE connected each one is also a reference latent.
+function checkH3Image(graph: Graph, text: string, kind: string, model: LocalModelDef, fail: (reason: string) => void): void {
   if (model.requiredClipType !== 'minimax') fail('h3image rows require requiredClipType minimax');
   if (text.includes('{{count}}') || nodesOf(graph, 'RepeatLatentBatch').length > 0) {
     fail('h3image graphs render one image: MiniMax H3 supports batch size 1 only');
@@ -109,6 +112,33 @@ function checkH3Image(graph: Graph, text: string, model: LocalModelDef, fail: (r
   }
   if (linkedNode(graph, sampler.inputs.negative)?.class_type !== 'ConditioningZeroOut') {
     fail('h3image graphs take a ConditioningZeroOut negative');
+  }
+  const pictures = Object.entries(conditioning[0]?.inputs ?? {}).filter(([name]) => name.startsWith('images.'));
+  const slots = kind === 'reference' ? REFERENCE_IMAGE_PLACEHOLDERS.slice(0, model.maxReferenceImages ?? 1) : [];
+  const ordered = pictures.length === slots.length && slots.every((token, slot) => {
+    const loader = linkedNode(graph, conditioning[0]?.inputs[`images.image_${slot + 1}`]);
+    return loader?.class_type === 'LoadImage' && loader.inputs.image === token;
+  });
+  if (!ordered) fail('h3image reference slots feed MiniMaxH3ImageConditioning images.image_N from LoadImage in order, and the base graph takes none');
+  if (nodesOf(graph, 'LoadImage').length !== slots.length) fail('h3image graphs load one image per reference slot');
+  if (kind === 'reference' && linkedNode(graph, conditioning[0]?.inputs.vae)?.class_type !== 'VAELoader') {
+    fail('h3image reference graphs connect the VAE so pictures anchor as reference latents');
+  }
+}
+
+// A row with `outputLongEdge` renders at its ratio map's size and delivers a
+// smaller image: the decoded frame goes through one ImageScaleBy into the save
+// node. Lanczos is the only core method that is both anti-aliased and sharp
+// when reducing (it runs through Pillow); bilinear and bicubic resample
+// without anti-aliasing and alias at these factors.
+function checkOutputScale(graph: Graph, model: LocalModelDef, fail: (reason: string) => void): void {
+  const scalers = Object.entries(graph).filter(([, node]) => Object.values(node.inputs).includes('{{outputScale}}'));
+  const [id, scaler] = scalers[0] ?? [];
+  const save = graph[model.saveImageNodeId]?.inputs.images;
+  if (scalers.length !== 1 || scaler?.class_type !== 'ImageScaleBy' || scaler.inputs.scale_by !== '{{outputScale}}'
+    || scaler.inputs.upscale_method !== 'lanczos' || linkedNode(graph, scaler.inputs.image)?.class_type !== 'VAEDecode'
+    || !Array.isArray(save) || save[0] !== id) {
+    fail('{{outputScale}} drives one lanczos ImageScaleBy between the final VAEDecode and the save node');
   }
 }
 
@@ -168,10 +198,11 @@ export function validateModels(options: { dir: string; builtinDir?: string }): s
         && !nodesOf(graph, 'CLIPLoader').every((node) => node.inputs.type === model.requiredClipType)) {
         fail('CLIPLoader type differs from requiredClipType');
       }
+      if (text.includes('{{outputScale}}')) checkOutputScale(graph, model, fail);
       switch (model.family) {
         case 'krea': checkKrea(graph, kind, model, fail); break;
         case 'moss': checkMoss(graph, model, fail); break;
-        case 'h3image': checkH3Image(graph, text, model, fail); break;
+        case 'h3image': checkH3Image(graph, text, kind, model, fail); break;
         case 'video': checkVideo(graph, kind, model, fail); break;
       }
     }

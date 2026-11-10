@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { RATIO_VALUES } from '@atelier/shared';
-import { PLACEHOLDER_VALUES } from '../comfyui.config';
+import { MAX_LOCAL_REFERENCE_IMAGES, PLACEHOLDER_VALUES } from '../comfyui.config';
 
 // A graph file named by a manifest: a bare file name inside the manifest's own
 // directory, never a path.
@@ -55,11 +55,24 @@ export const localModelManifestSchema = z.strictObject({
   /** Graph files relative to the manifest directory. */
   graphs: z.strictObject({
     base: graphFileName,
-    /** Face-reference graph; absent means the model takes no reference image. */
+    /** Reference-image graph; absent means the model takes no reference image. */
     reference: graphFileName.optional(),
     /** Continuation graph anchored on the previous segment's tail. */
     extend: graphFileName.optional(),
   }),
+  /**
+   * Reference images the reference graph accepts, one `{{referenceImage}}`,
+   * `{{referenceImage2}}`, ... slot each. Defaults to 1.
+   */
+  maxReferenceImages: z.number().int().min(1).max(MAX_LOCAL_REFERENCE_IMAGES).optional(),
+  /** Ratio map the reference graph renders at, when it differs from `ratioMap`. */
+  referenceRatioMap: z.string().min(1).optional(),
+  /**
+   * Long edge in pixels of the delivered image. The graphs render at their
+   * ratio map's size and end in an `ImageScaleBy` whose factor,
+   * `{{outputScale}}`, brings the long edge down to this. Image rows only.
+   */
+  outputLongEdge: z.number().int().positive().optional(),
   /** Placeholders the continuation graph requires, when they differ from the base. */
   extendRequiredPlaceholders: placeholderList.optional(),
   /** Weight files the host must have registered. */

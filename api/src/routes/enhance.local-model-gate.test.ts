@@ -6,8 +6,11 @@ import {
   type EnhanceChunk,
   type TestTextFeatureProvider,
 } from '../providers/text/featureHelpers';
+import sharp from 'sharp';
+import { storeUpload } from '../storage/uploadStore';
 import {
   ENHANCE_SYSTEM_PROMPT,
+  H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
   H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
   MOSS_ENHANCE_SYSTEM_PROMPT,
@@ -212,6 +215,33 @@ describe('POST /api/enhance-prompt local-model allowlist', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]?.model).toBe(TEXT_MODELS.kimi);
     expect(systemPromptOf(requests[0] ?? {})).toBe(H3_IMAGE_ENHANCE_SYSTEM_PROMPT);
+  });
+
+  test('MiniMax H3 Image with a reference picture gets the reference-edit writer and the picture', async () => {
+    restoreFetch();
+    const requests: CapturedRequest[] = [];
+    const upstream = serveCapture(requests);
+    const runtime = testRuntime({
+      ...VIDEO_ON,
+      CLIPROXY_BASE_URL: upstream,
+      CLIPROXY_TOKEN: 'sk-x',
+      LOCAL_MODELS_USERS: 'alice',
+    });
+    const { data: bytes } = await sharp({ create: { width: 16, height: 16, channels: 3, background: '#336699' } }).png().toUint8Array();
+    const upload = await storeUpload({ db: runtime.db, dataDir: runtime.config.DATA_DIR,
+      logger: runtime.logger, userId: 'alice', bytes, signal: new AbortController().signal });
+
+    const response = await runtime.app.fetch(new Request('http://local/api/enhance-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Remote-User': 'alice' },
+      body: JSON.stringify({ prompt: 'make the jacket red', modelId: 'minimax-h3-image', refImageIds: [upload.id] }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect((await parseSse(response)).at(-1)?.event).toBe('done');
+    expect(requests).toHaveLength(1);
+    expect(systemPromptOf(requests[0] ?? {})).toBe(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT);
+    expect(JSON.stringify(requests[0]?.messages)).toContain('data:image/jpeg;base64,');
   });
 
   test('a non-listed user sends MiniMax H3 Image through the generic prompt', async () => {

@@ -16,6 +16,7 @@ import { loadRefImages, refImageByteTotal } from '../orchestrator/refImages';
 import { downscaleForVision } from '../storage/downscaleForVision';
 import { findModel, localModelsAllowed } from '../providers/registry';
 import {
+  H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
   H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
   MOSS_ENHANCE_SYSTEM_PROMPT,
@@ -93,7 +94,11 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
     // Krea, MOSS and MiniMax H3 Image keep their own enhance prompts;
     // Sunburst gets its dedicated contract; other image targets use the
     // provider's model-neutral default.
-    systemPrompt = isLocalOpenWeightsTarget(target)
+    // MiniMax H3 Image composes from attached pictures, so a request carrying
+    // them gets its reference-edit writer instead of the text-to-image one.
+    systemPrompt = target === 'h3image' && visionRequired
+      ? H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT
+      : isLocalOpenWeightsTarget(target)
       ? LOCAL_ENHANCE_SYSTEM_PROMPTS[target]
       : isSunburstModel(entry?.model.id) ? SUNBURST_ENHANCE_SYSTEM_PROMPT : undefined;
     enhanceOpts = { defaults: AI_FILL_DEFAULTS };

@@ -5,7 +5,10 @@ test('inventory covers configured graph modes, private worker classes and source
   const inventory = comfyuiInventory();
   expect(inventory.models).toHaveLength(5);
   const graphs = inventory.models.flatMap((model) => model.graphs);
-  expect(graphs).toHaveLength(7);
+  // Five base graphs, the Krea and MiniMax H3 Image reference graphs, one extend graph.
+  expect(graphs).toHaveLength(8);
+  const h3Reference = inventory.models.find((model) => model.id === 'minimax-h3-image')?.graphs.find((graph) => graph.kind === 'reference');
+  expect(h3Reference?.privateClasses).toContain('AtelierLoadImage');
   for (const graph of graphs) {
     expect(graph.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(graph.missingWorkerClasses).toEqual([]);

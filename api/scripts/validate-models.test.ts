@@ -89,9 +89,10 @@ describe('validate-models', () => {
     type H3Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
     function h3Violation(
       mutate: (graph: H3Graph, sampler: H3Graph[string]) => void,
+      file = 'workflow.json',
     ): { result: ReturnType<typeof run>; graphPath: string } {
       const dir = copyFixture(BUILTIN_MODELS_DIR);
-      const graphPath = join(dir, 'minimax-h3-image', 'workflow.json');
+      const graphPath = join(dir, 'minimax-h3-image', file);
       const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as H3Graph;
       const sampler = graph['7'];
       if (sampler === undefined) throw new Error('minimax-h3-image graph has no node 7');
@@ -141,6 +142,92 @@ describe('validate-models', () => {
       });
       expect(result.code).toBe(1);
       expect(result.stderr).toContain(`${graphPath}: one MiniMaxH3ImageConditioning feeds the sampler latent from output 1`);
+    });
+  });
+
+  describe('output downscale', () => {
+    type ScaleGraph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+    const RULE = '{{outputScale}} drives one lanczos ImageScaleBy between the final VAEDecode and the save node';
+    function violation(mutate: (graph: ScaleGraph) => void): { result: ReturnType<typeof run>; graphPath: string } {
+      const dir = copyFixture(BUILTIN_MODELS_DIR);
+      const graphPath = join(dir, 'minimax-h3-image', 'workflow.json');
+      const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as ScaleGraph;
+      mutate(graph);
+      writeFileSync(graphPath, JSON.stringify(graph));
+      return { result: run(dir), graphPath };
+    }
+    function scaler(graph: ScaleGraph): ScaleGraph[string] {
+      const found = Object.values(graph).find((node) => node.class_type === 'ImageScaleBy');
+      if (found === undefined) throw new Error('minimax-h3-image graph has no ImageScaleBy');
+      return found;
+    }
+
+    test('a resample method without anti-aliasing exits 1', () => {
+      const { result, graphPath } = violation((graph) => { scaler(graph).inputs.upscale_method = 'bicubic'; });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: ${RULE}`);
+    });
+
+    test('a save node that bypasses the downscale exits 1', () => {
+      const { result, graphPath } = violation((graph) => {
+        const save = graph['9'];
+        if (save === undefined) throw new Error('minimax-h3-image graph has no node 9');
+        save.inputs.images = scaler(graph).inputs.image;
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: ${RULE}`);
+    });
+  });
+
+  describe('h3image reference slots', () => {
+    type H3Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+    const SLOTS = 'h3image reference slots feed MiniMaxH3ImageConditioning images.image_N from LoadImage in order, and the base graph takes none';
+    function violation(file: string, mutate: (graph: H3Graph) => void): { result: ReturnType<typeof run>; graphPath: string } {
+      const dir = copyFixture(BUILTIN_MODELS_DIR);
+      const graphPath = join(dir, 'minimax-h3-image', file);
+      const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as H3Graph;
+      mutate(graph);
+      writeFileSync(graphPath, JSON.stringify(graph));
+      return { result: run(dir), graphPath };
+    }
+    function node(graph: H3Graph, id: string): H3Graph[string] {
+      const found = graph[id];
+      if (found === undefined) throw new Error(`minimax-h3-image graph has no node ${id}`);
+      return found;
+    }
+
+    test('slots wired out of order exit 1', () => {
+      const { result, graphPath } = violation('reference.json', (graph) => {
+        const inputs = node(graph, '4').inputs;
+        [inputs['images.image_1'], inputs['images.image_2']] = [inputs['images.image_2'], inputs['images.image_1']];
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: ${SLOTS}`);
+    });
+
+    test('a picture resized on its way to the conditioning node exits 1', () => {
+      const { result, graphPath } = violation('reference.json', (graph) => {
+        graph['30'] = { class_type: 'ImageScaleToTotalPixels', inputs: { image: ['20', 0], upscale_method: 'area', megapixels: 1, resolution_steps: 16 } };
+        node(graph, '4').inputs['images.image_1'] = ['30', 0];
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: ${SLOTS}`);
+    });
+
+    test('a reference graph without the VAE on the conditioning node exits 1', () => {
+      const { result, graphPath } = violation('reference.json', (graph) => {
+        Reflect.deleteProperty(node(graph, '4').inputs, 'vae');
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image reference graphs connect the VAE so pictures anchor as reference latents`);
+    });
+
+    test('a loader no slot reads exits 1', () => {
+      const { result, graphPath } = violation('workflow.json', (graph) => {
+        graph['30'] = { class_type: 'LoadImage', inputs: { image: 'fixed.png' } };
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image graphs load one image per reference slot`);
     });
   });
 

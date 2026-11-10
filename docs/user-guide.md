@@ -86,9 +86,20 @@ cancel operation; use the batch's cancel control when you want to stop work.
 
 Attach a reference in the composer, then write what you want the model to do
 with it. The selected model determines the reference count and supported
-workflow: GPT accepts up to four, Gemini up to ten, and the bundled Krea
-reference graph uses one face reference. MOSS and MiniMax H3 Image do not
-accept references.
+workflow: GPT accepts up to four, Gemini up to ten, the bundled Krea
+reference graph uses one face reference, and MiniMax H3 Image takes up to
+three pictures. MOSS does not accept references.
+
+On **MiniMax H3 Image** the pictures are numbered in the order you attached
+them, and the prompt can name them `<Picture 1>`, `<Picture 2>` and
+`<Picture 3>`. Use it to edit a picture ("remove the newspaper"), to put the
+person from one picture into a new scene, or to combine a person, a place and
+a garment from three pictures. Enhance rewrites your request into the form
+the model follows best, and a short instruction is rewritten the same way
+automatically before it renders when a text model that accepts images is
+available. Every MiniMax H3 Image result is delivered with a 2048 pixel long
+edge: without pictures the model renders at about 16 megapixels and the
+result is reduced from that, with pictures it renders at about 4.
 
 Reference uploads are kept with your user data. Removing a reference from the
 current prompt changes the next request; it does not rewrite a completed batch.

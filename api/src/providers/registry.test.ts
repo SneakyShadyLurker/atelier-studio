@@ -221,7 +221,7 @@ describe('Model.concurrencyCapPerUser matches capsForPool', () => {
 });
 
 describe('Krea models are registered with correct fields', () => {
-  test('every Krea row publishes one reference image; video rows never do', async () => {
+  test('Krea rows publish one reference image, MiniMax H3 Image three; video rows never do', async () => {
     const { keyStore } = await setup();
     const config = testConfig({ LOCAL_MODELS_USERS: 'alice', VIDEO_MODELS_ENABLED: 'true' });
     const models = await publicModelsForUser(config, { userId: 'alice', keyStore });
@@ -234,7 +234,9 @@ describe('Krea models are registered with correct fields', () => {
     }
     const h3 = models.filter((model) => model.id.startsWith('minimax-h3-'));
     expect(h3.map((model) => model.id)).toEqual(['minimax-h3-image', 'minimax-h3-i2v', 'minimax-h3-t2v']);
-    for (const model of h3) {
+    // The image row edits from up to three pictures; the video rows take none.
+    expect(h3[0]).toMatchObject({ supportsReferenceImages: true, maxRefImages: 3 });
+    for (const model of h3.slice(1)) {
       expect(model).not.toHaveProperty('supportsReferenceImages');
       expect(model).not.toHaveProperty('maxRefImages');
     }

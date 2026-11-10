@@ -4,7 +4,7 @@ import { VIDEO_DURATION_FRAMES, type Ratio, type VideoDurationFrames } from '@at
 import type { Config } from '../../config';
 import { loggerForConfig } from '../../observability/logger';
 import { classifyImageModelTarget } from '../../prompts/gptImagePhrasing';
-import { PLACEHOLDER_VALUES, type Placeholder } from '../comfyui.config';
+import { PLACEHOLDER_VALUES, REFERENCE_IMAGE_PLACEHOLDERS, type Placeholder } from '../comfyui.config';
 import { localModelManifestSchema, type LocalModelManifest } from './manifest';
 import { RATIO_MAPS, isRatioMapName, type RatioDims, type RatioMapName } from './ratioMaps';
 
@@ -48,8 +48,14 @@ export interface LocalModelDef {
   /** Absolute path of the continuation graph, when the model has one. */
   extendWorkflowPath?: string;
   extendRequiredPlaceholders?: readonly Placeholder[];
-  /** Absolute path of the face-reference graph; absent means no reference image. */
+  /** Absolute path of the reference-image graph; absent means no reference image. */
   referenceWorkflowPath?: string;
+  /** Reference images the reference graph accepts; set whenever that graph is. */
+  maxReferenceImages?: number;
+  /** Render sizes of the reference graph, when they differ from `ratioDims`. */
+  referenceRatioDims?: RatioDims;
+  /** Long edge of the delivered image; every graph then ends in a `{{outputScale}}` downscale. */
+  outputLongEdge?: number;
   referenceRequiredModelFiles?: readonly string[];
   requiredModelFiles: readonly string[];
   /** CLIPLoader `type` the host must advertise. */
@@ -232,6 +238,7 @@ function resolveModel(file: ManifestFile, order: number): ResolvedModel {
     if (m.supportedDurations === undefined || m.defaultDuration === undefined) {
       throw new LocalModelCatalogError('video model requires supportedDurations and defaultDuration', path);
     }
+    if (m.outputLongEdge !== undefined) throw new LocalModelCatalogError('video model declares outputLongEdge', path);
   } else {
     if (isVideo) throw new LocalModelCatalogError('image family cannot output video', path);
     if (m.supportedDurations !== undefined || m.defaultDuration !== undefined || m.graphs.extend !== undefined) {
@@ -249,9 +256,20 @@ function resolveModel(file: ManifestFile, order: number): ResolvedModel {
     throw new LocalModelCatalogError('default duration is not a supported duration', path);
   }
 
+  if (m.maxReferenceImages !== undefined && m.graphs.reference === undefined) {
+    throw new LocalModelCatalogError('maxReferenceImages requires a reference graph', path);
+  }
+  const referenceSlots = REFERENCE_IMAGE_PLACEHOLDERS.slice(0, m.maxReferenceImages ?? 1);
+  const referenceRatioMap = m.referenceRatioMap;
+  if (referenceRatioMap !== undefined && m.graphs.reference === undefined) {
+    throw new LocalModelCatalogError('referenceRatioMap requires a reference graph', path);
+  }
+  if (referenceRatioMap !== undefined && !isRatioMapName(referenceRatioMap)) {
+    throw new LocalModelCatalogError('unknown reference ratio map', path);
+  }
   const required: Record<(typeof GRAPH_NAMES)[number], readonly string[]> = {
     base: m.requiredPlaceholders,
-    reference: [...m.requiredPlaceholders, '{{referenceImage}}'],
+    reference: [...m.requiredPlaceholders, ...referenceSlots],
     extend: m.extendRequiredPlaceholders ?? m.requiredPlaceholders,
   };
   const graphPaths: Partial<Record<(typeof GRAPH_NAMES)[number], string>> = {};
@@ -268,6 +286,13 @@ function resolveModel(file: ManifestFile, order: number): ResolvedModel {
     }
     if (!required[kind].every((placeholder) => text.includes(placeholder))) {
       throw new LocalModelCatalogError('graph lacks a required placeholder', graphPath);
+    }
+    const slots: readonly string[] = kind === 'reference' ? referenceSlots : [];
+    if (REFERENCE_IMAGE_PLACEHOLDERS.some((token) => text.includes(token) && !slots.includes(token))) {
+      throw new LocalModelCatalogError('graph declares a reference slot the model does not take', graphPath);
+    }
+    if (text.includes('{{outputScale}}') !== (m.outputLongEdge !== undefined)) {
+      throw new LocalModelCatalogError('outputLongEdge and the {{outputScale}} placeholder go together in every graph', graphPath);
     }
     if (!Object.hasOwn(JSON.parse(text) as object, m.saveImageNodeId)) {
       throw new LocalModelCatalogError('graph lacks the save node', graphPath);
@@ -307,7 +332,11 @@ function resolveModel(file: ManifestFile, order: number): ResolvedModel {
     workflowPath,
     ...(graphPaths.extend !== undefined ? { extendWorkflowPath: graphPaths.extend } : {}),
     ...(m.extendRequiredPlaceholders !== undefined ? { extendRequiredPlaceholders: m.extendRequiredPlaceholders } : {}),
-    ...(graphPaths.reference !== undefined ? { referenceWorkflowPath: graphPaths.reference } : {}),
+    ...(graphPaths.reference !== undefined
+      ? { referenceWorkflowPath: graphPaths.reference, maxReferenceImages: referenceSlots.length }
+      : {}),
+    ...(referenceRatioMap !== undefined ? { referenceRatioDims: RATIO_MAPS[referenceRatioMap] } : {}),
+    ...(m.outputLongEdge !== undefined ? { outputLongEdge: m.outputLongEdge } : {}),
     ...(m.referenceRequiredModelFiles !== undefined ? { referenceRequiredModelFiles: m.referenceRequiredModelFiles } : {}),
     requiredModelFiles: m.requiredModelFiles,
     ...(m.requiredClipType !== undefined ? { requiredClipType: m.requiredClipType } : {}),

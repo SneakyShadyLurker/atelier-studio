@@ -89,7 +89,7 @@
     "class_type": "SaveImageWebsocket",
     "inputs": {
       "images": [
-        "8",
+        "12",
         0
       ]
     }
@@ -102,6 +102,17 @@
         0
       ],
       "attention": "comfy kitchen attention"
+    }
+  },
+  "12": {
+    "class_type": "ImageScaleBy",
+    "inputs": {
+      "image": [
+        "8",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "scale_by": "{{outputScale}}"
     }
   }
 }

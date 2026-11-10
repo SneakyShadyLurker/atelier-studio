@@ -3,6 +3,7 @@ import type { Config } from '../config';
 import type { AppLogger } from '../observability/logger';
 import { isLikelyModelRefusal } from '../prompts/modelOutput';
 import { countPromptWords } from '../prompts/promptBudget';
+import type { EnhanceImageInput } from '../providers/text/featureHelpers';
 import { imageModelRouting, textProviderForResolved } from '../providers/textRouting';
 import type { ResolvedTextModel } from '../routing/textModelResolver';
 import type { TextServices } from '../routing/textServices';
@@ -21,6 +22,8 @@ export interface RewriteDeps {
 export interface RewriteSpec {
   readonly task: 'condense' | 'enhance';
   readonly systemPrompt: string;
+  /** Pictures the writer must see; a non-empty list requires a vision model. */
+  readonly images?: readonly EnhanceImageInput[];
   readonly timeoutMs: (latencyProfile: TextLatencyProfile) => number;
   /** Accepts the rewrite's word count against the original's. */
   readonly accepts: (afterWords: number, beforeWords: number) => boolean;
@@ -46,6 +49,7 @@ export async function rewriteBatchPrompt(
   spec: RewriteSpec,
 ): Promise<string> {
   const beforeWords = countPromptWords(prompt);
+  const images = spec.images ?? [];
   const skip = (reason: string, afterWords?: number): string => {
     deps.logger.info(
       {
@@ -61,7 +65,12 @@ export async function rewriteBatchPrompt(
   // Resolved before the timer so the deadline follows the model.
   let resolved: ResolvedTextModel;
   try {
-    resolved = deps.text.resolve({ userId: deps.userId, task: spec.task, ...imageModelRouting(deps.config, modelId) });
+    resolved = deps.text.resolve({
+      userId: deps.userId,
+      task: spec.task,
+      ...imageModelRouting(deps.config, modelId),
+      ...(images.length > 0 ? { visionRequired: true } : {}),
+    });
   } catch {
     return skip('error');
   }
@@ -83,7 +92,7 @@ export async function rewriteBatchPrompt(
 
     const enhanceOpts = reasoningEffort === undefined ? {} : { reasoningEffort };
 
-    for await (const chunk of provider.enhance(prompt, [], signal, spec.systemPrompt, enhanceOpts)) {
+    for await (const chunk of provider.enhance(prompt, [...images], signal, spec.systemPrompt, enhanceOpts)) {
       if (signal.aborted) break;
       if (chunk.type === 'delta') rewritten += chunk.text;
       else if (chunk.type === 'done') completed = true;

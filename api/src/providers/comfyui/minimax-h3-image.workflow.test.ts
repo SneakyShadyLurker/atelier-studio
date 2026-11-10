@@ -10,6 +10,9 @@ const _h3 = LOCAL_MODELS.find((m) => m.id === 'minimax-h3-image');
 if (!_h3) throw new Error('minimax-h3-image row missing from LOCAL_MODELS');
 const h3 = _h3;
 const workflowText = readFileSync(h3.workflowPath, 'utf8');
+if (h3.referenceWorkflowPath === undefined) throw new Error('minimax-h3-image has no reference graph');
+const referenceText = readFileSync(h3.referenceWorkflowPath, 'utf8');
+const referencePlaceholders = [...h3.requiredPlaceholders, '{{referenceImage}}'];
 
 interface Node {
   class_type: string;
@@ -18,7 +21,7 @@ interface Node {
 
 type Link = [string, number];
 
-const params = { prompt: 'A poster reading "OPEN LATE" above a neon diner', seed: 2026, width: 2496, height: 3328, count: 1, steps: h3.defaultSteps };
+const params = { prompt: 'A poster reading "OPEN LATE" above a neon diner', seed: 2026, width: 2496, height: 3328, count: 1, steps: h3.defaultSteps, outputScale: 2048 / 3328 };
 
 function build(): Record<string, Node> {
   return buildWorkflow(workflowText, params, h3.requiredPlaceholders) as Record<string, Node>;
@@ -61,13 +64,18 @@ describe('MiniMax H3 Image workflow', () => {
     expect(h3.outputKind).toBeUndefined();
     expect(h3.promptFormat).toBeUndefined();
     expect(h3.saveImageNodeId).toBe('9');
-    expect(h3.requiredPlaceholders).toEqual(['{{prompt}}', '{{seed}}', '{{width}}', '{{height}}', '{{steps}}']);
+    expect(h3.requiredPlaceholders).toEqual(['{{prompt}}', '{{seed}}', '{{width}}', '{{height}}', '{{steps}}', '{{outputScale}}']);
+    expect(h3.outputLongEdge).toBe(2048);
+    expect(h3.size).toBe('≈16MP → 2K · INT8 ConvRot');
     expect(h3.defaultSteps).toBe(6);
     expect(h3.batched).toBe(false);
     expect(h3.defaultCount).toBe(1);
     expect(h3.defaultRatio).toBe('3:4');
     expect(h3.ratioMap).toBe('h3image-16mp');
-    expect(h3.referenceWorkflowPath).toBeUndefined();
+    expect(h3.referenceWorkflowPath).toEndWith('/minimax-h3-image/reference.json');
+    expect(h3.maxReferenceImages).toBe(3);
+    expect(h3.referenceRatioDims?.['3:4']).toEqual({ width: 1728, height: 2304 });
+    expect(h3.referenceRequiredModelFiles).toBeUndefined();
     expect(h3.extendWorkflowPath).toBeUndefined();
     expect(h3.requiredClipType).toBe('minimax');
     expect(h3.requiredModelFiles).toEqual([
@@ -93,6 +101,45 @@ describe('MiniMax H3 Image workflow', () => {
       expect(Math.abs(width / height / ratioValue(ratio) - 1)).toBeLessThan(0.02);
     }
     expect(h3.ratioDims['3:4']).toEqual({ width: 3552, height: 4736 });
+  });
+
+  test('reference renders use ~4 MP sizes on the 32 grid that keep the 16 MP aspect', () => {
+    const reference = h3.referenceRatioDims;
+    if (reference === undefined) throw new Error('minimax-h3-image has no reference ratio map');
+    for (const ratio of h3.supportedRatios) {
+      const { width, height } = reference[ratio];
+      const full = h3.ratioDims[ratio];
+      expect(width % 32).toBe(0);
+      expect(height % 32).toBe(0);
+      const megapixels = (width * height) / 1_000_000;
+      expect(megapixels).toBeGreaterThan(3.9);
+      expect(megapixels).toBeLessThan(4.3);
+      // Editing a 16 MP tile must not reframe it.
+      expect(Math.abs(width / height / (full.width / full.height) - 1)).toBeLessThan(0.007);
+    }
+    for (const ratio of ['1:1', '4:5', '3:4'] as const) {
+      expect(reference[ratio].width * h3.ratioDims[ratio].height).toBe(reference[ratio].height * h3.ratioDims[ratio].width);
+    }
+  });
+
+  test('every ratio is delivered at a 2048 px long edge, for text-to-image and reference renders alike', () => {
+    // ImageScaleBy rounds each side of the rendered frame times the factor.
+    const delivered = (dims: { width: number; height: number }) => {
+      const scale = 2048 / Math.max(dims.width, dims.height);
+      return { width: Math.round(dims.width * scale), height: Math.round(dims.height * scale) };
+    };
+    const reference = h3.referenceRatioDims;
+    if (reference === undefined) throw new Error('minimax-h3-image has no reference ratio map');
+    for (const ratio of h3.supportedRatios) {
+      for (const dims of [h3.ratioDims[ratio], reference[ratio]]) {
+        const out = delivered(dims);
+        expect(Math.max(out.width, out.height)).toBe(2048);
+        expect(Math.abs(out.width / out.height / ratioValue(ratio) - 1)).toBeLessThan(0.02);
+      }
+    }
+    expect(delivered(h3.ratioDims['3:4'])).toEqual({ width: 1536, height: 2048 });
+    expect(delivered(reference['3:4'])).toEqual({ width: 1536, height: 2048 });
+    expect(delivered(h3.ratioDims['1:1'])).toEqual({ width: 2048, height: 2048 });
   });
 
   test('loaders bind the INT8 DiT, the Qwen3-VL encoder as minimax and the image VAE', () => {
@@ -145,7 +192,11 @@ describe('MiniMax H3 Image workflow', () => {
     const save = nodeOf(graph, h3.saveImageNodeId);
     expect(save.class_type).toBe('SaveImageWebsocket');
     expect(Object.values(graph).filter((n) => n.class_type === 'SaveImageWebsocket')).toHaveLength(1);
-    const decode = linked(graph, save, 'images');
+    // The 16 MP frame is reduced to a 2K long edge before it leaves the host.
+    const downscale = linked(graph, save, 'images');
+    expect(downscale).toMatchObject({ class_type: 'ImageScaleBy', inputs: { upscale_method: 'lanczos', scale_by: params.outputScale } });
+    expect(Object.values(graph).filter((n) => n.class_type === 'ImageScaleBy')).toHaveLength(1);
+    const decode = linked(graph, downscale, 'image');
     expect(decode.class_type).toBe('VAEDecode');
     expect(linked(graph, decode, 'samples').class_type).toBe('KSampler');
     expect(linked(graph, decode, 'vae').class_type).toBe('VAELoader');
@@ -157,6 +208,31 @@ describe('MiniMax H3 Image workflow', () => {
         }
       }
     }
-    expect(workflowText).not.toMatch(/\{\{(?!prompt|seed|width|height|steps)[^}]*\}\}/);
+    expect(workflowText).not.toMatch(/\{\{(?!prompt|seed|width|height|steps|outputScale)[^}]*\}\}/);
+  });
+
+  test('the reference graph is the base graph plus one loader per <Picture N> slot', () => {
+    const base = build();
+    for (const count of [1, 2, 3]) {
+      const referenceImages = ['job:a', 'job:b', 'job:c'].slice(0, count);
+      const graph = buildWorkflow(referenceText, { ...params, referenceImages }, referencePlaceholders) as Record<string, Node>;
+      const conditioning = single(graph, 'MiniMaxH3ImageConditioning');
+      const pictures = Object.keys(conditioning.inputs).filter((name) => name.startsWith('images.'));
+      expect(pictures).toEqual(referenceImages.map((_, slot) => `images.image_${slot + 1}`));
+      referenceImages.forEach((token, slot) => {
+        const loader = linked(graph, conditioning, `images.image_${slot + 1}`);
+        expect(loader).toEqual({ class_type: 'LoadImage', inputs: { image: token } });
+      });
+      expect(Object.values(graph).filter((n) => n.class_type === 'LoadImage')).toHaveLength(count);
+      // The reference latents need the image VAE on the conditioning node.
+      expect(linked(graph, conditioning, 'vae').class_type).toBe('VAELoader');
+      // Everything else is the base graph: same weights, sampler, size and terminal.
+      const stripped = structuredClone(graph);
+      for (const [id, node] of Object.entries(stripped)) {
+        if (node.class_type === 'LoadImage') Reflect.deleteProperty(stripped, id);
+        for (const name of Object.keys(node.inputs)) if (name.startsWith('images.')) Reflect.deleteProperty(node.inputs, name);
+      }
+      expect(stripped).toEqual(base);
+    }
   });
 });

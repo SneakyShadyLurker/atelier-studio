@@ -61,7 +61,7 @@ describe('brainstorm system prompt', () => {
     expect(reroll).not.toMatch(/\b18\b/);
   });
 
-  it('encodes the kept invariants, the field/record separators, and the age-token guard', () => {
+  it('encodes the kept invariants and field/record separators', () => {
     const sys = buildBrainstormSystemPrompt({ count: 12, modelId: 'gpt-image-test' });
     expect(sys).toContain(BRAINSTORM_RECORD_SEPARATOR);
     expect(sys).toContain(BRAINSTORM_FIELD_SEPARATOR);
@@ -79,8 +79,6 @@ describe('brainstorm system prompt', () => {
     expect(sys).toContain(
       'Each concept is exactly three fields and therefore exactly two separator lines.',
     );
-    // The GPT arm keeps its clothing boundary while every target/layout stays age-token clean.
-    expect(sys.toLowerCase()).not.toContain('nude');
     for (const modelId of [
       'gpt-image-test',
       'gemini-3-pro-image-preview',
@@ -102,16 +100,15 @@ describe('brainstorm system prompt', () => {
     }
   });
 
-  it('GPT target swaps the verbatim mood-word licence and charged meta-goals for the register contract', () => {
+  it('GPT target keeps the creative contract without moderation phrasing', () => {
     const sys = buildBrainstormSystemPrompt({ count: 5, modelId: 'gpt-image-test' });
-    expect(sys.toLowerCase()).not.toContain('verbatim');
-    expect(sys).toContain('NEVER write the charged word itself');
-    expect(sys.toLowerCase()).toContain('keyword-first');
-    expect(sys).toContain('Exposure is carried by the named garment');
-    // The prompt must not model the very register its rules forbid in output.
-    expect(sys).not.toContain('deliberately sexy');
-    expect(sys).not.toContain('revealing, skimpy and provocative');
-    expect(sys).toContain('most daring wardrobe');
+    expect(sys.toLowerCase()).toContain('verbatim');
+    expect(sys).toContain('deliberately sexy concepts');
+    expect(sys).toContain('MAXIMIZE EXPOSURE');
+    expect(sys).not.toContain('EXPOSURE CONTRACT');
+    expect(sys.toLowerCase()).not.toContain('keyword-first');
+    expect(sys.toLowerCase()).not.toContain('safety filter');
+    expect(sys.toLowerCase()).not.toContain('content filter');
   });
 
   it('gemini keeps the verbatim mood-word licence and charged meta-goals, with no GPT register contract', () => {
@@ -128,7 +125,7 @@ describe('brainstorm system prompt', () => {
     expect(sys.toLowerCase()).not.toContain('keyword-first');
   });
 
-  it('gives every non-GPT target the exposure contract while keeping the GPT arm tamer', () => {
+  it('keeps the detailed exposure contract off the concise GPT arm', () => {
     for (const modelId of [
       'gemini-3-pro-image-preview',
       'krea-2-gonzalomo',
@@ -140,16 +137,12 @@ describe('brainstorm system prompt', () => {
       expect(sys).toContain('OPEN WARDROBE');
     }
 
-    // Both layouts: the panel clause is interpolated inside the non-GPT literal,
-    // and gpt x diptych is the combination where a future edit would leak the
-    // explicit contract into the one target whose output render is scanned.
     for (const layout of ['single', 'diptych'] as const) {
       const gpt = buildBrainstormSystemPrompt({ count: 5, layout, modelId: 'gpt-image-test' });
-      expect(gpt).toContain('most daring wardrobe');
+      expect(gpt).toContain('MAXIMIZE EXPOSURE');
       expect(gpt).not.toContain('EXPOSURE CONTRACT');
       expect(gpt).not.toContain('GARMENT CEILING');
       expect(gpt).not.toContain('OPEN WARDROBE');
-      expect(gpt).not.toContain('her ass in the rear panel');
     }
   });
 
@@ -208,7 +201,6 @@ describe('brainstorm system prompt', () => {
   });
 
   it('applies the exposure contract to every woman, not just the lead', () => {
-    // GPT targets run the tamer MAXIMIZE EXPOSURE arm, which is already plural.
     for (const modelId of ['krea-2-gonzalomo', 'gemini-3-pro-image-preview']) {
       const sys = buildBrainstormSystemPrompt({ count: 3, modelId });
       expect(sys, modelId).toContain('This contract applies to EVERY woman in the frame');
@@ -216,7 +208,6 @@ describe('brainstorm system prompt', () => {
     }
     const gpt = buildBrainstormSystemPrompt({ count: 3, modelId: 'gpt-image-test' });
     expect(gpt).toContain('dress every woman in the most daring wardrobe');
-    expect(gpt).not.toContain('This contract applies to EVERY woman in the frame');
   });
 
   it('Krea target keeps the solo band and adds a per-woman allowance', () => {
@@ -454,10 +445,7 @@ describe('assembleBrainstormCharacterPrompt', () => {
     expect(BRAINSTORM_CONSTRAINTS).not.toContain('18');
   });
 
-  // "hyper-detailed anatomy" is the anatomy-emphasis input trigger the GPT
-  // register contract bans; the code-appended constraints must not reintroduce
-  // it after the model has complied.
-  it('gpt targets get anatomy-safe constraints; other targets keep the full constant', () => {
+  it('gpt targets get concise constraints; other targets keep the full constant', () => {
     const record = `scene${FS}subject${FS}details`;
     const gpt = assembleBrainstormCharacterPrompt(record, 'gpt');
     expect(gpt.text).not.toContain('hyper-detailed anatomy');
@@ -484,7 +472,6 @@ describe('assembleBrainstormCharacterPrompt', () => {
     }
     // The positive clause that carried the intent must survive.
     expect(krea.text).toContain('fills the entire frame edge to edge');
-    // Krea has no content filter, so it keeps the anatomy emphasis GPT must drop.
     expect(krea.text).toContain('hyper-detailed anatomy');
     expect(krea.text).toContain('slim waist');
     // Whole-tail negation sweep: the point of this arm is that NO exclusion
@@ -717,7 +704,8 @@ describe('MiniMax H3 Image brainstorm target', () => {
     expect(sys).toContain('Target model: MiniMax H3 Image');
     expect(sys).toContain('~90-220 words across the three fields');
     expect(sys).toContain('say which hand touches what');
-    expect(sys).toContain('State her adult age as a number or a decade');
+    expect(sys).toContain('State her apparent age as a number or a decade');
+    expect(sys).toContain('state her build plainly');
     expect(sys).toContain('Never add skin-realism cues');
     // The shared goal and exposure sections must not contradict the hint.
     expect(sys).toContain('realistic proportions, smooth, clear, even-toned skin');

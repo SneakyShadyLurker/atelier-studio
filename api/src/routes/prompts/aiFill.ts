@@ -95,7 +95,7 @@ function parseBatchResponse(
 ): ParsedBatchItem[] | null {
   const records = text.split(AI_FILL_RECORD_SEPARATOR);
   if (records.length > items.length) return null;
-  return items.map((item, index) => {
+  const parsed = items.map((item, index) => {
     const record = records[index];
     if (record === undefined) return { fills: [], mismatched: true, refusedSlot: -1 };
     const fills = splitFills(record);
@@ -106,6 +106,11 @@ function parseBatchResponse(
       refusedSlot: refusedFillIndex(fills),
     };
   });
+  // A refusal plus any malformed or missing record makes positional salvage
+  // unsafe: a later healthy record may belong to a different item.
+  const refusalWithMismatch = parsed.some((item) => item.refusedSlot >= 0)
+    && parsed.some((item) => item.mismatched);
+  return refusalWithMismatch ? parsed.map((item) => ({ ...item, mismatched: true })) : parsed;
 }
 
 type BatchItemResult = Extract<AiFillBatchSseEvent, { event: 'result' }>['data']['items'][number];

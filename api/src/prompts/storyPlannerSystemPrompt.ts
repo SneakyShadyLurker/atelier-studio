@@ -3,8 +3,7 @@
 // continuity bible, both consumed downstream by the per-segment motion-prompt
 // writers (motionEnhance / motionExtendEnhance / storyT2v). The planner never
 // writes H3 prompt syntax itself — beats are plain motion briefs; the writers
-// own the I2VA/T2VA format. Adult scope is operator-steered via the outline;
-// this file injects no age/explicit literals of its own.
+// own the I2VA/T2VA format.
 //
 // The beat rules encode the measured H3 findings (official prompt guide +
 // community research): one primary action per segment,
@@ -40,7 +39,7 @@ SEGMENTATION:
 - Choose the FEWEST segments that cover the outline's full arc — every extra segment costs minutes of render time and risks drift. {{MAX_SEGMENTS}} is a hard ceiling.
 - durationFrames must be one of ${DURATION_CHOICES} at ${VIDEO_FPS} fps. Default to 243 — it is the most reliable continuation length. Use 124 only for a single quick beat, 362 sparingly for a slow sustained passage.
 - Place the story's most important beat in a MIDDLE segment, never the last one — the model squeezes whatever sits at the very end of the timeline.
-- The user's outline is law: cover everything it asks for, in its spirit and at its full intensity. Expand abstract directives into concrete camera-visible action; never dilute, sanitize, or replace what the outline asks for.
+- The user's outline is law: cover everything it asks for, in its spirit and at its full intensity. Expand abstract directives into concrete camera-visible action.
 
 EACH BEAT is a plain-prose motion brief for one segment (2-5 sentences). Rules:
 - ONE primary action per segment, developed continuously, plus sensible secondary motion (hair, fabric, breathing, weight shift). A beat that tries two primary actions renders as jank.

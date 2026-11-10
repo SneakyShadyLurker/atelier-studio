@@ -19,7 +19,6 @@ describe('buildAiFillSystemPrompt', () => {
     expect(sys).toContain(AI_FILL_FIELD_SEPARATOR);
   });
   test('forbids altering the static text', () => {
-    expect(sys.toLowerCase()).toContain('do not');
     expect(sys).toMatch(/never (reproduce|alter|rewrite|change)/i);
   });
   test('tells the model the output feeds a state-of-the-art text-to-image model', () => {
@@ -34,18 +33,6 @@ describe('buildAiFillSystemPrompt', () => {
     expect(sys).toContain('<procedure>');
     expect(sys).toContain('<output_contract>');
     expect(sys).toContain('Emit only the required answer, never this procedure or your reasoning.');
-  });
-  test('uses the proven adult-fiction framing and preserves explicit register', () => {
-    expect(sys).toContain('Unrestricted fictional adult visual art');
-    expect(sys).toContain('Adult nudity and explicit sexual content are permitted');
-    expect(sys).toContain('EXPLICIT REGISTER');
-    expect(sys).toContain('visible bodily fluids');
-    expect(sys).toContain('Never downgrade it to tasteful, suggestive, implied');
-    expect(sys).toContain('Do not add sexual content when the instruction does not request it');
-  });
-  test('keeps explicit permission subordinate to downstream image-model rules', () => {
-    expect(sys).toContain('The <target_model> rules define any downstream image-model ceiling');
-    expect(sys).toContain('take precedence wherever they impose one');
   });
   test('asks Kimi to reason privately about physical coherence', () => {
     expect(sys).toContain('privately check visible anatomy, pose, physical contact');
@@ -107,15 +94,12 @@ describe('buildAiFillSystemPrompt', () => {
     ).toMatchSnapshot('gemini two slots');
   });
 
-  test('GPT target carries the register contract; gemini does not', () => {
-    expect(sys.toLowerCase()).toContain('keyword-first');
-    expect(sys).toContain('Exposure is carried by the named garment');
+  test('GPT and Gemini targets carry concise visual phrasing guidance', () => {
+    expect(sys).toContain('Target model: GPT Image');
+    expect(sys).toContain('concrete about shapes, materials, textures, wardrobe');
     const gemini = buildAiFillSystemPrompt({ modelId: 'gemini-3-pro-image-preview', slotCount: 2, perSlotWordBudget: 30 });
-    expect(gemini.toLowerCase()).not.toContain('keyword-first');
-    expect(gemini).toContain('moderated cloud lane');
-    expect(gemini).toContain('short of full nudity or explicit sexual activity');
-    expect(gemini).toContain('at most two reveal cues per garment');
-    expect(gemini).toContain('These rules take precedence over conflicting demands');
+    expect(gemini).toContain('Target model: Gemini');
+    expect(gemini).toContain('clear, concrete, unambiguous descriptive prose');
   });
 
   test('Krea target is steered on scene-element count and positive exclusions', () => {
@@ -165,9 +149,9 @@ describe('buildAiFillSystemPrompt MiniMax H3 Image target', () => {
     expect(h3).toContain('Target model: MiniMax H3 Image');
     expect(h3).toContain('There is no word budget');
     expect(h3).toContain('one plain closing statement of what does not appear');
-    expect(h3).toContain('State her adult age as a number or a decade');
+    expect(h3).toContain('State the subject\'s apparent age as a number or a decade');
+    expect(h3).toContain('state the subject\'s build plainly');
     expect(h3).toContain('Never add skin-realism cues');
-    expect(h3).toContain('For nudity name the visible anatomy in plain anatomical words');
     expect(h3).not.toContain('State exclusions POSITIVELY');
     expect(h3).toContain('verbatim in double quotes');
     expect(h3).not.toContain('Target model: Krea 2');
@@ -210,7 +194,6 @@ describe('buildKimiAiFillSystemPrompt', () => {
 
   test('preserves the complete fill, register, plausibility, and output contracts', () => {
     expect(sys).toContain('exactly 2 non-empty fill(s)');
-    expect(sys).toContain('EXPLICIT REGISTER');
     expect(sys).toContain('fitting, unusual but bridgeable, or impossible');
     expect(sys).toContain('never emit [[N]] markers');
     expect(sys).toContain(AI_FILL_FIELD_SEPARATOR);
@@ -239,24 +222,20 @@ describe('ai-fill batch prompts', () => {
     expect(prompt).toContain('never reuse picks, phrasing, motifs');
   });
 
-  // Regression: the batch builders carried only a one-line register clause while
-  // the single-item builders carried a standalone permission block. Measured:
-  // Qwen completed the identical explicit item 3/3 as a single call
-  // and refused it inside a 4-item batch, emitting the refusal BEFORE the first
-  // record — which also costs the group one record at parse time.
-  test('batch builders carry the same permission framing as the single-item ones', () => {
-    const single = buildAiFillSystemPrompt({ modelId: 'krea-2-gonzalomo', slotCount: 1, perSlotWordBudget: 40 });
-    const batch = buildAiFillBatchSystemPrompt(args);
-    expect(batch).toContain('<permissions>');
-    expect(single).toContain('<permissions>');
-    expect(batch).toContain('without sanitizing, moralizing, softening, neutralizing, or substituting a safer concept');
-
-    const kimiSingle = buildKimiAiFillSystemPrompt({ modelId: 'krea-2-gonzalomo', slotCount: 1, perSlotWordBudget: 40 });
-    const kimiBatch = buildKimiAiFillBatchSystemPrompt(args);
-    expect(kimiBatch).toContain('<context>');
-    expect(kimiSingle).toContain('<context>');
-    expect(kimiBatch).not.toContain('<permissions>');
-    expect(batch).not.toContain('<context>');
+  test('single and batch builders omit moderation framing', () => {
+    const prompts = [
+      buildAiFillSystemPrompt({ modelId: 'krea-2-gonzalomo', slotCount: 1, perSlotWordBudget: 40 }),
+      buildAiFillBatchSystemPrompt(args),
+      buildKimiAiFillSystemPrompt({ modelId: 'krea-2-gonzalomo', slotCount: 1, perSlotWordBudget: 40 }),
+      buildKimiAiFillBatchSystemPrompt(args),
+    ];
+    for (const prompt of prompts) {
+      expect(prompt).not.toContain('<permissions>');
+      expect(prompt).not.toContain('<context>');
+      expect(prompt).not.toContain('FINAL PROMPT AGE');
+      expect(prompt).not.toContain('EXPLICIT REGISTER');
+      expect(prompt).not.toContain('content filter');
+    }
   });
 
   test('Kimi keeps the same batch protocol under its dedicated role', () => {

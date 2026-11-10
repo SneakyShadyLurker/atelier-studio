@@ -4,8 +4,6 @@
 // with no source still the body must establish subject, setting, and framing
 // itself before developing motion. Continuations never come through here —
 // segment 2+ always renders I2V via motionExtendEnhanceSystemPrompt.
-// Adult scope is operator-steered via the beat + bible; this file injects no
-// age/explicit literals of its own.
 
 const T2V_RULES = `You rewrite a motion brief into a single prompt for the MiniMax H3 text-to-video model, using H3's official T2VA prompt structure.
 

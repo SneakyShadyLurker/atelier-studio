@@ -725,6 +725,52 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     ]);
   });
 
+  test.each(['', AI_FILL_RECORD_SEPARATOR])('a pre-record refusal with missing records cannot shift healthy fills onto other items (trailing separator %s)', async (trailingSeparator) => {
+    let calls = 0;
+    setTextModelProviderForTests(fakeProvider(() => {
+      calls += 1;
+      return Promise.resolve({
+        type: 'ok',
+        text: [
+          "I'm not able to complete Item 1.\nsecond item's fill",
+          "third item's fill",
+          "fourth item's fill",
+        ].join(AI_FILL_RECORD_SEPARATOR) + trailingSeparator,
+      });
+    }));
+    const frames = parseSseText(await (await postAiFillBatch({
+      items: [item('First'), item('Second'), item('Third'), item('Fourth')],
+      modelId: 'gpt-image-2.6-sunburst',
+    })).text());
+    expect(calls).toBe(1);
+    expect(frames.some((frame) => frame.event === 'result')).toBe(false);
+    expect(frameData(frames, 'error').code).toBe('refusal');
+  });
+
+  test('a field-separator-only record cannot hide refusal-driven shifts in multi-slot items', async () => {
+    let calls = 0;
+    setTextModelProviderForTests(fakeProvider(() => {
+      calls += 1;
+      const record = (first: string, second: string) => `${first}${AI_FILL_FIELD_SEPARATOR}${second}`;
+      return Promise.resolve({
+        type: 'ok',
+        text: [
+          `I'm not able to complete Item 1.\n${record('second one', 'second two')}`,
+          record('third one', 'third two'),
+          record('fourth one', 'fourth two'),
+          AI_FILL_FIELD_SEPARATOR,
+        ].join(AI_FILL_RECORD_SEPARATOR),
+      });
+    }));
+    const frames = parseSseText(await (await postAiFillBatch({
+      items: [twoSlotItem('First'), twoSlotItem('Second'), twoSlotItem('Third'), twoSlotItem('Fourth')],
+      modelId: 'gpt-image-2.6-sunburst',
+    })).text());
+    expect(calls).toBe(1);
+    expect(frames.some((frame) => frame.event === 'result')).toBe(false);
+    expect(frameData(frames, 'error').code).toBe('refusal');
+  });
+
   test('a multi-slot refusal neither retries the group nor escapes as a count mismatch', async () => {
     // One refusal paragraph for a two-instruction item reads as a count miss
     // too. It must still be recognised as a refusal: no group retry, and a

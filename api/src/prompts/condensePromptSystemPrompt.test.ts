@@ -15,7 +15,7 @@ test('condense prompt scales its target with depicted subject count', () => {
   expect(prompt).toContain('at most 440 words for three depicted subjects');
 });
 
-test('condense prompt preserves the ordered visual priorities and explicit register', () => {
+test('condense prompt preserves the ordered visual priorities', () => {
   const prompt = buildCondensePromptSystemPrompt(150);
   expect(prompt).toContain('at most 150 words');
   expect(prompt).toContain(
@@ -41,7 +41,6 @@ test('condense prompt preserves the ordered visual priorities and explicit regis
   expect(prompt.indexOf('wardrobe and exposure state exactly as given')).toBeGreaterThan(
     prompt.indexOf('the named place — the single venue that stages the scene'),
   );
-  expect(prompt).toContain('never sanitise, soften, or euphemise');
   expect(prompt).toEndWith('no preamble, commentary, or quotes.');
 });
 

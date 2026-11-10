@@ -22,7 +22,16 @@ export const SKIN_MARKING_BAN_MOSS =
   `${SKIN_MARKING_CORE} Skin realism comes from naming the natural texture of healthy skin — fine visible pores and subtle variation in tone — together with the way the light falls across the body and the flesh sits under it; that texture is not a marking.`;
 
 export function skinMarkingBanFor(target: ImageModelTarget): string {
-  return target === 'moss' ? SKIN_MARKING_BAN_MOSS : SKIN_MARKING_BAN;
+  switch (target) {
+    case 'moss':
+      return SKIN_MARKING_BAN_MOSS;
+    case 'gemini':
+    case 'gpt':
+    case 'krea':
+    case 'h3image':
+    case 'other':
+      return SKIN_MARKING_BAN;
+  }
 }
 
 // Enhance rewrites a prompt the operator wrote, so the ban has to survive an

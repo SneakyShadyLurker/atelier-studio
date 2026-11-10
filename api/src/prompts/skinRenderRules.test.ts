@@ -19,6 +19,7 @@ import {
 } from './aiFillSystemPrompt';
 import {
   ENHANCE_SYSTEM_PROMPT,
+  H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
   MOSS_ENHANCE_SYSTEM_PROMPT,
 } from './enhanceSystemPrompt';
@@ -29,6 +30,7 @@ const MODEL_IDS = [
   'gemini-3-pro-image-preview',
   'krea-2-gonzalomo',
   'moss-image-sft',
+  'minimax-h3-image',
   'some-other-model',
 ] as const;
 
@@ -75,7 +77,12 @@ describe('skin-marking ban', () => {
   // The texture tail is per family: only MOSS writers name skin texture, and
   // every other writer keeps the no-micro-texture tail.
   it('names pores for MOSS writers only', () => {
-    for (const [name, prompt] of Object.entries({ ...writers, 'enhance/moss': MOSS_ENHANCE_SYSTEM_PROMPT, ...ENHANCE_WRITERS })) {
+    for (const [name, prompt] of Object.entries({
+      ...writers,
+      'enhance/moss': MOSS_ENHANCE_SYSTEM_PROMPT,
+      'enhance/h3image': H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
+      ...ENHANCE_WRITERS,
+    })) {
       const moss = name.endsWith('/moss-image-sft') || name === 'enhance/moss';
       expect(prompt.includes('fine visible pores')).toBe(moss);
       expect(prompt.includes('never a named micro-texture')).toBe(!moss);
@@ -98,6 +105,14 @@ describe('skin-marking ban', () => {
       `${SKIN_MARKING_BAN_MOSS} This holds even when the user’s raw prompt names one: drop it.`,
     );
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('exactly as with grain');
+  });
+
+  // MiniMax H3 Image has no grain ban either, and keeps the no-micro-texture tail.
+  it('enhance/h3image carries the request-proof ban', () => {
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain(
+      `${SKIN_MARKING_BAN} This holds even when the user’s raw prompt names one: drop it.`,
+    );
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain('exactly as with grain');
   });
 
   // The tails are spliced into the image prompt itself, so a banned token here
@@ -130,7 +145,11 @@ describe('liquid ban', () => {
     });
   }
 
-  for (const [name, prompt] of Object.entries({ ...ENHANCE_WRITERS, 'enhance/moss': MOSS_ENHANCE_SYSTEM_PROMPT })) {
+  for (const [name, prompt] of Object.entries({
+    ...ENHANCE_WRITERS,
+    'enhance/moss': MOSS_ENHANCE_SYSTEM_PROMPT,
+    'enhance/h3image': H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
+  })) {
     it(`${name} carries the ban`, () => {
       expect(prompt).toContain(WET_LOOK_BAN);
     });

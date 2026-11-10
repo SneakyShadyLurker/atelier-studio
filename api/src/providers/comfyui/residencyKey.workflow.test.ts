@@ -57,11 +57,12 @@ describe('residency keys', () => {
     }
   });
 
-  test('both MiniMax H3 rows share one key; every other row keys on its own id', () => {
-    expect(localResidencyKey('minimax-h3-i2v')).toBe('minimax-h3');
-    expect(localResidencyKey('minimax-h3-t2v')).toBe('minimax-h3');
+  test('both MiniMax H3 video rows share one key; every other row keys on its own id', () => {
+    const videoIds = new Set(['minimax-h3-i2v', 'minimax-h3-t2v']);
+    for (const id of videoIds) expect(localResidencyKey(id)).toBe('minimax-h3');
+    expect(localResidencyKey('minimax-h3-image')).toBe('minimax-h3-image');
     for (const model of LOCAL_MODELS) {
-      if (!model.id.startsWith('minimax-h3-')) expect(localResidencyKey(model.id)).toBe(model.id);
+      if (!videoIds.has(model.id)) expect(localResidencyKey(model.id)).toBe(model.id);
     }
     expect(localResidencyKey('gpt-image-2.6-sunburst')).toBe('gpt-image-2.6-sunburst');
   });

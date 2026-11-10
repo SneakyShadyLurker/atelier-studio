@@ -232,12 +232,14 @@ describe('Krea models are registered with correct fields', () => {
       expect(model.maxRefImages).toBe(1);
       expect(model.tag).toBe('comfyui');
     }
-    const video = models.filter((model) => model.id.startsWith('minimax-h3-'));
-    expect(video).toHaveLength(2);
-    for (const model of video) {
+    const h3 = models.filter((model) => model.id.startsWith('minimax-h3-'));
+    expect(h3.map((model) => model.id)).toEqual(['minimax-h3-image', 'minimax-h3-i2v', 'minimax-h3-t2v']);
+    for (const model of h3) {
       expect(model).not.toHaveProperty('supportsReferenceImages');
       expect(model).not.toHaveProperty('maxRefImages');
     }
+    expect(h3.filter((model) => model.outputsVideo === true).map((model) => model.id))
+      .toEqual(['minimax-h3-i2v', 'minimax-h3-t2v']);
   });
 
   test('unset COMFYUI_BASE_URL registers no local rows', () => {
@@ -308,6 +310,16 @@ describe('MOSS Image is registered as a local image row outside the Krea family'
     expect(entry?.model.maxCountPerBatch).toBe(2);
     expect(Object.prototype.hasOwnProperty.call(entry?.model ?? {}, 'promptFormat')).toBe(false);
   });
+
+  test('minimax-h3-image renders one unbatched tile per roll and has no promptFormat', () => {
+    const config = testConfig({ COMFYUI_BASE_URL: 'https://comfyui.example.internal:7860' });
+    const entry = registryForConfig(config).find((candidate) => candidate.model.id === 'minimax-h3-image');
+    expect(entry?.model.batched).toBe(false);
+    expect(entry?.model.defaultCount).toBe(1);
+    expect(entry?.model.maxCountPerBatch).toBe(1);
+    expect(entry?.model).not.toHaveProperty('outputsVideo');
+    expect(Object.prototype.hasOwnProperty.call(entry?.model ?? {}, 'promptFormat')).toBe(false);
+  });
 });
 
 describe('MiniMax H3 I2V video model gate', () => {
@@ -315,9 +327,10 @@ describe('MiniMax H3 I2V video model gate', () => {
     const ids = (enable: string) => registryForConfig(testConfig({ VIDEO_MODELS_ENABLED: 'true', COMFYUI_ENABLE_MODELS: enable }))
       .map((entry) => entry.model.id)
       .filter((id) => id.startsWith('minimax-h3-'));
-    expect(ids('')).toEqual([]);
-    expect(ids('minimax-h3-t2v')).toEqual(['minimax-h3-t2v']);
-    expect(ids('minimax-h3-i2v,minimax-h3-t2v')).toEqual(['minimax-h3-i2v', 'minimax-h3-t2v']);
+    // The enabled image row registers regardless; only the video templates are gated.
+    expect(ids('')).toEqual(['minimax-h3-image']);
+    expect(ids('minimax-h3-t2v')).toEqual(['minimax-h3-image', 'minimax-h3-t2v']);
+    expect(ids('minimax-h3-i2v,minimax-h3-t2v')).toEqual(['minimax-h3-image', 'minimax-h3-i2v', 'minimax-h3-t2v']);
   });
 
   test('VIDEO_MODELS_ENABLED=false omits minimax-h3-i2v from public models', async () => {

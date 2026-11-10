@@ -14,7 +14,11 @@ or [Deployment](deployment.md).
 2. Enter a prompt describing the picture you want.
 3. Choose an aspect ratio with the ratio chip (for example `1:1`) and the number
    of images with the count chip (`×1` to `×4`). The available choices depend
-   on the model.
+   on the model. MiniMax H3 Image renders one image per roll, because the
+   model's ComfyUI implementation supports batch size 1 only; press Generate
+   again for more variations. Leave its steps at the default 6 in Prompt
+   Library → Settings → Model steps: the model is distilled for exactly that
+   count.
 4. Press **Generate**, or **Cmd+Enter** on macOS / **Ctrl+Enter** elsewhere while
    editing the prompt. Each press queues one more batch, so press it as many
    times as you want variations; there is no need to wait for the last one.
@@ -65,7 +69,8 @@ cancel operation; use the batch's cancel control when you want to stop work.
 Attach a reference in the composer, then write what you want the model to do
 with it. The selected model determines the reference count and supported
 workflow: GPT accepts up to four, Gemini up to ten, and the bundled Krea
-reference graph uses one face reference. MOSS does not accept references.
+reference graph uses one face reference. MOSS and MiniMax H3 Image do not
+accept references.
 
 Reference uploads are kept with your user data. Removing a reference from the
 current prompt changes the next request; it does not rewrite a completed batch.
@@ -137,8 +142,10 @@ weights, dimensions and worked examples.
 ## Video, Extend and stories
 
 These features appear only when the installation has suitable local models and
-the operator has enabled them. Bundled MiniMax H3 graphs are disabled templates
-and are unverified on a live host; the operator must validate them before use.
+the operator has enabled them. The bundled MiniMax H3 video graphs are disabled
+templates and are unverified on a live host; the operator must validate them
+before use. MiniMax H3 Image is a separate still-image model and is not part of
+these features.
 
 For image-to-video, choose **Animate this image** on a finished still, or select
 an image-to-video model and supply a source still. Describe the movement in the

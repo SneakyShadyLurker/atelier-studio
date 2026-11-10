@@ -26,10 +26,13 @@ The built-in rows live in `api/src/providers/comfyui/models/` and ship with the 
 |---|---|---|---|
 | `krea-2-gonzalomo` | `krea` | enabled | GonzaLomo INT8 ConvRot UNet, `qwen3vl_4b_bf16` encoder, `qwen_image_vae`; the reference graph adds `krea2_reid_rank32` |
 | `moss-image-sft` | `moss` | enabled | MOSS Image SFT INT8 ConvRot DiT, `qwen3.5_9b_int8_convrot` encoder, `flux2-vae` |
+| `minimax-h3-image` | `h3image` | enabled | `minimax_h3_image_pruned_int8_convrot` DiT, `qwen3vl_32b_minimax_h3_nvfp4_awq` encoder, `minimax_h3_image_vae_fp16` |
 | `minimax-h3-i2v` | `video` | disabled template | see below; includes the extend graph |
 | `minimax-h3-t2v` | `video` | disabled template | see below |
 
-The two MiniMax H3 rows are templates derived from ComfyUI's official H3 workflow: the stock transformer `minimax_h3_fl2va_pruned_int8_convrot.safetensors` (`UNETLoader`, `weight_dtype: default`) through `LoraLoaderModelOnly` with the official 8-step turbo LoRA `minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` at strength 1, the `qwen3vl_32b_minimax_h3_nvfp4_awq` encoder, the `minimax_h3_video_vae_int8_convrot` video VAE and the `minimax_h3_audio_vae_fp32` audio VAE. The i2v, t2v and extend graphs load the same weights, so the pair shares the `minimax-h3` residency key. **These templates are unverified on a live host.** They ship with `"enabled": false`; render through each graph against a real ComfyUI before enabling them with `COMFYUI_ENABLE_MODELS=minimax-h3-i2v,minimax-h3-t2v` or an external override manifest, and record the verification date with that change.
+`minimax-h3-image` is MiniMax's open-weights text-to-image model (released 2026-11-10). It takes no reference image. The graph runs the core `MiniMaxH3ImageConditioning` node, which encodes the prompt through the `minimax` `CLIPLoader` and emits both the positive conditioning and the latent, into one `KSampler` (`euler`, `simple`, CFG 1.0) with a `ConditioningZeroOut` negative. It needs ComfyUI 0.45.0 or later. The row renders one image per roll (`batched: false`, `defaultCount: 1`) because the model's ComfyUI implementation supports batch size 1 only. The checkpoint is distilled onto a fixed 6-step sigma grid, so `defaultSteps` is 6 and the row should stay at 6 steps: the per-model step override is still offered, as for every local row, but the stock schedulers only land on the distilled grid at that count. It renders about 8 MP on the `h3image-8mp` map. Verified by live render 2026-11-10 on ComfyUI 0.45.0 (RTX 4090): 2048x2048 in 8 s warm, 2880x2880 in 17 s. It keys residency on its own id and shares nothing with the video rows below.
+
+The two MiniMax H3 video rows are templates derived from ComfyUI's official H3 workflow: the stock transformer `minimax_h3_fl2va_pruned_int8_convrot.safetensors` (`UNETLoader`, `weight_dtype: default`) through `LoraLoaderModelOnly` with the official 8-step turbo LoRA `minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` at strength 1, the `qwen3vl_32b_minimax_h3_nvfp4_awq` encoder, the `minimax_h3_video_vae_int8_convrot` video VAE and the `minimax_h3_audio_vae_fp32` audio VAE. The i2v, t2v and extend graphs load the same weights, so the pair shares the `minimax-h3` residency key. **These templates are unverified on a live host.** They ship with `"enabled": false`; render through each graph against a real ComfyUI before enabling them with `COMFYUI_ENABLE_MODELS=minimax-h3-i2v,minimax-h3-t2v` or an external override manifest, and record the verification date with that change.
 
 ## Manifest schema
 
@@ -39,7 +42,7 @@ The Zod schema is `api/src/providers/comfyui/manifest.ts`. Unknown keys are reje
 |---|---|---|
 | `id` | yes | Wire model id, `^[a-z0-9-]+$`. |
 | `name` | yes | Display name. |
-| `family` | yes | `krea`, `moss` or `video`. An image family must match the prompt family the id classifies to (`classifyImageModelTarget`: an id containing `krea` is `krea`, one containing `moss` is `moss`). |
+| `family` | yes | `krea`, `moss`, `h3image` or `video`. An image family must match the prompt family the id classifies to (`classifyImageModelTarget`: an id containing `krea` is `krea`, one containing `moss` is `moss`, one containing `h3-image` is `h3image`). |
 | `order` | yes, except on an override | Integer sort key. Rows sort by `order`, then `id`. Orders are unique across the merged catalog. |
 | `enabled` | no | Defaults to `true`. See below. |
 | `overrides` | no | `true` on an external manifest that replaces a built-in. |
@@ -47,7 +50,7 @@ The Zod schema is `api/src/providers/comfyui/manifest.ts`. Unknown keys are reje
 | `saveImageNodeId` | yes | Terminal output node id; it must exist in every graph. `SaveImageWebsocket` for images, `SaveVideo` for video. |
 | `requiredPlaceholders` | yes | Placeholders the base graph must contain, such as `{{prompt}}`, `{{seed}}`, `{{width}}`, `{{height}}`, `{{count}}` and `{{steps}}`. A reference graph must also contain `{{referenceImage}}`. |
 | `defaultSteps` | yes | Base-sampler steps substituted into `{{steps}}`. Users may override them per model. |
-| `ratioMap` | yes | Name of a render-size map in `api/src/providers/comfyui/ratioMaps.ts`: `krea-2048`, `moss-2mp`, `moss-turbo-1.5mp`, `moss-hires-1.66mp` or `h3-768p`. |
+| `ratioMap` | yes | Name of a render-size map in `api/src/providers/comfyui/ratioMaps.ts`: `krea-2048`, `moss-2mp`, `moss-turbo-1.5mp`, `moss-hires-1.66mp`, `h3image-8mp` or `h3-768p`. |
 | `supportedRatios` | yes | Ratios offered on the wire. |
 | `defaultRatio` | no | Must be a supported ratio. |
 | `supportedDurations`, `defaultDuration` | video only | Clip lengths in frames. Each must be a member of `VIDEO_DURATION_FRAMES` in `shared`; the default must be supported. |
@@ -85,6 +88,7 @@ Startup checks every manifest against the schema, resolves and parses every grap
 - every graph class is in the worker allowlist (`infra/comfyui/atelier_private/allowed_nodes.json`), the save node has the right class, every required weight file appears in the graph, and every `CLIPLoader` uses `requiredClipType`;
 - Krea: `euler`, `requiredClipType` `krea2`, a `ConditioningZeroOut` negative at CFG 1.0 or a real empty `CLIPTextEncode` above it, and an empty-prompt `TextEncodeKrea2OstrisEdit` negative in reference graphs;
 - MOSS: `requiredClipType` `moss_image`, one sampler per graph, a `ConditioningZeroOut` negative and no skip-layer guidance at CFG 1.0, a real `CLIPTextEncode` negative above it, and skip-layer guidance only on single block 22 with `er_sde`;
+- H3 Image: `requiredClipType` `minimax`, exactly one `KSampler` at `euler`, `simple`, CFG 1.0 and denoise 1.0 whose latent is output 1 of the single `MiniMaxH3ImageConditioning`, a `ConditioningZeroOut` negative, no `CLIPTextEncode`, and no `{{count}}` or `RepeatLatentBatch` (the model supports batch size 1 only);
 - video: `requiredClipType` `minimax`, one guidance-free `BasicGuider`, no step-reuse cache, `MiniMaxH3SigmaShift` at video 12 and audio 7 feeding `BasicScheduler`, and `MiniMaxH3AddGuide` in continuation graphs.
 
 ```bash

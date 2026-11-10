@@ -89,8 +89,8 @@ For a manual walkthrough, open [Getting started](docs/getting-started.md).
 
 ### ✦ One prompt box, every backend
 GPT Image through a CLIProxyAPI-compatible upstream, Google Gemini with each
-user's own key, and local Krea 2 and MOSS models on ComfyUI share one composer,
-one model menu and one history. Partial previews
+user's own key, and local Krea 2, MOSS and MiniMax H3 Image models on ComfyUI
+share one composer, one model menu and one history. Partial previews
 stream over SSE, batches queue when a pool is busy, and in-flight tiles can be
 canceled.
 

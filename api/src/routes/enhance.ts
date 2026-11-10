@@ -15,12 +15,22 @@ import { parseBody } from './_http';
 import { loadRefImages, refImageByteTotal } from '../orchestrator/refImages';
 import { downscaleForVision } from '../storage/downscaleForVision';
 import { findModel, localModelsAllowed } from '../providers/registry';
-import { KREA_ENHANCE_SYSTEM_PROMPT, MOSS_ENHANCE_SYSTEM_PROMPT } from '../prompts/enhanceSystemPrompt';
+import {
+  H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
+  KREA_ENHANCE_SYSTEM_PROMPT,
+  MOSS_ENHANCE_SYSTEM_PROMPT,
+} from '../prompts/enhanceSystemPrompt';
 import { isSunburstModel, SUNBURST_ENHANCE_SYSTEM_PROMPT } from '../prompts/gptSystemPrompt';
-import { classifyImageModelTarget, isLocalOpenWeightsTarget } from '../prompts/gptImagePhrasing';
+import { classifyImageModelTarget, isLocalOpenWeightsTarget, type ImageModelTarget } from '../prompts/gptImagePhrasing';
 import { StorageSealedError } from '../storage/crypto';
 
 const SAFE_ERROR_MESSAGE = 'Couldn’t enhance the prompt. Please try again.';
+
+const LOCAL_ENHANCE_SYSTEM_PROMPTS: Record<Extract<ImageModelTarget, 'krea' | 'moss' | 'h3image'>, string> = {
+  krea: KREA_ENHANCE_SYSTEM_PROMPT,
+  moss: MOSS_ENHANCE_SYSTEM_PROMPT,
+  h3image: H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
+};
 
 export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c) => {
   const parsed = await parseBody(c, EnhancePromptRequestSchema);
@@ -80,11 +90,11 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
     const target = isLocalOpenWeightsTarget(rawTarget) && !localModelsEnabledForUser ? null : rawTarget;
     task = 'enhance';
     visionRequired = refImageIds !== undefined && refImageIds.length > 0;
-    // Krea and MOSS keep their own enhance prompts; Sunburst gets its
-    // dedicated contract; other image targets use the provider's
-    // model-neutral default.
+    // Krea, MOSS and MiniMax H3 Image keep their own enhance prompts;
+    // Sunburst gets its dedicated contract; other image targets use the
+    // provider's model-neutral default.
     systemPrompt = isLocalOpenWeightsTarget(target)
-      ? target === 'moss' ? MOSS_ENHANCE_SYSTEM_PROMPT : KREA_ENHANCE_SYSTEM_PROMPT
+      ? LOCAL_ENHANCE_SYSTEM_PROMPTS[target]
       : isSunburstModel(entry?.model.id) ? SUNBURST_ENHANCE_SYSTEM_PROMPT : undefined;
     enhanceOpts = { defaults: AI_FILL_DEFAULTS };
   }

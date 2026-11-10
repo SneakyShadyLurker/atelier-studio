@@ -82,6 +82,32 @@ function checkMoss(graph: Graph, model: LocalModelDef, fail: (reason: string) =>
   }
 }
 
+// MiniMax H3 Image: the conditioning node encodes the prompt and emits the
+// latent, and the model's ComfyUI implementation renders batch size 1 only.
+function checkH3Image(graph: Graph, text: string, model: LocalModelDef, fail: (reason: string) => void): void {
+  if (model.requiredClipType !== 'minimax') fail('h3image rows require requiredClipType minimax');
+  if (text.includes('{{count}}') || nodesOf(graph, 'RepeatLatentBatch').length > 0) {
+    fail('h3image graphs render one image: MiniMax H3 supports batch size 1 only');
+  }
+  if (nodesOf(graph, 'CLIPTextEncode').length > 0) fail('h3image graphs encode through MiniMaxH3ImageConditioning, not CLIPTextEncode');
+  const samplers = nodesOf(graph, 'KSampler');
+  const sampler = samplers[0];
+  if (samplers.length !== 1 || sampler === undefined) { fail('h3image graphs run exactly one KSampler'); return; }
+  const { sampler_name, scheduler, cfg, denoise } = sampler.inputs;
+  if (sampler_name !== 'euler' || scheduler !== 'simple' || cfg !== 1 || denoise !== 1) {
+    fail('h3image KSampler runs euler / simple at cfg 1.0 and denoise 1.0');
+  }
+  const conditioning = nodesOf(graph, 'MiniMaxH3ImageConditioning');
+  const latent = sampler.inputs.latent_image;
+  if (conditioning.length !== 1 || linkedNode(graph, latent)?.class_type !== 'MiniMaxH3ImageConditioning'
+    || !Array.isArray(latent) || latent[1] !== 1) {
+    fail('one MiniMaxH3ImageConditioning feeds the sampler latent from output 1');
+  }
+  if (linkedNode(graph, sampler.inputs.negative)?.class_type !== 'ConditioningZeroOut') {
+    fail('h3image graphs take a ConditioningZeroOut negative');
+  }
+}
+
 function checkVideo(graph: Graph, kind: string, model: LocalModelDef, fail: (reason: string) => void): void {
   if (model.requiredClipType !== 'minimax') fail('video rows require requiredClipType minimax');
   if (Object.values(graph).some((node) => STEP_CACHE.test(node.class_type))) fail('video graphs carry no step-reuse cache');
@@ -138,9 +164,12 @@ export function validateModels(options: { dir: string; builtinDir?: string }): s
         && !nodesOf(graph, 'CLIPLoader').every((node) => node.inputs.type === model.requiredClipType)) {
         fail('CLIPLoader type differs from requiredClipType');
       }
-      if (model.family === 'krea') checkKrea(graph, kind, model, fail);
-      else if (model.family === 'moss') checkMoss(graph, model, fail);
-      else checkVideo(graph, kind, model, fail);
+      switch (model.family) {
+        case 'krea': checkKrea(graph, kind, model, fail); break;
+        case 'moss': checkMoss(graph, model, fail); break;
+        case 'h3image': checkH3Image(graph, text, model, fail); break;
+        case 'video': checkVideo(graph, kind, model, fail); break;
+      }
     }
   }
   return failures;

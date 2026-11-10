@@ -23,11 +23,18 @@ describe('classifyImageModelTarget', () => {
     expect(classifyImageModelTarget('krea-2-test-alpha')).toBe('krea');
     expect(classifyImageModelTarget('moss-image-sft')).toBe('moss');
     expect(classifyImageModelTarget('moss-test-turbo')).toBe('moss');
+    expect(classifyImageModelTarget('minimax-h3-image')).toBe('h3image');
   });
 
-  it('groups only Krea and MOSS as local open-weights targets', () => {
+  it('keeps the MiniMax H3 video rows out of the image family', () => {
+    expect(classifyImageModelTarget('minimax-h3-i2v')).toBe('other');
+    expect(classifyImageModelTarget('minimax-h3-t2v')).toBe('other');
+  });
+
+  it('groups only Krea, MOSS and MiniMax H3 Image as local open-weights targets', () => {
     expect(isLocalOpenWeightsTarget('krea')).toBe(true);
     expect(isLocalOpenWeightsTarget('moss')).toBe(true);
+    expect(isLocalOpenWeightsTarget('h3image')).toBe(true);
     for (const target of ['gemini', 'gpt', 'other', null] as const) {
       expect(isLocalOpenWeightsTarget(target)).toBe(false);
     }
@@ -39,6 +46,9 @@ describe('classifyImageModelTarget', () => {
     expect(classifyImageModelTarget('gpt-image-krea')).toBe('gpt');
     expect(classifyImageModelTarget('krea-moss')).toBe('krea');
     expect(classifyImageModelTarget('gpt-image-moss')).toBe('gpt');
+    expect(classifyImageModelTarget('krea-h3-image')).toBe('krea');
+    expect(classifyImageModelTarget('moss-h3-image')).toBe('moss');
+    expect(classifyImageModelTarget('gpt-image-h3-image')).toBe('gpt');
   });
 });
 

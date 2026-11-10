@@ -8,8 +8,10 @@ Atelier does not support substituting plain ComfyUI for this worker.
 
 Before provisioning, install the model weights and custom nodes required by
 your chosen [local model graphs](../../docs/local-models.md). Weights and GPU
-hardware are not supplied. The disabled MiniMax H3 graphs are templates that
-must be verified on your own host before enabling them. For the application
+hardware are not supplied. The disabled MiniMax H3 video graphs are templates
+that must be verified on your own host before enabling them. The enabled
+MiniMax H3 Image row needs ComfyUI 0.45.0 or later for its core
+`MiniMaxH3ImageConditioning` node. For the application
 server, start with [Deployment](../../docs/deployment.md).
 
 This worker processes content in memory and returns it to Atelier for encrypted

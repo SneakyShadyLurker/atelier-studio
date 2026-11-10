@@ -41,6 +41,16 @@ export const RATIO_MAPS = {
     '16:9': { width: 1696, height: 960 }, // 1.63 MP -> 2544x1440
     '9:16': { width: 960, height: 1696 }, // 1.63 MP -> 1440x2544
   },
+  // MiniMax H3 Image: ~8 MP, every side a multiple of 32 (the latent is 16x
+  // downsampled and patched 2x2). Chosen over the 16 MP native size: a 16 MP
+  // PNG reaches ~27 MB against the worker's 50 MB image cap, for 5 s saved.
+  'h3image-8mp': {
+    '1:1': { width: 2880, height: 2880 },  // 8.29 MP
+    '4:5': { width: 2560, height: 3200 },  // 8.19 MP
+    '3:4': { width: 2496, height: 3328 },  // 8.31 MP
+    '16:9': { width: 3840, height: 2176 }, // 8.36 MP
+    '9:16': { width: 2176, height: 3840 }, // 8.36 MP
+  },
   // MiniMax H3 video: 768p.
   'h3-768p': {
     '1:1': { width: 768, height: 768 },

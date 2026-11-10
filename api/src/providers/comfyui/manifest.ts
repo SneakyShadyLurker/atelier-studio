@@ -19,7 +19,7 @@ const weightFileList = z.array(z.string().min(1)).min(1);
 export const localModelManifestSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9-]+$/),
   name: z.string().min(1),
-  family: z.enum(['krea', 'moss', 'video']),
+  family: z.enum(['krea', 'moss', 'h3image', 'video']),
   /** Sort key across built-in and external rows; an override may omit it to keep the built-in's. */
   order: z.number().int().optional(),
   /** Defaults to true. A disabled row registers only when listed in `COMFYUI_ENABLE_MODELS`. */

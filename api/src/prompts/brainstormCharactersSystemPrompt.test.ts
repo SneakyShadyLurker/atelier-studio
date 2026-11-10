@@ -689,3 +689,29 @@ describe('MOSS brainstorm target', () => {
     expect(sys).not.toContain('~60-180 words');
   });
 });
+
+describe('MiniMax H3 Image brainstorm target', () => {
+  const record = `scene${BRAINSTORM_FIELD_SEPARATOR}subject${BRAINSTORM_FIELD_SEPARATOR}details`;
+
+  it('appends the all-positive tail', () => {
+    expect(assembleBrainstormCharacterPrompt(record, 'h3image').text).toEndWith(BRAINSTORM_CONSTRAINTS_KREA);
+    const photo = assembleBrainstormCharacterPrompt(record, 'h3image', 'single', 'photograph');
+    expect(photo.text).toContain(BRAINSTORM_PHOTOGRAPH_CONSTRAINT);
+    expect(photo.text).not.toContain(BRAINSTORM_PHOTOGRAPH_CONSTRAINT_EXPLICIT);
+    const diptych = assembleBrainstormCharacterPrompt(record, 'h3image', 'diptych', 'photograph');
+    for (const assembled of [photo, diptych]) {
+      const tail = assembled.text.slice(assembled.text.indexOf('Constraints:'));
+      expect(tail).not.toMatch(/\bno\b|\bnot\b|\bwithout\b|\bnever\b/i);
+    }
+  });
+
+  it('gets its own phrasing hint and length band, never the Krea budget or MOSS rules', () => {
+    const sys = buildBrainstormSystemPrompt({ count: 3, modelId: 'minimax-h3-image' });
+    expect(sys).toContain('Target model: MiniMax H3 Image');
+    expect(sys).toContain('~90-220 words across the three fields');
+    expect(sys).not.toContain('Target model: Krea 2');
+    expect(sys).not.toContain('Target model: MOSS Image');
+    expect(sys).not.toContain('~60-180 words');
+    expect(sys).not.toContain('never add blur');
+  });
+});

@@ -21,6 +21,7 @@
   "Krea2OstrisEditModelPatch",
   "LoraLoaderModelOnly",
   "MiniMaxH3AddGuide",
+  "MiniMaxH3ImageConditioning",
   "MiniMaxH3ImageToVideo",
   "MiniMaxH3SigmaShift",
   "ModelAttentionBackend",

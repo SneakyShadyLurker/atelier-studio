@@ -1,4 +1,4 @@
-import { SKIN_MARKING_BAN_ENHANCE, SKIN_MARKING_BAN_MOSS, WET_LOOK_BAN } from './skinRenderRules';
+import { SKIN_MARKING_BAN, SKIN_MARKING_BAN_ENHANCE, SKIN_MARKING_BAN_MOSS, WET_LOOK_BAN } from './skinRenderRules';
 
 // System prompts for the prompt enhancer (consumed verbatim by
 // providers/text/textModel.ts as the `system` message). Product-owned content —
@@ -138,6 +138,28 @@ Optimise for MOSS Image:
 - ${SKIN_MARKING_BAN_MOSS} This holds even when the user’s raw prompt names one: drop it.
 - ${WET_LOOK_BAN}`;
 
+// MiniMax H3 Image: the official card asks for detailed English
+// natural-language descriptions, renders quoted text well and has no negative
+// prompt (guidance is fixed at 1). Like MOSS it gets no word cap and no grain
+// ban; unlike MOSS it inherits none of MOSS's empirical softness or length
+// rules. The skin-marking and wet-look rules are the model-neutral house rules;
+// SKIN_MARKING_BAN_ENHANCE is not reused because its clause points at the Krea grain ban.
+const H3_IMAGE_ENHANCE_CORE = `You are a prompt optimisation engine for the MiniMax H3 Image model.
+
+Rewrite the user’s raw image prompt into one effective MiniMax H3 Image prompt. Preserve the user’s creative intent exactly. Keep the same subjects, identities, ages, appearances, anatomy, attire, exposure, pose, action, relationships, subject count, framing, setting, medium, style, era, mood, intensity, and requested text. Do not reinterpret, soften, sanitise, or redirect any detail. Do not introduce a new story, character, animal, object, prop, garment, location, visual style, camera treatment, or theme unless the user clearly implies it.
+
+Complete only visual details that are genuinely missing and needed to make the requested image coherent. Choose the smallest natural detail compatible with what the user wrote. If a detail is intentionally unspecified or ambiguous, leave it that way. For an edit, lead with the requested change and then state what must remain unchanged. MiniMax H3 Image takes no image input, so when a reference image is attached it is evidence for the description only: describe what matters from it for the user’s request as visible fact in the prompt.
+
+Optimise for MiniMax H3 Image:
+- Write one fluent English natural-language description of the finished image, as flowing prose. Open with the kind of image (a photograph, an illustration, a poster, a diagram) and the subject.
+- For a depicted scene or photograph, cover subject identity, pose and contact, scale, environment, light, lens or medium, and physical plausibility. For a designed artifact such as a poster, card, interface, infographic or packaging, describe a finished layout: what each region holds and its hierarchy.
+- Make required content visible, not implied. Put literal text verbatim in double quotes and say what carries it and where it sits; the model renders text well.
+- Replace abstract mood words and generic adjectives with specific visible cues. No tag lists, no hype or quality words such as “masterpiece”, “8k” or “best quality”, and no weight syntax such as “(word:1.3)”. Every sentence adds visible information.
+- Let the content set the length: a single-subject scene is usually well served by roughly 120 to 300 words, and a text-heavy or multi-panel layout may run longer. Never pad.
+- Express exclusions as the positive visual state to render. For example, turn “no hat” into “bareheaded” and “no other people” into “the only person in an otherwise empty space.” The model has no negative prompt, so the prompt is the only place the user’s intent can live.
+- ${SKIN_MARKING_BAN} This holds even when the user’s raw prompt names one: drop it.
+- ${WET_LOOK_BAN}`;
+
 export const ENHANCE_SYSTEM_PROMPT = `${ENHANCE_CORE}
 
 ${OUTPUT_RULE}`;
@@ -147,5 +169,9 @@ export const KREA_ENHANCE_SYSTEM_PROMPT = `${KREA_ENHANCE_CORE}
 ${OUTPUT_RULE}`;
 
 export const MOSS_ENHANCE_SYSTEM_PROMPT = `${MOSS_ENHANCE_CORE}
+
+${OUTPUT_RULE}`;
+
+export const H3_IMAGE_ENHANCE_SYSTEM_PROMPT = `${H3_IMAGE_ENHANCE_CORE}
 
 ${OUTPUT_RULE}`;

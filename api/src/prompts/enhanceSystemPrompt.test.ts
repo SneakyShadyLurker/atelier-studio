@@ -2,6 +2,7 @@ import { describe, expect, it, test } from 'bun:test';
 
 import {
   ENHANCE_SYSTEM_PROMPT,
+  H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
   MOSS_ENHANCE_SYSTEM_PROMPT,
 } from './enhanceSystemPrompt';
@@ -146,5 +147,30 @@ describe('MOSS_ENHANCE_SYSTEM_PROMPT MOSS Image optimiser', () => {
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('exactly as with grain');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('face-identity reference only');
     expect(KREA_ENHANCE_SYSTEM_PROMPT).not.toContain('MOSS');
+  });
+});
+
+describe('H3_IMAGE_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image optimiser', () => {
+  it('keeps the shared intent-preservation contract', () => {
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Preserve the user’s creative intent exactly');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Complete only visual details that are genuinely missing');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('takes no image input');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Return only the final enhanced prompt');
+  });
+
+  it('carries the H3 Image description contract', () => {
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Optimise for MiniMax H3 Image:');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Open with the kind of image');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('describe a finished layout');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Put literal text verbatim in double quotes');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('roughly 120 to 300 words');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Express exclusions as the positive visual state to render');
+  });
+
+  it('inherits neither the Krea-only nor the MOSS-only rules', () => {
+    for (const fragment of ['Krea', '180 words', 'cannot render grain', 'exactly as with grain', 'face-identity reference only',
+      'MOSS', 'two to four paragraphs', '220 to 320', 'printed photo', 'do not add blur', 'fine visible pores']) {
+      expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain(fragment);
+    }
   });
 });

@@ -3,9 +3,9 @@ import { comfyuiInventory } from './comfyui-inventory';
 
 test('inventory covers configured graph modes, private worker classes and source hashes', () => {
   const inventory = comfyuiInventory();
-  expect(inventory.models).toHaveLength(4);
+  expect(inventory.models).toHaveLength(5);
   const graphs = inventory.models.flatMap((model) => model.graphs);
-  expect(graphs).toHaveLength(6);
+  expect(graphs).toHaveLength(7);
   for (const graph of graphs) {
     expect(graph.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(graph.missingWorkerClasses).toEqual([]);

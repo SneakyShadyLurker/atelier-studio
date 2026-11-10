@@ -25,7 +25,7 @@ describe('shipped Krea 2 workflows', () => {
     const base = buildWorkflow(readFileSync(model.workflowPath, 'utf8'), params, model.requiredPlaceholders) as Record<string, Node>;
     const graph = buildWorkflow(
       readFileSync(model.referenceWorkflowPath, 'utf8'),
-      { ...params, referenceImage: 'reference.png' },
+      { ...params, referenceImages: ['reference.png'] },
       [...model.requiredPlaceholders, '{{referenceImage}}'],
     ) as Record<string, Node>;
     const node = (id: string): Node => {

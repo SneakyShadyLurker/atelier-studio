@@ -192,6 +192,7 @@ export async function runBatchPipeline(prepared: PreparedBatch, ctx: GenerationC
         await condenseBatchPrompt(request.prompt, request.modelId, rewriteDeps),
         request.modelId,
         rewriteDeps,
+        (request.refImages ?? []).map((ref) => ref.bytes),
       );
     if (condensed !== request.prompt) {
       persistCondensedPrompt(ctx.db, prepared.batch.id, condensed);

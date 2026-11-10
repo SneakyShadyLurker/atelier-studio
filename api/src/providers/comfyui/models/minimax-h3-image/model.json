@@ -9,7 +9,8 @@
     "{{seed}}",
     "{{width}}",
     "{{height}}",
-    "{{steps}}"
+    "{{steps}}",
+    "{{outputScale}}"
   ],
   "defaultSteps": 6,
   "ratioMap": "h3image-16mp",
@@ -21,13 +22,17 @@
     "9:16"
   ],
   "defaultRatio": "3:4",
-  "size": "≈16MP · INT8 ConvRot",
+  "size": "≈16MP → 2K · INT8 ConvRot",
   "latency": "medium",
   "batched": false,
   "defaultCount": 1,
   "graphs": {
-    "base": "workflow.json"
+    "base": "workflow.json",
+    "reference": "reference.json"
   },
+  "outputLongEdge": 2048,
+  "maxReferenceImages": 3,
+  "referenceRatioMap": "h3image-4mp",
   "requiredModelFiles": [
     "minimax_h3_image_pruned_int8_convrot.safetensors",
     "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",

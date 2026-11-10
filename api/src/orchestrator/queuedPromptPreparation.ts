@@ -13,6 +13,7 @@ import {
 import { condenseBatchPrompt } from './condenseBatchPrompt';
 import { expandBatchPrompt } from './expandBatchPrompt';
 import * as queue from './queue';
+import { loadRefImages, refImageIdsForBatch } from './refImages';
 import { getBatchForUser, preRegisterBatch, setBatchDonePromise, unregisterBatch, type BatchEntry } from './registry';
 
 const MAX_PREPARERS = 2;
@@ -46,9 +47,19 @@ function needsCondensation(modelId: string, prompt: string): boolean {
 // Krea condensation and H3 Image expansion are exclusive by target. With
 // H3_IMAGE_AUTO_EXPAND off a short H3 Image prompt is not prepared at all, so
 // it gains no queue delay.
-export function needsQueuedPromptPreparation(config: Config, modelId: string, prompt: string): boolean {
+export function needsQueuedPromptPreparation(config: Config, modelId: string, prompt: string, referenceCount: number): boolean {
   return needsCondensation(modelId, prompt)
-    || (config.H3_IMAGE_AUTO_EXPAND && promptNeedsExpansionForModel(modelId, prompt));
+    || (config.H3_IMAGE_AUTO_EXPAND && promptNeedsExpansionForModel(modelId, prompt, referenceCount));
+}
+
+// The batch's reference pictures in order. Missing or unreadable pictures
+// throw, so preparation fails open and dispatch reports them as it always has.
+async function referenceBytes(configured: PreparationRuntime, entry: queue.QueueEntry): Promise<Uint8Array[]> {
+  const ids = refImageIdsForBatch(configured.db, entry.batchId);
+  if (ids.length === 0) return [];
+  const loaded = await loadRefImages(configured.db, configured.config.DATA_DIR, entry.userId, ids);
+  if (loaded === null) throw new Error('queued prompt preparation: reference picture missing');
+  return loaded.map((ref) => ref.bytes);
 }
 
 function current(job: PreparationJob): boolean {
@@ -112,7 +123,9 @@ export function prepareQueuedPrompts(db: Database): boolean {
       const registered = findModel(entry.modelId, configured.config);
       const eligible = registered?.model.pool === 'local'
         && configured.config.LOCAL_MODELS_USERS.has(entry.userId);
-      const needsPreparation = eligible && needsQueuedPromptPreparation(configured.config, entry.modelId, prompt);
+      const needsPreparation = eligible && needsQueuedPromptPreparation(
+        configured.config, entry.modelId, prompt, refImageIdsForBatch(configured.db, entry.batchId).length,
+      );
       queue.setPromptPreparation(entry.batchId, entry.epoch, needsPreparation ? 'pending' : 'ready');
     }
     for (const entry of queue.entries('local')) {
@@ -146,10 +159,10 @@ async function runPreparation(job: PreparationJob): Promise<void> {
   let ready = false;
   let retry = false;
   try {
-    const rewrite = needsCondensation(entry.modelId, job.original) ? condenseBatchPrompt : expandBatchPrompt;
-    const prompt = await rewrite(job.original, entry.modelId, {
-      ...configured, userId: entry.userId, signal: registered.batchController.signal,
-    });
+    const deps = { ...configured, userId: entry.userId, signal: registered.batchController.signal };
+    const prompt = needsCondensation(entry.modelId, job.original)
+      ? await condenseBatchPrompt(job.original, entry.modelId, deps)
+      : await expandBatchPrompt(job.original, entry.modelId, deps, await referenceBytes(configured, entry));
     if (!current(job) || registered.batchController.signal.aborted) return;
     if (prompt === job.original) ready = livePrompt(configured, entry) === job.original;
     else {

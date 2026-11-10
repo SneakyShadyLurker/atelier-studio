@@ -63,7 +63,15 @@ export function countPromptWords(text: string): number {
 // before dispatch.
 export const H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS = 60;
 
-export function promptNeedsExpansionForModel(modelId: string, prompt: string): boolean {
+// With reference pictures attached the model reads the prompt as an edit
+// brief that names each picture `<Picture N>`. A short instruction without
+// those names ("make the jacket red") renders a weak or wrong edit, so it is
+// expanded too, by the reference-edit writer with the pictures in view. A
+// prompt that already names a picture was written for the model and is kept.
+const H3_IMAGE_PICTURE_TOKEN = /<Picture \d+>/;
+
+export function promptNeedsExpansionForModel(modelId: string, prompt: string, referenceCount = 0): boolean {
   return classifyImageModelTarget(modelId) === 'h3image'
-    && countPromptWords(prompt) < H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS;
+    && countPromptWords(prompt) < H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS
+    && !(referenceCount > 0 && H3_IMAGE_PICTURE_TOKEN.test(prompt));
 }

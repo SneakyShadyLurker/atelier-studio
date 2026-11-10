@@ -19,7 +19,7 @@ describe('buildWorkflow per-workflow required placeholders', () => {
       seed: '{{seed}}', width: '{{width}}', height: '{{height}}', count: '{{count}}',
     }), {
       prompt: opaque, motionPrompt: `motion ${opaque}`, sourceImage: opaque,
-      referenceImage: opaque, contextVideo: opaque, seed: 7, width: 32, height: 64, count: 2,
+      referenceImages: [opaque], contextVideo: opaque, seed: 7, width: 32, height: 64, count: 2,
     }, KREA_REQUIRED);
     expect(workflow).toEqual({
       prompt: opaque, duplicate: opaque, motion: `motion ${opaque}`, source: opaque,
@@ -34,7 +34,7 @@ describe('buildWorkflow per-workflow required placeholders', () => {
     const referenceImage = 'face "one"\\crop\n.png';
     const workflow = buildWorkflow(
       '{"image":"{{referenceImage}}"}',
-      { prompt: 'p', seed: 1, width: 1024, height: 1024, count: 1, referenceImage },
+      { prompt: 'p', seed: 1, width: 1024, height: 1024, count: 1, referenceImages: [referenceImage] },
       ['{{referenceImage}}'],
     );
     expect(workflow).toEqual({ image: referenceImage });
@@ -48,6 +48,47 @@ describe('buildWorkflow per-workflow required placeholders', () => {
     )).toThrow('referenceImage is required');
   });
 
+  const SLOTTED = JSON.stringify({
+    '4': { class_type: 'Conditioning', inputs: { prompt: '{{prompt}}', 'images.image_1': ['20', 0], 'images.image_2': ['21', 0], 'images.image_3': ['22', 0] } },
+    '20': { class_type: 'LoadImage', inputs: { image: '{{referenceImage}}' } },
+    '21': { class_type: 'LoadImage', inputs: { image: '{{referenceImage2}}' } },
+    '22': { class_type: 'LoadImage', inputs: { image: '{{referenceImage3}}' } },
+  });
+  const slotParams = { prompt: 'p', seed: 1, width: 1024, height: 1024, count: 1 };
+
+  test('every supplied reference fills its slot in order', () => {
+    expect(buildWorkflow(SLOTTED, { ...slotParams, referenceImages: ['a', 'b', 'c'] }, ['{{referenceImage}}'])).toEqual({
+      '4': { class_type: 'Conditioning', inputs: { prompt: 'p', 'images.image_1': ['20', 0], 'images.image_2': ['21', 0], 'images.image_3': ['22', 0] } },
+      '20': { class_type: 'LoadImage', inputs: { image: 'a' } },
+      '21': { class_type: 'LoadImage', inputs: { image: 'b' } },
+      '22': { class_type: 'LoadImage', inputs: { image: 'c' } },
+    });
+  });
+
+  test('an empty later slot loses its loader and every link that read from it', () => {
+    expect(buildWorkflow(SLOTTED, { ...slotParams, referenceImages: ['a'] }, ['{{referenceImage}}'])).toEqual({
+      '4': { class_type: 'Conditioning', inputs: { prompt: 'p', 'images.image_1': ['20', 0] } },
+      '20': { class_type: 'LoadImage', inputs: { image: 'a' } },
+    });
+    expect(Object.keys(buildWorkflow(SLOTTED, { ...slotParams, referenceImages: ['a', 'b'] }, ['{{referenceImage}}'])))
+      .toEqual(['4', '20', '21']);
+  });
+
+  test('user text spelling a slot token is never mistaken for an empty slot', () => {
+    const workflow = buildWorkflow(SLOTTED, { ...slotParams, prompt: '{{referenceImage2}}', referenceImages: ['{{referenceImage3}}', 'b', 'c'] }, ['{{referenceImage}}']);
+    expect(Object.keys(workflow)).toEqual(['4', '20', '21', '22']);
+    expect(workflow['4']).toMatchObject({ inputs: { prompt: '{{referenceImage2}}' } });
+    expect(workflow['20']).toEqual({ class_type: 'LoadImage', inputs: { image: '{{referenceImage3}}' } });
+  });
+
+  test('more references than slots are refused', () => {
+    expect(() => buildWorkflow(
+      '{"1":{"inputs":{"image":"{{referenceImage}}"}}}',
+      { ...slotParams, referenceImages: ['a', 'b'] },
+      ['{{referenceImage}}'],
+    )).toThrow('more reference images than reference slots');
+  });
+
   test('steps substitutes as a number', () => {
     const workflow = buildWorkflow(
       '{"sampler":{"steps":"{{steps}}"}}',
@@ -55,6 +96,18 @@ describe('buildWorkflow per-workflow required placeholders', () => {
       ['{{steps}}'],
     );
     expect(workflow).toEqual({ sampler: { steps: 23 } });
+  });
+
+  test('outputScale substitutes as a number, is required when declared and stays in (0, 1]', () => {
+    const template = '{"scale":{"scale_by":"{{outputScale}}"}}';
+    const params = { prompt: 'p', seed: 1, width: 3552, height: 4736, count: 1 };
+    expect(buildWorkflow(template, { ...params, outputScale: 2048 / 4736 }, ['{{outputScale}}']))
+      .toEqual({ scale: { scale_by: 2048 / 4736 } });
+    expect(buildWorkflow(template, { ...params, outputScale: 1 }, [])).toEqual({ scale: { scale_by: 1 } });
+    expect(() => buildWorkflow(template, params, [])).toThrow('outputScale is required');
+    for (const outputScale of [0, -0.5, 1.01, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => buildWorkflow(template, { ...params, outputScale }, [])).toThrow('outputScale must be in (0, 1]');
+    }
   });
 
   test('steps is required when declared', () => {

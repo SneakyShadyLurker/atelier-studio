@@ -52,6 +52,18 @@ export const RATIO_MAPS = {
     '16:9': { width: 5472, height: 3072 }, // 16.81 MP
     '9:16': { width: 3072, height: 5472 }, // 16.81 MP
   },
+  // MiniMax H3 Image with reference pictures: ~4 MP, the area the model is
+  // tuned for and the size of its official edit workflow. At 16 MP a
+  // reference render takes four times as long and comes out over-sharpened,
+  // and a new scene around a referenced subject fails. 1:1, 4:5 and 3:4 match
+  // the 16 MP map's aspect exactly, so editing a tile does not reframe it.
+  'h3image-4mp': {
+    '1:1': { width: 2048, height: 2048 },  // 4.19 MP
+    '4:5': { width: 1792, height: 2240 },  // 4.01 MP, exact 4:5
+    '3:4': { width: 1728, height: 2304 },  // 3.98 MP, exact 3:4
+    '16:9': { width: 2720, height: 1536 }, // 4.18 MP
+    '9:16': { width: 1536, height: 2720 }, // 4.18 MP
+  },
   // MiniMax H3 video: 768p.
   'h3-768p': {
     '1:1': { width: 768, height: 768 },

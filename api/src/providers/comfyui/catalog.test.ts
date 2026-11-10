@@ -352,6 +352,84 @@ describe('loadLocalModelCatalog: residency groups', () => {
     expect(catalog.byId.get('krea-test-delta')?.referenceWorkflowPath).toBe(join(dir, 'reference.json'));
   });
 
+  function referenceFixture(tokens: readonly string[], maxReferenceImages?: number): { external: string; manifestPath: string } {
+    const external = copyFixture(EXTERNAL);
+    const dir = join(external, 'krea-test-delta');
+    const graph = JSON.parse(readFileSync(join(dir, 'workflow.json'), 'utf8')) as Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+    tokens.forEach((token, slot) => { graph[String(20 + slot)] = { class_type: 'LoadImage', inputs: { image: token } }; });
+    writeFileSync(join(dir, 'reference.json'), JSON.stringify(graph));
+    const manifestPath = editManifest(external, 'krea-test-delta', (manifest) => {
+      manifest.graphs = { base: 'workflow.json', reference: 'reference.json' };
+      if (maxReferenceImages !== undefined) manifest.maxReferenceImages = maxReferenceImages;
+    });
+    return { external, manifestPath };
+  }
+
+  test('a reference graph takes one image unless the manifest declares more slots', () => {
+    const one = referenceFixture(['{{referenceImage}}']);
+    expect(loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: one.external }).byId.get('krea-test-delta')?.maxReferenceImages).toBe(1);
+    const three = referenceFixture(['{{referenceImage}}', '{{referenceImage2}}', '{{referenceImage3}}'], 3);
+    expect(loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: three.external }).byId.get('krea-test-delta')?.maxReferenceImages).toBe(3);
+  });
+
+  test('a reference graph missing a declared slot, or carrying an undeclared one, stops the load', () => {
+    const missing = referenceFixture(['{{referenceImage}}'], 2);
+    expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: missing.external }), join(missing.external, 'krea-test-delta', 'reference.json'));
+    const extra = referenceFixture(['{{referenceImage}}', '{{referenceImage2}}']);
+    expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: extra.external }), join(extra.external, 'krea-test-delta', 'reference.json'));
+  });
+
+  test('maxReferenceImages without a reference graph, or above the worker input cap, stops the load', () => {
+    const external = copyFixture(EXTERNAL);
+    const manifestPath = editManifest(external, 'krea-test-delta', (manifest) => { manifest.maxReferenceImages = 2; });
+    expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: external }), manifestPath);
+    const over = referenceFixture(['{{referenceImage}}'], 4);
+    expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: over.external }), over.manifestPath);
+  });
+
+  test('a reference ratio map must be known and needs a reference graph', () => {
+    const known = referenceFixture(['{{referenceImage}}']);
+    editManifest(known.external, 'krea-test-delta', (manifest) => { manifest.referenceRatioMap = 'h3image-4mp'; });
+    expect(loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: known.external }).byId.get('krea-test-delta')?.referenceRatioDims?.['1:1'])
+      .toEqual({ width: 2048, height: 2048 });
+    const unknown = referenceFixture(['{{referenceImage}}']);
+    editManifest(unknown.external, 'krea-test-delta', (manifest) => { manifest.referenceRatioMap = 'nope'; });
+    expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: unknown.external }), unknown.manifestPath);
+    const external = copyFixture(EXTERNAL);
+    const manifestPath = editManifest(external, 'krea-test-delta', (manifest) => { manifest.referenceRatioMap = 'h3image-4mp'; });
+    expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: external }), manifestPath);
+  });
+
+  test('outputLongEdge and the {{outputScale}} placeholder must appear together, on image rows only', () => {
+    const scaled = (external: string): string => {
+      const graphPath = join(external, 'krea-test-delta', 'workflow.json');
+      const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+      graph['30'] = { class_type: 'ImageScaleBy', inputs: { image: ['8', 0], upscale_method: 'lanczos', scale_by: '{{outputScale}}' } };
+      writeFileSync(graphPath, JSON.stringify(graph));
+      return graphPath;
+    };
+    const both = copyFixture(EXTERNAL);
+    scaled(both);
+    editManifest(both, 'krea-test-delta', (manifest) => { manifest.outputLongEdge = 2048; });
+    expect(loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: both }).byId.get('krea-test-delta')?.outputLongEdge).toBe(2048);
+
+    const placeholderOnly = copyFixture(EXTERNAL);
+    expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: placeholderOnly }), scaled(placeholderOnly));
+
+    const fieldOnly = copyFixture(EXTERNAL);
+    editManifest(fieldOnly, 'krea-test-delta', (manifest) => { manifest.outputLongEdge = 2048; });
+    expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: fieldOnly }), join(fieldOnly, 'krea-test-delta', 'workflow.json'));
+  });
+
+  test('a base graph carrying a reference slot stops the load', () => {
+    const external = copyFixture(EXTERNAL);
+    const graphPath = join(external, 'krea-test-delta', 'workflow.json');
+    const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+    graph['20'] = { class_type: 'LoadImage', inputs: { image: '{{referenceImage}}' } };
+    writeFileSync(graphPath, JSON.stringify(graph));
+    expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: external }), graphPath);
+  });
+
   test('a reference graph whose base weight loaders differ stops the load', () => {
     const external = copyFixture(EXTERNAL);
     const dir = join(external, 'krea-test-delta');

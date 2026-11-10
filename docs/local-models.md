@@ -11,7 +11,7 @@ Local rows register only when `COMFYUI_BASE_URL` is set. Video rows also need `V
   <model id>/
     model.json       manifest
     workflow.json    base graph
-    reference.json   optional face-reference graph
+    reference.json   optional reference-image graph
     extend.json      optional video continuation graph
   _graphs/           ignored by the loader
 ```
@@ -26,11 +26,13 @@ The built-in rows live in `api/src/providers/comfyui/models/` and ship with the 
 |---|---|---|---|
 | `krea-2-gonzalomo` | `krea` | enabled | GonzaLomo INT8 ConvRot UNet, `qwen3vl_4b_bf16` encoder, `qwen_image_vae`; the reference graph adds `krea2_reid_rank32` |
 | `moss-image-sft` | `moss` | enabled | MOSS Image SFT INT8 ConvRot DiT, `qwen3.5_9b_int8_convrot` encoder, `flux2-vae` |
-| `minimax-h3-image` | `h3image` | enabled | `minimax_h3_image_pruned_int8_convrot` DiT, `qwen3vl_32b_minimax_h3_nvfp4_awq` encoder, `minimax_h3_image_vae_fp16` |
+| `minimax-h3-image` | `h3image` | enabled | `minimax_h3_image_pruned_int8_convrot` DiT, `qwen3vl_32b_minimax_h3_nvfp4_awq` encoder, `minimax_h3_image_vae_fp16`; the reference graph loads the same three files |
 | `minimax-h3-i2v` | `video` | disabled template | see below; includes the extend graph |
 | `minimax-h3-t2v` | `video` | disabled template | see below |
 
-`minimax-h3-image` is MiniMax's open-weights text-to-image model (released 2026-11-10). It takes no reference image. The graph runs the core `MiniMaxH3ImageConditioning` node, which encodes the prompt through the `minimax` `CLIPLoader` and emits both the positive conditioning and the latent, into one `KSampler` (`euler`, `simple`, CFG 1.0) with a `ConditioningZeroOut` negative. It needs ComfyUI 0.45.0 or later. The row renders one image per roll (`batched: false`, `defaultCount: 1`) because the model's ComfyUI implementation supports batch size 1 only. The checkpoint is distilled onto a fixed 6-step sigma grid, so `defaultSteps` is 6 and the row should stay at 6 steps: the per-model step override is still offered, as for every local row, but the stock schedulers only land on the distilled grid at that count. It renders about 16 MP, the size the model card recommends, on the `h3image-16mp` map. Verified by live render 2026-11-10 on ComfyUI 0.45.0 (RTX 4090): 2048x2048 in 8 s warm, 2880x2880 in 17 s, 4096x4096 in 22 s. It keys residency on its own id. The only file it shares with the video rows below is the `qwen3vl_32b_minimax_h3_nvfp4_awq` text encoder.
+`minimax-h3-image` is MiniMax's open-weights image model (released 2026-11-10); one checkpoint does text-to-image, editing and composition from reference pictures. The graph runs the core `MiniMaxH3ImageConditioning` node, which encodes the prompt through the `minimax` `CLIPLoader` and emits both the positive conditioning and the latent, into one `KSampler` (`euler`, `simple`, CFG 1.0) with a `ConditioningZeroOut` negative. It needs ComfyUI 0.45.0 or later. The row renders one image per roll (`batched: false`, `defaultCount: 1`) because the model's ComfyUI implementation supports batch size 1 only. The checkpoint is distilled onto a fixed 6-step sigma grid, so `defaultSteps` is 6 and the row should stay at 6 steps: the per-model step override is still offered, as for every local row, but the stock schedulers only land on the distilled grid at that count. It renders about 16 MP, the size the model card recommends, on the `h3image-16mp` map, and delivers a 2048 px long edge (`outputLongEdge: 2048`): the decoded frame passes through one `ImageScaleBy` (`lanczos`) before the save node, so the stored image is a supersampled 1536x2048 at 3:4. The reduction costs about half a second and replaces a 25 to 34 MB PNG with one of 3 to 7 MB (measured per ratio on 2026-11-10). Verified by live render 2026-11-10 on ComfyUI 0.45.0 (RTX 4090): 2048x2048 in 8 s warm, 2880x2880 in 17 s, 4096x4096 in 22 s. It keys residency on its own id. The only file it shares with the video rows below is the `qwen3vl_32b_minimax_h3_nvfp4_awq` text encoder.
+
+Its `reference.json` is the base graph plus three `LoadImage` nodes wired to the conditioning node's `images.image_1` to `images.image_3` inputs (`maxReferenceImages: 3`). The prompt names them `<Picture 1>` to `<Picture 3>`; with the VAE connected, as here, each picture conditions the Qwen3-VL encoder and is also anchored as a reference latent. Reference requests render on the `h3image-4mp` map (`referenceRatioMap`), about 4 MP, the area the model is tuned for and the size of its official edit workflow, and are delivered at the same 2048 px long edge. Verified by live render 2026-11-10 on the same host through this graph: one, two and three pictures at 1728x2304 in 17 s, 30 s and 46 s. At the base graph's 16 MP a one-picture edit took about 95 s, came out over-sharpened, and a new scene around a referenced person failed.
 
 The two MiniMax H3 video rows are templates derived from ComfyUI's official H3 workflow: the stock transformer `minimax_h3_fl2va_pruned_int8_convrot.safetensors` (`UNETLoader`, `weight_dtype: default`) through `LoraLoaderModelOnly` with the official 8-step turbo LoRA `minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` at strength 1, the `qwen3vl_32b_minimax_h3_nvfp4_awq` encoder, the `minimax_h3_video_vae_int8_convrot` video VAE and the `minimax_h3_audio_vae_fp32` audio VAE. The i2v, t2v and extend graphs load the same weights, so the pair shares the `minimax-h3` residency key. **These templates are unverified on a live host.** They ship with `"enabled": false`; render through each graph against a real ComfyUI before enabling them with `COMFYUI_ENABLE_MODELS=minimax-h3-i2v,minimax-h3-t2v` or an external override manifest, and record the verification date with that change.
 
@@ -48,9 +50,9 @@ The Zod schema is `api/src/providers/comfyui/manifest.ts`. Unknown keys are reje
 | `overrides` | no | `true` on an external manifest that replaces a built-in. |
 | `residencyKey` | no | Rows sharing a key load identical loader nodes, so switching between them skips VRAM eviction. Defaults to `id`. |
 | `saveImageNodeId` | yes | Terminal output node id; it must exist in every graph. `SaveImageWebsocket` for images, `SaveVideo` for video. |
-| `requiredPlaceholders` | yes | Placeholders the base graph must contain, such as `{{prompt}}`, `{{seed}}`, `{{width}}`, `{{height}}`, `{{count}}` and `{{steps}}`. A reference graph must also contain `{{referenceImage}}`. |
+| `requiredPlaceholders` | yes | Placeholders the base graph must contain, such as `{{prompt}}`, `{{seed}}`, `{{width}}`, `{{height}}`, `{{count}}` and `{{steps}}`. A reference graph must also contain `{{referenceImage}}`, plus `{{referenceImage2}}` and `{{referenceImage3}}` when `maxReferenceImages` declares those slots; no other graph may contain a reference slot. |
 | `defaultSteps` | yes | Base-sampler steps substituted into `{{steps}}`. Users may override them per model. |
-| `ratioMap` | yes | Name of a render-size map in `api/src/providers/comfyui/ratioMaps.ts`: `krea-2048`, `moss-2mp`, `moss-turbo-1.5mp`, `moss-hires-1.66mp`, `h3image-16mp` or `h3-768p`. |
+| `ratioMap` | yes | Name of a render-size map in `api/src/providers/comfyui/ratioMaps.ts`: `krea-2048`, `moss-2mp`, `moss-turbo-1.5mp`, `moss-hires-1.66mp`, `h3image-16mp`, `h3image-4mp` or `h3-768p`. |
 | `supportedRatios` | yes | Ratios offered on the wire. |
 | `defaultRatio` | no | Must be a supported ratio. |
 | `supportedDurations`, `defaultDuration` | video only | Clip lengths in frames. Each must be a member of `VIDEO_DURATION_FRAMES` in `shared`; the default must be supported. |
@@ -59,7 +61,10 @@ The Zod schema is `api/src/providers/comfyui/manifest.ts`. Unknown keys are reje
 | `batched`, `defaultCount` | yes | Whether one job renders several images, and the default count (capped by `COMFYUI_BATCH_MAX`). |
 | `outputKind` | no | `image` (default) or `video`. A `video` family manifest must say `video`; an image family cannot. |
 | `promptFormat` | no | `h3-motion` for rows whose prompts go through motion enhancement. |
-| `graphs` | yes | `{ "base": ..., "reference"?: ..., "extend"?: ... }`. Only video rows may declare `extend`. A reference graph makes the row accept one reference image. |
+| `graphs` | yes | `{ "base": ..., "reference"?: ..., "extend"?: ... }`. Only video rows may declare `extend`. A reference graph makes the row accept reference images. |
+| `maxReferenceImages` | no | Reference images the reference graph accepts, 1 to 3, one `LoadImage` slot each. Defaults to 1. Three is the private worker's per-job input cap. The loader of a slot the request leaves empty is removed from the submitted graph together with every link that read from it. |
+| `referenceRatioMap` | no | Ratio map the reference graph renders at, when it differs from `ratioMap`. |
+| `outputLongEdge` | no | Long edge in pixels of the delivered image, image rows only. Every graph of the row must then end in an `ImageScaleBy` whose `scale_by` is `{{outputScale}}`; the adapter fills it with `outputLongEdge` over the long edge the request renders at, never above 1. A graph may carry `{{outputScale}}` only when the manifest sets this field. |
 | `extendRequiredPlaceholders` | no | Placeholders the continuation graph requires, when they differ from the base. |
 | `requiredModelFiles` | yes | Weight files the host must have registered before the row is available. |
 | `referenceRequiredModelFiles` | no | Extra weights needed only by the reference graph. |
@@ -86,9 +91,10 @@ Startup checks every manifest against the schema, resolves and parses every grap
 `api/scripts/validate-models.ts` runs the same checks over every manifest, disabled ones included, and adds the recipe invariants:
 
 - every graph class is in the worker allowlist (`infra/comfyui/atelier_private/allowed_nodes.json`), the save node has the right class, every required weight file appears in the graph, and every `CLIPLoader` uses `requiredClipType`;
+- a graph with `{{outputScale}}` has exactly one `ImageScaleBy` carrying it, with `upscale_method` `lanczos`, reading the final `VAEDecode` and feeding the save node. Lanczos runs through Pillow and is anti-aliased; `bilinear` and `bicubic` call `torch.nn.functional.interpolate` without anti-aliasing and alias when reducing by more than 2x, and `area` is alias-free but softer;
 - Krea: `euler` or `er_sde`, `requiredClipType` `krea2`, a `ConditioningZeroOut` negative at CFG 1.0 or a real empty `CLIPTextEncode` above it, and an empty-prompt `TextEncodeKrea2OstrisEdit` negative in reference graphs;
 - MOSS: `requiredClipType` `moss_image`, one sampler per graph, a `ConditioningZeroOut` negative and no skip-layer guidance at CFG 1.0, a real `CLIPTextEncode` negative above it, and skip-layer guidance only on single block 22 with `er_sde`;
-- H3 Image: `requiredClipType` `minimax`, exactly one `KSampler` at `euler`, `simple`, CFG 1.0 and denoise 1.0 whose latent is output 1 of the single `MiniMaxH3ImageConditioning`, a `ConditioningZeroOut` negative, no `CLIPTextEncode`, and no `{{count}}` or `RepeatLatentBatch` (the model supports batch size 1 only);
+- H3 Image: `requiredClipType` `minimax`, exactly one `KSampler` at `euler`, `simple`, CFG 1.0 and denoise 1.0 whose latent is output 1 of the single `MiniMaxH3ImageConditioning`, a `ConditioningZeroOut` negative, no `CLIPTextEncode`, and no `{{count}}` or `RepeatLatentBatch` (the model supports batch size 1 only); in the reference graph each slot's `LoadImage` feeds `images.image_N` of the conditioning node directly and in order with the VAE connected, and the base graph loads no image;
 - video: `requiredClipType` `minimax`, one guidance-free `BasicGuider`, no step-reuse cache, `MiniMaxH3SigmaShift` at video 12 and audio 7 feeding `BasicScheduler`, and `MiniMaxH3AddGuide` in continuation graphs.
 
 ```bash

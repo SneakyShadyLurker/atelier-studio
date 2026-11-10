@@ -7,7 +7,8 @@ import {
   type EnhanceChunk,
   type TestTextFeatureProvider,
 } from '../providers/text/featureHelpers';
-import { H3_IMAGE_ENHANCE_SYSTEM_PROMPT } from '../prompts/enhanceSystemPrompt';
+import sharp from 'sharp';
+import { H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT, H3_IMAGE_ENHANCE_SYSTEM_PROMPT } from '../prompts/enhanceSystemPrompt';
 import { H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS } from '../prompts/promptBudget';
 import { expandBatchPrompt } from './expandBatchPrompt';
 import { needsQueuedPromptPreparation } from './queuedPromptPreparation';
@@ -74,6 +75,7 @@ function expand(
   prompt: string,
   modelId = H3,
   signal = new AbortController().signal,
+  references: readonly Uint8Array[] = [],
 ): Promise<string> {
   return expandBatchPrompt(prompt, modelId, {
     config: runtime.config,
@@ -81,7 +83,11 @@ function expand(
     logger: runtime.logger,
     userId: 'alice',
     signal,
-  });
+  }, references);
+}
+
+async function picture(width: number): Promise<Uint8Array> {
+  return (await sharp({ create: { width, height: 8, channels: 3, background: '#336699' } }).png().toUint8Array()).data;
 }
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
@@ -111,6 +117,48 @@ test('expands a short H3 Image prompt with the H3 Image enhance system prompt', 
   expect(log).toMatchObject({ beforeWords: 7, afterWords: 154 });
   // Content-free: no prompt text reaches the logs.
   expect(runtime.logs.some((line) => line.includes('reading by a window') || line.includes('detail1'))).toBe(false);
+});
+
+test('with reference pictures a short instruction goes to the reference-edit writer with the pictures in order', async () => {
+  const seen: { prompt: string; widths: (number | undefined)[]; mimes: string[]; systemPrompt?: string }[] = [];
+  setTextModelProviderForTests(fakeProvider(async function* (prompt, images, _signal, systemPrompt) {
+    const widths = await Promise.all(images.map(async (image) => (await sharp(image.bytes).metadata()).width));
+    seen.push({ prompt, widths, mimes: images.map((image) => image.mime), ...(systemPrompt === undefined ? {} : { systemPrompt }) });
+    yield { type: 'delta', text: EXPANDED } satisfies EnhanceChunk;
+    yield { type: 'done' } satisfies EnhanceChunk;
+  }));
+  const runtime = testRuntime({ seedLegacyText: true });
+  const instruction = 'make her jacket red';
+
+  expect(await expand(runtime, instruction, H3, undefined, [await picture(16), await picture(24)])).toBe(EXPANDED);
+  expect(seen).toEqual([{
+    prompt: instruction,
+    widths: [16, 24],
+    mimes: ['image/jpeg', 'image/jpeg'],
+    systemPrompt: H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
+  }]);
+});
+
+test('with reference pictures a prompt that already names a picture is kept without a call', async () => {
+  const reply = replying(EXPANDED);
+  const runtime = testRuntime({ seedLegacyText: true });
+  const written = 'The cup in <Picture 1> is <Subject 1>. The target image shows <Subject 1> with a blue finish.';
+
+  expect(await expand(runtime, written, H3, undefined, [await picture(16)])).toBe(written);
+  expect(needsQueuedPromptPreparation(runtime.config, H3, written, 1)).toBe(false);
+  expect(reply.calls()).toBe(0);
+  // Without pictures the same short text is an ordinary short prompt.
+  expect(needsQueuedPromptPreparation(runtime.config, H3, written, 0)).toBe(true);
+  expect(needsQueuedPromptPreparation(runtime.config, H3, 'make her jacket red', 1)).toBe(true);
+});
+
+test('an unreadable reference picture fails open without a call', async () => {
+  const reply = replying(EXPANDED);
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
+
+  expect(await expand(runtime, SHORT, H3, undefined, [new Uint8Array([1, 2, 3])])).toBe(SHORT);
+  expect(reply.calls()).toBe(0);
+  expect(skipReason(runtime)).toBe('reference-unreadable');
 });
 
 test('expands at 59 words and leaves 60 or more untouched without a call', async () => {
@@ -143,12 +191,12 @@ test('H3_IMAGE_AUTO_EXPAND=false turns the preparation predicate and the pass of
   const on = testRuntime({ seedLegacyText: true });
   const off = testRuntime({ seedLegacyText: true, H3_IMAGE_AUTO_EXPAND: 'false' });
 
-  expect(needsQueuedPromptPreparation(on.config, H3, SHORT)).toBe(true);
-  expect(needsQueuedPromptPreparation(on.config, H3, wordPrompt(60))).toBe(false);
-  expect(needsQueuedPromptPreparation(off.config, H3, SHORT)).toBe(false);
+  expect(needsQueuedPromptPreparation(on.config, H3, SHORT, 0)).toBe(true);
+  expect(needsQueuedPromptPreparation(on.config, H3, wordPrompt(60), 0)).toBe(false);
+  expect(needsQueuedPromptPreparation(off.config, H3, SHORT, 0)).toBe(false);
   // The switch is H3-only: Krea condensation keeps its own trigger.
-  expect(needsQueuedPromptPreparation(off.config, 'krea-2-gonzalomo', wordPrompt(400))).toBe(true);
-  expect(needsQueuedPromptPreparation(on.config, 'krea-2-gonzalomo', SHORT)).toBe(false);
+  expect(needsQueuedPromptPreparation(off.config, 'krea-2-gonzalomo', wordPrompt(400), 0)).toBe(true);
+  expect(needsQueuedPromptPreparation(on.config, 'krea-2-gonzalomo', SHORT, 0)).toBe(false);
   expect(await expand(off, SHORT)).toBe(SHORT);
   expect(reply.calls()).toBe(0);
 });

@@ -104,14 +104,22 @@ function startMock(metadata = currentWorkerPrivacy) {
   return { state, baseUrl: `https://127.0.0.1:${server.port}` };
 }
 
-function providerFor(baseUrl: string, withReference = true): Provider {
+function providerFor(baseUrl: string, withReference = true, slots = 1): Provider {
   return createComfyuiProvider({
     baseUrl,
     privacy: privateWorkerTestPrivacy,
     workflowText: JSON.stringify(BASE_GRAPH),
     ...(withReference ? {
-      referenceWorkflowText: JSON.stringify(REFERENCE_GRAPH),
+      referenceWorkflowText: JSON.stringify(slots === 1 ? REFERENCE_GRAPH : {
+        ...REFERENCE_GRAPH,
+        '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}', 'images.image_1': ['4', 0], 'images.image_2': ['12', 0], 'images.image_3': ['13', 0] } },
+        '12': { class_type: 'LoadImage', inputs: { image: '{{referenceImage2}}' } },
+        '13': { class_type: 'LoadImage', inputs: { image: '{{referenceImage3}}' } },
+        '14': { class_type: 'ImageScaleBy', inputs: { image: ['3', 0], upscale_method: 'lanczos', scale_by: '{{outputScale}}' } },
+      }),
       referenceRequiredPlaceholders: [...REQUIRED, '{{referenceImage}}'],
+      maxReferenceImages: slots,
+      ...(slots === 1 ? {} : { referenceRatioDims: { '1:1': { width: 512, height: 768 } }, outputLongEdge: 384 }),
     } : {}),
     maxResponseBytes: 1024 * 1024,
     saveImageNodeId: '9',
@@ -137,10 +145,7 @@ test('image reference uploads first, uses a job-owned token and gates reference 
   expect(health).toMatchObject({ ok: false });
   if (health && !health.ok) expect(health.reason).toContain('Krea2OstrisEditModelPatch');
   state.ostrisAvailable = true;
-  const results = await collect(provider, {
-    ...REQUEST,
-    refImages: [{ bytes: PNG, mime: 'image/png' }, { bytes: new Uint8Array([2]), mime: 'image/jpeg' }],
-  });
+  const results = await collect(provider, { ...REQUEST, refImages: [{ bytes: PNG, mime: 'image/png' }] });
   expect(results).toMatchObject([{ status: 'ready' }]);
   expect(state.uploads).toHaveLength(1);
   expect(state.uploads[0]?.bytes).toEqual(PNG);
@@ -148,6 +153,38 @@ test('image reference uploads first, uses a job-owned token and gates reference 
   expect(state.log.findIndex((call) => call.startsWith('PUT /atelier/v1/jobs/'))).toBeLessThan(state.log.indexOf('POST /prompt'));
   expect(state.prompt?.['4']).toEqual({ class_type: 'AtelierLoadImage', inputs: { image: state.uploads[0]?.token } });
   expect(JSON.stringify(state.prompt)).not.toContain('{{');
+});
+
+test('a multi-slot graph uploads every reference in order and drops the slots left empty', async () => {
+  const { state, baseUrl } = startMock();
+  const second = new Uint8Array([...PNG, 2]);
+  const results = await collect(providerFor(baseUrl, true, 3), {
+    ...REQUEST,
+    refImages: [{ bytes: PNG, mime: 'image/png' }, { bytes: second, mime: 'image/png' }],
+  });
+  expect(results).toMatchObject([{ status: 'ready' }]);
+  expect(state.uploads.map((upload) => upload.bytes)).toEqual([PNG, second]);
+  expect(state.prompt?.['4']).toEqual({ class_type: 'AtelierLoadImage', inputs: { image: state.uploads[0]?.token } });
+  expect(state.prompt?.['12']).toEqual({ class_type: 'AtelierLoadImage', inputs: { image: state.uploads[1]?.token } });
+  expect(state.prompt?.['13']).toBeUndefined();
+  // The reference graph renders at its own size, not the base graph's.
+  expect(state.prompt?.['2']?.inputs).toMatchObject({ width: 512, height: 768 });
+  // The delivered long edge is taken against the size this request renders at.
+  expect(state.prompt?.['14']?.inputs.scale_by).toBe(384 / 768);
+  expect(state.prompt?.['1']).toEqual({
+    class_type: 'CLIPTextEncode',
+    inputs: { text: 'portrait', 'images.image_1': ['4', 0], 'images.image_2': ['12', 0] },
+  });
+  expect(JSON.stringify(state.prompt)).not.toContain('{{');
+});
+
+test('more references than the graph has slots fail before posting anything', async () => {
+  const { state, baseUrl } = startMock();
+  const refImages: NonNullable<ProviderRequest['refImages']> = [{ bytes: PNG, mime: 'image/png' }, { bytes: new Uint8Array([2]), mime: 'image/jpeg' }];
+  expect(await collect(providerFor(baseUrl), { ...REQUEST, refImages }))
+    .toMatchObject([{ status: 'failed', error: "model 'krea-2-gonzalomo' takes at most 1 reference images" }]);
+  expect(state.log).toEqual([]);
+  expect(state.prompt).toBeUndefined();
 });
 
 test('without references the unchanged base graph is submitted without an upload', async () => {
@@ -182,7 +219,7 @@ for (const kind of ['count', 'input-size', 'payload-size'] as const) {
 test('references without a reference graph fail before posting anything', async () => {
   const { state, baseUrl } = startMock();
   expect(await collect(providerFor(baseUrl, false), { ...REQUEST, refImages: [{ bytes: PNG, mime: 'image/png' }] }))
-    .toMatchObject([{ status: 'failed', error: "model 'krea-2-gonzalomo' has no face-reference graph" }]);
+    .toMatchObject([{ status: 'failed', error: "model 'krea-2-gonzalomo' has no reference-image graph" }]);
   expect(state.log).toEqual([]);
   expect(state.prompt).toBeUndefined();
 });

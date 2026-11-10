@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { RATIO_VALUES, type Model, type ModelAvailability, type Pool } from '@atelier/shared';
+import { RATIO_VALUES, type Model, type ModelAvailability, type Pool, type RenderResolution } from '@atelier/shared';
 import { cliproxyEnabled, type Config } from '../config';
 import type { KeyStore } from '../keystore';
 import { loggerForConfig } from '../observability/logger';
@@ -43,6 +43,18 @@ export interface RegistryEntry {
    * the wire `Model`). Absent for models without a step concept.
    */
   defaultSteps?: number;
+  /**
+   * User-selectable render sizes for local rows that offer them (server-only;
+   * never on the wire `Model`). Absent for every other model.
+   */
+  resolutions?: RegistryResolutions;
+}
+
+export interface RegistryResolutions {
+  /** Text-to-image render size when the user has no override. */
+  defaultTextToImage: RenderResolution;
+  /** Render size with reference pictures; null when the row has no reference graph. */
+  defaultReference: RenderResolution | null;
 }
 
 // Drafts spell out `pool` so the routing-relevant attribute is explicit per
@@ -56,6 +68,7 @@ interface RegistryEntryDraft {
   bind: (deps: BindDeps) => Provider;
   timeoutMs: (timeouts: { cloud: number; local: number; localVideo: number }) => number;
   defaultSteps?: number;
+  resolutions?: RegistryResolutions;
 }
 
 function staticBind(provider: Provider): (deps: BindDeps) => Provider {
@@ -230,6 +243,7 @@ function buildLocalEntries(config: Config): RegistryEntryDraft[] {
             ...(def.referenceRatioDims !== undefined ? { referenceRatioDims: def.referenceRatioDims } : {}),
           }
         : {}),
+      ...(def.resolutionDims !== undefined ? { resolutionDims: def.resolutionDims } : {}),
       ...(def.extendWorkflowPath !== undefined
         ? {
             extendWorkflowText: loadWorkflowText(def.extendWorkflowPath, def.id),
@@ -277,6 +291,14 @@ function buildLocalEntries(config: Config): RegistryEntryDraft[] {
         ? ({ localVideo }) => localVideo
         : ({ local }) => local,
       defaultSteps: def.defaultSteps,
+      ...(def.defaultResolution !== undefined
+        ? {
+            resolutions: {
+              defaultTextToImage: def.defaultResolution,
+              defaultReference: def.defaultReferenceResolution ?? null,
+            },
+          }
+        : {}),
     });
   }
   return drafts;

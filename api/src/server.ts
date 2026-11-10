@@ -50,6 +50,7 @@ import { keysRoutes } from './routes/keys';
 import { metricsRoutes } from './routes/metrics';
 import { modelsRoutes } from './routes/models';
 import { modelStepsRoutes } from './routes/modelSteps';
+import { modelResolutionRoutes } from './routes/modelResolution';
 import { sessionRoutes } from './routes/session';
 import { promptsRoutes } from './routes/prompts';
 import { enhanceRoutes } from './routes/enhance';
@@ -218,6 +219,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   });
   app.route('/api', modelsRoutes);
   app.route('/api', modelStepsRoutes);
+  app.route('/api', modelResolutionRoutes);
   app.route('/api', sessionRoutes);
   app.route('/api', generateRoutes);
   app.route('/api', batchesEventsRoutes);

@@ -2,7 +2,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
-import type { PublicTextModel, TaskRow, TextModelsResponse } from '@atelier/shared';
+import type {
+  ModelResolutionPutRequest,
+  ModelResolutionSetting,
+  PublicTextModel,
+  TaskRow,
+  TextModelsResponse,
+} from '@atelier/shared';
 import { TEXT_TASK_LABELS, TEXT_TASKS } from '@atelier/shared';
 import { promptKeys } from '../../api/prompts';
 import { textModelKeys } from '../../api/textModels';
@@ -563,5 +569,139 @@ describe('SettingsPanel model steps', () => {
       expect((globalThis.fetch as unknown as ReturnType<typeof mock>).mock.calls.some(([url]) => String(url).includes('/settings/model-steps'))).toBe(true);
     });
     expect(screen.queryByText('Model steps')).toBeNull();
+  });
+});
+
+const H3_RESOLUTION: ModelResolutionSetting = {
+  modelId: 'minimax-h3-image', name: 'MiniMax H3 Image', defaultTextToImage: '16mp', textToImage: null, defaultReference: '4mp', reference: null,
+};
+const RESOLUTION_MODELS: readonly ModelResolutionSetting[] = [H3_RESOLUTION];
+const TEXT_ONLY_RESOLUTION_MODELS: readonly ModelResolutionSetting[] = [
+  { modelId: 'text-only', name: 'Text Only', defaultTextToImage: '8mp', textToImage: '4mp', defaultReference: null, reference: null },
+];
+
+function renderResolution(models: readonly ModelResolutionSetting[] = RESOLUTION_MODELS, putStatus = 200) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  let current = { options: ['4mp', '8mp', '16mp'], models };
+  globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = urlOf(input);
+    if (url.includes('/text-models')) return Response.json(settings());
+    if (url.includes('/settings/model-resolution')) {
+      if (init?.method === 'PUT') {
+        if (putStatus !== 200) return Response.json({ error: 'boom' }, { status: putStatus });
+        const modelId = decodeURIComponent(url.split('/').pop() ?? '');
+        const body = JSON.parse(init.body as string) as ModelResolutionPutRequest;
+        current = {
+          ...current,
+          models: current.models.map((m) => (m.modelId === modelId
+            ? {
+                ...m,
+                ...(body.textToImage !== undefined ? { textToImage: body.textToImage === m.defaultTextToImage ? null : body.textToImage } : {}),
+                ...(body.reference !== undefined ? { reference: body.reference === m.defaultReference ? null : body.reference } : {}),
+              }
+            : m)),
+        };
+      }
+      return Response.json(current);
+    }
+    return Response.json({});
+  }) as unknown as typeof fetch;
+  render(<SettingsPanel />, { wrapper: wrapper(client) });
+  return globalThis.fetch as unknown as ReturnType<typeof mock>;
+}
+
+function resolutionPuts(fetchMock: ReturnType<typeof mock>): unknown[] {
+  return putCalls(fetchMock).map(([, init]) => JSON.parse((init as RequestInit).body as string) as unknown);
+}
+
+describe('SettingsPanel render resolution', () => {
+  test('renders both mode controls with their defaults marked and Reset disabled', async () => {
+    renderResolution();
+    const heading = await screen.findByRole('heading', { name: 'Render resolution' });
+    // No secondary line under the heading.
+    expect(heading.nextElementSibling).toBeNull();
+    expect(screen.getByText('MiniMax H3 Image')).toBeTruthy();
+    expect(screen.getByText('Text to image')).toBeTruthy();
+    expect(screen.getByText('With reference pictures')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Text to image resolution for MiniMax H3 Image, currently 16 MP (default)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'With reference pictures resolution for MiniMax H3 Image, currently 4 MP (default)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reset MiniMax H3 Image to its default resolutions' }).hasAttribute('disabled')).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Text to image resolution for MiniMax H3 Image/ }));
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['4 MP', '8 MP', '16 MP (default)']);
+  });
+
+  test('choosing a text-to-image size saves only that mode', async () => {
+    const fetchMock = renderResolution();
+    fireEvent.click(await screen.findByRole('button', { name: /^Text to image resolution for MiniMax H3 Image/ }));
+    fireEvent.click(screen.getByRole('option', { name: '8 MP' }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/settings/model-resolution/minimax-h3-image',
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ textToImage: '8mp' }) }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Text to image resolution for MiniMax H3 Image, currently 8 MP' })).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: 'Reset MiniMax H3 Image to its default resolutions' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  test('choosing a reference size saves only that mode, and the default saves null', async () => {
+    const fetchMock = renderResolution();
+    fireEvent.click(await screen.findByRole('button', { name: /^With reference pictures resolution/ }));
+    fireEvent.click(screen.getByRole('option', { name: '16 MP' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'With reference pictures resolution for MiniMax H3 Image, currently 16 MP' })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^With reference pictures resolution/ }));
+    fireEvent.click(screen.getByRole('option', { name: '4 MP (default)' }));
+    await waitFor(() => {
+      expect(resolutionPuts(fetchMock)).toEqual([{ reference: '16mp' }, { reference: null }]);
+    });
+  });
+
+  test('Reset clears both modes', async () => {
+    const fetchMock = renderResolution([{ ...H3_RESOLUTION, textToImage: '8mp', reference: '16mp' }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reset MiniMax H3 Image to its default resolutions' }));
+    await waitFor(() => {
+      expect(resolutionPuts(fetchMock)).toEqual([{ textToImage: null, reference: null }]);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Reset MiniMax H3 Image to its default resolutions' }).hasAttribute('disabled')).toBe(true);
+    });
+    expect(screen.getByRole('button', { name: 'Text to image resolution for MiniMax H3 Image, currently 16 MP (default)' })).toBeTruthy();
+  });
+
+  test('a failed save rolls back and shows an error toast', async () => {
+    renderResolution(RESOLUTION_MODELS, 500);
+    fireEvent.click(await screen.findByRole('button', { name: /^Text to image resolution for MiniMax H3 Image/ }));
+    fireEvent.click(screen.getByRole('option', { name: '4 MP' }));
+    await waitFor(() => {
+      expect(useAtelierStore.getState().toasts.some((toast) => toast.tone === 'error')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Text to image resolution for MiniMax H3 Image, currently 16 MP (default)' })).toBeTruthy();
+    });
+  });
+
+  test('a row without reference pictures hides that control and resets only text to image', async () => {
+    const fetchMock = renderResolution(TEXT_ONLY_RESOLUTION_MODELS);
+    expect(await screen.findByRole('button', { name: 'Text to image resolution for Text Only, currently 4 MP' })).toBeTruthy();
+    expect(screen.queryByText('With reference pictures')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^With reference pictures resolution/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Text Only to its default resolutions' }));
+    await waitFor(() => {
+      expect(resolutionPuts(fetchMock)).toEqual([{ textToImage: null }]);
+    });
+  });
+
+  test('is hidden when the endpoint lists no models', async () => {
+    renderResolution([]);
+    expect(await screen.findByText('Your text models')).toBeTruthy();
+    await waitFor(() => {
+      expect((globalThis.fetch as unknown as ReturnType<typeof mock>).mock.calls.some(([url]) => String(url).includes('/settings/model-resolution'))).toBe(true);
+    });
+    expect(screen.queryByText('Render resolution')).toBeNull();
   });
 });

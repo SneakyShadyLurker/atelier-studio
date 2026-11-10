@@ -68,6 +68,16 @@ export const localModelManifestSchema = z.strictObject({
   /** Ratio map the reference graph renders at, when it differs from `ratioMap`. */
   referenceRatioMap: z.string().min(1).optional(),
   /**
+   * Render sizes a user may pick per mode, each a ratio map name. `ratioMap`
+   * (and `referenceRatioMap` when set) must be one of them; those are the
+   * defaults. Image rows only.
+   */
+  resolutionMaps: z.strictObject({
+    '4mp': z.string().min(1),
+    '8mp': z.string().min(1),
+    '16mp': z.string().min(1),
+  }).optional(),
+  /**
    * Long edge in pixels of the delivered image. The graphs render at their
    * ratio map's size and end in an `ImageScaleBy` whose factor,
    * `{{outputScale}}`, brings the long edge down to this. Image rows only.

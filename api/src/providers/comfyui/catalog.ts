@@ -1,6 +1,12 @@
 import { readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { join } from 'node:path';
-import { VIDEO_DURATION_FRAMES, type Ratio, type VideoDurationFrames } from '@atelier/shared';
+import {
+  RENDER_RESOLUTIONS,
+  VIDEO_DURATION_FRAMES,
+  type Ratio,
+  type RenderResolution,
+  type VideoDurationFrames,
+} from '@atelier/shared';
 import type { Config } from '../../config';
 import { loggerForConfig } from '../../observability/logger';
 import { classifyImageModelTarget } from '../../prompts/gptImagePhrasing';
@@ -54,6 +60,12 @@ export interface LocalModelDef {
   maxReferenceImages?: number;
   /** Render sizes of the reference graph, when they differ from `ratioDims`. */
   referenceRatioDims?: RatioDims;
+  /** Render sizes a user may pick, from `resolutionMaps`; absent when the row offers none. */
+  resolutionDims?: Readonly<Record<RenderResolution, RatioDims>>;
+  /** The text-to-image render size (`ratioMap`'s key); set with `resolutionDims`. */
+  defaultResolution?: RenderResolution;
+  /** The reference render size; set with `resolutionDims` on a row with a reference graph. */
+  defaultReferenceResolution?: RenderResolution;
   /** Long edge of the delivered image; every graph then ends in a `{{outputScale}}` downscale. */
   outputLongEdge?: number;
   referenceRequiredModelFiles?: readonly string[];
@@ -225,6 +237,43 @@ interface ResolvedModel {
   weights: string;
 }
 
+type ResolutionFields = Pick<LocalModelDef, 'resolutionDims' | 'defaultResolution' | 'defaultReferenceResolution'>;
+
+/** The key of `resolutionMaps` naming `mapName`, if any. */
+function resolutionFor(
+  maps: Readonly<Record<RenderResolution, string>>,
+  mapName: string,
+): RenderResolution | undefined {
+  return RENDER_RESOLUTIONS.find((resolution) => maps[resolution] === mapName);
+}
+
+/** Validates `resolutionMaps`; the row's own maps become the per-mode defaults. */
+function resolveResolutions(m: LocalModelManifest, path: string): ResolutionFields {
+  const maps = m.resolutionMaps;
+  if (maps === undefined) return {};
+  if (m.outputKind === 'video') throw new LocalModelCatalogError('resolutionMaps is for image rows only', path);
+  const dimsFor = (resolution: RenderResolution): RatioDims => {
+    const name = maps[resolution];
+    if (!isRatioMapName(name)) throw new LocalModelCatalogError('unknown resolution ratio map', path);
+    return RATIO_MAPS[name];
+  };
+  const dims: Record<RenderResolution, RatioDims> = {
+    '4mp': dimsFor('4mp'),
+    '8mp': dimsFor('8mp'),
+    '16mp': dimsFor('16mp'),
+  };
+  const defaultResolution = resolutionFor(maps, m.ratioMap);
+  if (defaultResolution === undefined) {
+    throw new LocalModelCatalogError('ratioMap is not one of the resolutionMaps', path);
+  }
+  if (m.graphs.reference === undefined) return { resolutionDims: dims, defaultResolution };
+  const defaultReferenceResolution = resolutionFor(maps, m.referenceRatioMap ?? m.ratioMap);
+  if (defaultReferenceResolution === undefined) {
+    throw new LocalModelCatalogError('referenceRatioMap is not one of the resolutionMaps', path);
+  }
+  return { resolutionDims: dims, defaultResolution, defaultReferenceResolution };
+}
+
 function resolveModel(file: ManifestFile, order: number): ResolvedModel {
   const { manifest: m, dir, path, files } = file;
   if (!isRatioMapName(m.ratioMap)) throw new LocalModelCatalogError('unknown ratio map', path);
@@ -267,6 +316,7 @@ function resolveModel(file: ManifestFile, order: number): ResolvedModel {
   if (referenceRatioMap !== undefined && !isRatioMapName(referenceRatioMap)) {
     throw new LocalModelCatalogError('unknown reference ratio map', path);
   }
+  const resolutions = resolveResolutions(m, path);
   const required: Record<(typeof GRAPH_NAMES)[number], readonly string[]> = {
     base: m.requiredPlaceholders,
     reference: [...m.requiredPlaceholders, ...referenceSlots],
@@ -336,6 +386,7 @@ function resolveModel(file: ManifestFile, order: number): ResolvedModel {
       ? { referenceWorkflowPath: graphPaths.reference, maxReferenceImages: referenceSlots.length }
       : {}),
     ...(referenceRatioMap !== undefined ? { referenceRatioDims: RATIO_MAPS[referenceRatioMap] } : {}),
+    ...resolutions,
     ...(m.outputLongEdge !== undefined ? { outputLongEdge: m.outputLongEdge } : {}),
     ...(m.referenceRequiredModelFiles !== undefined ? { referenceRequiredModelFiles: m.referenceRequiredModelFiles } : {}),
     requiredModelFiles: m.requiredModelFiles,

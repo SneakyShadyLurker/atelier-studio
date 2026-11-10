@@ -1,5 +1,5 @@
 import { EXT_MIME, MEDIA_EXT_MIME, MEDIA_EXTS } from '@atelier/shared';
-import type { Backend, MediaExt, MediaMime, Ratio, TileExt, TileMime } from '@atelier/shared';
+import type { Backend, MediaExt, MediaMime, Ratio, RenderResolution, TileExt, TileMime } from '@atelier/shared';
 
 // Structured logger an adapter writes operational events to (the app's pino
 // logger satisfies it). Keep field names clear of the content-free
@@ -41,6 +41,12 @@ export interface ProviderRequest {
    * batch at dispatch. Absent means the model's `defaultSteps`.
    */
   steps?: number;
+  /**
+   * The user's render size for this request's mode (text-to-image or with
+   * reference pictures), resolved once per batch at dispatch. Absent means
+   * the row's default size for that mode.
+   */
+  resolution?: RenderResolution;
 }
 
 export interface ProviderProgress {

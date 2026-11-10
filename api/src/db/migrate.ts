@@ -10,7 +10,7 @@ import { namedArtifactDir, namedArtifactRoot } from '../storage/files';
 import type { AppLogger } from '../observability/logger';
 import { LEGACY_SEED, type TextSeed } from './textSeed';
 
-export const BINARY_SCHEMA_VERSION = 59;
+export const BINARY_SCHEMA_VERSION = 60;
 
 export class MigrationError extends Error {
   constructor(message: string) {
@@ -603,6 +603,9 @@ const migration56Sql = loadMigration('0056_user_model_steps.sql');
 const migration57Sql = loadMigration('0057_stories_source_upload_index.sql');
 const migration58Sql = loadMigration('0058_text_providers.sql');
 const migration59Sql = loadMigration('0059_gpt_image_2_6_writer.sql');
+// Per-user render-size overrides per mode (2026-11-10). NULL means the row's
+// default for that mode.
+const migration60Sql = loadMigration('0060_user_model_resolution.sql');
 
 // Wraps migration 19 with a conditional `tile_ref_images` rebuild and the
 // SQLite-recommended foreign-key dance for ALTER-table-style rebuilds.
@@ -1742,6 +1745,7 @@ const migrations: readonly Migration[] = [
   { version: 57, sql: migration57Sql },
   { version: 58, fn: migration58Run },
   { version: 59, sql: migration59Sql },
+  { version: 60, sql: migration60Sql },
 ];
 
 export function migrate(

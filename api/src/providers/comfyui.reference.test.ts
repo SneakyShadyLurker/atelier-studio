@@ -223,3 +223,58 @@ test('references without a reference graph fail before posting anything', async 
   expect(state.log).toEqual([]);
   expect(state.prompt).toBeUndefined();
 });
+
+const SCALE_NODE = { class_type: 'ImageScaleBy', inputs: { image: ['3', 0], upscale_method: 'lanczos', scale_by: '{{outputScale}}' } };
+
+/** A row offering render sizes: each graph ends in the `{{outputScale}}` downscale. */
+function sizedProviderFor(baseUrl: string): Provider {
+  return createComfyuiProvider({
+    baseUrl,
+    privacy: privateWorkerTestPrivacy,
+    workflowText: JSON.stringify({ ...BASE_GRAPH, '14': SCALE_NODE }),
+    referenceWorkflowText: JSON.stringify({ ...REFERENCE_GRAPH, '14': SCALE_NODE }),
+    referenceRequiredPlaceholders: [...REQUIRED, '{{referenceImage}}'],
+    maxReferenceImages: 1,
+    referenceRatioDims: { '1:1': { width: 256, height: 256 } },
+    resolutionDims: {
+      '4mp': { '1:1': { width: 256, height: 256 } },
+      '8mp': { '1:1': { width: 512, height: 640 } },
+      '16mp': { '1:1': { width: 1024, height: 1024 } },
+    },
+    outputLongEdge: 128,
+    maxResponseBytes: 1024 * 1024,
+    saveImageNodeId: '9',
+    requiredPlaceholders: REQUIRED,
+    requiredModelFiles: [],
+    ratioDims: { '1:1': { width: 1024, height: 1024 } },
+    modelId: REQUEST.modelId,
+  });
+}
+
+for (const withReferences of [false, true]) {
+  const graph = withReferences ? 'reference' : 'base';
+  const extra: Partial<ProviderRequest> = withReferences ? { refImages: [{ bytes: PNG, mime: 'image/png' }] } : {};
+
+  test(`a requested render size picks its dims for the ${graph} graph and the output scale follows`, async () => {
+    const { state, baseUrl } = startMock();
+    expect(await collect(sizedProviderFor(baseUrl), { ...REQUEST, ...extra, resolution: '8mp' }))
+      .toMatchObject([{ status: 'ready' }]);
+    expect(state.prompt?.['4'] !== undefined).toBe(withReferences);
+    expect(state.prompt?.['2']?.inputs).toMatchObject({ width: 512, height: 640 });
+    expect(state.prompt?.['14']?.inputs.scale_by).toBe(128 / 640);
+  });
+
+  test(`without a requested size the ${graph} graph keeps its own default dims`, async () => {
+    const { state, baseUrl } = startMock();
+    expect(await collect(sizedProviderFor(baseUrl), { ...REQUEST, ...extra })).toMatchObject([{ status: 'ready' }]);
+    const size = withReferences ? 256 : 1024;
+    expect(state.prompt?.['2']?.inputs).toMatchObject({ width: size, height: size });
+    expect(state.prompt?.['14']?.inputs.scale_by).toBe(128 / size);
+  });
+}
+
+test('a requested size on a row without sizes keeps the row dims', async () => {
+  const { state, baseUrl } = startMock();
+  expect(await collect(providerFor(baseUrl), { ...REQUEST, resolution: '8mp' })).toMatchObject([{ status: 'ready' }]);
+  expect(state.prompt?.['2']?.inputs).toMatchObject({ width: 1024, height: 1024 });
+});

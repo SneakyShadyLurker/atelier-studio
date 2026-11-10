@@ -14,7 +14,7 @@ import {
 } from './comfyui.config';
 import { buildWorkflow } from './comfyui/template';
 import { createPrivacyTransport, drainPrivacyLeases, privateNodeClass, submissionNodeClass, PrivacyNotReadyError, PrivacyRequestError, PrivacyInvalidResponseError, type PrivacyConfig, type PrivacyJob, type ComfyFetch } from './comfyui/privacy';
-import { snapVideoFrameGrid } from '@atelier/shared';
+import { snapVideoFrameGrid, type RenderResolution } from '@atelier/shared';
 import { createComfyuiHealthTransport, type ComfyuiHealthTransport } from './comfyui/health';
 
 export interface ComfyuiProviderConfig {
@@ -58,6 +58,11 @@ export interface ComfyuiProviderConfig {
   maxReferenceImages?: number;
   /** Render sizes of the reference graph. Defaults to `ratioDims`. */
   referenceRatioDims?: Record<string, { width: number; height: number } | undefined>;
+  /**
+   * User-selectable render sizes; a request's `resolution` picks one for
+   * either graph. Absent means the row offers none.
+   */
+  resolutionDims?: Partial<Record<RenderResolution, Record<string, { width: number; height: number } | undefined>>>;
   /** Long edge of the delivered image; fills `{{outputScale}}` from the rendered size. */
   outputLongEdge?: number;
   /** This model's ratio→dims map. */
@@ -438,7 +443,10 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
       const terminalIndices = new Set<number>();
       try {
         const references = outputKind === 'image' ? req.refImages ?? [] : [];
-        const dims = (references.length > 0 ? config.referenceRatioDims ?? ratioDims : ratioDims)[req.ratio];
+        // The user's render size, resolved per mode at dispatch, wins over the
+        // row's per-graph default.
+        const sizeDims = req.resolution !== undefined ? config.resolutionDims?.[req.resolution] : undefined;
+        const dims = (sizeDims ?? (references.length > 0 ? config.referenceRatioDims ?? ratioDims : ratioDims))[req.ratio];
         if (!dims) {
           yield* failedTerminals(req, `unsupported ratio: ${req.ratio}`);
           return;

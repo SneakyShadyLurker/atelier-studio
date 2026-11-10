@@ -10,7 +10,7 @@ import {
   GLM_ABLITERATED_STREAM_DRAIN_MS,
   aiFillBatchPerAttemptTimeoutMs,
   aiFillPerAttemptTimeoutMs,
-  kreaCondenseTimeoutMs,
+  promptRewriteTimeoutMs,
   AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS,
   AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
   aiFillBatchRouteTimeoutMs,
@@ -74,13 +74,13 @@ describe('budgets by latency profile (spec § 11.2 item 2)', () => {
     expect(aiFillPerAttemptTimeoutMs('standard', 120_000)).toBe(120_000);
     expect(aiFillBatchPerAttemptTimeoutMs('standard')).toBe(150_000);
     expect(textStreamDrainMs('standard', 300_000)).toBe(300_000);
-    expect(kreaCondenseTimeoutMs('standard', 150_000)).toBe(150_000);
+    expect(promptRewriteTimeoutMs('standard', 150_000)).toBe(150_000);
     expect(textMaxResponseBytes('standard', 1024 * 1024)).toBe(1024 * 1024);
 
     expect(aiFillPerAttemptTimeoutMs('slow', 120_000)).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
     expect(aiFillBatchPerAttemptTimeoutMs('slow')).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
     expect(textStreamDrainMs('slow', 300_000)).toBe(GLM_ABLITERATED_STREAM_DRAIN_MS);
-    expect(kreaCondenseTimeoutMs('slow', 150_000)).toBe(GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS);
+    expect(promptRewriteTimeoutMs('slow', 150_000)).toBe(GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS);
     expect(textMaxResponseBytes('slow', 1024 * 1024)).toBe(GLM_ABLITERATED_MAX_RESPONSE_BYTES);
     // A configured value above the floor still wins.
     expect(textStreamDrainMs('slow', GLM_ABLITERATED_STREAM_DRAIN_MS + 1)).toBe(GLM_ABLITERATED_STREAM_DRAIN_MS + 1);

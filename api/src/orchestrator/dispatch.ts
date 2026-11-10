@@ -96,7 +96,7 @@ export interface StartPreparedOptions {
   readonly boundProvider: Provider;
   readonly reservation: ReservationReleaser;
   readonly touchRequiredKey: (() => Promise<void>) | undefined;
-  /** The queue preparer already attempted prompt condensation. */
+  /** The queue preparer already attempted the prompt rewrite (condensation or expansion). */
   readonly promptPrepared?: boolean;
 }
 

@@ -4,8 +4,14 @@ import { reportIfCorruption } from '../db/integrity';
 import type { AppLogger } from '../observability/logger';
 import type { TextServices } from '../routing/textServices';
 import { findModel } from '../providers/registry';
-import { countPromptWords, KREA_PROMPT_CONDENSE_TRIGGER_WORDS, promptWordBudgetForModel } from '../prompts/promptBudget';
+import {
+  countPromptWords,
+  KREA_PROMPT_CONDENSE_TRIGGER_WORDS,
+  promptNeedsExpansionForModel,
+  promptWordBudgetForModel,
+} from '../prompts/promptBudget';
 import { condenseBatchPrompt } from './condenseBatchPrompt';
+import { expandBatchPrompt } from './expandBatchPrompt';
 import * as queue from './queue';
 import { getBatchForUser, preRegisterBatch, setBatchDonePromise, unregisterBatch, type BatchEntry } from './registry';
 
@@ -32,9 +38,17 @@ let runtime: PreparationRuntime | null = null;
 let unsubscribe: (() => void) | undefined;
 const jobs = new Set<PreparationJob>();
 
-export function needsQueuedPromptPreparation(modelId: string, prompt: string): boolean {
+function needsCondensation(modelId: string, prompt: string): boolean {
   return promptWordBudgetForModel(modelId) !== null
     && countPromptWords(prompt) > KREA_PROMPT_CONDENSE_TRIGGER_WORDS;
+}
+
+// Krea condensation and H3 Image expansion are exclusive by target. With
+// H3_IMAGE_AUTO_EXPAND off a short H3 Image prompt is not prepared at all, so
+// it gains no queue delay.
+export function needsQueuedPromptPreparation(config: Config, modelId: string, prompt: string): boolean {
+  return needsCondensation(modelId, prompt)
+    || (config.H3_IMAGE_AUTO_EXPAND && promptNeedsExpansionForModel(modelId, prompt));
 }
 
 function current(job: PreparationJob): boolean {
@@ -71,7 +85,7 @@ export function stopQueuedPromptPreparation(): Promise<unknown[]> {
   return Promise.allSettled([...jobs].map((job) => job.done));
 }
 
-// Called synchronously before local admission: mark EVERY long prompt pending
+// Called synchronously before local admission: mark EVERY prompt that needs a rewrite pending
 // before starting any asynchronous work, including reconstructed queue rows.
 export function prepareQueuedPrompts(db: Database): boolean {
   const configured = runtime;
@@ -98,7 +112,7 @@ export function prepareQueuedPrompts(db: Database): boolean {
       const registered = findModel(entry.modelId, configured.config);
       const eligible = registered?.model.pool === 'local'
         && configured.config.LOCAL_MODELS_USERS.has(entry.userId);
-      const needsPreparation = eligible && needsQueuedPromptPreparation(entry.modelId, prompt);
+      const needsPreparation = eligible && needsQueuedPromptPreparation(configured.config, entry.modelId, prompt);
       queue.setPromptPreparation(entry.batchId, entry.epoch, needsPreparation ? 'pending' : 'ready');
     }
     for (const entry of queue.entries('local')) {
@@ -132,7 +146,8 @@ async function runPreparation(job: PreparationJob): Promise<void> {
   let ready = false;
   let retry = false;
   try {
-    const prompt = await condenseBatchPrompt(job.original, entry.modelId, {
+    const rewrite = needsCondensation(entry.modelId, job.original) ? condenseBatchPrompt : expandBatchPrompt;
+    const prompt = await rewrite(job.original, entry.modelId, {
       ...configured, userId: entry.userId, signal: registered.batchController.signal,
     });
     if (!current(job) || registered.batchController.signal.aborted) return;

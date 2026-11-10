@@ -136,6 +136,12 @@ admin can also choose a text model to write the prompts for a particular image
 model. If they lock that choice, your pick does not apply there and the result
 can come from a different model than the one you chose. Otherwise your pick
 still wins.
+
+On **MiniMax H3 Image**, a prompt under 60 words is expanded automatically
+before it renders, because that model draws very short prompts poorly. The
+batch then shows the expanded prompt. To keep full control, write a fuller
+prompt or press **Enhance** and edit the result before you generate.
+
 Read [Prompt Library authoring](prompt-library-authoring.md) for syntax,
 weights, dimensions and worked examples.
 

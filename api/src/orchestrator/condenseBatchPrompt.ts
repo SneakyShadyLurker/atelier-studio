@@ -1,28 +1,14 @@
 import type { Database } from 'bun:sqlite';
-import { MAX_PROMPT_CHARS } from '@atelier/shared';
-import type { Config } from '../config';
-import type { AppLogger } from '../observability/logger';
 import { buildCondensePromptSystemPrompt } from '../prompts/condensePromptSystemPrompt';
-import { isLikelyModelRefusal } from '../prompts/modelOutput';
 import {
   countPromptWords,
   KREA_PROMPT_CONDENSE_TRIGGER_WORDS,
   promptWordBudgetForModel,
 } from '../prompts/promptBudget';
-import { kreaCondenseTimeoutMs } from '../providers/text/textBudgets';
-import { imageModelRouting, textProviderForResolved } from '../providers/textRouting';
-import type { ResolvedTextModel } from '../routing/textModelResolver';
-import type { TextServices } from '../routing/textServices';
-import { enhancePool } from './llmAdmission';
+import { promptRewriteTimeoutMs } from '../providers/text/textBudgets';
+import { rewriteBatchPrompt, type RewriteDeps } from './rewriteBatchPrompt';
 
-export interface CondenseDeps {
-  readonly config: Config;
-  readonly text: TextServices;
-  readonly logger: AppLogger;
-  readonly userId: string;
-  /** Batch controller signal — user cancel, DELETE /history, SIGTERM drain. */
-  readonly signal: AbortSignal;
-}
+export type CondenseDeps = RewriteDeps;
 
 /**
  * Condense an over-budget Krea prompt down toward its word budget.
@@ -43,84 +29,27 @@ export interface CondenseDeps {
  * `krea_prompt_condense_skipped`. A condense failure must never fail a batch
  * the user already paid queue time for.
  */
-export async function condenseBatchPrompt(
+export function condenseBatchPrompt(
   prompt: string,
   modelId: string,
   deps: CondenseDeps,
 ): Promise<string> {
   const wordBudget = promptWordBudgetForModel(modelId);
-  const beforeWords = countPromptWords(prompt);
-  if (wordBudget === null || beforeWords <= KREA_PROMPT_CONDENSE_TRIGGER_WORDS) return prompt;
-
-  const skip = (reason: string, afterWords?: number): string => {
-    deps.logger.info(
-      {
-        event: 'krea_prompt_condense_skipped',
-        reason,
-        beforeWords,
-        ...(afterWords === undefined ? {} : { afterWords }),
-      },
-      'Krea prompt condensation skipped',
-    );
-    return prompt;
-  };
+  if (wordBudget === null || countPromptWords(prompt) <= KREA_PROMPT_CONDENSE_TRIGGER_WORDS) {
+    return Promise.resolve(prompt);
+  }
   // Condensation runs only for Krea rows, on the `condense` task's model.
-  // Resolved before the timer so the deadline follows the model.
-  let resolved: ResolvedTextModel;
-  try {
-    resolved = deps.text.resolve({ userId: deps.userId, task: 'condense', ...imageModelRouting(deps.config, modelId) });
-  } catch {
-    return skip('error');
-  }
-  if (!resolved.ok) return skip(`text-model-${resolved.reason}`);
-  const textModel = resolved.model;
-  const reasoningEffort = resolved.effort;
-  const timeoutSignal = AbortSignal.timeout(kreaCondenseTimeoutMs(textModel.latencyProfile, deps.config.KREA_CONDENSE_TIMEOUT_MS));
-  const signal = AbortSignal.any([deps.signal, timeoutSignal]);
-  let releaseEnhanceSlot: (() => void) | null = null;
-
-  try {
-    const slot = enhancePool.acquire(deps.userId);
-    if (!slot.ok) return skip(`admission-${slot.reason}`);
-    releaseEnhanceSlot = () => { slot.release(); };
-
-    const provider = textProviderForResolved(deps.config, deps.text, textModel);
-    const systemPrompt = buildCondensePromptSystemPrompt(wordBudget);
-    let condensed = '';
-    let completed = false;
-
-    const enhanceOpts = reasoningEffort === undefined ? {} : { reasoningEffort };
-
-    for await (const chunk of provider.enhance(prompt, [], signal, systemPrompt, enhanceOpts)) {
-      if (signal.aborted) break;
-      if (chunk.type === 'delta') condensed += chunk.text;
-      else if (chunk.type === 'done') completed = true;
-      else if (chunk.type === 'failed') return skip('provider-failed');
-    }
-
-    if (timeoutSignal.aborted) return skip('timeout');
-    if (deps.signal.aborted) return skip('batch-canceled');
-    if (!completed) return skip('truncated');
-
-    const candidate = condensed.trim();
-    if (candidate.length === 0) return skip('empty');
-    if (isLikelyModelRefusal(candidate)) return skip('refusal');
-    const afterWords = countPromptWords(candidate);
-    if (candidate.length > MAX_PROMPT_CHARS) return skip('over-char-limit', afterWords);
-    if (afterWords >= beforeWords) return skip('not-shorter', afterWords);
-
-    deps.logger.info(
-      { event: 'krea_prompt_condensed', beforeWords, afterWords },
-      'Krea prompt condensed',
-    );
-    return candidate;
-  } catch {
-    if (timeoutSignal.aborted) return skip('timeout');
-    if (deps.signal.aborted) return skip('batch-canceled');
-    return skip('error');
-  } finally {
-    releaseEnhanceSlot?.();
-  }
+  return rewriteBatchPrompt(prompt, modelId, deps, {
+    task: 'condense',
+    systemPrompt: buildCondensePromptSystemPrompt(wordBudget),
+    timeoutMs: (profile) => promptRewriteTimeoutMs(profile, deps.config.KREA_CONDENSE_TIMEOUT_MS),
+    accepts: (afterWords, beforeWords) => afterWords < beforeWords,
+    rejectReason: 'not-shorter',
+    skippedEvent: 'krea_prompt_condense_skipped',
+    skippedMessage: 'Krea prompt condensation skipped',
+    doneEvent: 'krea_prompt_condensed',
+    doneMessage: 'Krea prompt condensed',
+  });
 }
 
 /**

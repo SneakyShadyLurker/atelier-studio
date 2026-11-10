@@ -693,7 +693,7 @@ describe('MOSS brainstorm target', () => {
 describe('MiniMax H3 Image brainstorm target', () => {
   const record = `scene${BRAINSTORM_FIELD_SEPARATOR}subject${BRAINSTORM_FIELD_SEPARATOR}details`;
 
-  it('appends the all-positive tail', () => {
+  it('appends the compact Krea tail', () => {
     expect(assembleBrainstormCharacterPrompt(record, 'h3image').text).toEndWith(BRAINSTORM_CONSTRAINTS_KREA);
     const photo = assembleBrainstormCharacterPrompt(record, 'h3image', 'single', 'photograph');
     expect(photo.text).toContain(BRAINSTORM_PHOTOGRAPH_CONSTRAINT);
@@ -709,6 +709,9 @@ describe('MiniMax H3 Image brainstorm target', () => {
     const sys = buildBrainstormSystemPrompt({ count: 3, modelId: 'minimax-h3-image' });
     expect(sys).toContain('Target model: MiniMax H3 Image');
     expect(sys).toContain('~90-220 words across the three fields');
+    expect(sys).toContain('say which hand touches what');
+    expect(sys).toContain('an exclusion is a plain statement of what does not appear');
+    expect(sys).not.toContain('State exclusions positively');
     expect(sys).not.toContain('Target model: Krea 2');
     expect(sys).not.toContain('Target model: MOSS Image');
     expect(sys).not.toContain('~60-180 words');

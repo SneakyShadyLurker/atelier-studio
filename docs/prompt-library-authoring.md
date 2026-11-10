@@ -181,16 +181,18 @@ Atelier's word budgets, positive-phrasing rules and texture exclusions are local
 | Adult content | The reference pipeline has no safety checker, and stock SFT renders adult nudity; explicit sex acts render with broken anatomy. The official Qwen3.5 prompt enhancer refuses such content; the image model does not, which is why Atelier's own writers carry the MOSS hint. |
 | Anti-patterns | Tag soup; quality words ("masterpiece", "8k", "best quality"); weight syntax; generic Turbo/DMD distills on SFT (plastic skin). Krea's grain ban and 180-word enhance cap are Krea-specific; the skin-marking and liquid rules apply to every writer. |
 
-**MiniMax H3 Image** (`minimax-h3-image`) is a third local lane. Neither the Krea rules nor the MOSS empirical rules (its sharpness warnings, length bands and skin-texture naming) carry over; the house rules on skin markings, liquids, positive exclusions, quoted text, and no quality tags or weight syntax do. Source: MiniMax's official model card.
+**MiniMax H3 Image** (`minimax-h3-image`) is a third local lane. Neither the Krea rules nor the MOSS empirical rules (its sharpness warnings, length bands and skin-texture naming) carry over; the house rules on skin markings, liquids, quoted text, and no quality tags or weight syntax do. Sources: MiniMax's official model card, its prompt-writing skill (`skills/h3-image-prompt-writing` in the model's repository) and the task prompt of its official prompt expander.
 
-| Axis | MiniMax H3 Image (Qwen3-VL 32B encoder · euler 6 steps · guidance 1 · ~8 MP) |
+| Axis | MiniMax H3 Image (Qwen3-VL 32B encoder · euler 6 steps · guidance 1 · ~16 MP) |
 |---|---|
 | Structure | One fluent English natural-language description of the finished image, opening with the kind of image (photograph, illustration, poster, diagram) and the subject. |
 | Length | No Atelier word budget and no condense pass. The enhancer treats roughly 120 to 300 words as typical for a single-subject scene and lets a text-heavy or multi-panel layout run longer; content sets the length, never padding. |
-| Facets | For a scene: subject identity, pose and contact, scale, environment, light, lens or medium, physical plausibility. For a designed artifact (poster, card, interface, infographic, packaging): a finished layout naming what each region holds and its hierarchy. |
-| Text rendering | Renders text well. Literal words verbatim in double quotes, with what carries them and where. |
-| Exclusions | State them as the positive visual state; the model has no negative prompt. |
-| Anti-patterns | Abstract mood words and generic adjectives in place of visible cues; hype and quality words; tag lists; weight syntax. |
+| Focus | One clear visual focus. Detail is added for a purpose (a readable interaction, a convincing material, depth, light, hierarchy), and the requested medium and restraint are kept: a minimal image stays minimal. |
+| Scenes | One frozen moment: the subject's visible state or action, viewpoint, setting and meaningful light. Left and right, foreground and background, gaze, body orientation to the camera, hands and contact must agree; where contact matters, say which hand touches what. |
+| Designed artifacts | Poster, card, interface, chart, infographic, packaging: hierarchy in reading order, every region with its actual content (real title, labels, values, copy), never "some icons". No invented statistics presented as real. |
+| Text rendering | Renders text well. Literal words verbatim in double quotes on the surface that carries them, keeping capitalisation, punctuation and line order. Narration is English; lettering keeps its own language. No unrequested lettering. |
+| Exclusions | Stated plainly in one closing sentence, as the official examples do ("No lettering or additional people appear."); the model has no negative prompt. This differs from Krea and MOSS. |
+| Anti-patterns | Abstract mood words and generic adjectives in place of visible cues; hype and quality words; hidden backstory; extra principal subjects; tag lists; weight syntax. |
 
 ## Prompting guidance for the text LLMs (metaprompts + ai-fill)
 

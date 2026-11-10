@@ -164,7 +164,8 @@ describe('buildAiFillSystemPrompt MiniMax H3 Image target', () => {
     const h3 = buildAiFillSystemPrompt({ modelId: 'minimax-h3-image', slotCount: 2, perSlotWordBudget: 30 });
     expect(h3).toContain('Target model: MiniMax H3 Image');
     expect(h3).toContain('There is no word budget');
-    expect(h3).toContain('State exclusions POSITIVELY');
+    expect(h3).toContain('one plain closing statement of what does not appear');
+    expect(h3).not.toContain('State exclusions POSITIVELY');
     expect(h3).toContain('verbatim in double quotes');
     expect(h3).not.toContain('Target model: Krea 2');
     expect(h3).not.toContain('Target model: MOSS Image');

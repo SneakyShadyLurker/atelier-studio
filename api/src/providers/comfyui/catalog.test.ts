@@ -400,6 +400,94 @@ describe('loadLocalModelCatalog: residency groups', () => {
     expectFailure(() => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: external }), manifestPath);
   });
 
+  describe('resolutionMaps', () => {
+    const maps = { '4mp': 'krea-2048', '8mp': 'h3image-8mp', '16mp': 'h3image-16mp' };
+    const load = (external: string) =>
+      loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: external }).byId.get('krea-test-delta');
+
+    test('resolves each size and takes ratioMap as the text-to-image default', () => {
+      const external = copyFixture(EXTERNAL);
+      editManifest(external, 'krea-test-delta', (manifest) => { manifest.resolutionMaps = maps; });
+      const model = load(external);
+      expect(model?.resolutionDims).toEqual({
+        '4mp': RATIO_MAPS['krea-2048'],
+        '8mp': RATIO_MAPS['h3image-8mp'],
+        '16mp': RATIO_MAPS['h3image-16mp'],
+      });
+      expect(model?.defaultResolution).toBe('4mp');
+      expect(model).not.toHaveProperty('defaultReferenceResolution');
+    });
+
+    test('a row without the field offers no sizes', () => {
+      const model = load(copyFixture(EXTERNAL));
+      expect(model).not.toHaveProperty('resolutionDims');
+      expect(model).not.toHaveProperty('defaultResolution');
+    });
+
+    test('the reference default is referenceRatioMap, else ratioMap', () => {
+      const own = referenceFixture(['{{referenceImage}}']);
+      editManifest(own.external, 'krea-test-delta', (manifest) => {
+        manifest.resolutionMaps = maps;
+        manifest.referenceRatioMap = 'h3image-16mp';
+      });
+      expect(load(own.external)?.defaultReferenceResolution).toBe('16mp');
+      const inherited = referenceFixture(['{{referenceImage}}']);
+      editManifest(inherited.external, 'krea-test-delta', (manifest) => { manifest.resolutionMaps = maps; });
+      expect(load(inherited.external)?.defaultReferenceResolution).toBe('4mp');
+    });
+
+    test('an unknown map name stops the load', () => {
+      const external = copyFixture(EXTERNAL);
+      const manifestPath = editManifest(external, 'krea-test-delta', (manifest) => {
+        manifest.resolutionMaps = { ...maps, '8mp': 'nope' };
+      });
+      expectFailure(() => load(external), manifestPath);
+    });
+
+    test('a missing or extra key stops the load', () => {
+      const missing = copyFixture(EXTERNAL);
+      const missingPath = editManifest(missing, 'krea-test-delta', (manifest) => {
+        manifest.resolutionMaps = { '4mp': 'krea-2048', '16mp': 'h3image-16mp' };
+      });
+      expectFailure(() => load(missing), missingPath);
+      const extra = copyFixture(EXTERNAL);
+      const extraPath = editManifest(extra, 'krea-test-delta', (manifest) => {
+        manifest.resolutionMaps = { ...maps, '2mp': 'krea-2048' };
+      });
+      expectFailure(() => load(extra), extraPath);
+    });
+
+    test('ratioMap outside the sizes stops the load', () => {
+      const external = copyFixture(EXTERNAL);
+      const manifestPath = editManifest(external, 'krea-test-delta', (manifest) => {
+        manifest.resolutionMaps = { ...maps, '4mp': 'h3image-4mp' };
+      });
+      expect(expectFailure(() => load(external), manifestPath).message).toContain('ratioMap is not one');
+    });
+
+    test('a reference map outside the sizes stops the load', () => {
+      const fixture = referenceFixture(['{{referenceImage}}']);
+      editManifest(fixture.external, 'krea-test-delta', (manifest) => {
+        manifest.resolutionMaps = maps;
+        manifest.referenceRatioMap = 'h3image-4mp';
+      });
+      expect(expectFailure(() => load(fixture.external), fixture.manifestPath).message)
+        .toContain('referenceRatioMap is not one');
+    });
+
+    test('a video row stops the load', () => {
+      const external = copyFixture(EXTERNAL);
+      const manifestPath = editManifest(external, 'video-test-gamma', (manifest) => {
+        manifest.resolutionMaps = { '4mp': manifest.ratioMap, '8mp': 'h3image-8mp', '16mp': 'h3image-16mp' };
+      });
+      const error = expectFailure(
+        () => loadLocalModelCatalog({ builtinDir: BUILTIN, externalDir: external, enableModels: ['video-test-gamma'] }),
+        manifestPath,
+      );
+      expect(error.message).toContain('image rows only');
+    });
+  });
+
   test('outputLongEdge and the {{outputScale}} placeholder must appear together, on image rows only', () => {
     const scaled = (external: string): string => {
       const graphPath = join(external, 'krea-test-delta', 'workflow.json');

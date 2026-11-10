@@ -416,7 +416,7 @@ describe('migration 59 - GPT Image 2.6 writer', () => {
       const retired = before.find((row) => row.image_model_id === 'gpt-image-2.5-sunburst');
       expect(retired?.mode).toBe('lock');
       migrate(db, dataDir);
-      expect(schemaVersion(db)).toBe(59);
+      expect(schemaVersion(db)).toBe(60);
       expect(writers(db)).toEqual(
         before
           .map((row) => (row === retired ? { ...row, image_model_id: 'gpt-image-2.6-sunburst' } : row))

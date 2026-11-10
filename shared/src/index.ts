@@ -1265,6 +1265,34 @@ export interface ModelStepsPutRequest {
   readonly steps: number | null;
 }
 
+/** Render sizes a local row may offer (megapixels); delivery size is unchanged. */
+export const RENDER_RESOLUTIONS = ['4mp', '8mp', '16mp'] as const;
+export type RenderResolution = (typeof RENDER_RESOLUTIONS)[number];
+
+export interface ModelResolutionSetting {
+  readonly modelId: string;
+  readonly name: string;
+  /** The row's text-to-image render size. */
+  readonly defaultTextToImage: RenderResolution;
+  /** The user's text-to-image override, or null when the default applies. */
+  readonly textToImage: RenderResolution | null;
+  /** The reference-picture render size; null when the row takes no reference pictures. */
+  readonly defaultReference: RenderResolution | null;
+  /** The user's reference override, or null when the default applies or the row has none. */
+  readonly reference: RenderResolution | null;
+}
+
+export interface ModelResolutionSettingsResponse {
+  readonly options: readonly RenderResolution[];
+  readonly models: readonly ModelResolutionSetting[];
+}
+
+export interface ModelResolutionPutRequest {
+  /** null (or the default value) resets that mode; an absent key leaves it unchanged. */
+  readonly textToImage?: RenderResolution | null;
+  readonly reference?: RenderResolution | null;
+}
+
 /** Advisory leading ai-fill frame naming the text model serving the fill. */
 export interface AiFillBackendFrame {
   readonly modelId: string;
@@ -1541,6 +1569,9 @@ type _NoUserIdOnAiFillBatchSseEvent = _Assert<_NoUserIdOn<AiFillBatchSseEvent>>;
 type _NoUserIdOnTextRouting = _Assert<_NoUserIdOn<TextRoutingResponse>>;
 type _NoUserIdOnModelStepsSettings = _Assert<_NoUserIdOn<ModelStepsSettingsResponse>>;
 type _NoUserIdOnModelStepsSetting = _Assert<_NoUserIdOn<ModelStepsSetting>>;
+type _NoUserIdOnModelResolutionSettings = _Assert<_NoUserIdOn<ModelResolutionSettingsResponse>>;
+type _NoUserIdOnModelResolutionSetting = _Assert<_NoUserIdOn<ModelResolutionSetting>>;
+type _NoUserIdOnModelResolutionPut = _Assert<_NoUserIdOn<ModelResolutionPutRequest>>;
 type _NoUserIdOnBrainstormCharactersRequest = _Assert<_NoUserIdOn<BrainstormCharactersRequest>>;
 type _NoUserIdOnDraftListRequest = _Assert<_NoUserIdOn<DraftVariableListRequest>>;
 type _NoUserIdOnDraftVariableListResponse = _Assert<_NoUserIdOn<DraftVariableListResponse>>;

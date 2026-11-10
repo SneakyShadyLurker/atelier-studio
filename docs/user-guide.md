@@ -100,6 +100,11 @@ automatically before it renders when a text model that accepts images is
 available. Every MiniMax H3 Image result is delivered with a 2048 pixel long
 edge: without pictures the model renders at about 16 megapixels and the
 result is reduced from that, with pictures it renders at about 4.
+You can change both sizes in Prompt Library → Settings → Render resolution:
+pick 4, 8 or 16 MP for Text to image and for With reference pictures. A
+larger size takes longer; the delivered image stays 2048 pixels on the long
+edge. With pictures, 4 and 8 MP give clean results; 16 MP is available but
+tends to come out harsh and over-sharpened.
 
 Reference uploads are kept with your user data. Removing a reference from the
 current prompt changes the next request; it does not rewrite a completed batch.

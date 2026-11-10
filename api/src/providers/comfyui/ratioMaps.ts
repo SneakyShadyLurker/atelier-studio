@@ -52,6 +52,15 @@ export const RATIO_MAPS = {
     '16:9': { width: 5472, height: 3072 }, // 16.81 MP
     '9:16': { width: 3072, height: 5472 }, // 16.81 MP
   },
+  // MiniMax H3 Image at ~8 MP, a user-selectable middle size. Every side a
+  // multiple of 32 and every aspect equal to the 16 MP map's.
+  'h3image-8mp': {
+    '1:1': { width: 2880, height: 2880 },  // 8.29 MP
+    '4:5': { width: 2560, height: 3200 },  // 8.19 MP, exact 4:5
+    '3:4': { width: 2496, height: 3328 },  // 8.31 MP, exact 3:4
+    '16:9': { width: 3648, height: 2048 }, // 7.47 MP, the 16 MP map's 57:32
+    '9:16': { width: 2048, height: 3648 }, // 7.47 MP
+  },
   // MiniMax H3 Image with reference pictures: ~4 MP, the area the model is
   // tuned for and the size of its official edit workflow. At 16 MP a
   // reference render takes four times as long and comes out over-sharpened,

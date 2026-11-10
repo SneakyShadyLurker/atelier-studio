@@ -7,6 +7,7 @@ import { usePendingTaskPicks, useSetTaskPick, useTextModels } from '../../hooks/
 import { useTextModelGate } from '../../hooks/useTextModelGate';
 import ChipSelect, { type ChipSelectOption } from '../Composer/ChipSelect';
 import { LoadingState, ErrorState } from '../StateView';
+import ModelResolutionSection from './ModelResolutionSection';
 import ModelStepsSection from './ModelStepsSection';
 import styles from './SettingsPanel.module.css';
 
@@ -191,6 +192,7 @@ export default function SettingsPanel() {
     <div className={styles.stack}>
       <TextModelsSection />
       <ModelStepsSection />
+      <ModelResolutionSection />
     </div>
   );
 }

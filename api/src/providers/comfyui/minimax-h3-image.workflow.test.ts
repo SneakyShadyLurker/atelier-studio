@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { RATIO_VALUES } from '@atelier/shared';
 import { buildWorkflow } from './template';
 import { loadBuiltinCatalog } from './catalog';
+import { RATIO_MAPS } from './ratioMaps';
 
 const { kreaModels: KREA_MODELS, models: LOCAL_MODELS } = loadBuiltinCatalog();
 
@@ -66,7 +67,7 @@ describe('MiniMax H3 Image workflow', () => {
     expect(h3.saveImageNodeId).toBe('9');
     expect(h3.requiredPlaceholders).toEqual(['{{prompt}}', '{{seed}}', '{{width}}', '{{height}}', '{{steps}}', '{{outputScale}}']);
     expect(h3.outputLongEdge).toBe(2048);
-    expect(h3.size).toBe('≈16MP → 2K · INT8 ConvRot');
+    expect(h3.size).toBe('≤16MP → 2K · INT8 ConvRot');
     expect(h3.defaultSteps).toBe(6);
     expect(h3.batched).toBe(false);
     expect(h3.defaultCount).toBe(1);
@@ -119,6 +120,32 @@ describe('MiniMax H3 Image workflow', () => {
     }
     for (const ratio of ['1:1', '4:5', '3:4'] as const) {
       expect(reference[ratio].width * h3.ratioDims[ratio].height).toBe(reference[ratio].height * h3.ratioDims[ratio].width);
+    }
+  });
+
+  test('offers 4, 8 and 16 MP, defaulting to 16 MP for text to image and 4 MP with reference pictures', () => {
+    expect(h3.resolutionDims).toEqual({
+      '4mp': RATIO_MAPS['h3image-4mp'],
+      '8mp': RATIO_MAPS['h3image-8mp'],
+      '16mp': RATIO_MAPS['h3image-16mp'],
+    });
+    expect(h3.defaultResolution).toBe('16mp');
+    expect(h3.defaultReferenceResolution).toBe('4mp');
+  });
+
+  test('the 8 MP map sits on the 32 grid, keeps the 16 MP aspect exactly and delivers a 2048 px long edge', () => {
+    const eight = RATIO_MAPS['h3image-8mp'];
+    for (const ratio of h3.supportedRatios) {
+      const { width, height } = eight[ratio];
+      const full = h3.ratioDims[ratio];
+      expect(width % 32).toBe(0);
+      expect(height % 32).toBe(0);
+      const megapixels = (width * height) / 1_000_000;
+      expect(megapixels).toBeGreaterThan(7.4);
+      expect(megapixels).toBeLessThan(8.4);
+      expect(width * full.height).toBe(height * full.width);
+      const scale = 2048 / Math.max(width, height);
+      expect(Math.max(Math.round(width * scale), Math.round(height * scale))).toBe(2048);
     }
   });
 

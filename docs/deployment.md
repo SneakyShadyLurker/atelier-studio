@@ -463,6 +463,8 @@ its queued batches and loading tiles finish. Queued rows keep their original
 model id; after the upgrade, dequeue rejects that retired id and fails those
 batches. Verify the queue is drained immediately before replacing the API.
 
+Schema v60 adds `user_model_resolution`, the per-user render-size setting for local rows that offer it. It creates an empty table and leaves existing rows intact. Once v60 is recorded, a v59 image refuses the database, so retain a forward-fix path instead of relying on the previous image alone.
+
 Follow these steps for a release:
 
 1. **Lock.** Hold one deploy lock per compose directory so a deploy and host maintenance never overlap. `infra/docker/deploy-lock.sh` is a bash 3.2 lock library (BSD and Linux) for this: an owner record in `infra/docker/.deploy.lock`, stale-lock recovery under a kernel flock on `infra/docker/.deploy-reclaim.flock`, and a refusal while a live owner or child holds it. Never delete `.deploy-reclaim.flock`; keep both paths gitignored.

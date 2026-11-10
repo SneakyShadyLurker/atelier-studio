@@ -1484,6 +1484,37 @@ describe('migration 56 - user_model_steps', () => {
   });
 });
 
+describe('migration 60 - user_model_resolution', () => {
+  test('applies on top of v59, allows NULL modes, enforces the size list and cascades with the user', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'atelier-migration60-'));
+    const db = new Database(':memory:');
+    try {
+      migrate(db, dataDir);
+      db.run('DROP TABLE user_model_resolution');
+      db.run('DELETE FROM schema_versions WHERE version >= 60');
+      expect(db.query('SELECT MAX(version) AS version FROM schema_versions').get()).toEqual({ version: 59 });
+
+      migrate(db, dataDir);
+      expect(db.query('SELECT COUNT(*) AS count FROM schema_versions WHERE version = 60').get()).toEqual({ count: 1 });
+      db.run("INSERT INTO users (id, created_at) VALUES ('u1', 1)");
+      db.run("INSERT INTO user_model_resolution VALUES ('u1', 'minimax-h3-image', '8mp', NULL, 1)");
+      db.run("INSERT INTO user_model_resolution VALUES ('u1', 'other-row', NULL, '16mp', 1)");
+      for (const bad of ['2mp', '8MP', '']) {
+        expect(() => db.query("INSERT INTO user_model_resolution VALUES ('u1', 'bad-text', ?, NULL, 1)").run(bad))
+          .toThrow(/CHECK constraint failed/i);
+        expect(() => db.query("INSERT INTO user_model_resolution VALUES ('u1', 'bad-ref', NULL, ?, 1)").run(bad))
+          .toThrow(/CHECK constraint failed/i);
+      }
+      expect(() => db.run("INSERT INTO user_model_resolution VALUES ('u1', 'minimax-h3-image', '4mp', NULL, 2)"))
+        .toThrow(/UNIQUE constraint failed/i);
+      db.run("DELETE FROM users WHERE id = 'u1'");
+      expect(db.query('SELECT COUNT(*) AS count FROM user_model_resolution').get()).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe('migration 44 - retire Pro text backend', () => {
   test('maps v43 Pro overrides to Flash, which migration 55 then retires, and rejects the retired key', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-migration44-'));

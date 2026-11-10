@@ -22,7 +22,7 @@
     "9:16"
   ],
   "defaultRatio": "3:4",
-  "size": "≈16MP → 2K · INT8 ConvRot",
+  "size": "≤16MP → 2K · INT8 ConvRot",
   "latency": "medium",
   "batched": false,
   "defaultCount": 1,
@@ -33,6 +33,11 @@
   "outputLongEdge": 2048,
   "maxReferenceImages": 3,
   "referenceRatioMap": "h3image-4mp",
+  "resolutionMaps": {
+    "4mp": "h3image-4mp",
+    "8mp": "h3image-8mp",
+    "16mp": "h3image-16mp"
+  },
   "requiredModelFiles": [
     "minimax_h3_image_pruned_int8_convrot.safetensors",
     "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",

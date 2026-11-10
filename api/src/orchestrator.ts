@@ -7,6 +7,7 @@ import type {
   GenerateRequest,
   MediaExt,
   MediaMime,
+  RenderResolution,
   TileMime,
   TileErrorCategory,
   TileEvent,
@@ -64,6 +65,7 @@ import { condenseBatchPrompt, persistCondensedPrompt } from './orchestrator/cond
 import { expandBatchPrompt } from './orchestrator/expandBatchPrompt';
 import { doneTileEvent } from './orchestrator/tileEvents';
 import { readModelStepsOverride } from './routing/modelStepsPreference';
+import { readModelResolutionOverride } from './routing/modelResolutionPreference';
 
 export interface ResolvedRefImage {
   bytes: Uint8Array;
@@ -76,6 +78,8 @@ export type ResolvedGenerateRequest = GenerateRequest & {
   i2vContext?: NonNullable<ProviderRequest['i2vContext']>;
   /** The user's base-sampler step override, resolved once per batch at dispatch. */
   steps?: number;
+  /** The user's render size for this batch's mode, resolved once per batch at dispatch. */
+  resolution?: RenderResolution;
 };
 
 export interface GenerationContext {
@@ -175,6 +179,7 @@ export async function runBatchPipeline(prepared: PreparedBatch, ctx: GenerationC
     request = await resolveI2vSourceAfterReservation(ctx, prepared, request);
     request = await resolveI2vContextAfterReservation(ctx, prepared, request);
     request = resolveModelSteps(ctx, request);
+    request = resolveModelResolution(ctx, request);
     // Production queued requests were already prepared before GPU admission.
     // Keep the fail-open fallback for direct/legacy pipeline callers only.
     // Condensation (Krea) and expansion (MiniMax H3 Image) are exclusive by
@@ -413,6 +418,39 @@ function resolveModelSteps(ctx: GenerationContext, request: ResolvedGenerateRequ
   return steps === undefined ? request : { ...request, steps };
 }
 
+/** Whether a resolved request renders with reference pictures. */
+function rendersWithReferences(request: ResolvedGenerateRequest): boolean {
+  return (request.refImages?.length ?? 0) > 0;
+}
+
+/**
+ * Reads the user's render-size override once, at dispatch start and after
+ * references are resolved, so the mode (with or without reference pictures)
+ * is known and a batch never mixes sizes. Rows without sizes carry none.
+ */
+function resolveModelResolution(ctx: GenerationContext, request: ResolvedGenerateRequest): ResolvedGenerateRequest {
+  if (ctx.registryEntry.resolutions === undefined) return request;
+  const override = readModelResolutionOverride(ctx.db, ctx.userId, request.modelId);
+  const resolution = rendersWithReferences(request) ? override?.reference : override?.textToImage;
+  return resolution === undefined || resolution === null ? request : { ...request, resolution };
+}
+
+const RESOLUTION_MEGAPIXELS: Readonly<Record<RenderResolution, number>> = { '4mp': 4, '8mp': 8, '16mp': 16 };
+
+/**
+ * Budget factor for a render size above the mode's default: sampling cost is
+ * ~linear in pixels. A smaller size keeps the default budget.
+ */
+function resolutionTimeoutFactor(ctx: GenerationContext): number {
+  const resolutions = ctx.registryEntry.resolutions;
+  const selected = ctx.request.resolution;
+  if (resolutions === undefined || selected === undefined) return 1;
+  const fallback = rendersWithReferences(ctx.request)
+    ? resolutions.defaultReference ?? resolutions.defaultTextToImage
+    : resolutions.defaultTextToImage;
+  return Math.max(1, RESOLUTION_MEGAPIXELS[selected] / RESOLUTION_MEGAPIXELS[fallback]);
+}
+
 function resolveTimeoutMs(ctx: GenerationContext): number {
   const unscaled = ctx.registryEntry.timeoutMs({
     cloud: ctx.config.CLOUD_TIMEOUT_MS,
@@ -424,9 +462,12 @@ function resolveTimeoutMs(ctx: GenerationContext): number {
   // default; a lower count keeps the default (fast-failure) budget.
   const defaultSteps = ctx.registryEntry.defaultSteps;
   const steps = ctx.request.steps;
-  const base = defaultSteps !== undefined && steps !== undefined && steps > defaultSteps
+  const stepScaled = defaultSteps !== undefined && steps !== undefined && steps > defaultSteps
     ? Math.ceil((unscaled * steps) / defaultSteps)
     : unscaled;
+  // The same holds for pixels: a render size above the mode's default scales
+  // the budget by the megapixel ratio.
+  const base = Math.ceil(stepScaled * resolutionTimeoutFactor(ctx));
   // LOCAL_VIDEO_TIMEOUT_MS budgets the BASELINE 124-frame clip. H3 denoises one
   // joint AV latent over a fixed step count, so cost is ~linear in frames — a
   // 362-frame clip inheriting the 124-frame ceiling would abort mid-render and
@@ -531,6 +572,7 @@ function providerRequestForTile(
     ...(ctx.request.motionPrompt !== undefined ? { motionPrompt: ctx.request.motionPrompt } : {}),
     ...(ctx.request.durationFrames !== undefined ? { durationFrames: ctx.request.durationFrames } : {}),
     ...(ctx.request.steps !== undefined ? { steps: ctx.request.steps } : {}),
+    ...(ctx.request.resolution !== undefined ? { resolution: ctx.request.resolution } : {}),
   };
 }
 

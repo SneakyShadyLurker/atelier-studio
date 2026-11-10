@@ -105,6 +105,34 @@
   display: inline-flex;
 }
 
+/* The render-resolution row carries two labelled chips and Reset, wider than
+   the panel at tablet widths: its control group may shrink so the chips wrap
+   under each other, and the model name keeps its width. */
+@media (width >= 768px) {
+  .sizeRow > .rowMain {
+    flex-shrink: 0;
+  }
+
+  .sizeRow > .rowControl {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+/* A render-resolution chip with its visible mode label. */
+.modeControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modeLabel {
+  white-space: nowrap;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
 .stepsInput {
   width: 64px;
   height: 36px;

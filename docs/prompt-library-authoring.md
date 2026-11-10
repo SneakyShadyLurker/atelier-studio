@@ -187,7 +187,7 @@ Atelier's word budgets, positive-phrasing rules and texture exclusions are local
 |---|---|
 | Structure | One fluent English natural-language description of the finished image, opening with the kind of image (photograph, illustration, poster, diagram) and the subject. |
 | Length | No Atelier word budget and no condense pass. The enhancer treats roughly 120 to 300 words as typical for a single-subject scene and lets a text-heavy or multi-panel layout run longer; content sets the length, never padding. |
-| Short prompts | A prompt under 60 words renders badly (wide cluttered scenes, garbled invented props, a harsh phone-processing look), so queued preparation expands it with the H3 Image enhance prompt before dispatch and the batch keeps the expanded text. Any failure renders the original. Write 60 words or more, or enhance first, to keep the wording as written. |
+| Short prompts | A prompt under 60 words renders badly (wide cluttered scenes, garbled invented props, a harsh phone-processing look), so queued preparation expands it with the H3 Image enhance prompt before dispatch and the batch keeps the expanded text. Any failure renders the original. Only a prompt of 60 words or more, or `H3_IMAGE_AUTO_EXPAND=false`, bypasses this pass; a manual Enhance result that is still under 60 words is expanded again. |
 | Focus | One clear visual focus. Detail is added for a purpose (a readable interaction, a convincing material, depth, light, hierarchy), and the requested medium and restraint are kept: a minimal image stays minimal. |
 | Scenes | One frozen moment: the subject's visible state or action, viewpoint, setting and meaningful light. Left and right, foreground and background, gaze, body orientation to the camera, hands and contact must agree; where contact matters, say which hand touches what. |
 | People | Apparent adult age as a number or a decade: a vague age drifts older, most of all on a nude subject. Build named outright (a slim waist); "athletic" renders visible abdominal definition. Each garment with its material. |
@@ -363,7 +363,7 @@ A well-structured body draws on the same broad sequence of elements. Use them as
 6. **Wardrobe**: the outfit choice and how it is worn, within the target lane's rules.
 7. **Atmosphere and lighting**: tone words land best paired with a concrete light source.
 8. **Environmental detail**: the small lived-in signal, within Krea's scene-complexity budget.
-9. **Closing constraints (cloud lane only)**: "no glamour posing, no staged symmetry, no direct camera awareness" suppresses portrait-mode bias on cloud models. On Krea, use the positive form instead.
+9. **Closing constraints**: "no glamour posing, no staged symmetry, no direct camera awareness" suppresses portrait-mode bias on cloud models. On Krea and MOSS, use the positive form instead. MiniMax H3 Image takes one plain closing exclusion sentence.
 
 Example single-subject opener (structure illustration, not a paste-ready body):
 
@@ -390,7 +390,7 @@ A same-subject diptych locks subject, outfit and setting across panels in prose 
 - [ ] New lists are atom-shaped, and no option is a finished picture.
 - [ ] No option names a time, weather or light quality that another slot in the same sentence supplies.
 - [ ] Every state, atmosphere or condition list is read for valence.
-- [ ] Templates reaching the local lane: no negation, weighting syntax, keyword stacking or closing "no X" block in **static** body text.
+- [ ] Templates reaching Krea or MOSS: no negation, weighting syntax, keyword stacking or closing "no X" block in **static** body text. MiniMax H3 Image alone accepts one plain closing exclusion sentence; weighting syntax and keyword stacking stay out there too.
 - [ ] Dimensions wired with escape hatches; polarity chosen per tag; scripts read both `tagIds` and `excludeTagIds`.
 - [ ] Multi-subject templates: per-woman axes `@N`-scoped, scene axes bare, set-level properties on their own slot, state of dress rolled once per frame, headcount via nested `{{random}}`.
 - [ ] Every dimension carried by a participating list is carried by another slot that actually co-occurs with it.

@@ -33,7 +33,7 @@ access and, if you use local models, model weights.
 - [`prompt-library-authoring.md`](./prompt-library-authoring.md): prompt
   template, variable-list and tag-dimension grammar, pairwise-coherence
   rules, and the per-model prompting contracts (gpt-image-2.6-sunburst,
-  Krea 2, MOSS) for template bodies and text-LLM metaprompts.
+  Krea 2, MOSS, MiniMax H3 Image) for template bodies and text-LLM metaprompts.
 - [`web-conventions.md`](./web-conventions.md): Web UI conventions, canonical
   component owners and the phone breakpoint contract.
 - [Native anchors](./native-anchors.md): overlay relationships, CSS placement,

@@ -133,7 +133,7 @@ atelier-api builds data URLs from upload bytes (`Buffer.from(bytes).toString('ba
 
 ## Text providers and models
 
-Every text feature (Enhance, the motion writer, AI fill, Brainstorm, Krea condense, the story planner and segments, dimension inference and rescue, list and template drafts) calls a **text model** that an admin configured in the app's Text models view. The first-timer walkthrough is [Connect a text model](connect-a-text-model.md); this section is the reference. Nothing here reads `CLIPROXY_*`: the CLIProxyAPI connection above serves GPT Image only, unless an upgrade migrated the old text backends into a provider (see [Migration from the fixed backends](#migration-from-the-fixed-backends)).
+Every text feature (Enhance, the motion writer, AI fill, Brainstorm, Krea condense, MiniMax H3 Image short-prompt expansion, the story planner and segments, dimension inference and rescue, list and template drafts) calls a **text model** that an admin configured in the app's Text models view. The first-timer walkthrough is [Connect a text model](connect-a-text-model.md); this section is the reference. Nothing here reads `CLIPROXY_*`: the CLIProxyAPI connection above serves GPT Image only, unless an upgrade migrated the old text backends into a provider (see [Migration from the fixed backends](#migration-from-the-fixed-backends)).
 
 ### Providers
 
@@ -160,7 +160,7 @@ A model row (`text_models`) names one upstream `model_id` on a provider. Its set
 | Reasoning levels, Default effort | `reasoning_levels`, `reasoning_default` | Levels are what users may pick. The default is sent when the user picked nothing; null sends no effort field. Empty levels plus a default is a fixed effort. OpenAI-compatible sends `reasoning_effort`; Anthropic sends `output_config.effort` and leaves out `none`/`minimal` with a wire note |
 | Temperature, Top P | `temperature`, `top_p` | Sent only when set |
 | Fixed output tokens | `fixed_output_tokens` | Replaces every per-task output budget |
-| Slow model | `latency_profile` (`standard`/`slow`) | `slow` raises the floors in `providers/text/textBudgets.ts`: ai-fill attempt at least 360 s, Krea condense at least 420 s, stream drain at least 45 min and the raw response cap at least 4 MiB |
+| Slow model | `latency_profile` (`standard`/`slow`) | `slow` raises the floors in `providers/text/textBudgets.ts`: ai-fill attempt at least 360 s, Krea condense and MiniMax H3 Image expansion at least 420 s, stream drain at least 45 min and the raw response cap at least 4 MiB |
 | Prompt style | `prompt_variant` (`generic`/`kimi`) | Which ai-fill system prompt the route sends (**Standard** or **Kimi-tuned**) |
 | Screen requests first | `screen_requests` | Runs the [input moderation](#gpt-only-input-moderation) before every request to this model |
 
@@ -183,7 +183,7 @@ Shared rules that do not depend on the model: the adapters keep only answer text
 5. **Task assignment** (`text_defaults` scope = task).
 6. **Default model** (`text_defaults` scope `default`).
 
-A candidate is eligible when the model and its provider are enabled, the model is not offline, and it has `vision` when the request carries images. Ineligible candidates in steps 2-6 are skipped. When nothing qualifies the route answers 409 `TEXT_MODEL_NOT_CONFIGURED`, or `TEXT_MODEL_NO_VISION` when vision was the only reason (`providers/textRouting.ts` `textModelFailureBody`). Krea condense fails open instead. A user's effort applies only when the serving model is the one the user picked and the level is in its `reasoning_levels`; otherwise the model's `reasoning_default` is sent.
+A candidate is eligible when the model and its provider are enabled, the model is not offline, and it has `vision` when the request carries images. Ineligible candidates in steps 2-6 are skipped. When nothing qualifies the route answers 409 `TEXT_MODEL_NOT_CONFIGURED`, or `TEXT_MODEL_NO_VISION` when vision was the only reason (`providers/textRouting.ts` `textModelFailureBody`). Krea condense and MiniMax H3 Image expansion fail open instead and keep the original prompt. A user's effort applies only when the serving model is the one the user picked and the level is in its `reasoning_levels`; otherwise the model's `reasoning_default` is sent.
 
 **Brainstorm failover.** When the selected model yields a transient failure (open timeout, 5xx, open breaker, mid-drain fault) before any `prompt` event, the route retries once on the resolver's next choice with the failed model excluded (`brainstorm_backend_fallback`). The partner runs at its own default effort. There is no partner across a locked writer, and a screened model never hands its request to an unscreened one. Refusals, quota and permanent failures do not fail over. Ai-fill, condense and enhance have no cross-model fallback.
 
@@ -433,7 +433,7 @@ The graph scales the reference with `ImageScaleToTotalPixels` (`area`, 0.140625 
 
 Known ReID caveats are hair-length drift on some finetunes, beauty-mark placement drift, and full-body references leaking clothing and pose. Multi-reference is untested and is not exposed.
 
-MiniMax H3 contributes two video rows to the local model catalog: `minimax-h3-i2v` (Animate, requires a source still) and `minimax-h3-t2v` (plain text-to-video on the same weights). `VIDEO_MODELS_ENABLED` gates both rows (default false) and requires `COMFYUI_BASE_URL`; boot refuses to start if the flag is set without that URL. The bundled H3 rows are disabled templates; see [ComfyUI (video / I2V)](#comfyui-video--i2v).
+MiniMax H3 contributes two video rows to the local model catalog: `minimax-h3-i2v` (Animate, requires a source still) and `minimax-h3-t2v` (plain text-to-video on the same weights). `VIDEO_MODELS_ENABLED` gates both rows (default false) and requires `COMFYUI_BASE_URL`; boot refuses to start if the flag is set without that URL. The bundled H3 video rows are disabled templates; see [ComfyUI (video / I2V)](#comfyui-video--i2v).
 
 ### MOSS Image (`moss-image-sft`)
 
@@ -449,7 +449,7 @@ The first non-Krea local image row: its manifest has `family: "moss"`, so it is 
 
 ### MiniMax H3 Image (`minimax-h3-image`)
 
-MiniMax's open-weights text-to-image model, released 2026-11-10. Its manifest has `family: "h3image"`; it is a still-image row and shares neither weights nor residency with the disabled H3 video templates. The official card asks for detailed English natural-language descriptions, renders literal text in quotes well, samples 6 steps with guidance fixed at 1 and no negative prompt, and is effective from about 4 to 20 MP.
+MiniMax's open-weights text-to-image model, released 2026-11-10. Its manifest has `family: "h3image"`; it is a still-image row with its own diffusion model, VAE and residency key; the only file it shares with the disabled H3 video templates is the Qwen3-VL text encoder. The official card asks for detailed English natural-language descriptions, renders literal text in quotes well, samples 6 steps with guidance fixed at 1 and no negative prompt, and is effective from about 4 to 20 MP.
 
 - Weights: `minimax_h3_image_pruned_int8_convrot.safetensors` (diffusion model), `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` (text encoder, CLIPLoader type `minimax`) and `minimax_h3_image_vae_fp16.safetensors`.
 - ComfyUI: needs 0.45.0 or later for the core `MiniMaxH3ImageConditioning` node, which is in the private worker allowlist. That node encodes the prompt and emits the positive conditioning (output 0) and a one-image latent (output 1); it has no batch input, and ComfyUI's MiniMax H3 model rejects any batch above 1.

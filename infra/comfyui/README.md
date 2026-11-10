@@ -194,8 +194,9 @@ not an OS sandbox for arbitrary native code. Keep the approved node allowlist
 and pinned install; review native writers when changing dependencies.
 
 The worker reads `atelier_private/allowed_nodes.json` once at import and checks
-it only at `/prompt`; `/object_info` is unfiltered. A stale staged allowlist
-therefore leaves a row looking healthy while every submit is rejected. Restage
+it only at `/prompt`; `/object_info` is unfiltered. The worker advertises the
+list and the api compares every graph class of a row with it, so a stale
+staged allowlist makes the affected rows fail readiness. Restage
 the allowlist and restart the worker before deploying an API build that ships a
 new node class. Removing a class needs no restage, since a staged superset is
 harmless.
@@ -458,7 +459,8 @@ reload and verify authenticated upload/SSE behavior afterward.
 
 Before routing production traffic, verify active worker controls, TLS certificate
 checks, unauthenticated rejection and fail-closed behavior with the old launcher.
-Exercise Krea plain/reference and H3 text/image/continuation, including audio,
+Exercise Krea plain/reference, MiniMax H3 Image stills, and H3 video
+text-to-video, image-to-video and continuation, including audio,
 encrypted storage acknowledgment, cancellation, disconnect and process restart.
 Use synthetic canaries, inspect only aggregate content-match counts, and observe
 file writes during execution as well as directory state afterward. Native-media

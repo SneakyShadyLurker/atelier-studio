@@ -35,7 +35,8 @@ Atelier is a self-hosted web app for AI image and video generation. You pick a
 model, write a prompt and get a batch of tiles; the server routes the request
 to the right backend, streams previews as they render and keeps every batch in
 server-side history. It sits behind your own authentication proxy and keeps
-each user's work separate, down to the encryption of every stored file.
+each user's work separate, down to per-user encryption of every stored image
+and clip.
 
 ## Start here
 
@@ -58,7 +59,8 @@ images so you can check the installation without spending provider credits.
 It then explains how to connect real generation. For a shared or public
 installation, follow the production guide before exposing the app.
 
-Image generation works as soon as a backend is connected. The text features
+Image generation works once a backend is configured and its access
+requirements are met. The text features
 need one more step in the app: an admin connects a text model and picks a
 default. The [Admin guide](docs/admin-guide.md) covers it in five steps.
 
@@ -97,12 +99,14 @@ canceled.
 ### ✦ Prompt Library
 Reusable templates, weighted variable lists and tag dimensions that keep random
 picks coherent. `{{ai-fill: …}}` blanks let a text model fill parts of a prompt
-at generate time while your own text stays byte for byte, and Brainstorm
+at generate time while your own text around them stays byte for byte, and Brainstorm
 streams fresh character concepts into the roll queue. Enhance rewrites a prompt
-for the selected model in one click. These features run on text models an
+for the selected model in one click, and a prompt too short for MiniMax H3
+Image is expanded automatically before it renders. These features run on text models an
 admin connects in the app, such as a local Ollama or LM Studio, OpenAI,
-Anthropic or OpenRouter ([Admin guide](docs/admin-guide.md)). Each person can
-pick their own model per task.
+Anthropic or OpenRouter ([Admin guide](docs/admin-guide.md)). Prompt Library
+users can pick their own model per task, unless an admin has locked a writer
+to an image model.
 
 ### ✦ Local models as data
 Each local model is a manifest and its ComfyUI graphs, validated at startup and
@@ -114,12 +118,12 @@ per-job leases, a node allowlist and in-memory inputs and outputs.
 MiniMax H3 turns a still or a text prompt into a clip with native audio.
 Extend continues a clip from its last frames and soundtrack and stitches the
 sequence, and AI Storytelling plans an outline into segments and renders them
-one after another. The bundled H3 graphs follow ComfyUI's official templates
+one after another. The bundled H3 video graphs follow ComfyUI's official templates
 and ship disabled until you verify them against your own ComfyUI.
 
 ### ✦ Encrypted at rest, per user
-Every stored artifact is an age file encrypted to its owner, and the server
-starts sealed until it receives the root identity. Provider keys are encrypted
+Every stored artifact is an age file encrypted to its owner, and a production
+server starts sealed until it receives the root identity. Provider keys are encrypted
 separately. Prompts and other metadata in SQLite rely on the encryption of the
 volume they live on.
 
@@ -127,7 +131,7 @@ volume they live on.
 
 - **Reference images**: attach up to 4 (GPT) or 10 (Gemini); HEIC, AVIF, GIF
   and TIFF are converted on the server, and Krea rows take a face reference
-- **Collections and archive**: drag batches into collections, pin favourites,
+- **Collections and archive**: move batches into collections, pin favourites,
   search prompts, and restore archived work for 30 days
 - **Gemini BYOK**: each user brings their own Google key, encrypted on the server
 - **Ephemera character cards**: turn a finished image into a character card in

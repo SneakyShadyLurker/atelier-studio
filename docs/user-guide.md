@@ -80,8 +80,8 @@ files in `DATA_DIR`.
 ## Organise your work
 
 The **Library** sidebar contains your collections, **Unsorted** work and
-**Pinned** batches. Create a collection with **New collection**, then drag
-a batch into it. Pin a batch to make it easier to find, and use search to look
+**Pinned** batches. Create a collection with **New collection**, then use
+**Move to collection** on a batch to file it. Pin a batch to make it easier to find, and use search to look
 for prompt text.
 
 Each batch header has **Re-roll**, **Move to collection** and **Archive batch**
@@ -139,8 +139,9 @@ still wins.
 
 On **MiniMax H3 Image**, a prompt under 60 words is expanded automatically
 before it renders, because that model draws very short prompts poorly. The
-batch then shows the expanded prompt. To keep full control, write a fuller
-prompt or press **Enhance** and edit the result before you generate.
+batch then shows the expanded prompt. A prompt of 60 words or more is sent as
+written, so write a fuller prompt, or press **Enhance** and edit the result,
+to keep full control. An operator can switch the expansion off.
 
 Read [Prompt Library authoring](prompt-library-authoring.md) for syntax,
 weights, dimensions and worked examples.

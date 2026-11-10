@@ -1,4 +1,6 @@
 .shell {
+  /* The positioning context for the jump-to-latest control (JumpToLatest). */
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -45,6 +47,35 @@
      read the scroller-scoped --scroll-fade-top. */
   --scroll-fade-top: 14px;
   mask-image: linear-gradient(to bottom, transparent 0, black var(--scroll-fade-top), black calc(100% - 14px), transparent 100%);
+}
+
+/* Feed view transitions stay between the view header and the Composer
+   (motion.css, "Feed clip"). Where nested view-transition groups exist
+   (Chromium), the scroller is the parent group of every row and tile it
+   holds and clips them. A view navigation captures the stage as one piece,
+   so the scroller is not named while React names the stage (its inline
+   view-transition-name). */
+@supports (view-transition-group: contain) {
+  .canvas {
+    view-transition-name: atelier-feed;
+    view-transition-group: contain;
+  }
+
+  :global([data-testid='feed'][style*='view-transition-name']) .canvas {
+    view-transition-name: none;
+  }
+}
+
+/* Engines without nested groups (WebKit 26) cannot clip the feed, and they
+   paint a captured row or tile whole, scrolled-away part included. While a
+   feed boundary carries React's view-transition name (only between React
+   naming it and the browser capturing it, so only in a feed transition),
+   the header is captured too and its group paints above the feed's
+   (motion.css, "Feed clip"). The Composer's dock does the same. */
+@supports not (view-transition-group: contain) {
+  .shell:has(> .canvas [style*='view-transition-name']) > .head {
+    view-transition-name: atelier-feed-head;
+  }
 }
 
 /* At rest the first batch sits unmasked; the top fade grows over the first

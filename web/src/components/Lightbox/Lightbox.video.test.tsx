@@ -116,3 +116,13 @@ test('a sequence master keeps native controls, download and no tile navigation',
   screen.getByRole('button', { name: 'Download sequence master' }).click();
   expect(download).toHaveBeenCalledTimes(1);
 });
+
+test('controls that act on a clip say video', async () => {
+  const secondVideo = { ...videoTile, id: 'video-02', url: '/api/img/video-02', thumbUrl: '/api/img/video-02/thumb' };
+  await renderLightbox({ ...allDoneBatch, tiles: [videoTile, secondVideo] });
+  expect(screen.getByRole('button', { name: 'Download expanded video' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Archive expanded video' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Next video' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Previous video' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /image/ })).toBeNull();
+});

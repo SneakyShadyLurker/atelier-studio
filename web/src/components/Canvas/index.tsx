@@ -1,19 +1,23 @@
 import type { Batch, Collection, DoneTile, Model, Tile } from '@atelier/shared';
 import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
-import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, ViewTransition, type Ref } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useEffectEvent, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, ViewTransition, type Ref } from 'react';
 import { flushSync } from 'react-dom';
 import { useIsPhone } from '../../hooks/useIsPhone';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
-import { FEED_SCROLL_END_THRESHOLD_PX, FEED_VIRTUALIZER_ANCHORING, measureFeedScrollMargin, settleFeedScrollMargin, type FeedMarginState } from '../../lib/feedAnchor';
-import { estimateBatchHeight, type FeedGeometry } from '../../lib/feedEstimate';
+import { FEED_SCROLL_END_THRESHOLD_PX, FEED_VIRTUALIZER_ANCHORING, measureFeedScrollMargin, settleFeedScrollMargin, shouldAnchorRowResize, type FeedMarginState } from '../../lib/feedAnchor';
+import { estimateBatchHeight, feedGeometry, readFeedChrome, readFeedContainerWidth, type FeedChrome } from '../../lib/feedEstimate';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { markBatchesSeen, useSeenBatches } from '../../lib/seenBatches';
 import { scopeTitle } from '../../lib/viewChrome';
 import { useAtelierStore, type AppView } from '../../store/atelier';
 import BatchView, { type BatchAction, type TileAction, type TileHandoff } from '../Batch';
-import { InfiniteStatus, useStatusFootprint } from '../InfiniteStatus';
+import { FeedRefreshStatus, InfiniteStatus, useStatusFootprint } from '../InfiniteStatus';
+import { JumpToLatest } from '../JumpToLatest';
+import { feedChangedBelow, snapshotFeedEnd, type LeftEndSnapshot } from '../JumpToLatest/marker';
+import { FeedRetention } from './FeedRetention';
 import { ManagedViewHeader } from '../ManagedViewHeader';
 import { StateView, LoadingState } from '../StateView';
+import { requestComposerYield } from '../Composer/composerYield';
 import styles from './index.module.css';
 
 interface CanvasProps {
@@ -63,10 +67,12 @@ export interface CanvasHandle {
 }
 
 const CANVAS_FALLBACK_BATCHES = 7;
-/** The scroller's inline padding (index.module.css) plus the stable scrollbar gutter. */
-const CANVAS_INLINE_CHROME_PX = { desktop: 36 * 2 + 16, phone: 14 * 2 } as const;
 /** A scroll this soon after a reader's drag or wheel is theirs (covers touch momentum). */
 const READER_SCROLL_WINDOW_MS = 1_000;
+// Keys that scroll the feed when nothing else consumes them.
+const SCROLL_KEYS: ReadonlySet<string> = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End']);
+// Controls that use those keys themselves.
+const KEY_OWNING_SELECTOR = 'input, textarea, select, [contenteditable], [role="menu"], [role="listbox"], [role="dialog"], dialog';
 
 interface VirtualBatchRowProps {
   index: number;
@@ -87,7 +93,7 @@ interface VirtualBatchRowProps {
   onTellStoryTile?: TileHandoff | undefined;
   onCreateCardTile?: TileHandoff | undefined;
   cardPendingTileIds?: ReadonlySet<string> | undefined;
-  measureElement: (element: Element | null) => void;
+  measureElement: (element: HTMLElement | null) => void;
   q: string;
 }
 
@@ -96,7 +102,72 @@ export function canvasBatchKey(batches: readonly Pick<Batch, 'id'>[], index: num
 }
 
 
-function EmptyCanvas() {
+/** Where the reader stands: at the newest end, a little above it, or more than one viewport above it. */
+type FeedEndState = 'end' | 'near' | 'far';
+
+/** The reader's first visible tile and its offset inside its row, recorded on scroll (R10). */
+interface ReaderTile {
+  readonly key: string;
+  readonly tileId: string;
+  readonly offset: number;
+}
+
+function readReaderTile(scroller: HTMLElement): ReaderTile | null {
+  const top = scroller.getBoundingClientRect().top;
+  for (const row of scroller.querySelectorAll<HTMLElement>('[data-index][data-batch-id]')) {
+    const rowRect = row.getBoundingClientRect();
+    if (rowRect.bottom <= top) continue;
+    for (const tile of row.querySelectorAll<HTMLElement>('[data-feed-tile]')) {
+      const tileRect = tile.getBoundingClientRect();
+      if (tileRect.bottom <= top) continue;
+      const key = row.dataset.batchId;
+      const tileId = tile.dataset.feedTile;
+      return key && tileId ? { key, tileId, offset: tileRect.top - rowRect.top } : null;
+    }
+    return null;
+  }
+  return null;
+}
+
+/** How far the recorded tile moved inside its row since it was recorded, or null when `row` does not hold it. */
+function readerTileShift(anchor: ReaderTile | null, key: unknown, row: Element | undefined): number | null {
+  if (!anchor || anchor.key !== key || !row) return null;
+  const tile = row.querySelector(`[data-feed-tile="${CSS.escape(anchor.tileId)}"]`);
+  if (!tile) return null;
+  return tile.getBoundingClientRect().top - row.getBoundingClientRect().top - anchor.offset;
+}
+
+/** The virtualizer surface `pinRowSize` writes through. */
+interface RowSizeSurface {
+  itemSizeCache: Map<string | number | bigint, number>;
+  indexFromElement: (element: Element) => number;
+  resizeItem: (index: number, size: number) => void;
+}
+
+/**
+ * Records a mounted row's measured size. A row whose measurement equals its
+ * estimate never enters the virtualizer's size cache (resizeItem stores only
+ * a non-zero delta), so its height keeps following the estimate: a tile
+ * failing in it re-lays it out through the estimate, outside resizeItem and
+ * the reader anchor. Pinned, the change arrives as a row resize. An equal
+ * size changes no layout.
+ */
+function pinRowSize(instance: RowSizeSurface, row: Element, size: number): void {
+  const key = row instanceof HTMLElement ? row.dataset.batchId : undefined;
+  if (key === undefined || !row.isConnected) return;
+  instance.resizeItem(instance.indexFromElement(row), size);
+  if (!instance.itemSizeCache.has(key)) instance.itemSizeCache.set(key, size);
+}
+
+function EmptyCanvas({ view }: { view: AppView }) {
+  // Only Unsorted invites a first generation: a new batch lands there, so
+  // the invitation would read as broken in Pinned or a collection.
+  if (view.kind === 'pinned') {
+    return <StateView art="empty-canvas" title="Nothing pinned yet" body="Pin a batch from its menu to keep it here." />;
+  }
+  if (view.kind === 'collection') {
+    return <StateView art="empty-canvas" title="This collection is empty" body="Move batches here from Unsorted." />;
+  }
   return (
     <StateView
       art="empty-canvas"
@@ -214,6 +285,9 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   const readOnly = readOnlyActions || placeholder;
   const trimmedQ = q.trim();
   const blockingError = batches.length === 0 ? error : null;
+  // A failed read while rows are shown (R16). A failed next page is the
+  // load-more row's own error, above the list.
+  const refreshError = batches.length > 0 && !isFetchNextPageError ? error : null;
   const isPhone = useIsPhone();
   const reducedMotion = useReducedMotion();
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -231,17 +305,60 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   // Unmeasured rows are laid out at the estimate, so it reads the geometry
   // the grid lays out with (lib/feedEstimate). The scroller rect arrives from
   // the virtualizer's own observer; until then the flat fallback applies.
-  const geometryRef = useRef<FeedGeometry>({ containerWidth: null, viewportWidth: 0, viewportHeight: 0, phone: isPhone });
-  const estimateRow = useCallback((batch: Batch | undefined) => estimateBatchHeight(batch, geometryRef.current), []);
+  // The lone-tile cap also reads the scope title height and the composer's
+  // top (FeedChrome); they are re-read when the scroller rect or the
+  // composer reserve changes, not per estimate.
+  const layoutRef = useRef<{ containerWidth: number | null; chrome: FeedChrome } | null>(null);
+  const refreshLayout = (scroller: HTMLElement | null) => {
+    layoutRef.current = { containerWidth: scroller ? readFeedContainerWidth(scroller) : null, chrome: readFeedChrome() };
+  };
+  const estimateRow = useCallback((batch: Batch | undefined, first = false) => {
+    layoutRef.current ??= { containerWidth: null, chrome: readFeedChrome() };
+    const { containerWidth, chrome } = layoutRef.current;
+    return estimateBatchHeight(batch, feedGeometry(containerWidth, isPhone, chrome), first);
+  }, [isPhone]);
+
+  // The scroller exists from the first commit; the virtualizer waits for it
+  // and for the first rows (see `enabled` below). The scroller's geometry is
+  // read here, before the first paint.
+  const [scrollerReady, setScrollerReady] = useState(false);
+  useLayoutEffect(() => {
+    refreshLayout(canvasRef.current);
+    setScrollerReady(true);
+  }, []);
+  // Set in the commit after the virtualizer first attached; it stays on.
+  const [feedStarted, setFeedStarted] = useState(false);
+  const virtualizerOn = scrollerReady && (feedStarted || batches.length > 0);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual's useVirtualizer is the canonical virtualization primitive; React Compiler escape hatch.
   const batchVirtualizer = useVirtualizer({
     count: batches.length,
+    // The first window is already the newest end. TanStack reads
+    // `initialOffset` only while it holds no scroll offset: at creation, and
+    // again after `enabled` was false. So the virtualizer starts with the
+    // first render that has rows and a mounted scroller (`scrollerReady`, set
+    // with the scroller's geometry before the first paint, so the estimates
+    // are already the laid-out ones), at the estimated end of the list: past
+    // the last row's start, so the window is the newest row plus overscan, a
+    // subset of the window the landing below settles on. No row mounts and
+    // leaves again (rendering from 0 mounted the oldest rows for a frame, and
+    // their thumbnail downloads were aborted). Attaching writes the offset to
+    // the scroller, which clamps it to the real end, and the scroll event
+    // that follows hands the virtualizer the real offset (a feed too short
+    // to scroll fires none: see "too short to scroll" below).
+    // Once started it stays enabled, and rows render only from the commit
+    // after it attached (`feedStarted`): ResizeObserver callbacks run in the
+    // order the observers were created, and the width-change path in
+    // `observeElementRect` below must run before the rows' own observer, or a
+    // sidebar collapse re-anchors the rows first and the feed no longer reads
+    // as pinned to the end (ui-polish "collapsing the sidebar").
+    enabled: virtualizerOn,
+    initialOffset: () => batches.reduce((total, batch, index) => total + estimateRow(batch, index === 0), scrollMargin),
     getScrollElement: () => canvasRef.current,
     // Stable batch ids, NOT indexes — the anchoring below cannot tell a prepend
     // from an append once every index has shifted.
     getItemKey: getBatchKey,
-    estimateSize: (index) => estimateRow(batches[index]),
+    estimateSize: (index) => estimateRow(batches[index], index === 0),
     initialRect: { width: 0, height: 900 },
     overscan: 3,
     scrollMargin,
@@ -268,6 +385,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
       const cleanup = observeElementRect(instance, (rect) => {
         const widthChanged = width !== null && rect.width !== width;
         width = rect.width;
+        refreshLayout(instance.scrollElement);
         // The initial measurement runs inside the virtualizer's layout effect.
         if (subscribing) {
           callback(rect);
@@ -278,8 +396,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
           callback(rect);
           if (!widthChanged) return;
           for (const row of instance.elementsCache.values()) {
-            const size = row instanceof HTMLElement ? row.offsetHeight : row.getBoundingClientRect().height;
-            instance.resizeItem(instance.indexFromElement(row), size);
+            pinRowSize(instance, row, row instanceof HTMLElement ? row.offsetHeight : row.getBoundingClientRect().height);
           }
         });
         // A growing list was clamped to the old scroll height; the committed
@@ -291,13 +408,30 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
     },
   });
   const scrollRectWidth = batchVirtualizer.scrollRect?.width ?? 0;
-  const geometry: FeedGeometry = {
-    containerWidth: scrollRectWidth > 0 ? Math.max(0, scrollRectWidth - (isPhone ? CANVAS_INLINE_CHROME_PX.phone : CANVAS_INLINE_CHROME_PX.desktop)) : null,
-    viewportWidth: typeof window === 'undefined' ? 0 : window.innerWidth,
-    viewportHeight: typeof window === 'undefined' ? 0 : window.innerHeight,
-    phone: isPhone,
-  };
-  geometryRef.current = geometry;
+
+  // R10: TanStack anchors at row boundaries and leaves a row that spans the
+  // viewport top alone. A row holds up to four tiles, so a tile above the
+  // reader's in the same row (a failure collapsing to a compact card, a
+  // removal) would move them; the reader's first visible tile, recorded on
+  // scroll, decides (lib/feedAnchor shouldAnchorRowResize).
+  const readerTileRef = useRef<ReaderTile | null>(null);
+  useLayoutEffect(() => {
+    batchVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, delta, instance) => shouldAnchorRowResize({
+      start: item.start,
+      size: item.size,
+      delta,
+      scrollOffset: instance.scrollOffset ?? 0,
+      firstMeasure: !instance.itemSizeCache.has(item.key),
+      backward: instance.scrollDirection === 'backward',
+      tileShift: readerTileShift(readerTileRef.current, item.key, instance.elementsCache.get(item.key)),
+    });
+  }, [batchVirtualizer]);
+  // Rows mount measured; their size is pinned (pinRowSize) so a later
+  // estimate change cannot re-lay out a mounted row unanchored.
+  const measureRow = useCallback((element: HTMLElement | null) => {
+    batchVirtualizer.measureElement(element);
+    if (element) pinRowSize(batchVirtualizer, element, Math.round(element.getBoundingClientRect().height));
+  }, [batchVirtualizer]);
   // The virtualizer memoizes its layout on measured sizes, not on the estimate
   // function, so the rows laid out before the scroller rect arrived (at the
   // flat fallback) are re-estimated once, when the first geometry lands and
@@ -305,27 +439,38 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   // a resize across 480px or 920px) leave measured rows alone and let the
   // unmeasured ones pick up the new estimate as they mount: clearing the
   // measurement cache mid-resize threw the feed back by whole rows.
-  const hasGeometry = geometry.containerWidth !== null;
+  const hasGeometry = scrollRectWidth > 0;
   const estimatedRef = useRef(false);
   useLayoutEffect(() => {
     if (!hasGeometry || estimatedRef.current) return;
     estimatedRef.current = true;
     batchVirtualizer.measure();
+    // measure() drops every recorded size; re-pin the rows already mounted.
+    for (const row of batchVirtualizer.elementsCache.values()) {
+      pinRowSize(batchVirtualizer, row, Math.round(row.getBoundingClientRect().height));
+    }
   }, [batchVirtualizer, hasGeometry]);
-  const virtualBatches = batchVirtualizer.getVirtualItems();
+  // Rows render once the virtualizer has attached (`feedStarted`, above).
+  // Until then (the mount commit and the first enabled one, both re-rendered
+  // before they paint) no row renders: the fallback rows are the oldest ones,
+  // and they would start their thumbnail downloads only to leave again.
+  const virtualBatches = feedStarted ? batchVirtualizer.getVirtualItems() : [];
   const renderBatches = virtualBatches.length > 0
     ? virtualBatches
     : fallbackVirtualRows(
-      batches.length,
+      feedStarted ? batches.length : 0,
       CANVAS_FALLBACK_BATCHES,
-      (index) => estimateRow(batches[index]),
+      (index) => estimateRow(batches[index], index === 0),
       (index) => canvasBatchKey(batches, index),
     );
+  // The whole-feed estimate is only the pre-measure fallback height; with
+  // virtual items the virtualizer's total is the height (lib/virtualWindow).
+  const hasVirtualItems = virtualBatches.length > 0;
   const estimatedFeedHeight = useMemo(
-    () => batches.reduce((total, batch) => total + estimateRow(batch), 0),
-    [batches, estimateRow],
+    () => (hasVirtualItems ? 0 : batches.reduce((total, batch, index) => total + estimateRow(batch, index === 0), 0)),
+    [batches, estimateRow, hasVirtualItems],
   );
-  const virtualFeedHeight = virtualizedHeight(virtualBatches.length > 0, batchVirtualizer.getTotalSize(), estimatedFeedHeight);
+  const virtualFeedHeight = virtualizedHeight(hasVirtualItems, batchVirtualizer.getTotalSize(), estimatedFeedHeight);
   // Keyed on the contiguous virtual window bounds (NOT renderBatches, which is
   // rebuilt every render). The window is contiguous, so first..last fully
   // reconstructs the same id list and the memo short-circuits unchanged scrolls.
@@ -354,6 +499,23 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
     if (scroller && !feedIsScrolling) settleFeedScrollMargin(scroller, marginStateRef.current, batchVirtualizer);
   }, [batchVirtualizer, feedIsScrolling]);
 
+  // The virtualizer has attached (its layout effect ran first): rows may render.
+  useLayoutEffect(() => {
+    if (virtualizerOn) setFeedStarted(true);
+  }, [virtualizerOn]);
+  const rowsLive = feedStarted && batches.length > 0;
+
+  // A feed too short to scroll: the clamped `initialOffset` write left the
+  // scroller at 0, so no scroll event reports the real offset, and the
+  // virtualizer would keep windowing from past the end. Let it read the
+  // offset through its own scroll listener. Declared after useVirtualizer, so
+  // its attach (the write) has run.
+  useLayoutEffect(() => {
+    const scroller = canvasRef.current;
+    if (!rowsLive || !scroller || scroller.scrollTop > 0) return;
+    scroller.dispatchEvent(new Event('scroll'));
+  }, [rowsLive]);
+
   const landedRef = useRef(false);
   const landingRef = useRef(false);
 
@@ -369,18 +531,19 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
 
   // Land on the newest work. The feed is bottom-anchored, so arriving at the
   // top would show the oldest batch in the page and lurch afterwards. Runs on
-  // the first render that actually has batches (mount usually has none — the
-  // query is still resolving) and never again. `scrollToEnd` is the
+  // the first render with rows (the virtualizer starts at the estimated end,
+  // `initialOffset` above; mount usually has no batches — the query is still
+  // resolving) and never again. `scrollToEnd` is the
   // virtualizer's own path and reconciles toward the end as rows measure.
   // Following new work is the library's `followOnAppend` (lib/feedAnchor): it
   // follows only a reader within the shared end threshold, and keeps the end
   // pinned as appended rows measure taller than their estimate.
   useLayoutEffect(() => {
-    if (landedRef.current || batches.length === 0 || !canvasRef.current) return;
+    if (landedRef.current || !rowsLive || !canvasRef.current) return;
     landedRef.current = true;
     landingRef.current = true;
     batchVirtualizer.scrollToEnd();
-  }, [batches.length, batchVirtualizer]);
+  }, [rowsLive, batchVirtualizer]);
 
   // Until the reader takes over, keep re-asserting the end as the measured
   // total settles: the first scrollToEnd lands on estimates, and rows (and
@@ -399,15 +562,53 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   // batch slide behind the composer, so keep them there. The padding change
   // resizes the scroller's content box, which is what this observes.
   const atEndRef = useRef(false);
+  // The reader's distance from the end, as state only on a change of band:
+  // the jump control (R18) and the resting trim (R7) follow it.
+  const [endState, setEndState] = useState<FeedEndState>('end');
+  const endStateRef = useRef<FeedEndState>('end');
+  // What the feed held when the reader left the end (the jump marker).
+  const [leftEnd, setLeftEnd] = useState<LeftEndSnapshot | null>(null);
+  const updateEndState = (scroller: HTMLElement) => {
+    const distanceFromEnd = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+    atEndRef.current = distanceFromEnd <= FEED_SCROLL_END_THRESHOLD_PX;
+    const next: FeedEndState = atEndRef.current ? 'end' : distanceFromEnd > scroller.clientHeight ? 'far' : 'near';
+    const previous = endStateRef.current;
+    if (next === previous) return;
+    endStateRef.current = next;
+    if (previous === 'end') setLeftEnd(snapshotFeedEnd(liveBatches));
+    if (next === 'end') setLeftEnd(null);
+    setEndState(next);
+  };
+  const onScrollerResize = useEffectEvent((scroller: HTMLElement) => {
+    refreshLayout(scroller);
+    if (landingRef.current || atEndRef.current) batchVirtualizer.scrollToEnd();
+    updateEndState(scroller);
+  });
   useEffect(() => {
     const scroller = canvasRef.current;
     if (!scroller || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      if (landingRef.current || atEndRef.current) batchVirtualizer.scrollToEnd();
-    });
+    const observer = new ResizeObserver(() => { onScrollerResize(scroller); });
     observer.observe(scroller);
     return () => { observer.disconnect(); };
-  }, [batchVirtualizer]);
+  }, []);
+
+  // The refresh-failure row sits below the list, so a reader at the end
+  // would find it under the composer: keep them at the end as it appears.
+  const hasRefreshError = refreshError !== null;
+  useLayoutEffect(() => {
+    if (hasRefreshError && atEndRef.current) batchVirtualizer.scrollToEnd();
+  }, [batchVirtualizer, hasRefreshError]);
+
+  const jumpVisible = batches.length > 0 && !blockingError && endState === 'far';
+  const jumpMarker = jumpVisible && leftEnd !== null && feedChangedBelow(leftEnd, batches);
+  const jumpToLatest = () => {
+    const scroller = canvasRef.current;
+    if (!scroller) return;
+    // Focus first: the control leaves once the feed reaches the end.
+    scroller.focus({ preventScroll: true });
+    landingRef.current = false;
+    batchVirtualizer.scrollToEnd({ behavior: reducedMotion ? 'auto' : 'smooth' });
+  };
 
   useEffect(() => {
     if (renderedBatchIds === '') return;
@@ -433,21 +634,56 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
     scrollGestureAtRef.current = performance.now();
     releaseLanding();
   };
+  // Keyboard scrolling is the reader's too. Only keys that scroll, and not
+  // from a control that uses them itself (a menu's roving arrows, a text
+  // field): the feed's own scroll after such a press is not a reader scroll.
+  // Space scrolls only from the scroller; on a button it activates.
+  const onScrollerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    releaseLanding();
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    const onScroller = event.target === event.currentTarget;
+    if (!SCROLL_KEYS.has(event.key) && !(event.key === ' ' && onScroller)) return;
+    if (!onScroller && event.target instanceof Element && event.target.closest(KEY_OWNING_SELECTOR) !== null) return;
+    scrollGestureAtRef.current = performance.now();
+  };
+  // A mouse press on the scroller's own scrollbar strip (not on a row, not a
+  // touch, which scrolls through touchmove): every scroll until the pointer
+  // lifts is the reader dragging it. An overlay scrollbar has no gutter, so
+  // the strip is the last 16px of the box.
+  const scrollbarDragRef = useRef(false);
+  const onScrollerPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    releaseLanding();
+    const scroller = event.currentTarget;
+    if (event.target !== scroller || event.pointerType !== 'mouse') return;
+    const strip = Math.max(16, scroller.offsetWidth - scroller.clientWidth);
+    if (event.clientX < scroller.getBoundingClientRect().right - strip) return;
+    scrollbarDragRef.current = true;
+    const end = () => {
+      scrollbarDragRef.current = false;
+      window.removeEventListener('pointerup', end, true);
+      window.removeEventListener('pointercancel', end, true);
+    };
+    window.addEventListener('pointerup', end, true);
+    window.addEventListener('pointercancel', end, true);
+  };
 
   const lastScrollTop = useRef(0);
   const downwardFromTop = useRef(0);
+  const readerScrollFrom = useRef(0);
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) return;
     const scroller = event.currentTarget;
     const top = scroller.scrollTop;
-    const byReader = performance.now() - scrollGestureAtRef.current < READER_SCROLL_WINDOW_MS;
+    const byReader = scrollbarDragRef.current || performance.now() - scrollGestureAtRef.current < READER_SCROLL_WINDOW_MS;
     // A programmatic scroll re-bases the collapse distance instead of adding
     // to it: opening the phone composer grows its reserve, the end is kept in
     // view, and that scroll must not shut the composer it was made for.
     if (!byReader || top < lastScrollTop.current) downwardFromTop.current = top;
+    if (!byReader) readerScrollFrom.current = top;
     lastScrollTop.current = top;
     const distanceFromEnd = scroller.scrollHeight - scroller.clientHeight - top;
-    atEndRef.current = distanceFromEnd <= FEED_SCROLL_END_THRESHOLD_PX;
+    updateEndState(scroller);
+    readerTileRef.current = readReaderTile(scroller);
 
     // A reader who scrolls well away from the end (by script or a scrollbar
     // drag too) takes over from the landing. One estimated row of slack: while
@@ -466,6 +702,12 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
       downwardFromTop.current = top;
       useAtelierStore.getState().setComposerExpanded(false);
     }
+    // On desktop a reader scroll of more than 24 px either way asks the
+    // Composer to yield the viewport (R24); the Composer decides whether it may.
+    if (!isPhone && Math.abs(top - readerScrollFrom.current) > 24) {
+      readerScrollFrom.current = top;
+      requestComposerYield();
+    }
   };
 
   return (
@@ -483,8 +725,8 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
         onWheel={onScrollGesture}
         onTouchMove={onScrollGesture}
         onTouchStart={releaseLanding}
-        onPointerDown={releaseLanding}
-        onKeyDown={releaseLanding}
+        onPointerDown={onScrollerPointerDown}
+        onKeyDown={onScrollerKeyDown}
         data-testid="canvas-scroller"
         data-state={!blockingError && (isLoading || batches.length === 0) ? 'true' : undefined}
       >
@@ -500,7 +742,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
         // deletes the whole column, so the column exits (a row boundary
         // inside it never runs) while the empty state fades in.
         <ViewTransition key="empty" default="none" enter="part-enter">
-          <EmptyCanvas />
+          <EmptyCanvas view={activeView} />
         </ViewTransition>
       ) : (
         // Exit only, and none for placeholder rows: their replacement belongs
@@ -568,17 +810,24 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
                   onTellStoryTile={onTellStoryTile}
                   onCreateCardTile={onCreateCardTile}
                   cardPendingTileIds={cardPendingTileIds}
-                  measureElement={batchVirtualizer.measureElement}
+                  measureElement={measureRow}
                   q={q}
                 />
               );
             })}
             </div>
           </div>
+          {/* The newest end: a failed read while rows are shown (R16). */}
+          <FeedRefreshStatus
+            message={refreshError === null ? null : `Couldn’t refresh ${scopeTitle(activeView, collections)}.`}
+            {...(onRetry ? { onRetry } : {})}
+          />
+          {readOnly ? null : <FeedRetention view={activeView} q={q} atEnd={endState === 'end'} atEndRef={atEndRef} />}
         </div>
         </ViewTransition>
       )}
       </div>
+      <JumpToLatest visible={jumpVisible} marker={jumpMarker} onJump={jumpToLatest} />
     </div>
   );
 }

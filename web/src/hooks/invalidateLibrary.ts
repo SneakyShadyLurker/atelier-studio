@@ -1,4 +1,4 @@
-import type { QueryClient } from '@tanstack/react-query';
+import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { archiveKeys } from '../api/archive';
 import { collectionKeys } from '../api/collections';
 import { historyKeys } from '../api/history';
@@ -43,6 +43,21 @@ function deferHistoryRead(queryClient: QueryClient): void {
 export function invalidateHistoryBehindWrites(queryClient: QueryClient): Promise<void> {
   deferHistoryRead(queryClient);
   return queryClient.invalidateQueries({ queryKey: historyKeys.all(), refetchType: 'none' });
+}
+
+/**
+ * A settle or recovery re-read of history (a stream that ended or was lost, a
+ * replay, an insert re-issuing an interrupted read, a convergence probe):
+ * read now, or, while a history write is pending, mark every scope stale and
+ * read once after the last write settles.
+ */
+export function reReadHistory(
+  queryClient: QueryClient,
+  filters: { queryKey: QueryKey; exact?: boolean } = { queryKey: historyKeys.all() },
+): Promise<void> {
+  return historyWriting(queryClient)
+    ? invalidateHistoryBehindWrites(queryClient)
+    : queryClient.invalidateQueries(filters);
 }
 
 // The library re-read every settled history write (and a sibling tab's

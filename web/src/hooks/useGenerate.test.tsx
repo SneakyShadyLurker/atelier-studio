@@ -10,7 +10,7 @@ import { useAtelierStore } from '../store/atelier';
 import { emitHistoryCancel, MY_TAB_ID, resetBroadcastForTests } from './broadcastHistory';
 import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 import { getBatch, registerBatch, resetInFlightForTests } from './inFlightBatches';
-import type { HistoryData } from './historyCache';
+import { resetCancelTombstones, type HistoryData } from './historyCache';
 import { useGenerate } from './useGenerate';
 import { markDrainOwned } from '../lib/drainOwnership';
 import { flushQueryNotifications } from '../../test/fixtures/queryNotifications';
@@ -94,6 +94,7 @@ afterEach(async () => {
   resetBroadcastForTests();
   resetInFlightForTests();
   resetAnnouncedBatchesForTests();
+  resetCancelTombstones();
   MockChannel.listeners.clear();
   setBroadcastChannel(originalBroadcastChannel);
   useAtelierStore.setState({
@@ -1432,5 +1433,122 @@ describe('useGenerate writes beyond the Unsorted scope', () => {
     expect(ids()).toEqual([batchId, older.id]);
     expect(client.getQueryState(historyKeys.list())?.isInvalidated).toBe(false);
     unsubscribe();
+  });
+});
+
+describe('useGenerate convergence with other history writers', () => {
+  const encoder = new TextEncoder();
+  const batchId = '00000000-0000-4000-8000-000000000f01';
+  const row = (overrides: Partial<Batch> = {}): Batch => ({
+    id: batchId, prompt: 'make an image', ratio: '1:1', modelId: 'mock-slow', modelLabel: 'Mock Slow',
+    createdAt: 1_700_000_000_000, collectionId: null, pinned: false, status: 'running',
+    tiles: [{ id: 't1', seed: 1, status: 'loading' }, { id: 't2', seed: 2, status: 'loading' }],
+    ...overrides,
+  });
+  const batchEvent = { batchId, status: 'running', createdAt: 1_700_000_000_000, tiles: [{ tileId: 't1', tileIndex: 0, seed: 1 }, { tileId: 't2', tileIndex: 1, seed: 2 }] };
+  const frame = (event: string, data: unknown) => encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  function streamFetch() {
+    const historyUrls: string[] = [];
+    let push: ((event: string, data: unknown) => void) | undefined;
+    let close: (() => void) | undefined;
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://local');
+      if (url.pathname === '/api/history') {
+        historyUrls.push(url.search);
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      }
+      if (url.pathname === '/api/history/refresh') return Promise.resolve(Response.json({ items: [], missingBatchIds: [] }));
+      if (url.pathname === '/api/generate') {
+        return Promise.resolve(Response.json({ batchId, status: 'running', pool: 'shared', tiles: batchEvent.tiles }, { status: 201 }));
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(frame('batch', batchEvent));
+          push = (event, data) => { controller.enqueue(frame(event, data)); };
+          close = () => { controller.close(); };
+          init?.signal?.addEventListener('abort', () => { controller.error(init.signal?.reason); }, { once: true });
+        },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    }) as unknown as typeof fetch;
+    return { historyUrls, push: (event: string, data: unknown) => push?.(event, data), close: () => close?.() };
+  }
+
+  const sharingClient = () => {
+    const structuralSharing = historyOpts().structuralSharing;
+    if (typeof structuralSharing !== 'function') throw new Error('history structural sharing missing');
+    return new QueryClient({ defaultOptions: { queries: { retry: false, structuralSharing }, mutations: { retry: false } } });
+  };
+
+  test('a truncated stream during a history write marks history stale and reads once the write has settled', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const { historyUrls, close } = streamFetch();
+    await client.infiniteQuery(historyOpts());
+    const observer = new InfiniteQueryObserver(client, historyOpts());
+    const unsubscribe = observer.subscribe(() => undefined);
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    let generation: Promise<unknown> | undefined;
+    act(() => { generation = result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 2 }).catch(() => undefined); });
+    await waitFor(() => { expect(getBatch(batchId)).toBeDefined(); });
+    const readsBefore = historyUrls.length;
+    const write = Promise.withResolvers<null>();
+    const settled = client.getMutationCache()
+      .build(client, { mutationKey: HISTORY_WRITE_MUTATION_KEY, mutationFn: () => write.promise })
+      .execute(undefined);
+    await act(async () => { close(); await generation; await flushQueryNotifications(); });
+    expect(historyUrls.length).toBe(readsBefore);
+    expect(client.getQueryState(historyKeys.list())?.isInvalidated).toBe(true);
+    await act(async () => { write.resolve(null); await settled; await flushQueryNotifications(); });
+    await waitFor(() => { expect(historyUrls.length).toBe(readsBefore + 1); });
+    unsubscribe();
+  });
+
+  test('an SSE canceled terminal keeps the tile out of a history read sent before it', async () => {
+    const client = sharingClient();
+    client.setQueryData<HistoryData>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [null] });
+    const { push, close } = streamFetch();
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    let generation: Promise<unknown> | undefined;
+    act(() => { generation = result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 2 }).catch(() => undefined); });
+    const tiles = () => client.getQueryData<HistoryData>(historyKeys.list())?.pages[0]?.items.find((item) => item.id === batchId)?.tiles.map((tile) => tile.id);
+    await waitFor(() => { expect(tiles()).toEqual(['t1', 't2']); });
+    await act(async () => { push('tile', { tileId: 't2', tileIndex: 1, status: 'canceled', completedAt: 100 }); await flushQueryNotifications(); });
+    await waitFor(() => { expect(tiles()).toEqual(['t1']); });
+    // A read that left before the cancel committed lands now.
+    client.setQueryData<HistoryData>(historyKeys.list(), { pages: [{ items: [row()], nextCursor: null }], pageParams: [null] });
+    expect(tiles()).toEqual(['t1']);
+    await act(async () => { close(); await generation; await flushQueryNotifications(); });
+  });
+
+  test('the initial batch event keeps a cached row\'s collection and pin and skips Unsorted for a collection row', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const collectionKey = historyKeys.scoped({ kind: 'collection', id: 'c1' }, '');
+    client.setQueryData<HistoryData>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [null] });
+    // A sibling read already brought the row in, moved into a collection and pinned.
+    client.setQueryData<HistoryData>(collectionKey, { pages: [{ items: [row({ collectionId: 'c1', pinned: true })], nextCursor: null }], pageParams: [null] });
+    const { close } = streamFetch();
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    let generation: Promise<unknown> | undefined;
+    act(() => { generation = result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 2 }).catch(() => undefined); });
+    await waitFor(() => { expect(getBatch(batchId)).toBeDefined(); });
+    await act(async () => { await flushQueryNotifications(); });
+    expect(client.getQueryData<HistoryData>(historyKeys.list())?.pages[0]?.items).toEqual([]);
+    expect(client.getQueryData<HistoryData>(collectionKey)?.pages[0]?.items[0]).toMatchObject({ collectionId: 'c1', pinned: true });
+    await act(async () => { close(); await generation; await flushQueryNotifications(); });
+  });
+
+  test('the initial batch event keeps the pin of a cached Unsorted row', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const pinnedKey = historyKeys.scoped({ kind: 'pinned' }, '');
+    client.setQueryData<HistoryData>(historyKeys.list(), { pages: [{ items: [], nextCursor: null }], pageParams: [null] });
+    client.setQueryData<HistoryData>(pinnedKey, { pages: [{ items: [row({ pinned: true })], nextCursor: null }], pageParams: [null] });
+    const { close } = streamFetch();
+    const { result } = renderHook(() => useGenerate(allModelsById), { wrapper: wrapper(client) });
+    let generation: Promise<unknown> | undefined;
+    act(() => { generation = result.current.generate({ prompt: 'make an image', modelId: 'mock-slow', ratio: '1:1', count: 2 }).catch(() => undefined); });
+    await waitFor(() => { expect(client.getQueryData<HistoryData>(historyKeys.list())?.pages[0]?.items[0]?.id).toBe(batchId); });
+    expect(client.getQueryData<HistoryData>(historyKeys.list())?.pages[0]?.items[0]?.pinned).toBe(true);
+    await act(async () => { close(); await generation; await flushQueryNotifications(); });
   });
 });

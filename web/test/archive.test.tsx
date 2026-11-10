@@ -11,6 +11,7 @@ import ConfirmDialog from '../src/components/ConfirmDialog';
 import Sidebar from '../src/components/Sidebar';
 import { fixtureModels } from './fixtures/models';
 import { collectionKeys } from '../src/api/collections';
+import { resetMediaCacheForTests } from '../src/lib/mediaCache';
 import { useClearAll, clearAllConfirmCopy } from '../src/hooks/useClearAll';
 import { useDeleteBatch } from '../src/hooks/useDeleteBatch';
 import { useDeleteTile } from '../src/hooks/useDeleteTile';
@@ -337,11 +338,20 @@ describe('Archive view', () => {
     expect(onPurgeAll).not.toHaveBeenCalled();
   });
 
-  test('renders archived tiles and routes tile/body/button interactions', () => {
+  test('renders archived tiles and routes tile/body/button interactions', async () => {
     const onOpenTile = mock();
     const onRestore = mock();
     const onPermanentDelete = mock();
     const onPurgeAll = mock();
+    // The thumbnail is read through the session media cache (one fetch, then
+    // an object URL), so a virtualized remount repaints from memory.
+    resetMediaCacheForTests();
+    const realFetch = globalThis.fetch;
+    const realCreate = URL.createObjectURL.bind(URL);
+    const realRevoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = () => 'blob:archive-thumb';
+    URL.revokeObjectURL = () => undefined;
+    globalThis.fetch = mock(() => Promise.resolve(new Response(new Blob(['thumb'], { type: 'image/webp' })))) as unknown as typeof fetch;
     render(
       <Archive
         items={[archivedDone]}
@@ -359,9 +369,14 @@ describe('Archive view', () => {
 
     expect(screen.queryByText('1 item')).toBeNull();
     const image = screen.getByRole('img', { name: `${archivedDone.prompt} — generated with ${archivedDone.modelLabel}` });
-    expect(image.getAttribute('src')).toBe('/api/img/tile-archive-1/thumb');
+    await waitFor(() => { expect(image.getAttribute('src')).toBe('blob:archive-thumb'); });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     fireEvent.error(image);
     expect(image.getAttribute('src')).toBe('/api/img/tile-archive-1');
+    globalThis.fetch = realFetch;
+    URL.createObjectURL = realCreate;
+    URL.revokeObjectURL = realRevoke;
+    resetMediaCacheForTests();
 
     fireEvent.click(screen.getByRole('button', { name: `Open archived image: ${archivedDone.prompt}` }));
     expect(onOpenTile).toHaveBeenCalledWith(archivedDone);

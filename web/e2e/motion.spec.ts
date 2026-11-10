@@ -651,7 +651,7 @@ test('trusted touch dismissal retains its terminal image pose through exit', asy
   const context = await browser.newContext({ hasTouch: true, viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
   try {
-    await page.goto('http://localhost:5173/e2e/harness/index.html?case=edit');
+    await page.goto('/e2e/harness/index.html?case=edit');
     await page.getByRole('button', { name: 'Expand tile 1', exact: true }).click();
     const image = page.locator('dialog img[alt^="Expanded generated image"]');
     await expect(image).toHaveJSProperty('complete', true);
@@ -1410,7 +1410,7 @@ test.describe('grid reflow and tile exits (React ViewTransition)', () => {
     });
     await only.getByRole('button', { name: 'Archive batch' }).click();
     const frames = await vtFrames(page);
-    await expect(page.getByText('What would you like to make?')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'This collection is empty' })).toBeVisible();
     await expect(page.locator(FEED_BATCH('studio-batch-3'))).toHaveCount(0);
     if (supported) {
       expect(ran(frames, 'old', 'column', 'atelier-shrink-out'), anyVt(frames).join('\n')).toBe(true);
@@ -1875,18 +1875,20 @@ test.describe('overlay exits keep the overlay grammar and its timing', () => {
   test('the BatchPrompt card fades out before it unmounts', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 1600 });
     await page.goto('/e2e/harness/anchors.html?case=feed&seed=2');
-    const prompt = page.locator('section[data-batch-id="batch-0"] header > div[tabindex="0"]');
-    await expect(prompt).toBeVisible();
-    // The reader takes over the feed first, as native-anchors' focusPrompt does.
+    const section = page.locator('section[data-batch-id="batch-0"]');
+    await expect(section).toBeVisible();
+    // The reader takes over the feed first, as native-anchors' openPromptCard does.
     await page.getByTestId('canvas-scroller').dispatchEvent('wheel');
-    await expect(prompt).toBeInViewport({ ratio: 1 });
-    await prompt.focus();
-    await expect(page.getByRole('tooltip')).toBeVisible();
+    await expect(section.locator('header')).toBeInViewport({ ratio: 1 });
+    await section.getByRole('button', { name: 'More actions' }).click();
+    await page.getByRole('menuitem', { name: 'Show full prompt' }).click();
+    const card = page.getByRole('dialog', { name: 'Full prompt' });
+    await expect(card).toBeVisible();
     await page.waitForTimeout(300);
     await recordMotionEvents(page, { card: '[id][data-anchored="name"]' });
     await page.keyboard.press('Escape');
     // Closed for assistive tech at once; the card itself stays through the fade.
-    await expect(page.getByRole('tooltip')).toHaveCount(0);
+    await expect(card).toHaveCount(0);
     await expect(page.locator('[data-anchored="name"]')).toHaveCount(0);
     const fade = (await motionEvents(page)).find((event) => event.kind === 'transition' && event.name === 'opacity');
     expect(fade, 'the card never faded').toBeDefined();
@@ -2201,3 +2203,360 @@ test.describe('feed touch micro-interactions', () => {
     }
   });
 });
+
+/*
+ * R12: a feed view transition (a batch entering, the rows above it moving up)
+ * never paints a tile or batch snapshot over the view header or the
+ * Composer, and typing keeps reaching the prompt while it runs. The pseudo
+ * tree draws in the top layer above every live element, so the feed's groups
+ * are clipped to the band between the two (motion.css). Animations run at a
+ * twentieth of their speed (CDP) so the midpoint can be photographed.
+ */
+test('a feed view transition stays between the view header and the Composer', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Slowing the animation clock needs CDP; WebKit has no nested groups and is covered by the header and Composer groups.');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/e2e/studio/index.html?generate=1&generateDelay=50');
+  const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
+  const expand = page.getByRole('button', { name: 'Expand composer', exact: true });
+  if (await expand.isVisible()) await expand.click();
+  await prompt.fill('a lighthouse at dusk');
+  // Three batches make the feed scroll; then park the newest tile half
+  // behind the Composer.
+  const generateButton = page.getByRole('button', { name: 'Generate', exact: true });
+  for (let press = 1; press <= 3; press += 1) {
+    await generateButton.click();
+    await expect(page.locator(`section[data-batch-id="studio-generated-${String(press)}"]`)).toBeVisible();
+  }
+  await page.waitForTimeout(600);
+  const scroller = page.getByTestId('canvas-scroller');
+  await scroller.evaluate((element) => { element.scrollTop = Math.max(0, element.scrollTop - 200); });
+  await page.waitForTimeout(300);
+  const composerBox = await page.locator('#atelier-composer').boundingBox();
+  // The view header is the band above the feed scroller.
+  const headerBox = await scroller.evaluate((element) => {
+    const rect = (element.previousElementSibling ?? element).getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  });
+  expect(headerBox.height).toBeGreaterThan(20);
+  if (!composerBox) throw new Error('missing composer');
+  // The newest tile really is behind the Composer before the transition.
+  const tileBottom = await page.locator('section[data-batch-id="studio-generated-3"] [data-feed-tile]').first().evaluate((tile) => tile.getBoundingClientRect().bottom);
+  expect(tileBottom).toBeGreaterThan(composerBox.y + 40);
+
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Animation.enable');
+  await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.05 });
+  const viewTransitionRunning = () => page.evaluate(() => document.getAnimations().some((animation) => {
+    const effect = animation.effect;
+    return effect instanceof KeyframeEffect && (effect.pseudoElement ?? '').startsWith('::view-transition-group') && animation.playState === 'running';
+  }));
+  await generateButton.click();
+  await expect.poll(viewTransitionRunning, { intervals: [5], timeout: 5000 }).toBe(true);
+  const clip = (box: { x: number; y: number; width: number; height: number }) => ({ x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) });
+  // Typing reaches the prompt mid-transition: keyboard input is not hit-tested.
+  await prompt.focus();
+  await page.keyboard.type('xyz');
+  await expect(prompt).toHaveValue(/xyz$/);
+  await prompt.evaluate((element) => { (element as HTMLTextAreaElement).blur(); });
+  const midComposer = await page.screenshot({ clip: clip(composerBox), animations: 'allow' });
+  const midHeader = await page.screenshot({ clip: clip(headerBox), animations: 'allow' });
+  expect(await viewTransitionRunning()).toBe(true);
+  // The dock is not captured here, so a pointer press still lands on it.
+  const generateBox = await generateButton.boundingBox();
+  if (!generateBox) throw new Error('missing Generate');
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.textContent.trim() ?? null, { x: generateBox.x + generateBox.width / 2, y: generateBox.y + generateBox.height / 2 })).toBe('Generate');
+  await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 });
+  await expect.poll(viewTransitionRunning, { timeout: 5000 }).toBe(false);
+  const endComposer = await page.screenshot({ clip: clip(composerBox) });
+  const endHeader = await page.screenshot({ clip: clip(headerBox) });
+  const differing = (a: Buffer, b: Buffer) => page.evaluate(async ([left, right]) => {
+    const decode = async (base64: string) => {
+      // The studio replaces window.fetch, so decode through an <img>.
+      const image = new Image();
+      image.src = `data:image/png;base64,${base64}`;
+      await image.decode();
+      const bitmap = await createImageBitmap(image);
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const context2d = canvas.getContext('2d');
+      if (!context2d) throw new Error('no 2d context');
+      context2d.drawImage(bitmap, 0, 0);
+      return context2d.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    };
+    const [one, two] = await Promise.all([decode(left), decode(right)]);
+    let count = 0;
+    for (let index = 0; index < one.length; index += 4) {
+      const delta = Math.abs((one[index] ?? 0) - (two[index] ?? 0)) + Math.abs((one[index + 1] ?? 0) - (two[index + 1] ?? 0)) + Math.abs((one[index + 2] ?? 0) - (two[index + 2] ?? 0));
+      if (delta > 48) count += 1;
+    }
+    return count;
+  }, [a.toString('base64'), b.toString('base64')] as const);
+  // Live state settling in place (a count badge's tint) differs in a few
+  // thousand pixels at most; a tile or row snapshot over the dock covered
+  // about 62 000 before the clip.
+  expect(await differing(midComposer, endComposer)).toBeLessThan(5000);
+  expect(await differing(midHeader, endHeader)).toBeLessThan(300);
+});
+
+/*
+ * R12 in engines without nested view-transition groups (WebKit 26): the feed
+ * scroller cannot clip its rows, and WebKit paints a captured row or tile
+ * whole, scrolled-away part included. A feed transition therefore captures
+ * the view header and the Composer as their own groups, painted above the
+ * rows and tiles (motion.css, "Feed clip"). Each transition is held at its
+ * midpoint through the Web Animations API, which every engine has, and
+ * photographed against the settled frame.
+ */
+test.describe('feed view transitions without nested groups', () => {
+  test.skip(({ browserName }) => browserName === 'chromium', 'Chromium clips the feed with nested groups (the test above).');
+
+  interface Box { x: number; y: number; width: number; height: number }
+  const clip = (box: Box) => ({ x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) });
+
+  async function openFeed(page: Page): Promise<{ header: Box; composer: Box }> {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const url = '/e2e/studio/index.html?writable=1&batches=4';
+    await page.goto(url);
+    await expect(page.locator(FEED_BATCH('studio-batch-4'))).toBeVisible();
+    await page.waitForTimeout(500);
+    await page.goto(url);
+    await expect(page.locator(FEED_BATCH('studio-batch-4'))).toBeVisible();
+    // Settle the composer (a press outside it minimizes it).
+    await page.getByTestId('canvas-scroller').click({ position: { x: 4, y: 4 } });
+    await page.waitForTimeout(700);
+    const scroller = page.getByTestId('canvas-scroller');
+    const header = await scroller.evaluate((element) => {
+      const rect = (element.previousElementSibling ?? element).getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
+    expect(header.height).toBeGreaterThan(20);
+    const composer = await page.locator('#atelier-composer').boundingBox();
+    if (!composer) throw new Error('missing composer');
+    return { header, composer };
+  }
+
+  /** Holds each view transition `act` causes at its midpoint; `whileHeld` runs on the first. */
+  async function midFrames(page: Page, boxes: { header: Box; composer: Box }, act: () => Promise<void>, whileHeld?: () => Promise<void>) {
+    await page.evaluate(() => {
+      const state = window as Window & { __vtHolds?: number };
+      state.__vtHolds = 0;
+      const held = new WeakSet<Animation>();
+      const hold = () => {
+        const running = document.getAnimations().filter((animation) => {
+          const effect = animation.effect;
+          return effect instanceof KeyframeEffect && (effect.pseudoElement ?? '').startsWith('::view-transition') && animation.playState === 'running' && !held.has(animation);
+        });
+        if (running.length > 0) {
+          for (const animation of running) {
+            held.add(animation);
+            animation.pause();
+            animation.currentTime = Number(animation.effect?.getComputedTiming().duration ?? 0) / 2;
+          }
+          state.__vtHolds = (state.__vtHolds ?? 0) + 1;
+        }
+        requestAnimationFrame(hold);
+      };
+      requestAnimationFrame(hold);
+    });
+    const holds = () => page.evaluate(() => (window as Window & { __vtHolds?: number }).__vtHolds ?? 0);
+    await act();
+    const mids: { header: Buffer; composer: Buffer; groups: string[] }[] = [];
+    let seen = 0;
+    for (let round = 0; round < 10; round += 1) {
+      try {
+        await expect.poll(holds, { intervals: [10], timeout: 1500 }).toBeGreaterThan(seen);
+      } catch {
+        break;
+      }
+      seen = await holds();
+      await page.waitForTimeout(30);
+      if (mids.length === 0) await whileHeld?.();
+      mids.push({
+        header: await page.screenshot({ clip: clip(boxes.header), animations: 'allow' }),
+        composer: await page.screenshot({ clip: clip(boxes.composer), animations: 'allow' }),
+        groups: await page.evaluate(() => document.getAnimations()
+          .map((animation) => (animation.effect as KeyframeEffect | null)?.pseudoElement ?? '')
+          .filter((name) => name.startsWith('::view-transition-group'))),
+      });
+      await page.evaluate(() => {
+        for (const animation of document.getAnimations()) {
+          const effect = animation.effect;
+          if (effect instanceof KeyframeEffect && (effect.pseudoElement ?? '').startsWith('::view-transition') && animation.playState === 'paused') animation.finish();
+        }
+      });
+    }
+    expect(mids.length).toBeGreaterThan(0);
+    await page.waitForTimeout(800);
+    const endHeader = await page.screenshot({ clip: clip(boxes.header) });
+    const endComposer = await page.screenshot({ clip: clip(boxes.composer) });
+    const results: { header: number; composer: number; groups: string[] }[] = [];
+    for (const mid of mids) {
+      results.push({ header: await countDifferingPixels(page, mid.header, endHeader), composer: await countDifferingPixels(page, mid.composer, endComposer), groups: mid.groups });
+    }
+    test.info().annotations.push({ type: 'pixels', description: results.map((result) => `header=${String(result.header)} composer=${String(result.composer)} groups=${String(result.groups.length)}`).join(' | ') });
+    return results;
+  }
+
+  test('only a feed transition captures the view header and the dock', async ({ page }) => {
+    await openFeed(page);
+    // Each frame while a view transition runs: whether the header or the
+    // dock carries a view-transition name (the capture gate).
+    const sample = () => page.evaluate(() => {
+      const state = window as Window & { __gateFrames?: string[]; __gateStop?: boolean };
+      state.__gateFrames = [];
+      state.__gateStop = false;
+      const tick = () => {
+        if (state.__gateStop) return;
+        const head = document.querySelector('[data-testid="canvas-scroller"]')?.previousElementSibling;
+        const dock = document.querySelector('#atelier-composer');
+        const named = [head, dock].map((element) => (element ? getComputedStyle(element).viewTransitionName : 'none')).filter((name) => name !== 'none' && !name.startsWith('_') && !name.startsWith('r-'));
+        if (named.length > 0) state.__gateFrames?.push(named.join(','));
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const named = async () => {
+      await page.waitForTimeout(600);
+      return page.evaluate(() => {
+        const state = window as Window & { __gateFrames?: string[]; __gateStop?: boolean };
+        state.__gateStop = true;
+        return [...new Set(state.__gateFrames ?? [])];
+      });
+    };
+    await sample();
+    await page.getByRole('button', { name: /^Pinned/ }).click();
+    await expect(page.locator(FEED_BATCH('studio-batch-1'))).toBeVisible();
+    expect(await named()).toEqual([]);
+    await sample();
+    await page.getByRole('button', { name: /^Unsorted/ }).click();
+    await expect(page.locator(FEED_BATCH('studio-batch-4'))).toBeVisible();
+    expect(await named()).toEqual([]);
+    await page.waitForTimeout(500);
+    const newest = page.locator('[data-testid="canvas-scroller"] section[data-batch-id]').last();
+    await newest.locator('[data-feed-tile]').first().hover();
+    await sample();
+    await newest.getByRole('button', { name: 'Archive tile' }).first().click();
+    expect((await named()).join(',')).toMatch(/atelier-feed-head.*atelier-dock|atelier-dock.*atelier-feed-head/);
+  });
+
+  test('a tile archived in the newest batch moves its survivor under the Composer, not over it', async ({ page }) => {
+    const boxes = await openFeed(page);
+    const newest = page.locator('[data-testid="canvas-scroller"] section[data-batch-id]').last();
+    // The newest batch's survivor reaches behind the Composer.
+    const survivorBottom = await newest.locator('[data-feed-tile]').last().evaluate((tile) => tile.getBoundingClientRect().bottom);
+    expect(survivorBottom).toBeGreaterThan(boxes.composer.y + 40);
+    await newest.locator('[data-feed-tile]').first().hover();
+    const results = await midFrames(page, boxes, async () => {
+      await newest.getByRole('button', { name: 'Archive tile' }).first().click();
+    });
+    // Live state settling (the dock minimizing on the press) differs in a few
+    // thousand pixels at most; the survivor over the dock covered ~38 000.
+    for (const result of results) expect(result.composer).toBeLessThan(5000);
+  });
+
+  test('typing reaches the prompt while a batch enters the feed', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/e2e/studio/index.html?generate=1&generateDelay=50');
+    const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
+    const expand = page.getByRole('button', { name: 'Expand composer', exact: true });
+    if (await expand.isVisible()) await expand.click();
+    await prompt.fill('a lighthouse at dusk');
+    const generateButton = page.getByRole('button', { name: 'Generate', exact: true });
+    for (let press = 1; press <= 3; press += 1) {
+      await generateButton.click();
+      await expect(page.locator(`section[data-batch-id="studio-generated-${String(press)}"]`)).toBeVisible();
+    }
+    await page.waitForTimeout(600);
+    const header = await page.getByTestId('canvas-scroller').evaluate((element) => {
+      const rect = (element.previousElementSibling ?? element).getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
+    const composer = await page.locator('#atelier-composer').boundingBox();
+    if (!composer) throw new Error('missing composer');
+    const results = await midFrames(page, { header, composer }, async () => {
+      await generateButton.click();
+    }, async () => {
+      // Keyboard input is not hit-tested, so it reaches the prompt.
+      await prompt.focus();
+      await page.keyboard.type('xyz');
+      await expect(prompt).toHaveValue(/xyz$/);
+      // Where a press on the prompt lands while the transition runs
+      // (recorded, not asserted: WebKit's hit testing of a captured element
+      // is reported in docs/web-conventions.md).
+      await prompt.evaluate((element) => { element.blur(); });
+      const box = await prompt.boundingBox();
+      if (!box) throw new Error('missing prompt');
+      const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      const hit = await page.evaluate(({ x, y }) => {
+        (window as Window & { __pressTarget?: string }).__pressTarget = 'lost';
+        window.addEventListener('pointerdown', (event) => {
+          const target = event.target as Element | null;
+          (window as Window & { __pressTarget?: string }).__pressTarget = target ? `${target.tagName}.${target.className}` : 'none';
+        }, { capture: true, once: true });
+        const hit = document.elementFromPoint(x, y);
+        return hit ? `${hit.tagName}.${hit.className}` : null;
+      }, point);
+      await page.mouse.click(point.x, point.y);
+      const pressed = await page.evaluate(() => (window as Window & { __pressTarget?: string }).__pressTarget ?? null);
+      const focused = await page.evaluate(() => document.activeElement?.tagName ?? null);
+      const groups = await page.evaluate(() => document.getAnimations()
+        .map((animation) => (animation.effect as KeyframeEffect | null)?.pseudoElement ?? '')
+        .filter((name) => name.startsWith('::view-transition-group('))
+        .join(' '));
+      test.info().annotations.push({ type: 'press', description: `elementFromPoint=${String(hit)} pointerdown=${String(pressed)} focused=${String(focused)} groups=${groups}` });
+      await prompt.evaluate((element) => { element.blur(); });
+    });
+    // The dock's own state settles meanwhile (the queue count, Generate's
+    // tint), so only the header is compared here; the archives above pin the
+    // dock's pixels.
+    for (const result of results) expect(result.header).toBeLessThan(300);
+  });
+
+  test('a tile archived in a row under the view header moves its survivor under the header, not over it', async ({ page }) => {
+    const boxes = await openFeed(page);
+    // Scroll as a reader so a two-tile row sits half under the header.
+    await page.mouse.move(900, 400);
+    await page.mouse.wheel(0, -260);
+    await page.waitForTimeout(800);
+    const headerBottom = boxes.header.y + boxes.header.height;
+    const straddling = page.locator('[data-testid="canvas-scroller"] section[data-batch-id]').filter({ has: page.locator('[data-feed-tile]') });
+    const index = await straddling.evaluateAll((sections, bottom) => sections.findIndex((section) => {
+      const tile = section.querySelector('[data-feed-tile]')?.getBoundingClientRect();
+      return tile !== undefined && tile.top < bottom - 20 && tile.bottom > bottom + 60;
+    }), headerBottom);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const row = straddling.nth(index);
+    await row.locator('[data-feed-tile]').first().hover({ position: { x: 50, y: 200 } });
+    const results = await midFrames(page, boxes, async () => {
+      await row.getByRole('button', { name: 'Archive tile' }).first().click({ force: true });
+    });
+    // The survivor over the header covered ~72 000 pixels.
+    for (const result of results) expect(result.header).toBeLessThan(300);
+  });
+});
+
+/** Pixels whose RGB differs by more than 48 between two same-sized PNG screenshots. */
+async function countDifferingPixels(page: Page, a: Buffer, b: Buffer): Promise<number> {
+  return page.evaluate(async ([left, right]) => {
+    const decode = async (base64: string) => {
+      // The studio replaces window.fetch, so decode through an <img>.
+      const image = new Image();
+      image.src = `data:image/png;base64,${base64}`;
+      await image.decode();
+      const bitmap = await createImageBitmap(image);
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const context2d = canvas.getContext('2d');
+      if (!context2d) throw new Error('no 2d context');
+      context2d.drawImage(bitmap, 0, 0);
+      return context2d.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    };
+    const [one, two] = await Promise.all([decode(left), decode(right)]);
+    let count = 0;
+    for (let index = 0; index < one.length; index += 4) {
+      const delta = Math.abs((one[index] ?? 0) - (two[index] ?? 0)) + Math.abs((one[index + 1] ?? 0) - (two[index + 1] ?? 0)) + Math.abs((one[index + 2] ?? 0) - (two[index + 2] ?? 0));
+      if (delta > 48) count += 1;
+    }
+    return count;
+  }, [a.toString('base64'), b.toString('base64')] as const);
+}

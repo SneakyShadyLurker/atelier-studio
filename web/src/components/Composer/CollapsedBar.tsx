@@ -1,4 +1,5 @@
-import { ViewTransition, type Ref } from 'react';
+import { ViewTransition, type KeyboardEvent, type Ref } from 'react';
+import { isImeComposing } from '../../lib/ime';
 import styles from './index.module.css';
 
 interface CollapsedBarProps {
@@ -13,7 +14,22 @@ interface CollapsedBarProps {
   dangerTint: boolean;
   onExpand: () => void;
   onSubmit: () => void;
+  /** A printable character typed on the focused bar: expand and insert it. */
+  onType?: (character: string) => void;
   ref?: Ref<HTMLButtonElement>;
+  generateRef?: Ref<HTMLButtonElement>;
+  stopRef?: Ref<HTMLButtonElement>;
+}
+
+/**
+ * The printable text a key press types, with no command chord and no IME
+ * composition. Named keys (Enter, Tab, F1, Dead, Unidentified) are one
+ * capitalised word; Space stays the button's own activation key.
+ */
+function typedCharacter(event: KeyboardEvent): string | null {
+  if (event.ctrlKey || event.metaKey || event.altKey || isImeComposing(event)) return null;
+  if (event.key === '' || event.key === ' ' || /^[A-Z][A-Za-z0-9]+$/.test(event.key)) return null;
+  return event.key;
 }
 
 export function CollapsedBar({
@@ -27,7 +43,10 @@ export function CollapsedBar({
   dangerTint,
   onExpand,
   onSubmit,
+  onType,
   ref,
+  generateRef,
+  stopRef,
 }: CollapsedBarProps) {
   return (
     <div className={styles.collapsedBar} {...(dangerTint ? { 'data-tone': 'danger' } : {})}>
@@ -42,6 +61,12 @@ export function CollapsedBar({
             : 'Expand composer'
         }
         onClick={onExpand}
+        onKeyDown={(event) => {
+          const character = onType ? typedCharacter(event) : null;
+          if (character === null) return;
+          event.preventDefault();
+          onType?.(character);
+        }}
       >
         <span className={styles.collapsedPrompt} data-empty={prompt.trim() ? undefined : 'true'}>
           {prompt.trim() || placeholder}
@@ -55,7 +80,7 @@ export function CollapsedBar({
           </ViewTransition>
         )}
         {queueLength > 0 && (
-          <ViewTransition default="none" enter="part-enter" exit="part-exit">
+          <ViewTransition default="none" enter={draining ? 'none' : 'part-enter'} exit={draining ? 'none' : 'part-exit'}>
             <span className={styles.collapsedQueueBadge} data-tip={`${queueLength} queued roll${queueLength === 1 ? '' : 's'}`}>
               {queueLength} queued
             </span>
@@ -64,6 +89,7 @@ export function CollapsedBar({
       </button>
       {draining && (
         <button
+          ref={stopRef}
           type="button"
           className={styles.go}
           data-stop=""
@@ -75,7 +101,7 @@ export function CollapsedBar({
         </button>
       )}
       {canSubmit && (
-        <button type="button" className={styles.go} onClick={onSubmit}>
+        <button ref={generateRef} type="button" className={styles.go} onClick={onSubmit}>
           Generate
         </button>
       )}

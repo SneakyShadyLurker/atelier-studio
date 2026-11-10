@@ -21,8 +21,6 @@
 
 .sheet {
   composes: sheet from '../../styles/menuShell.module.css';
-  --sheet-pad: 8px;
-  --sheet-pad-bottom: 18px;
 }
 
 .backdrop {
@@ -42,10 +40,6 @@
 }
 
 .row[data-danger='true'] .icon {
-  color: var(--danger);
-}
-
-.icon {
   color: var(--danger);
 }
 
@@ -77,9 +71,3 @@
   background: var(--line);
 }
 
-@media (width < 768px) {
-  .row {
-    min-height: 48px;
-    font-size: var(--text-md);
-  }
-}

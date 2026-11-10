@@ -57,6 +57,9 @@ export const PERSIST_CACHE_VERSION = '17';
 // hydration resumes `fetchNextPage` from page N seamlessly. This bounds the
 // IndexedDB blob for power users without touching any live path.
 const MAX_PERSISTED_HISTORY_PAGES = 5;
+// Batches across persisted pages. Whole pages only: a page cut inside would
+// hand a restored cursor rows it never covered.
+const MAX_PERSISTED_HISTORY_BATCHES = 150;
 // Durable batch fields only; transient queue state (queueLengthAhead) stays out.
 // The one list: the persisted type, the key set and the projection derive from it.
 const PERSISTED_HISTORY_BATCH_FIELDS = [
@@ -199,26 +202,39 @@ export async function flushPersisterForTests(): Promise<void> {
   await flushLatestClient();
 }
 
+// The newest whole pages within both bounds: at most five pages and 150
+// batches. 0 when the first page alone exceeds the batch bound.
+function persistedPageCount(pages: readonly unknown[]): number {
+  let batches = 0;
+  let count = 0;
+  for (const page of pages.slice(0, MAX_PERSISTED_HISTORY_PAGES)) {
+    const items = isRecord(page) && Array.isArray(page.items) ? page.items.length : 0;
+    if (batches + items > MAX_PERSISTED_HISTORY_BATCHES) break;
+    batches += items;
+    count += 1;
+  }
+  return count;
+}
+
 function boundPersistedHistory(client: PersistedClient): PersistedClient {
   const original = client.clientState.queries;
-  const queries = original.map((entry) => {
-    if (!isDefaultHistoryScopeKey(entry.queryKey)) return entry;
+  const queries = original.flatMap((entry) => {
+    if (!isDefaultHistoryScopeKey(entry.queryKey)) return [entry];
     const data = entry.state.data;
-    if (!isRecord(data) || !Array.isArray(data.pages)) return entry;
-    const boundedPages = data.pages.length > MAX_PERSISTED_HISTORY_PAGES
-      ? data.pages.slice(0, MAX_PERSISTED_HISTORY_PAGES)
-      : data.pages;
-    const pages = scrubHistoryPagesForPersist(boundedPages);
-    const pageParams = data.pages.length > MAX_PERSISTED_HISTORY_PAGES && Array.isArray(data.pageParams)
-      ? data.pageParams.slice(0, MAX_PERSISTED_HISTORY_PAGES)
-      : data.pageParams;
-    if (pages === data.pages && pageParams === data.pageParams) return entry;
-    return { ...entry, state: { ...entry.state, data: { ...data, pages, pageParams } } };
+    if (!isRecord(data) || !Array.isArray(data.pages)) return [entry];
+    const keep = persistedPageCount(data.pages);
+    // A first page over the bound: the scope is not persisted at all.
+    if (keep === 0 && data.pages.length > 0) return [];
+    const sliced = keep < data.pages.length;
+    const pages = scrubHistoryPagesForPersist(sliced ? data.pages.slice(0, keep) : data.pages);
+    const pageParams = sliced && Array.isArray(data.pageParams) ? data.pageParams.slice(0, keep) : data.pageParams;
+    if (pages === data.pages && pageParams === data.pageParams) return [entry];
+    return [{ ...entry, state: { ...entry.state, data: { ...data, pages, pageParams } } }];
   });
   // Unchanged entries are returned by-reference, so a per-index identity
   // check tells us whether any page slice actually happened (avoids a
   // closure-mutated flag, which TS CFA can't narrow and eslint flags).
-  if (queries.every((entry, i) => entry === original[i])) return client;
+  if (queries.length === original.length && queries.every((entry, i) => entry === original[i])) return client;
   return { ...client, clientState: { ...client.clientState, queries } };
 }
 

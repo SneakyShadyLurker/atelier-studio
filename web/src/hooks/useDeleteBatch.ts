@@ -12,6 +12,7 @@ import {
   rollbackCanonicalMirror,
   type ActiveScope,
   type HistoryData,
+  type MirrorChange,
   type ScopeSnapshot,
 } from './scopedHistoryMutation';
 import { useArchiveUndoToast } from './useArchiveUndoToast';
@@ -27,6 +28,8 @@ interface DeleteBatchInput {
 interface MutationContext {
   readonly allLoading: boolean;
   readonly activeKey: QueryKey;
+  readonly batchId: string;
+  readonly change: MirrorChange;
   readonly keys: readonly QueryKey[];
   readonly snapshots: readonly ScopeSnapshot[];
   readonly hadAnyLoading: boolean;
@@ -47,6 +50,8 @@ function batchMutationContext(
   const tiles = batch?.tiles ?? [];
   return {
     activeKey,
+    batchId,
+    change: { kind: 'removeBatch' },
     keys: [activeKey],
     snapshots: [],
     allLoading: tiles.length > 0 && tiles.every((tile) => tile.status === 'loading'),
@@ -86,7 +91,7 @@ export function useDeleteBatch(scope: Partial<ActiveScope> = {}) {
         await queryClient.cancelQueries({ queryKey: historyKeys.all() });
         return context;
       }
-      const mirror = await beginCanonicalMirror(queryClient, activeKey, input.batchId);
+      const mirror = await beginCanonicalMirror(queryClient, activeKey, input.batchId, { kind: 'removeBatch' });
       // Snapshot loading tile IDs BEFORE removing the batch so we can drop
       // their preview entries from the Zustand store. The LoadingTile
       // unmount effect would also catch this, but the explicit cleanup

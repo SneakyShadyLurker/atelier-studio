@@ -146,7 +146,8 @@ At widths of 768px and above, only these two editor panels gain an overflow-only
 **Empty state**: `StateView` (`web/src/components/StateView`), a flex column with gap 18px. Passive Canvas states centre above a stable bottom reserve: 241px on desktop and 77px plus the safe-area inset on phone. Composer resizing and view remounts leave the artwork in place. Populated feeds and actionable history errors retain the live Composer reserve so their controls remain reachable by scrolling. When the Canvas is at least 560px wide but shorter than 440px above that reserve, an actionable etched state becomes one centred row: a 64px plate (the etching at 48px with 8px padding), the heading over the body (4px apart, start-aligned, type unchanged), then the action, with 18px between columns, starting at the top of the content box. Passive states, narrower Canvases and taller ones keep the stacked state. Without body text, the heading centres beside the plate. Long error text can grow the row and remains scrollable. The plate, heading and body fade in together over `--dur-overlay`; the navigation stage owns spatial motion.
 - **Plate**: the `empty-canvas` etching (360px wide on desktop, 240px on phone) inside `.plate`: `var(--bg-sunk)`, `box-shadow: var(--plate-mark)`, `--radius-tile`, 24px padding (16px on phone). See The plate and etched art.
 - **Heading** "What would you like to make?": serif `--text-display`, weight 400, line-height 1.15, `text-wrap: balance`, color `var(--ink)`, max-width 520px.
-- **Body** "Write a prompt, pick a model, press ⌘ ↵.": sans `--text-sm`, line-height 1.55, max-width 420px, color `var(--ink-3)`. Under exactly `(hover: none) and (pointer: coarse)`, first-run and empty-collection Canvas instead show "Write a prompt, pick a model, tap Generate.", matching Composer help. CSS selects one visible, accessible variant. The keys are `<kbd>` caps: mono `--text-2xs`, `var(--bg-elev)` background, `1px solid var(--line)` border with a 2px bottom border, `--radius-control`.
+- **Body** "Write a prompt, pick a model, press ⌘ ↵.": sans `--text-sm`, line-height 1.55, max-width 420px, color `var(--ink-3)`. Under exactly `(hover: none) and (pointer: coarse)`, the first-run Canvas (an empty Unsorted feed) instead shows "Write a prompt, pick a model, tap Generate.", matching Composer help. CSS selects one visible, accessible variant. The keys are `<kbd>` caps: mono `--text-2xs`, `var(--bg-elev)` background, `1px solid var(--line)` border with a 2px bottom border, `--radius-control`.
+- **Scope-aware empty states** (same plate, heading and body styles): an empty Pinned view reads "Nothing pinned yet" with "Pin a batch from its menu to keep it here."; an empty collection reads "This collection is empty" with "Move batches here from Unsorted." Neither shows the generate hint; only the empty Unsorted feed keeps the invitation above.
 - A search with no matches shows `empty-search` art, "No results found" and a one-line suggestion; a history error shows `state-error` art with a Retry secondary button; loading shows the plate at rest (`restPlate`: a 96px 3:2 empty plate breathing with `atelier-pulse`).
 
 ### Batch
@@ -154,7 +155,7 @@ At widths of 768px and above, only these two editor panels gain an overflow-only
 **Container (`.batch`)**: a sheet laid on the table: `var(--bg-elev)`, `var(--shadow-1)`, `--radius-panel`, 16px padding and a 28px top margin between batches (12px and 20px on phone; no margin on the first batch). The sheet's edge marks the break between batches; there is no divider rule. Entrance once per batch id (`seenBatches`), never replayed.
 
 **Header**: flex row, baseline-aligned, 14px gap, 8px bottom margin; no rule under it. Below 768px the prompt takes the first row alone and the meta line and actions share the second, centred on each other.
-- **Prompt**: the batch heading is data, so it sets in the sans: `--text-md`, weight 500, line-height 1.45, color `var(--ink)`, flex 1, single-line ellipsis. The full prompt opens in the `BatchPrompt` prose card (`--bg`, 1px `--line-2`, `--radius-panel`, `--shadow-photo`).
+- **Prompt**: the batch heading is data, so it sets in the sans: `--text-md`, weight 500, line-height 1.45, color `var(--ink)`, flex 1, single-line ellipsis. While the prompt is truncated, the batch More menu offers Show full prompt (first in its Prompt group), which opens the `BatchPrompt` prose card under the prompt (`--bg`, 1px `--line-2`, `--radius-panel`, `--shadow-photo`); hovering, focusing or tapping the prompt opens nothing.
 - **Meta cluster**: a `Meta` list with `lead` (sans `--text-xs`, `var(--ink-3)`, tabular figures, 10px gaps, no separators): model name (first field in `var(--ink-2)`), ratio, an optional sequence or story chip (`Part 2 of 3, 0:10`, `Part 2 of 3, stitching…`, `Story failed`; 1px `--line`, `--radius-control`, `var(--ink-2)`), the queue state while queued (`Queued, 3 ahead`, `Queued, next`), relative time ("just now", "5m ago", "2h ago", or locale date), then, when `batch.collectionId` is set, a borderless folder-glyph + collection-name button that opens the Move popover, and the template provenance (sparkle + template name, seed in its tooltip). The relative-time field is hidden below 768px to prevent meta wrap on phones.
 - **Actions**: 28×28 `buttons.iconAction` buttons (44×44 under the touch gate; transparent at rest in `var(--ink-3)`; hover `var(--bg-sunk)` fill and `var(--ink)`), 4px apart, in order: a filled pin star only while pinned (`aria-pressed`, "Unpin batch"), Play master on a sequence tail with a ready master, Copy prompt (below 768px it moves into More), Re-roll, Move to collection (folder-plus, filled while the batch is in a collection; opens the Move popover anchored to itself), Archive batch, and More (⋯) with the remaining actions, omitted when empty. None uses `--accent`. At viewport widths at least 768px, the one-line prompt reserves `max(240px, 50% of the header)` before meta and actions wrap below, with actions end-aligned. The intrinsic flex layout keeps one row when the cluster fits; below 768px the meta list keeps 96px before the actions wrap. Re-roll and Move honor read-only actions; Copy stays enabled. More retains Reopen in picker, sequence/story actions, Save to templates and Pin with their existing availability. The archive button uses the archive (box-with-slot) icon; main-feed removals are soft deletes that move tiles to the Archive view for 30 days before permanent deletion.
 
@@ -233,12 +234,13 @@ The veil persists through the loading→done handoff (see "Fresh-completion reve
 
 ### Tile (Failed)
 
-**Body**: absolute fill, 18px padding, `var(--bg-elev)` bg with 45° hatched stripes (`repeating-linear-gradient(45deg, transparent 0 8px, var(--bg-sunk) 8px 9px)`).
+**Frame**: the tile ratio is the preferred size and the content the floor (the automatic minimum of an aspect-ratio box that is not a scroll container), so a shallow tile (16:9 in a narrow column) grows to its message and actions instead of clipping them.
+**Body**: in flow, filling the frame, 18px padding, on the plate the queued and loading tiles share (`var(--bg-sunk)` mat, `--plate-mark`, `--radius-tile`); no etching. A failure that replaces its loading plate in place fades its body in over `--dur-overlay` `--ease-out` without a second shell entrance.
 - **Icon**: alert-triangle, color `var(--danger)`.
 - **Title** "Generation failed": the small-caps label in `var(--danger)`.
-- **Message**: sans `--text-xs`, `var(--ink-2)`, line-height 1.5. The error string from the backend (or the mock's reason).
-- **Actions**: two compact buttons (Retry, Dismiss) — sans `--text-xs` 500 with an icon, `1px solid var(--line-2)`, `--radius-control`, 5px 9px padding (44px tall on touch devices). Hover: invert to `var(--ink)` bg, `var(--bg)` text.
-- **Phone** (`width < 768px`): no image footprint and no stripes; the tile is as tall as its content: icon and title on one line, the message, then the actions in one row.
+- **Message**: sans `--text-xs`, `var(--ink-2)`, line-height 1.5. Categorized copy chosen from the failure category (content safety, rejected, connection, server, unavailable), never the raw provider or backend text.
+- **Actions**: two compact buttons (Retry, Dismiss) — sans `--text-xs` 500 with an icon, `1px solid var(--line-control)`, `--radius-control`, 5px 9px padding (44px tall on touch devices). Hover: invert to `var(--ink)` bg, `var(--bg)` text.
+- **Phone** (`width < 768px`): no image footprint; the tile is as tall as its content: icon and title on one line, the message, then the actions in one row.
 
 **Behavior**: Retry calls generate again with a new random seed (preserves prompt/model/ratio); Dismiss removes that single tile. If all tiles in a batch are dismissed, the batch is removed.
 
@@ -619,7 +621,7 @@ Every empty, error and crash surface shows an etched still life in a plate; noth
 
 | id | Surface | Width desktop / phone |
 |---|---|---|
-| `empty-canvas` | Canvas first run and empty collection | 360 / 240 |
+| `empty-canvas` | Canvas first run, empty Pinned and empty collection | 360 / 240 |
 | `empty-search` | Canvas search with no matches | 200 / 160 |
 | `empty-archive` | Archive empty | 320 / 220 |
 | `empty-templates` | Prompt Library, no templates | 320 / 220 |
@@ -665,7 +667,7 @@ The CSS in the `css` template literal at the top of `app.js` is the source of tr
 
 - **Streaming responses**: the prototype fakes parallel resolution with independent setTimeouts. The real backend should stream per-image results so tiles flip from loading→done individually as soon as each is ready, not in lockstep.
 - **Image format**: prototype downloads `.svg`. Real downloads should use the source format (PNG / WebP) and include EXIF or sidecar metadata if the backend provides it.
-- **Failure messages**: surface the actual backend error string verbatim. The prototype uses fake messages like "CUDA out of memory on GPU-1" — these are the kind of text the real failure tile should show, but they must come from the backend.
+- **Failure messages**: the failed tile shows categorized copy keyed by the backend's failure category, never the raw backend or provider error string (the prototype's fake messages such as "CUDA out of memory on GPU-1" are not shown in the product).
 - **Aspect ratios**: the dropdown lists 5 fixed ratios. Confirm with the model registry which ratios each model actually supports — you may want to filter the ratio chip per selected model.
 - **Auth**: not in scope of the design but obviously needed in production.
 - **Accessibility audit**: keyboard nav exists for major paths but the lightbox should also trap focus; the chips' hidden `<select>` works with screen readers but verify against your team's a11y baseline.

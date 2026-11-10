@@ -1,13 +1,18 @@
 import type { Batch, HistoryPage } from '@atelier/shared';
 import type { InfiniteData } from '@tanstack/react-query';
 import { QueryClient } from '@tanstack/react-query';
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { historyKeys, historyOpts } from '../api/history';
 import {
   findTileInAnyScope,
   historyScopesWithBatch,
+  reconcileHistoryPages,
   removeBatchFromCache,
   removeTileFromCache,
+  resetCancelTombstones,
+  CANCEL_TOMBSTONE_FINISHED_MS,
+  forgetCanceledTiles,
+  tombstoneCanceledTiles,
   updateBatchTile,
   updateBatchStatus,
   upsertNewBatch,
@@ -372,5 +377,149 @@ describe('history writes against a missing or invalidated cache', () => {
     expect(keys.toSorted()).toEqual([JSON.stringify(key), JSON.stringify(pinnedKey)].toSorted());
     expect(findTileInAnyScope(client, historyKeys.all(), 'a', 'a-t1')?.status).toBe('loading');
     expect(findTileInAnyScope(client, historyKeys.all(), 'nope', 'a-t1')).toBeUndefined();
+  });
+});
+
+describe('reconcile keeps canonical order across page appends (R1)', () => {
+  const at = (id: string, createdAt: number): Batch => ({ ...batch(id, []), createdAt });
+  const canonical = (a: Batch, b: Batch) => (b.createdAt - a.createdAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+  const sharingClient = () => {
+    const structuralSharing = historyOpts().structuralSharing;
+    if (typeof structuralSharing !== 'function') throw new Error('history structural sharing missing');
+    return new QueryClient({ defaultOptions: { queries: { structuralSharing } } });
+  };
+
+  test('a late arrival parked on the last page moves when a later page brings newer rows', () => {
+    const client = sharingClient();
+    client.setQueryData(key, { pages: [{ items: [at('p0-a', 50), at('p0-b', 40)], nextCursor: 'c0' }], pageParams: [null] });
+    // Older than every loaded row: parked at the end of the last page.
+    upsertNewBatch(client, key, at('late', 20));
+    client.setQueryData<HistoryData>(key, (current) => current && ({
+      ...current,
+      pages: [...current.pages, { items: [at('p1-a', 30), at('p1-b', 10)], nextCursor: null }],
+      pageParams: [...current.pageParams, 'c0'],
+    }));
+    const cached = client.getQueryData<HistoryData>(key);
+    expect(cached?.pages.map((page) => page.items.map((item) => item.id))).toEqual([['p0-a', 'p0-b'], ['p1-a', 'late', 'p1-b']]);
+    expect(cached?.pages.map((page) => page.nextCursor)).toEqual(['c0', null]);
+    expect(cached?.pageParams).toEqual([null, 'c0']);
+  });
+
+  test('any interleaving of late inserts and page appends flattens to server order without duplicates', () => {
+    let seed = 11;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let run = 0; run < 300; run += 1) {
+      const client = sharingClient();
+      const all = Array.from({ length: 6 + Math.floor(next() * 20) }, (_, index) => at(`r${run}-${index}`, Math.floor(next() * 8))).toSorted(canonical);
+      const late = all.filter(() => next() < 0.3);
+      const visible = new Set(all.filter((row) => !late.includes(row)).map((row) => row.id));
+      const pageSize = 1 + Math.floor(next() * 4);
+      const readPage = (after: Batch | undefined) => {
+        const rows = all.filter((row) => visible.has(row.id) && (after === undefined || canonical(after, row) < 0));
+        const items = rows.slice(0, pageSize);
+        return { items, nextCursor: rows.length > pageSize ? `after-${items.at(-1)?.id ?? ''}` : null };
+      };
+      const first = readPage(undefined);
+      client.setQueryData(key, { pages: [first], pageParams: [null] });
+      let cursorRow = first.items.at(-1);
+      let ended = first.nextCursor === null;
+      const pendingLate = late.slice().sort(() => next() - 0.5);
+      for (let step = 0; step < 40 && (!ended || pendingLate.length > 0); step += 1) {
+        if (pendingLate.length > 0 && (ended || next() < 0.5)) {
+          const row = pendingLate.pop();
+          if (!row) continue;
+          visible.add(row.id);
+          upsertNewBatch(client, key, row);
+        } else if (!ended) {
+          const page = readPage(cursorRow);
+          client.setQueryData<HistoryData>(key, (current) => current && ({
+            ...current,
+            pages: [...current.pages, page],
+            pageParams: [...current.pageParams, `after-${cursorRow?.id ?? ''}`],
+          }));
+          cursorRow = page.items.at(-1) ?? cursorRow;
+          ended = page.nextCursor === null;
+        }
+      }
+      const flat = client.getQueryData<HistoryData>(key)?.pages.flatMap((page) => page.items) ?? [];
+      expect(flat.map((row) => row.id)).toEqual(flat.toSorted(canonical).map((row) => row.id));
+      expect(new Set(flat.map((row) => row.id)).size).toBe(flat.length);
+    }
+  });
+
+  test('a write with nothing to fix keeps the incoming data object', () => {
+    const loading = { ...batch('a', [{ id: 'a-1', seed: 1, status: 'loading' }]), createdAt: 5, status: 'running' as const };
+    const previous = { pages: [{ items: [loading, at('b', 4)], nextCursor: 'c' }, { items: [at('c', 3)], nextCursor: null }], pageParams: [null, 'c'] } as HistoryData;
+    const incoming = { ...previous, pages: previous.pages.map((page) => ({ ...page })) };
+    expect(reconcileHistoryPages(incoming, previous) === incoming).toBe(true);
+    expect(reconcileHistoryPages(incoming) === incoming).toBe(true);
+  });
+});
+
+describe('confirmed cancellation tombstones (R4)', () => {
+  const sharingClient = () => {
+    const structuralSharing = historyOpts().structuralSharing;
+    if (typeof structuralSharing !== 'function') throw new Error('history structural sharing missing');
+    return new QueryClient({ defaultOptions: { queries: { structuralSharing } } });
+  };
+  const loadingBatch = (id: string, tileIds: readonly string[], createdAt: number): Batch => ({
+    ...batch(id, tileIds.map((tileId, index) => ({ id: tileId, seed: index, status: 'loading' as const }))),
+    createdAt,
+    status: 'running',
+  });
+  afterEach(() => { resetCancelTombstones(); });
+
+  test('a stale read never brings back a tile whose cancel the server confirmed', () => {
+    const client = sharingClient();
+    const stale = { pages: [{ items: [loadingBatch('a', ['a-1', 'a-2'], 5)], nextCursor: null }], pageParams: [null] };
+    tombstoneCanceledTiles(['a-2']);
+    client.setQueryData(key, stale);
+    const cached = client.getQueryData<HistoryData>(key);
+    expect(cached?.pages[0]?.items[0]?.tiles.map((tile) => tile.id)).toEqual(['a-1']);
+    expect(cached?.loadingTileCount).toBe(1);
+  });
+
+  test('a tile the server handed back (a restore) is shown again at once', () => {
+    const client = sharingClient();
+    tombstoneCanceledTiles(['a-1', 'a-2']);
+    forgetCanceledTiles(['a-2']);
+    client.setQueryData(key, { pages: [{ items: [loadingBatch('a', ['a-1', 'a-2'], 5)], nextCursor: null }], pageParams: [null] });
+    expect(client.getQueryData<HistoryData>(key)?.pages[0]?.items[0]?.tiles.map((tile) => tile.id)).toEqual(['a-2']);
+  });
+
+  test('a finished copy of a cancelled tile is a stale read for a minute, then a real restore', () => {
+    // The cancel raced the tile's completion: the server archived the finished
+    // tile. A read that sampled it between completion and the DELETE lands
+    // within the minute and must not bring it back; a restore from another
+    // tab later returns it finished, and then it shows.
+    const client = sharingClient();
+    const restored: Batch = {
+      ...loadingBatch('a', ['a-1'], 5),
+      tiles: [
+        { id: 'a-1', seed: 0, status: 'loading' },
+        { id: 'a-2', seed: 1, status: 'done', url: '/img/a-2.png', ext: 'png', mime: 'image/png', completedAt: 9 },
+      ],
+    };
+    tombstoneCanceledTiles(['a-2']);
+    client.setQueryData(key, { pages: [{ items: [restored], nextCursor: null }], pageParams: [null] });
+    expect(client.getQueryData<HistoryData>(key)?.pages[0]?.items[0]?.tiles.map((tile) => tile.id)).toEqual(['a-1']);
+    // More than a minute after the confirmation.
+    tombstoneCanceledTiles(['a-2'], Date.now() - CANCEL_TOMBSTONE_FINISHED_MS - 1);
+    client.setQueryData(key, { pages: [{ items: [{ ...restored }], nextCursor: null }], pageParams: [null] });
+    expect(client.getQueryData<HistoryData>(key)?.pages[0]?.items[0]?.tiles.map((tile) => tile.id)).toEqual(['a-1', 'a-2']);
+  });
+
+  test('a batch whose every tile was cancelled does not reappear', () => {
+    const client = sharingClient();
+    tombstoneCanceledTiles(['a-1', 'a-2']);
+    client.setQueryData(key, { pages: [{ items: [loadingBatch('a', ['a-1', 'a-2'], 5), loadingBatch('b', ['b-1'], 4)], nextCursor: null }], pageParams: [null] });
+    expect(client.getQueryData<HistoryData>(key)?.pages[0]?.items.map((item) => item.id)).toEqual(['b']);
+  });
+
+  test('a tombstone expires five minutes after the confirmation', () => {
+    const client = sharingClient();
+    tombstoneCanceledTiles(['a-2'], Date.now() - 5 * 60_000 - 1);
+    client.setQueryData(key, { pages: [{ items: [loadingBatch('a', ['a-1', 'a-2'], 5)], nextCursor: null }], pageParams: [null] });
+    expect(client.getQueryData<HistoryData>(key)?.pages[0]?.items[0]?.tiles.map((tile) => tile.id)).toEqual(['a-1', 'a-2']);
   });
 });

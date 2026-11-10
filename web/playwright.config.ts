@@ -5,6 +5,14 @@ import { defineConfig, devices, firefox } from '@playwright/test';
 // not, say so once per run instead of failing to launch it, so a missing
 // engine is a recorded verification gap rather than a silent skip.
 const firefoxInstalled = existsSync(firefox.executablePath());
+// The dev server port. Another project's Vite on 5173 would otherwise be
+// reused (`reuseExistingServer`) and every spec would run against the wrong
+// app; parallel checkouts each need their own port too.
+const port = Number(process.env.ATELIER_E2E_PORT ?? 5173);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  throw new Error(`ATELIER_E2E_PORT must be a TCP port, got "${String(process.env.ATELIER_E2E_PORT)}"`);
+}
+const origin = `http://localhost:${String(port)}`;
 if (!firefoxInstalled) {
   console.warn(`[playwright] Firefox is not installed (${firefox.executablePath()}): the firefox-anchors project is unavailable, so native-anchors.spec.ts runs without Firefox this time.`);
 }
@@ -25,7 +33,7 @@ export default defineConfig({
   retries: 0,
   reporter: process.env.CI ? 'line' : [['list']],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: origin,
     trace: {
       mode: 'retain-on-failure',
       snapshots: { dom: true, aria: true, screen: true },
@@ -52,8 +60,8 @@ export default defineConfig({
   // The overlay harness (e2e/harness/) is a dev-server-only entry, so the specs
   // need Vite running — not a built bundle. No API is involved.
   webServer: {
-    command: 'bun run dev',
-    url: 'http://localhost:5173/e2e/harness/index.html',
+    command: `bun run dev -- --port ${String(port)} --strictPort`,
+    url: `${origin}/e2e/harness/index.html`,
     reuseExistingServer: true,
     timeout: 60_000,
   },

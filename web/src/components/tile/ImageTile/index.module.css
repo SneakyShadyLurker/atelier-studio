@@ -236,3 +236,20 @@
     transform: none;
   }
 }
+
+/* The streamed tile's last partial preview, held over the mat until the final
+   image has decoded (data-media-ready), then cross-faded out. Its own
+   transition survives data-cached so the fade always ends and hands back. */
+.frame img.preview,
+.frame[data-cached='true'] img.preview {
+  position: absolute;
+  inset: 0;
+  opacity: 1;
+  filter: none;
+  pointer-events: none;
+  transition: opacity var(--dur-reveal) var(--ease-out);
+}
+
+.frame[data-media-ready='true'] img.preview {
+  opacity: 0;
+}

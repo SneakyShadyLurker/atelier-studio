@@ -1,6 +1,7 @@
 import { isVideoMime, type ArchivedTile } from '@atelier/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState, ViewTransition } from 'react';
+import { useCachedThumb } from '../../hooks/useCachedMedia';
 import { getRatioDefinition } from '../../lib/ratios';
 import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow';
 import { InfiniteStatus } from '../InfiniteStatus';
@@ -34,6 +35,108 @@ interface ArchiveProps {
   onOpenTile: (tile: ArchivedTile) => void;
 }
 
+interface ArchiveTileCardProps {
+  tile: ArchivedTile;
+  archivedDate: string;
+  onOpen: () => void;
+  onRestore: () => void;
+  onDelete: () => void;
+}
+
+// One archived tile: media, its actions and the identity block. Its own
+// component so the full-prompt card has per-tile state. Nothing about the
+// prompt line itself opens the full text (no hover, focus or tap); a cut-off
+// prompt adds a "Show full prompt" action beside Restore and Delete, the
+// Archive's counterpart of the feed's More menu item.
+function ArchiveTileCard({ tile, archivedDate, onOpen, onRestore, onDelete }: ArchiveTileCardProps) {
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptTruncated, setPromptTruncated] = useState(false);
+  const promptButtonRef = useRef<HTMLButtonElement | null>(null);
+  return (
+    <div className={styles.tile}>
+      <div className={styles.media}>
+        <button
+          className={styles.frame}
+          type="button"
+          aria-label={`Open archived image: ${tile.prompt}`}
+          // Archived media was seen in the feed: a virtual remount (scroll,
+          // re-chunked rows) must not replay the video develop.
+          data-seen="true"
+          style={{ aspectRatio: tileAspectRatio(tile) }}
+          onClick={onOpen}
+        >
+          {isVideoMime(tile.mime) ? (
+            <ClipFrame src={tile.url} poster={tile.thumbUrl} />
+          ) : (
+            <ArchiveImage tile={tile} />
+          )}
+        </button>
+        <div className={styles.overlay}>
+          <div className={styles.actions}>
+            {promptTruncated && (
+              <button
+                ref={promptButtonRef}
+                type="button"
+                className={buttons.tileAction}
+                aria-label="Show full prompt"
+                aria-haspopup="dialog"
+                aria-expanded={promptOpen}
+                data-tip="Show full prompt"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setPromptOpen(true);
+                }}
+              >
+                <I.expand />
+              </button>
+            )}
+            <button
+              type="button"
+              className={buttons.tileAction}
+              aria-label="Restore"
+              data-tip="Restore"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRestore();
+              }}
+            >
+              <I.reroll />
+            </button>
+            <button
+              type="button"
+              className={buttons.tileAction}
+              aria-label="Delete permanently"
+              data-tip="Delete permanently"
+              data-tip-place="above-end"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete();
+              }}
+            >
+              <I.trash />
+            </button>
+          </div>
+        </div>
+      </div>
+      <div className={styles.identity}>
+        <BatchPrompt
+          prompt={tile.prompt}
+          {...(styles.prompt ? { className: styles.prompt } : {})}
+          open={promptOpen}
+          onClose={() => { setPromptOpen(false); }}
+          onTruncatedChange={setPromptTruncated}
+          returnFocusRef={promptButtonRef}
+        />
+        <Meta
+          lead
+          className={styles.meta}
+          items={[tile.modelLabel, <time key="archived" dateTime={new Date(tile.archivedAt).toISOString()}>Archived {archivedDate}</time>]}
+        />
+      </div>
+    </div>
+  );
+}
+
 function EmptyArchive() {
   return (
     <StateView
@@ -56,6 +159,9 @@ const archiveDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'me
 
 function ArchiveImage({ tile }: { tile: ArchivedTile }) {
   const [loaded, setLoaded] = useState(false);
+  // Read through the session media cache: a virtualized remount repaints
+  // from memory instead of downloading the thumbnail again.
+  const thumbSrc = useCachedThumb(tile.thumbUrl, tile.url);
   return (
     <>
       <span className={`${styles.skeleton} ${loaded ? styles.skeletonHidden : ''}`} aria-hidden="true" />
@@ -64,7 +170,7 @@ function ArchiveImage({ tile }: { tile: ArchivedTile }) {
           if (image?.complete && image.naturalWidth > 0) setLoaded(true);
         }}
         className={loaded ? styles.imageLoaded : undefined}
-        src={tile.thumbUrl ?? tile.url}
+        src={thumbSrc}
         alt={`${tile.prompt} — generated with ${tile.modelLabel}`}
         width={ARCHIVE_MIN_TILE_WIDTH}
         height={ARCHIVE_MIN_TILE_WIDTH}
@@ -233,63 +339,13 @@ function Archive({
         exit="tile-exit"
         enter={revealedIds.has(tile.id) ? 'tile-enter' : 'none'}
       >
-      <div className={styles.tile}>
-        <div className={styles.media}>
-          <button
-            className={styles.frame}
-            type="button"
-            aria-label={`Open archived image: ${tile.prompt}`}
-            // Archived media was seen in the feed: a virtual remount (scroll,
-            // re-chunked rows) must not replay the video develop.
-            data-seen="true"
-            style={{ aspectRatio: tileAspectRatio(tile) }}
-            onClick={() => { onOpenTile(tile); }}
-          >
-            {isVideoMime(tile.mime) ? (
-              <ClipFrame src={tile.url} poster={tile.thumbUrl} />
-            ) : (
-              <ArchiveImage tile={tile} />
-            )}
-          </button>
-          <div className={styles.overlay}>
-            <div className={styles.actions}>
-              <button
-                type="button"
-                className={buttons.tileAction}
-                aria-label="Restore"
-                data-tip="Restore"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  removeTile(tile.id, onRestore);
-                }}
-              >
-                <I.reroll />
-              </button>
-              <button
-                type="button"
-                className={buttons.tileAction}
-                aria-label="Delete permanently"
-                data-tip="Delete permanently"
-                data-tip-place="above-end"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setPendingDelete(tile.id);
-                }}
-              >
-                <I.trash />
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className={styles.identity}>
-          <BatchPrompt prompt={tile.prompt} {...(styles.prompt ? { className: styles.prompt } : {})} />
-          <Meta
-            lead
-            className={styles.meta}
-            items={[tile.modelLabel, <time key="archived" dateTime={new Date(tile.archivedAt).toISOString()}>Archived {archivedDate}</time>]}
-          />
-        </div>
-      </div>
+      <ArchiveTileCard
+        tile={tile}
+        archivedDate={archivedDate}
+        onOpen={() => { onOpenTile(tile); }}
+        onRestore={() => { removeTile(tile.id, onRestore); }}
+        onDelete={() => { setPendingDelete(tile.id); }}
+      />
       </ViewTransition>
     );
   };

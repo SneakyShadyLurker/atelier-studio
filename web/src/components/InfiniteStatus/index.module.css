@@ -25,6 +25,21 @@
   min-height: 1lh;
 }
 
+/* The feed's refresh-failure row (FeedRefreshStatus): the end footprint while
+   it reports a failure, no footprint at all while its live region is empty. */
+.refresh {
+  composes: root;
+}
+
+.refresh:not([data-error='true']) {
+  padding: 0;
+  gap: 0;
+}
+
+.refresh:not([data-error='true']) .status {
+  min-height: 0;
+}
+
 .hairline {
   width: 60px;
   height: 1px;

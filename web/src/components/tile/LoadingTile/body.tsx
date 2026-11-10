@@ -32,7 +32,7 @@ function elapsedLabel(now: number, startedAt: number, isVideo: boolean): string 
 
 function ElapsedTime({ modelName, startedAt, isVideo }: { modelName: string; startedAt: number; isVideo: boolean }) {
   const now = useNowTick();
-  return <Meta className={styles.elapsed} items={[modelName, elapsedLabel(now, startedAt, isVideo)]} />;
+  return <Meta className={styles.elapsed} items={[<span key="model" className={styles.model}>{modelName}</span>, elapsedLabel(now, startedAt, isVideo)]} />;
 }
 
 interface StepProgressProps {

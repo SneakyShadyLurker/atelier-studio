@@ -14,6 +14,7 @@ import { fixtureModels } from './fixtures/models';
 import { flushQueryNotifications } from './fixtures/queryNotifications';
 import { seedTextModelGate } from './fixtures/textModelGate';
 import { collectionKeys } from '../src/api/collections';
+import { resetMediaCacheForTests } from '../src/lib/mediaCache';
 import { APP_VIEW_PINNED, APP_VIEW_UNSORTED, toGenerateRequest, useAtelierStore } from '../src/store/atelier';
 
 const originalMatchMedia = window.matchMedia.bind(window);
@@ -768,6 +769,17 @@ describe('visual scaffold components', () => {
     const tileWithThumb = firstTile.status === 'done'
       ? { ...firstTile, thumbUrl: '/api/img/done-01/thumb' }
       : firstTile;
+    // The placeholder is the feed's thumbnail, read through the session media
+    // cache (the server answers thumbnails `no-store`): one fetch, then an
+    // object URL every consumer shares.
+    resetMediaCacheForTests();
+    const requested: string[] = [];
+    URL.createObjectURL = mock(() => 'blob:lightbox-thumb');
+    URL.revokeObjectURL = mock(() => undefined);
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      requested.push(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      return Promise.resolve(new Response(new Blob(['thumb'], { type: 'image/webp' })));
+    }) as unknown as typeof fetch;
     render(withQueryClient(
       <Lightbox
         batch={{ ...doneBatch, tiles: [tileWithThumb, ...doneBatch.tiles.slice(1)] }}
@@ -784,8 +796,34 @@ describe('visual scaffold components', () => {
     const full = screen.getByRole('img', { name: new RegExp(`Expanded generated image, prompt: ${doneBatch.prompt}`) });
     expect(full.getAttribute('src')).toBe(firstTile.status === 'done' ? firstTile.url : '');
     expect(full.getAttribute('fetchpriority')).toBe('high');
-    expect(full.parentElement?.getAttribute('style')).toContain('/api/img/done-01/thumb');
+    await waitFor(() => { expect(full.parentElement?.getAttribute('style')).toContain('blob:lightbox-thumb'); });
+    // The mounted viewer says so in the store (clip previews pause behind it),
+    // and takes the flag back when it unmounts.
+    expect(useAtelierStore.getState().viewerOpen).toBe(true);
+    cleanup();
+    expect(useAtelierStore.getState().viewerOpen).toBe(false);
+    expect(requested.filter((url) => url.includes('/api/img/done-01/thumb')).length).toBe(1);
+    resetMediaCacheForTests();
     expect(screen.queryByRole('presentation', { hidden: true })).toBeNull();
+  });
+
+  test('a Lightbox left with no finished tile shows no viewer and clears the viewer flag', async () => {
+    const doneBatch = requireValue(fixtureBatches[0], 'done batch');
+    const firstTile = requireValue(doneBatch.tiles[0], 'first done tile');
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const viewer = (batch: typeof doneBatch) => (
+      <QueryClientProvider client={client}>
+        <Lightbox batch={batch} modelById={fixtureModelById} triggerKey={firstTile.id} deleteVariant="archive" onClose={() => undefined} onDownload={() => undefined} onDelete={() => undefined} />
+      </QueryClientProvider>
+    );
+    const view = render(viewer({ ...doneBatch, tiles: [firstTile] }));
+    await act(async () => { await import('../src/components/Lightbox/Content'); });
+    expect(useAtelierStore.getState().viewerOpen).toBe(true);
+    // The batch stays in scope, but its only finished tile is gone (archived
+    // elsewhere) and a loading sibling remains: nothing to view.
+    view.rerender(viewer({ ...doneBatch, status: 'running', tiles: [{ id: 'still-loading', seed: 2, status: 'loading' }] }));
+    expect(screen.queryByRole('dialog') === null).toBe(true);
+    expect(useAtelierStore.getState().viewerOpen).toBe(false);
   });
 
   test('Lightbox Edit pushes the active tile into the composer, focuses prompt, and closes', async () => {

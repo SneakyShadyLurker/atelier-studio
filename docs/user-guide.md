@@ -61,6 +61,24 @@ keep it somewhere appropriate for its contents.
 request when an editing model is available. It leaves the original result in
 history. Change the prompt and generate again to create a new batch.
 
+On a desktop, the composer tucks itself into its bar when you click a batch or
+scroll the feed, or after a few seconds of not touching it while images are
+generating, so your results get the whole view. Your prompt, references and
+queue stay as they are, and the bar keeps **Generate**. Click the bar, press
+Enter, or start typing while the bar is focused to bring it back.
+
+The feed keeps your place. New results appear at the bottom, and the view
+follows them only while you are already there. When you scroll more than a
+screen above your newest results, a **Jump to latest** button appears above the
+composer, with a dot when a batch arrived or finished below. A batch started on
+another device shows up within about a minute while the tab is visible. If a
+refresh fails, a "Couldn’t refresh" row with **Retry** appears at the bottom of
+the feed; the results you already have stay on screen. A queued batch is
+announced as queued until it starts generating. Video clips play when most of
+the clip is on screen (touch) or under the pointer, and pause while the viewer
+is open. An empty **Pinned** view says "Nothing pinned yet" and an empty
+collection says "This collection is empty".
+
 Refresh the page to reconnect to server history. Closing the browser is not a
 cancel operation; use the batch's cancel control when you want to stop work.
 
@@ -86,7 +104,10 @@ for prompt text.
 
 Each batch header has **Re-roll**, **Move to collection** and **Archive batch**
 actions. **Copy prompt** is beside them on larger screens and under **More** on
-phones. To create a destination while moving a batch, choose **New collection**,
+phones. A long prompt is cut off in the header: open the batch's **More** (⋯)
+menu and choose **Show full prompt** to read all of it, then press Escape or
+click elsewhere to close it. Nothing opens when you rest the pointer on a
+prompt. In the Archive the same action sits on the tile beside **Restore**. To create a destination while moving a batch, choose **New collection**,
 enter its name, then select **Move** or press Enter.
 
 Archiving removes work from the active views. Open **Archive** to restore

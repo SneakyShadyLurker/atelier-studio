@@ -36,10 +36,16 @@
   transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
 }
 
-.clear:hover,
 .clear:focus-visible {
   color: var(--ink);
   background: var(--bg);
+}
+
+@media (hover: hover) {
+  .clear:hover {
+    color: var(--ink);
+    background: var(--bg);
+  }
 }
 
 .clear:active {
@@ -133,13 +139,19 @@
   transition: border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
 }
 
-.row:hover {
-  border-color: var(--line);
-  color: var(--ink);
-}
+@media (hover: hover) {
+  .row:hover {
+    border-color: var(--line);
+    color: var(--ink);
+  }
 
-.drag:hover {
-  color: var(--ink);
+  .drag:hover {
+    color: var(--ink);
+  }
+
+  .remove:hover:where(:not(:disabled)) {
+    color: var(--danger);
+  }
 }
 
 .row:focus-visible {
@@ -176,7 +188,6 @@
   height: 24px;
 }
 
-.remove:hover:where(:not(:disabled)),
 .remove:focus-visible {
   color: var(--danger);
 }
@@ -185,4 +196,5 @@
 @media (hover: none), (any-pointer: coarse) {
   .row { min-height: 44px; }
   .remove { width: 44px; height: 44px; }
+  .clear { min-height: 44px; padding-inline: 10px; }
 }

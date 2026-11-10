@@ -206,6 +206,10 @@ export default function Content({ batch, modelById, deleteVariant, onDownload, o
       handoffFocusRef.current = null;
     });
   };
+  // Busy is aria-disabled with a click guard (each handler returns early),
+  // never `disabled`: a focused control that becomes disabled drops keyboard
+  // focus to <body>.
+  const mediaNoun = isVideoMime(tile.mime) ? 'video' : 'image';
   const canAnimate = i2vModel !== undefined && !isVideoMime(tile.mime);
   const canExtend = !showingMaster && canExtendVideoTile(batch, tile, i2vModel !== undefined);
 
@@ -374,27 +378,27 @@ export default function Content({ batch, modelById, deleteVariant, onDownload, o
             {zoom.isZoomed ? <I.zoomOut /> : <I.zoomIn />}
           </button>
         )}
-        {!showingReference && <button className={styles.btn} type="button" aria-label={showingMaster ? 'Download sequence master' : 'Download expanded image'} onClick={() => { if (master) master.onDownload(); else onDownload(tile); }}>
+        {!showingReference && <button className={styles.btn} type="button" aria-label={showingMaster ? 'Download sequence master' : `Download expanded ${mediaNoun}`} onClick={() => { if (master) master.onDownload(); else onDownload(tile); }}>
           <I.download />
           Download
         </button>}
         {!showingReference && canAnimate && (
-          <button className={`${buttons.iconAction} ${styles.animateAction}`} type="button" aria-label="Animate this image" data-tip={animating ? 'Preparing…' : 'Animate'} aria-busy={animating} disabled={animating} onClick={animateFromTile}>
+          <button className={`${buttons.iconAction} ${styles.animateAction}`} type="button" aria-label="Animate this image" data-tip={animating ? 'Preparing…' : 'Animate'} aria-busy={animating || undefined} aria-disabled={animating || undefined} onClick={animateFromTile}>
             {animating ? <span className={styles.animateSpinner} aria-hidden="true" /> : <I.film />}
           </button>
         )}
         {!showingReference && canExtend && (
-          <button className={`${buttons.iconAction} ${styles.animateAction}`} type="button" aria-label="Extend this video" data-tip={extendingTileId === tile.id ? 'Preparing…' : 'Extend'} aria-busy={extendingTileId === tile.id} disabled={extendingTileId !== null} onClick={extendFromTile}>
+          <button className={`${buttons.iconAction} ${styles.animateAction}`} type="button" aria-label="Extend this video" data-tip={extendingTileId === tile.id ? 'Preparing…' : 'Extend'} aria-busy={extendingTileId === tile.id || undefined} aria-disabled={extendingTileId !== null || undefined} onClick={extendFromTile}>
             {extendingTileId === tile.id ? <span className={styles.animateSpinner} aria-hidden="true" /> : <I.extend />}
           </button>
         )}
         {!showingMaster && !showingReference && canEdit && (
-          <button className={styles.btn} type="button" aria-label="Edit from this image" aria-busy={editing || undefined} disabled={editing} onClick={editFromTile}>
+          <button className={styles.btn} type="button" aria-label="Edit from this image" aria-busy={editing || undefined} aria-disabled={editing || undefined} onClick={editFromTile}>
             {editing ? <span className={styles.animateSpinner} aria-hidden="true" /> : <I.penLine />}
             Edit
           </button>
         )}
-        {!showingMaster && !showingReference && <button className={`${styles.btn} ${styles.danger}`} type="button" aria-label={deleteVariant === 'archive' ? 'Archive expanded image' : 'Delete expanded image permanently'} onClick={() => { onDelete(tile); }}>
+        {!showingMaster && !showingReference && <button className={`${styles.btn} ${styles.danger}`} type="button" aria-label={deleteVariant === 'archive' ? `Archive expanded ${mediaNoun}` : `Delete expanded ${mediaNoun} permanently`} onClick={() => { onDelete(tile); }}>
           {deleteVariant === 'archive' ? <I.archive /> : <I.trash />}
           {deleteVariant === 'archive' ? 'Archive' : 'Delete'}
         </button>}

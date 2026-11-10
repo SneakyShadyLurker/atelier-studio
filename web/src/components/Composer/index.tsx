@@ -5,6 +5,7 @@ import { addTransitionType, memo, startTransition, useEffect, useId, useLayoutEf
 import { useQuery } from '@tanstack/react-query';
 import { textModelsOpts } from '../../api/textModels';
 import { refImageUrl, uploadRefImage } from '../../api/uploads';
+import { useHistoryWorkRunning } from '../../hooks/useHistoryWorkRunning';
 import { COMPOSER_BODY_UPDATE, COMPOSER_PARTS_TRANSITION, composerPartsReshaped } from '../../lib/composerMotion';
 import { beginSourceHandoff, supersedeSourceHandoffs } from '../../lib/composerSourceHandoff';
 import { isModelAvailable } from '../../lib/effectiveModel';
@@ -30,6 +31,9 @@ import { Disclosure } from '../Disclosure';
 import { I } from '../icons/I';
 import ChipSelect, { type ChipSelectOption } from './ChipSelect';
 import { CollapsedBar } from './CollapsedBar';
+import { registerComposerYield } from './composerYield';
+import { useComposerIdleYield } from './useComposerIdleYield';
+import { elementContainsPoint, useRootClickRescue } from './useRootClickRescue';
 import EnhanceControl from './EnhanceControl';
 import InFlightIndicator from './InFlightIndicator';
 import { hostLabel, shortModelToken } from './modelToken';
@@ -43,6 +47,9 @@ import RollQueueList from '../RollQueueList';
 import { Meta } from '../Meta';
 import buttons from '../../styles/buttons.module.css';
 import styles from './index.module.css';
+
+// The feed's row list (Canvas): batches and their tiles.
+const FEED_ROWS_SELECTOR = '[data-virtualized="canvas"]';
 
 export const COMPOSER_PROMPT_ID = 'atelier-composer-prompt';
 const BYOK_SENTINEL = '__BYOK__';
@@ -137,6 +144,14 @@ function Composer({
   const motionRef = useRef<HTMLTextAreaElement | null>(null);
   const sourceUploadRef = useRef<HTMLInputElement | null>(null);
   const collapsedExpandRef = useRef<HTMLButtonElement | null>(null);
+  const goRef = useRef<HTMLButtonElement | null>(null);
+  const stopRef = useRef<HTMLButtonElement | null>(null);
+  const barGoRef = useRef<HTMLButtonElement | null>(null);
+  const barStopRef = useRef<HTMLButtonElement | null>(null);
+  // Desktop yield guards that no render reads: the pointer resting over the
+  // Composer and an IME composition in one of its fields.
+  const pointerOverRef = useRef(false);
+  const imeComposingRef = useRef(false);
   const motionPromptId = useId();
   const statusId = useId();
   const [dragActive, setDragActive] = useState(false);
@@ -171,6 +186,11 @@ function Composer({
     return labels;
   }, [textModels, aiFillLabels]);
   const draining = useAtelierStore((state) => state.draining);
+  // Work is running while tiles load in history (a boolean read of the cache,
+  // so a stream's tile events do not re-render the Composer), the roll queue
+  // drains or prompts are still being prepared.
+  const historyWorkRunning = useHistoryWorkRunning();
+  const workRunning = historyWorkRunning || draining || preparing > 0;
   const canStop = draining || retryingPrepared;
   const removeQueuedRoll = useAtelierStore((state) => state.removeQueuedRoll);
   const reorderQueuedRolls = useAtelierStore((state) => state.reorderQueuedRolls);
@@ -252,8 +272,16 @@ function Composer({
   const [parts, setParts] = useState(liveParts);
   const scheduledPartsRef = useRef(liveParts);
   useEffect(() => {
-    const reshaped = composerPartsReshaped(scheduledPartsRef.current, liveParts, useAtelierStore.getState().draining);
+    const drainRunning = useAtelierStore.getState().draining;
+    const reshaped = composerPartsReshaped(scheduledPartsRef.current, liveParts, drainRunning);
     scheduledPartsRef.current = liveParts;
+    // Even enter="none" can start a native view transition when its React
+    // boundary mounts. A drain's take/restore/count commits own no motion:
+    // keep them urgent, outside the document-wide capture preparation window.
+    if (drainRunning && !reshaped) {
+      setParts(liveParts);
+      return;
+    }
     startTransition(() => {
       if (reshaped) addTransitionType(COMPOSER_PARTS_TRANSITION);
       setParts(liveParts);
@@ -407,19 +435,49 @@ function Composer({
     autoFocus: false,
   });
   const composerKeyboardActive = isPhone ? composerExpanded : composerFocused && !collapsed;
-  // A pointer landing in the feed while the composer holds nothing is the
-  // operator moving on. On a fresh load the wrap never had focus, so the blur
-  // path alone would leave the empty composer covering the canvas until the
-  // first keystroke. Open composer-owned popovers and dialogs are not "outside".
-  useOutsidePointer([wrapRef], () => {
+  // R24: the desktop Composer yields the viewport to the feed, text or not.
+  // It stays while the reader is using it: an owned popover or dialog, an
+  // upload or Enhance run, an IME composition, or (for scroll and idle) the
+  // pointer resting on it. Only popover triggers count (ChipSelect,
+  // Templates): a persistent disclosure such as the roll-queue expander must
+  // not pin the composer open.
+  const yieldBlocked = (pointerMatters: boolean): boolean => {
     const wrap = wrapRef.current;
-    // Only popover triggers count (ChipSelect, Templates): a persistent
-    // disclosure such as the roll-queue expander must not pin the composer open.
-    if (!wrap || wrap.querySelector('[aria-haspopup][aria-expanded="true"]')) return;
+    if (!wrap || isPhone || collapsed || forceExpanded) return true;
+    if ((pointerMatters && pointerOverRef.current) || imeComposingRef.current) return true;
+    if (hasUploadingRefs || sourceUploading || enhancing || textNote !== null) return true;
+    if (wrap.querySelector('[aria-haspopup][aria-expanded="true"]')) return true;
     const active = document.activeElement;
-    if (active instanceof Element && active.closest('dialog, [role="dialog"], [role="listbox"], [role="menu"]')) return;
+    return active instanceof Element && active.closest('dialog, [role="dialog"], [role="listbox"], [role="menu"]') !== null;
+  };
+  // Scroll and idle: focus inside the Composer moves to the collapsed bar,
+  // as minimize() does; focus elsewhere stays where the reader put it.
+  const yieldViewport = () => {
+    if (yieldBlocked(true)) return;
+    if (wrapRef.current?.contains(document.activeElement)) minimize();
+    else setComposerMinimized(true);
+  };
+  // A press in the feed. "Outside" is decided by the pointer's point against
+  // the Composer's box, not only the target: during a feed transition WebKit
+  // hit-tests a press on the captured Composer through to the feed behind
+  // it, and capture preparation delivers it to the root. The press then
+  // places focus itself, so none is moved here.
+  // A Composer holding a draft yields only to the feed's own rows (batches
+  // and tiles): there the reader is looking at results. A press on a feed
+  // state with nothing to view (the empty invitation, a load error's Retry),
+  // the view header, the sidebar or a dialog leaves the draft in sight. An
+  // empty Composer keeps yielding to any press outside it.
+  useOutsidePointer([wrapRef], (event) => {
+    const wrap = wrapRef.current;
+    if (!wrap || yieldBlocked(false)) return;
+    if (event instanceof MouseEvent && elementContainsPoint(wrap, event.clientX, event.clientY)) return;
+    const target = event.target;
+    const inFeedRows = target instanceof Element && target.closest(FEED_ROWS_SELECTOR) !== null;
+    if (composerHasContent && !inFeedRows) return;
     setComposerMinimized(true);
-  }, { enabled: !isPhone && !collapsed && !forceExpanded && !composerHasContent });
+  }, { enabled: !isPhone && !collapsed && !forceExpanded });
+  useEffect(() => registerComposerYield(yieldViewport));
+  useComposerIdleYield(wrapRef, !isPhone && !collapsed && !forceExpanded && workRunning, yieldViewport);
   useKeyboardScopeActive('composer', composerKeyboardActive);
   useKeyboardScoped('composer', 'Escape', (event) => {
     // Escape during IME composition dismisses the candidate window, not us.
@@ -465,6 +523,41 @@ function Composer({
     previousComposerExpanded.current = composerExpanded;
   }, [composerExpanded, isPhone, parts.isI2VMode]);
 
+  const submit = () => {
+    if (retryingPrepared || !selectedModel) return;
+    if (selectedModel.requiresKey) {
+      useAtelierStore.getState().openByok();
+      return;
+    }
+    if (selectedModel.availability && !selectedModel.availability.ok) {
+      addToast(`${selectedModel.name} is offline`, 'error');
+      return;
+    }
+    if (generateDisabled) return;
+    onSubmit();
+  };
+
+  // R25: a press on Generate or Stop survives the frames in which a view
+  // transition's capture suspends hit-testing (the click lands on the root).
+  useRootClickRescue([
+    { ref: collapsed ? barStopRef : stopRef, active: canStop, activate: onStopDraining },
+    { ref: collapsed ? barGoRef : goRef, active: canSubmitNow && !retryingPrepared, activate: submit },
+  ]);
+
+  // A printable key on the focused collapsed bar: expand, focus the field
+  // and insert that one character at its end.
+  const typeIntoComposer = (character: string) => {
+    setComposerExpanded(true);
+    if (parts.isI2VMode) setDraft({ motionPrompt: `${motionPrompt ?? ''}${character}` });
+    else editPrompt(`${prompt}${character}`);
+    runWhenReachable(() => {
+      const target = parts.isI2VMode ? motionRef.current : textRef.current;
+      if (!target) return;
+      target.focus();
+      target.setSelectionRange(target.value.length, target.value.length);
+    }, wrapRef.current);
+  };
+
   // The failed-inventory banner stays (from the snapshot) until the deferred
   // render removes it, so it leaves through its boundary when models arrive.
   // Pending inventory swaps to the form at once: no transition at load.
@@ -491,20 +584,6 @@ function Composer({
   }
 
   if (!selectedModel) return null;
-
-  const submit = () => {
-    if (retryingPrepared) return;
-    if (selectedModel.requiresKey) {
-      useAtelierStore.getState().openByok();
-      return;
-    }
-    if (selectedModel.availability && !selectedModel.availability.ok) {
-      addToast(`${selectedModel.name} is offline`, 'error');
-      return;
-    }
-    if (generateDisabled) return;
-    onSubmit();
-  };
 
   const collapseWithFocusReturn = () => {
     setComposerExpanded(false);
@@ -785,6 +864,10 @@ function Composer({
       {...(collapsed ? { 'data-collapsed': 'true' } : {})}
       data-tone={collapsed && dangerTint ? 'danger' : undefined}
       onFocus={() => { setComposerFocused(true); }}
+      onPointerEnter={() => { pointerOverRef.current = true; }}
+      onPointerLeave={() => { pointerOverRef.current = false; }}
+      onCompositionStart={() => { imeComposingRef.current = true; }}
+      onCompositionEnd={() => { imeComposingRef.current = false; }}
       onPointerDownCapture={() => {
         // A press on non-focusable composer chrome blurs the textarea with a
         // null relatedTarget; remember the press so that blur is not read as
@@ -838,6 +921,9 @@ function Composer({
             }
           }}
           onSubmit={submit}
+          onType={typeIntoComposer}
+          generateRef={barGoRef}
+          stopRef={barStopRef}
         />
       </div>
       <div className={styles.expandedTrack} inert={collapsed} aria-hidden={collapsed}>
@@ -1032,8 +1118,11 @@ function Composer({
           </ViewTransition>
         ) : null}
 
+        {/* A drain takes and restores the whole queue on each pass. Like the
+            frame's reshape gate, its parts must ignore those bookkeeping
+            mounts/unmounts, so a capture cannot swallow a Generate press. */}
         {parts.rollQueue.length > 0 ? (
-          <ViewTransition default="none" enter="part-enter" exit="part-exit">
+          <ViewTransition default="none" enter={draining ? 'none' : 'part-enter'} exit={draining ? 'none' : 'part-exit'}>
           <Disclosure
             id={queuePanelId}
             open={queueExpanded}
@@ -1088,7 +1177,7 @@ function Composer({
               </>
             )}
             {parts.rollQueue.length > 0 ? (
-              <ViewTransition default="none" enter="part-enter" exit="part-exit">
+              <ViewTransition default="none" enter={draining ? 'none' : 'part-enter'} exit={draining ? 'none' : 'part-exit'}>
               <button
                 type="button"
                 className={styles.queueChip}
@@ -1208,6 +1297,7 @@ function Composer({
                 for as long as the server holds rolls back at capacity. */}
             {canStop ? (
               <button
+                ref={stopRef}
                 className={styles.go}
                 type="button"
                 data-stop=""
@@ -1221,6 +1311,7 @@ function Composer({
             ) : null}
             {retryingPrepared ? null : (
               <button
+                ref={goRef}
                 className={styles.go}
                 type="button"
                 aria-disabled={generateDisabled || undefined}

@@ -13,6 +13,7 @@ import { modelKeys } from './api/models';
 import { promptKeys } from './api/prompts';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { createHistoryBroadcastMutationCache } from './hooks/broadcastHistory';
+import { installHistoryRetention } from './hooks/historyRetention';
 import { createIDBPersister, PERSIST_CACHE_VERSION, preparePersistenceScope, shouldDehydrateQuery } from './lib/persister';
 import { createPreloadErrorHandler } from './lib/preloadRecovery';
 import { reportRecoverableError } from './lib/recoverableError';
@@ -87,6 +88,8 @@ function SessionScopedApp() {
         queryClient: new QueryClient({ defaultOptions: { mutations: { retry: false } }, mutationCache: createHistoryBroadcastMutationCache() }),
         persister: createIDBPersister(cacheScope),
       };
+      // History scopes the reader leaves keep only their newest pages.
+      installHistoryRetention(ready.queryClient);
       setRuntime(ready);
     }).catch(() => { if (active) setError(true); });
     return () => {

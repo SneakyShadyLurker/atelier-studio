@@ -1,0 +1,71 @@
+/* Centred just above the composer reserve inside the feed shell (the shell
+   is the positioning context; the composer floats over the scroller's
+   bottom padding, which is `--composer-top` plus 24px, 20px on phones). A
+   floating icon action: the shared .iconAction geometry and press, on the
+   elevated surface so it reads over a tile. `button.jump` outranks the
+   shared class without relying on stylesheet order (buttons.module.css). */
+button.jump {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--composer-top, 156px) + 12px);
+  z-index: 1;
+  display: none;
+  width: 36px;
+  height: 36px;
+  background: var(--bg-elev);
+  border-color: var(--line-control);
+  color: var(--ink);
+  box-shadow: var(--shadow-2);
+  opacity: 0;
+  translate: -50% var(--m-shift);
+  transition: opacity var(--dur-overlay) var(--ease-out),
+    translate var(--dur-overlay) var(--ease-out),
+    background-color var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out),
+    transform var(--dur-transform) var(--ease-tactile),
+    display var(--dur-overlay) allow-discrete;
+}
+
+button.jump[data-visible='true'] {
+  display: inline-flex;
+  opacity: 1;
+  translate: -50% 0;
+}
+
+@starting-style {
+  button.jump[data-visible='true'] {
+    opacity: 0;
+    translate: -50% var(--m-shift);
+  }
+}
+
+.glyph {
+  rotate: 90deg;
+}
+
+/* A batch arrived or finished below: a small ink dot on the corner. Ink, not
+   --accent: the accent is reserved for AI actions. */
+.marker {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink);
+  /* Separates the dot from the glyph without a new shadow. */
+  outline: 2px solid var(--bg-elev);
+}
+
+@media (width < 768px) {
+  button.jump {
+    bottom: calc(var(--composer-top, 140px) + 12px);
+  }
+}
+
+@media (hover: none), (any-pointer: coarse) {
+  button.jump {
+    width: 44px;
+    height: 44px;
+  }
+}

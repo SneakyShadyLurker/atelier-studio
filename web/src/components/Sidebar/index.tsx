@@ -16,6 +16,7 @@ import { fallbackVirtualRows, virtualizedHeight } from '../../lib/virtualWindow'
 import { describeError } from '../../lib/errorCopy';
 import { scopeTitle } from '../../lib/viewChrome';
 import type { Theme } from '../../hooks/useTheme';
+import { useCachedThumb } from '../../hooks/useCachedMedia';
 import { useCollections } from '../../hooks/useCollections';
 import { useCreateCollection } from '../../hooks/useCreateCollection';
 import { useDeleteCollection } from '../../hooks/useDeleteCollection';
@@ -150,6 +151,9 @@ const SidebarFeedRow = memo(function SidebarFeedRow({ batch, isActive, seen, rea
   // entrance short. A virtual remount of a seen row replays nothing.
   const [seenAtMount] = useState(seen);
   const firstReady = batch.tiles.find((tile) => tile.status === 'done');
+  // The same thumbnail the feed tile shows, from the session media cache: the
+  // rail and the feed share one download.
+  const thumbSrc = useCachedThumb(firstReady?.thumbUrl, firstReady?.url);
   const pinLabel = batch.pinned ? 'Unpin batch' : 'Pin batch';
   return (
     <div className={styles.itemShell}>
@@ -179,7 +183,7 @@ const SidebarFeedRow = memo(function SidebarFeedRow({ batch, isActive, seen, rea
         <div className={`${styles.thumb} ${firstReady ? '' : styles.thumbEmpty}`}>
           {firstReady?.status === 'done' && (
             <img
-              src={firstReady.thumbUrl ?? firstReady.url}
+              src={thumbSrc}
               alt=""
               width={32}
               height={32}

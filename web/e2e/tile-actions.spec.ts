@@ -88,3 +88,37 @@ for (const aspect of TOUCH_ASPECTS) {
     });
   }
 }
+
+// R19: a failed tile never clips its message or its actions. A shallow 16:9
+// failure in a four-tile grid at 1024x768 grows to its content instead.
+test('a failed 16:9 tile at 1024x768 shows its full message and both actions inside the tile', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/e2e/harness/index.html?case=phone-feed&failed=4&failedRatio=16:9');
+  const tile = page.locator('[data-feed-tile="tile-failed"]');
+  await tile.scrollIntoViewIfNeeded();
+  await expect(tile).toBeVisible();
+  const result = await tile.evaluate((element) => {
+    const rect = (node: Element) => node.getBoundingClientRect();
+    const shell = rect(element);
+    const message = element.querySelector('[class*="message"]');
+    const buttons = Array.from(element.querySelectorAll('button'));
+    const inside = (node: Element) => {
+      const box = rect(node);
+      return box.top >= shell.top - 0.5 && box.bottom <= shell.bottom + 0.5 && box.left >= shell.left - 0.5 && box.right <= shell.right + 0.5;
+    };
+    return {
+      width: shell.width,
+      ratio: shell.width / shell.height,
+      labels: buttons.map((button) => button.getAttribute('aria-label')),
+      buttonsInside: buttons.every(inside),
+      messageInside: message ? inside(message) : false,
+      messageClipped: message ? message.scrollHeight > message.clientHeight + 1 : true,
+    };
+  });
+  // The fixture really is shallow: a narrow tile whose 16:9 box is too short.
+  expect(result.width).toBeLessThan(420);
+  expect(result.labels).toEqual(['Retry failed tile', 'Dismiss failed tile']);
+  expect(result.buttonsInside).toBe(true);
+  expect(result.messageInside).toBe(true);
+  expect(result.messageClipped).toBe(false);
+});

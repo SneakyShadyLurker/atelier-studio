@@ -10,7 +10,7 @@ import { announceBatchSettled } from '../../lib/queueLiveAnnouncer';
 import { getRatioDefinition } from '../../lib/ratios';
 import { useTogglePin } from '../../hooks/useTogglePin';
 import { useIsPhone } from '../../hooks/useIsPhone';
-import type { AppView } from '../../store/atelier';
+import { useAtelierStore, type AppView } from '../../store/atelier';
 import { I } from '../icons/I';
 import { Meta } from '../Meta';
 import BatchOverflowMenu, { buildBatchOverflowGroups, type BatchOverflowAction } from '../BatchOverflowMenu';
@@ -136,6 +136,13 @@ function TileRowImpl({
   // entrance that would otherwise make it flash and rise a second time.
   const [enteredLoading] = useState(tile.status === 'loading');
   const entered = enteredLoading && tile.status !== 'loading';
+  // The stream's terminal event clears the store's partial preview with (or
+  // before) the done tile, so the row remembers the last one itself: the
+  // ImageTile holds it over the mat until the final image has decoded. Only a
+  // loading tile subscribes to anything; a done tile's selector is constant.
+  const livePreview = useAtelierStore((state) => (tile.status === 'loading' ? state.previews.get(tile.id)?.url : undefined));
+  const [lastPreview, setLastPreview] = useState<string | undefined>(undefined);
+  if (livePreview !== undefined && livePreview !== lastPreview) setLastPreview(livePreview);
   if (tile.status === 'loading') {
     return (
       <TilePlaceholder
@@ -178,6 +185,8 @@ function TileRowImpl({
       entered={entered}
       disabled={readOnlyActions}
       promptPreview={batch.prompt}
+      preview={lastPreview}
+      onPreviewDone={() => { setLastPreview(undefined); }}
       videoSrc={inlineVideoSrc}
       canEdit={batchSupportsReferenceImages && onEditTile !== undefined && !isVideoMime(tile.mime)}
       canAnimate={i2vAvailable && onAnimateTile !== undefined && !isVideoMime(tile.mime)}
@@ -217,6 +226,10 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
   const batch = useDeferredValue(liveBatch);
   const [moveOpen, setMoveOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // The header prompt is cut off (BatchPrompt measures it), so the More menu
+  // offers its full text; the card itself opens only from that item.
+  const [promptTruncated, setPromptTruncated] = useState(false);
+  const [promptOpen, setPromptOpen] = useState(false);
   const moreBtnRef = useRef<HTMLButtonElement | null>(null);
   const moveBtnRef = useRef<HTMLButtonElement | null>(null);
   const moreFocusRef = useRef<HTMLElement | null>(null);
@@ -255,7 +268,7 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
   // the header reads, so it costs nothing extra and stays memo-stable.
   const i2vModel = findI2VModel(modelById.values());
   const i2vAvailable = i2vModel !== undefined;
-  const hasMoreItems = buildBatchOverflowGroups({ batch, promptsEnabled, readOnlyActions, i2vAvailable, isPhone }).length > 0;
+  const hasMoreItems = buildBatchOverflowGroups({ batch, promptsEnabled, readOnlyActions, i2vAvailable, promptTruncated, isPhone }).length > 0;
   // Losing the last canonical item dismisses the existing menu through its
   // ordinary exit lifecycle, and cannot leave a latent open state behind.
   if (moreOpen && !hasMoreItems) setMoreOpen(false);
@@ -285,13 +298,17 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
     else if (tile.status === 'failed') failed += 1;
     else loading += 1;
   }
-  const noun = total === 1 ? 'image' : 'images';
+  const medium = batchIsVideo ? 'video' : 'image';
+  const noun = total === 1 ? medium : `${medium}s`;
   // This row's region speaks progress only; completion goes to the page-level
   // announcer (lib/queueLiveAnnouncer), which de-duplicates it per batch with
-  // the generation stream and still speaks when this row is not mounted.
-  const liveStatus = loading > 0
-    ? `Generating ${total} ${noun}: ${done} of ${total} ready${failed > 0 ? `, ${failed} failed` : ''}`
-    : '';
+  // the generation stream and still speaks when this row is not mounted. A
+  // queued batch has not started: it says so instead of "Generating".
+  const liveStatus = loading === 0
+    ? ''
+    : batch.status === 'queued'
+      ? `Queued: ${total} ${noun}`
+      : `Generating ${total} ${noun}: ${done} of ${total} ready${failed > 0 ? `, ${failed} failed` : ''}`;
   const hasLoading = loading > 0;
   // Only batches that are (or were) generating during THIS mount get a live
   // region. A settled historical/virtualized batch mounting with no loading
@@ -316,6 +333,11 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
   };
   const onOverflowSelect = (action: BatchOverflowAction) => {
     if (action === 'move') { openMove(moveBtnRef.current); return; }
+    if (action === 'showPrompt') {
+      setMoreOpen(false);
+      setPromptOpen(true);
+      return;
+    }
     if (action === 'pin') {
       // The canonical chrome's deferred restore was queued when the menu
       // closed. A focus move made before it runs must keep its destination.
@@ -350,7 +372,13 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
           || next.closest('[role="menu"][aria-label="Batch actions"]'))) return;
         moreFocusRef.current = null;
       }}>
-        <BatchPrompt prompt={batch.prompt} />
+        <BatchPrompt
+          prompt={batch.prompt}
+          open={promptOpen}
+          onClose={() => { setPromptOpen(false); }}
+          onTruncatedChange={setPromptTruncated}
+          returnFocusRef={moreBtnRef}
+        />
         <div className={styles.headerControls}>
         <Meta lead className={styles.meta} items={[
           <span key="model" className={styles.modelName}>{modelName}</span>,
@@ -492,6 +520,7 @@ function BatchView({ batch: liveBatch, modelById, activeView, currentCollection,
             promptsEnabled={promptsEnabled}
             readOnlyActions={readOnlyActions}
             i2vAvailable={i2vAvailable}
+            promptTruncated={promptTruncated}
             onSelect={onOverflowSelect}
             onClose={() => { setMoreOpen(false); }}
           />

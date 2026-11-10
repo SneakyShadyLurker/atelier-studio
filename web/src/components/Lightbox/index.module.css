@@ -324,6 +324,17 @@
   color: var(--glass-on-dark-85);
 }
 
+/* Extend is blocked while another tile extends: the icon-action disabled
+   look (buttons.module.css), kept focusable through aria-disabled. */
+.animateAction[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.animateAction[aria-disabled='true']:active {
+  transform: none;
+}
+
 /* Laid out but unseen until zoom is worthwhile (the slot keeps the toolbar
    width constant across decode); the element is also inert and aria-hidden. */
 .zoomAction[aria-hidden='true'] {
@@ -352,7 +363,7 @@
     background: color-mix(in oklch, var(--danger) 40%, transparent);
   }
 
-  .animateAction:hover:where(:not(:disabled, [aria-busy='true'])),
+  .animateAction:hover:where(:not(:disabled, [aria-busy='true'], [aria-disabled='true'])),
   .zoomAction:hover:where(:not(:disabled, [aria-busy='true'])) {
     background: var(--glass-on-dark-10);
     border-color: var(--glass-on-dark-12);

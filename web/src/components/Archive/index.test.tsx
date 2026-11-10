@@ -296,3 +296,52 @@ describe('Archive failed actions', () => {
     }
   });
 });
+
+describe('Archive full prompt', () => {
+  const descriptors = {
+    scrollWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth'),
+    clientWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth'),
+  };
+  // happy-dom has no layout: report every element as 600px of text in a 200px box.
+  const installTruncation = () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => 600 });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 200 });
+  };
+  afterEach(() => {
+    for (const [name, descriptor] of Object.entries(descriptors)) {
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+    }
+  });
+
+  test('a prompt that fits offers no full-prompt action and resting on it opens nothing', () => {
+    renderArchive([archivedTile]);
+    expect(screen.queryByRole('button', { name: 'Show full prompt' }) === null).toBe(true);
+    fireEvent.mouseEnter(screen.getByText(archivedTile.prompt));
+    fireEvent.focus(screen.getByText(archivedTile.prompt));
+    fireEvent.click(screen.getByText(archivedTile.prompt));
+    expect(screen.queryByRole('dialog', { name: 'Full prompt' }) === null).toBe(true);
+  });
+
+  test('a cut-off prompt opens its full text only from the tile action, beside Restore and Delete', async () => {
+    installTruncation();
+    renderArchive([archivedTile]);
+    const action = screen.getByRole('button', { name: 'Show full prompt' });
+    const frame = screen.getByRole('button', { name: `Open archived image: ${archivedTile.prompt}` });
+    expect(frame.contains(action)).toBe(false);
+    expect(action.getAttribute('aria-expanded')).toBe('false');
+    // Hover, focus and tap on the prompt line open nothing.
+    const line = screen.getAllByText(archivedTile.prompt)[0];
+    if (!line) throw new Error('prompt line missing');
+    fireEvent.mouseEnter(line);
+    fireEvent.click(line);
+    expect(screen.queryByRole('dialog', { name: 'Full prompt' }) === null).toBe(true);
+
+    await act(async () => { fireEvent.click(action); await Promise.resolve(); });
+    const card = screen.getByRole('dialog', { name: 'Full prompt' });
+    expect(card.textContent).toBe(archivedTile.prompt);
+    expect(action.getAttribute('aria-expanded')).toBe('true');
+
+    await act(async () => { fireEvent.keyDown(card, { key: 'Escape' }); await Promise.resolve(); });
+    expect(action.getAttribute('aria-expanded')).toBe('false');
+  });
+});

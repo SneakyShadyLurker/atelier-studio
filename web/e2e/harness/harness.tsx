@@ -8,7 +8,7 @@
  */
 import type { Batch, GptModerationNotice, Model } from '@atelier/shared';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import BatchOverflowMenu from '../../src/components/BatchOverflowMenu';
 import CharacterCardDialog from '../../src/components/CharacterCardDialog';
@@ -23,8 +23,9 @@ import Composer from '../../src/components/Composer';
 import SaveTemplateDialog from '../../src/components/SaveTemplateDialog';
 import { promptKeys } from '../../src/api/prompts';
 import { historyKeys, type HistoryData } from '../../src/api/history';
+import { estimateBatchHeight, feedGeometry, readFeedChrome, readFeedContainerWidth } from '../../src/lib/feedEstimate';
 import { useHistory } from '../../src/hooks/useHistory';
-import { APP_VIEW_UNSORTED, initialAtelierState, useAtelierStore } from '../../src/store/atelier';
+import { APP_VIEW_UNSORTED, initialAtelierState, useAtelierStore, type AppView } from '../../src/store/atelier';
 import ModerationNotice from '../../src/components/ModerationNotice';
 import FailedTile from '../../src/components/tile/FailedTile';
 import { InfiniteStatus } from '../../src/components/InfiniteStatus';
@@ -280,6 +281,34 @@ function feedBatches(count: number, startAt = 0): Batch[] {
   }));
 }
 
+/* `?mix=1`: tile counts 1-4 and three ratios in rotation, so the estimate
+   geometry check (feed.spec) sees every grid shape the feed lays out. */
+const MIX_RATIOS = ['1:1', '9:16', '16:9'] as const;
+function copyTiles(batch: Batch, ids: readonly string[]): Batch['tiles'] {
+  const [first] = batch.tiles;
+  return first ? ids.map((id) => ({ ...first, id })) : [];
+}
+
+function mixFeed(batches: Batch[]): Batch[] {
+  return batches.map((batch, index) => ({
+    ...batch,
+    ratio: MIX_RATIOS[index % MIX_RATIOS.length] ?? '1:1',
+    tiles: copyTiles(batch, Array.from({ length: (index % 4) + 1 }, (_, tile) => `${batch.id}-tile-${String(tile)}`)),
+  }));
+}
+
+/* The estimate the Canvas lays an unmeasured row out at, from the same
+   geometry it reads (lib/feedEstimate), for the rendered-vs-estimated check. */
+function exposeFeedEstimate(batches: readonly Batch[]): void {
+  (window as unknown as { __feedEstimate?: (id: string) => number | null }).__feedEstimate = (id) => {
+    const scroller = document.querySelector<HTMLElement>('[data-testid="canvas-scroller"]');
+    const batch = batches.find((candidate) => candidate.id === id);
+    if (!scroller || !batch) return null;
+    const phone = window.matchMedia('(width < 768px)').matches;
+    return estimateBatchHeight(batch, feedGeometry(readFeedContainerWidth(scroller), phone, readFeedChrome()), batches[0]?.id === id);
+  };
+}
+
 /* Canvas alone, with the composer's height reserved below it, so the feed specs
    can assert landing position, append direction and reader stability. `seed`
    sets how many batches exist; "queue" appends one, standing in for an SSE
@@ -287,9 +316,11 @@ function feedBatches(count: number, startAt = 0): Batch[] {
 function FeedCase() {
   const params = new URLSearchParams(window.location.search);
   const seed = Number(params.get('seed') ?? '30');
-  const [batches, setBatches] = useState(() => feedBatches(seed, 100));
+  const mix = params.get('mix') === '1';
+  const [batches, setBatches] = useState(() => (mix ? mixFeed(feedBatches(seed, 100)) : feedBatches(seed, 100)));
   const [olderLoaded, setOlderLoaded] = useState(0);
   const modelById = new Map([[MODEL.id, MODEL]]);
+  exposeFeedEstimate(batches);
   return (
     // The left inset stands in for the sidebar rail. Tile height follows column
     // width, so a full-viewport canvas renders taller rows than production and
@@ -336,13 +367,88 @@ function FeedCase() {
   );
 }
 
+/* The feed with the Lightbox over it (overlays.spec.ts, focus restore),
+   driven by the store's selection as in App. The page shell is inert while
+   the viewer shows; the viewer unmounts when its batch leaves. Each batch
+   holds two tiles. The spec removes tiles and batches from outside the inert
+   page through `window.__harnessFeed`. */
+declare global {
+  interface Window {
+    __harnessFeed?: { removeBatch: (batchId: string) => void; removeTile: (tileId: string) => void };
+  }
+}
+
+const STILL = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#5b6470"/></svg>')}`;
+
+function FeedLightboxCase() {
+  const [batches, setBatches] = useState(() => feedBatches(6, 100).map((batch) => ({
+    ...batch,
+    tiles: batch.tiles.flatMap((tile) => [{ ...tile, url: STILL }, { ...tile, id: `${tile.id}-b`, url: STILL, seed: tile.seed + 50 }]),
+  })));
+  const open = useAtelierStore((state) => state.lightbox);
+  useEffect(() => {
+    window.__harnessFeed = {
+      removeBatch: (batchId) => { setBatches((current) => current.filter((batch) => batch.id !== batchId)); },
+      removeTile: (tileId) => {
+        setBatches((current) => current.flatMap((batch) => {
+          const tiles = batch.tiles.filter((tile) => tile.id !== tileId);
+          return tiles.length > 0 ? [{ ...batch, tiles }] : [];
+        }));
+      },
+    };
+  }, []);
+  const openBatch = open ? batches.find((batch) => batch.id === open.batchId) : undefined;
+  // Inert only while the viewer shows. (App keys this on the selection alone,
+  // so a batch removed underneath an open viewer leaves its shell inert.)
+  const viewerShown = open !== null && openBatch !== undefined;
+  const modelById = new Map([[MODEL.id, MODEL]]);
+  return (
+    <>
+      <main inert={viewerShown || undefined} style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <Canvas
+            batches={batches}
+            modelById={modelById}
+            collections={[]}
+            activeView={APP_VIEW_UNSORTED}
+            hasNextPage={false}
+            isFetchingNextPage={false}
+            onLoadMore={() => undefined}
+            onBatchAction={() => undefined}
+            promptsEnabled={false}
+            onTileAction={() => undefined}
+            onOpenTile={(batch, tile) => { useAtelierStore.getState().openLightbox(batch.id, tile.id); }}
+            q=""
+          />
+        </div>
+      </main>
+      {open && openBatch && (
+        <Lightbox
+          batch={openBatch}
+          modelById={modelById}
+          triggerKey={open.tileId}
+          deleteVariant="archive"
+          onClose={() => { useAtelierStore.getState().closeLightbox(); }}
+          onDownload={() => undefined}
+          onDelete={() => undefined}
+        />
+      )}
+    </>
+  );
+}
+
 /* The plate (plate.spec.ts): the first-run canvas with no batches, or with
    `tiles=loading` one running batch holding a rendering tile beside a queued
    batch, so the plate wipe and the plate at rest can be read in a browser. */
 const PLATE_NOW = Date.now();
 
 function PlateCase() {
-  const loading = new URLSearchParams(window.location.search).get('tiles') === 'loading';
+  const params = new URLSearchParams(window.location.search);
+  const loading = params.get('tiles') === 'loading';
+  // `?view=pinned|collection`: the scope-aware empty states.
+  const scope = params.get('view');
+  const view: AppView = scope === 'pinned' ? { kind: 'pinned' } : scope === 'collection' ? { kind: 'collection', id: 'harness-collection' } : APP_VIEW_UNSORTED;
+  const collections = scope === 'collection' ? [{ id: 'harness-collection', name: 'Portraits', count: 0, archivedCount: 0, createdAt: 1 }] : [];
   const now = PLATE_NOW;
   const batches: Batch[] = loading
     ? [
@@ -356,8 +462,8 @@ function PlateCase() {
         <Canvas
           batches={batches}
           modelById={new Map([[MODEL.id, MODEL]])}
-          collections={[]}
-          activeView={APP_VIEW_UNSORTED}
+          collections={collections}
+          activeView={view}
           hasNextPage={false}
           isFetchingNextPage={false}
           onLoadMore={() => undefined}
@@ -385,25 +491,44 @@ function PhoneFeedCase() {
   const seed = Number(params.get('seed') ?? '4');
   const composerHeight = Number(params.get('composer') ?? '150');
   const newestRatio = params.get('ratio') === '1:1' ? '1:1' as const : '9:16' as const;
+  const mix = params.get('mix') === '1';
   const [batches, setBatches] = useState(() => {
-    const feed = feedBatches(seed, 100);
+    const feed = mix ? mixFeed(feedBatches(seed, 100)) : feedBatches(seed, 100);
     const last = feed[feed.length - 1];
-    if (last) feed[feed.length - 1] = { ...last, ratio: newestRatio };
-    // `?failed=1`: a failed batch just above the newest one (failed-tile layout).
-    if (params.get('failed') === '1') {
+    if (last && !mix) feed[feed.length - 1] = { ...last, ratio: newestRatio };
+    // `?pair=1`: the batch below the oldest holds two square tiles (the
+    // intra-batch anchor spec fails one of them with #fail-tile-<n>).
+    if (params.get('pair') === '1' && feed[1]) {
+      const pair = feed[1];
+      feed[1] = { ...pair, ratio: '1:1', tiles: copyTiles(pair, ['pair-tile-0', 'pair-tile-1']) };
+    }
+    // `?failed=N`: a failed batch of N tiles (default 1) just above the newest
+    // one (failed-tile layout); `failedRatio=16:9` makes its tiles shallow.
+    const failedCount = Number(params.get('failed') ?? 0);
+    if (failedCount > 0) {
+      const failedRatio = params.get('failedRatio') === '16:9' ? '16:9' as const : '1:1' as const;
       feed.splice(Math.max(0, feed.length - 1), 0, {
         ...BATCH,
         id: 'batch-failed',
         prompt: 'Failed prompt',
+        ratio: failedRatio,
         modelId: MODEL.id,
         modelLabel: MODEL.name,
         createdAt: 99,
-        tiles: [{ id: 'tile-failed', seed: 9, status: 'failed', error: 'connection lost', completedAt: 99 }],
+        tiles: Array.from({ length: failedCount }, (_, index) => ({
+          id: index === 0 ? 'tile-failed' : `tile-failed-${String(index)}`, seed: 9 + index, status: 'failed' as const, error: 'connection lost' as const, completedAt: 99,
+        })),
       });
     }
     return feed;
   });
   const modelById = new Map([[MODEL.id, MODEL]]);
+  exposeFeedEstimate(batches);
+  const failPairTile = (index: number) => {
+    setBatches((current) => current.map((batch) => (batch.tiles.some((tile) => tile.id === `pair-tile-${String(index)}`)
+      ? { ...batch, tiles: batch.tiles.map((tile) => (tile.id === `pair-tile-${String(index)}` ? { id: tile.id, seed: tile.seed, status: 'failed' as const, error: 'connection lost', completedAt: 99 } : tile)) }
+      : batch)));
+  };
   document.documentElement.style.setProperty('--composer-top', `${composerHeight}px`);
   return (
     <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
@@ -442,7 +567,115 @@ function PhoneFeedCase() {
         >
           queue one
         </button>
+        <button type="button" id="fail-tile-0" onClick={() => { failPairTile(0); }}>fail first</button>
+        <button type="button" id="fail-tile-1" onClick={() => { failPairTile(1); }}>fail second</button>
       </div>
+    </div>
+  );
+}
+
+/* The feed on the real history query (useHistory), served by an in-page
+   `/api/history` (installFeedHistoryServer) with `total` batches newest first,
+   30 per page, and seeded with `pages` pages already read, so the specs can
+   watch retention trim the cache, older pages load again, a refresh fail and
+   recover, and new work arrive below a reader. The composer floats like
+   PhoneFeedCase's, so `--composer-top` is published. */
+const FEED_HISTORY_PAGE = 30;
+interface FeedHistoryServer {
+  total: number;
+  /** Fail every history read with a 400 (non-retryable) while set. */
+  fail: boolean;
+  requests: string[];
+}
+const feedHistoryServer: FeedHistoryServer = { total: 200, fail: false, requests: [] };
+
+function feedHistoryBatch(index: number): Batch {
+  // index 0 is the newest; createdAt descends with it.
+  const [batch] = feedBatches(1, 1000 - index);
+  if (!batch) throw new Error('feedBatches(1) returned no batch');
+  return batch;
+}
+
+function feedHistoryPage(cursor: string | null) {
+  const start = cursor === null ? 0 : Number(cursor);
+  const end = Math.min(feedHistoryServer.total, start + FEED_HISTORY_PAGE);
+  return {
+    items: Array.from({ length: end - start }, (_, offset) => feedHistoryBatch(start + offset)),
+    nextCursor: end < feedHistoryServer.total ? String(end) : null,
+  };
+}
+
+function installFeedHistoryServer(queryClient: QueryClient): void {
+  const params = new URLSearchParams(window.location.search);
+  feedHistoryServer.total = Number(params.get('total') ?? '200');
+  const original = window.fetch.bind(window);
+  const serve = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.href);
+    if (url.pathname !== '/api/history') return original(input, init);
+    feedHistoryServer.requests.push(url.search);
+    if (feedHistoryServer.fail) {
+      return Promise.resolve(new Response(JSON.stringify({ error: 'History unavailable' }), { status: 400, headers: { 'Content-Type': 'application/json' } }));
+    }
+    return Promise.resolve(new Response(JSON.stringify(feedHistoryPage(url.searchParams.get('cursor'))), { headers: { 'Content-Type': 'application/json' } }));
+  };
+  window.fetch = Object.assign(serve, { preconnect: original.preconnect });
+  const seeded = Number(params.get('pages') ?? '5');
+  const pages = [];
+  const pageParams: (string | null)[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < seeded; page += 1) {
+    pageParams.push(cursor);
+    const read = feedHistoryPage(cursor);
+    pages.push(read);
+    cursor = read.nextCursor;
+    if (cursor === null) break;
+  }
+  queryClient.setQueryData(historyKeys.list(), { pages, pageParams }, { updatedAt: Date.now() });
+  const probe = window as unknown as Record<string, unknown>;
+  probe.__feedHistory = {
+    server: feedHistoryServer,
+    pages: () => queryClient.getQueryData<HistoryData>(historyKeys.list())?.pages.length ?? 0,
+    refetch: () => queryClient.refetchQueries({ queryKey: historyKeys.list(), exact: true }),
+    // New work arriving at the newest end, the way the stream inserts it.
+    arrive: () => {
+      const data = queryClient.getQueryData<HistoryData>(historyKeys.list());
+      const first = data?.pages[0];
+      if (!data || !first) return;
+      feedHistoryServer.total += 1;
+      const newest = first.items[0];
+      const arrival = { ...feedHistoryBatch(0), id: `batch-arrival-${String(feedHistoryServer.total)}`, prompt: `Arrival ${String(feedHistoryServer.total)}`, createdAt: (newest?.createdAt ?? 0) + 1 };
+      queryClient.setQueryData<HistoryData>(historyKeys.list(), { ...data, pages: [{ ...first, items: [arrival, ...first.items] }, ...data.pages.slice(1)] });
+    },
+  };
+}
+
+function FeedHistoryCase() {
+  const history = useHistory(APP_VIEW_UNSORTED, '');
+  const modelById = new Map([[MODEL.id, MODEL]]);
+  document.documentElement.style.setProperty('--composer-top', '150px');
+  return (
+    <div style={{ position: 'fixed', inset: 0, paddingLeft: 248, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Canvas
+          batches={history.batches}
+          modelById={modelById}
+          collections={[]}
+          activeView={APP_VIEW_UNSORTED}
+          hasNextPage={history.hasNextPage}
+          isFetchingNextPage={history.isFetchingNextPage}
+          isFetchNextPageError={history.isFetchNextPageError}
+          isLoading={history.isLoading}
+          error={history.isError ? 'History unavailable' : null}
+          onLoadMore={() => { void history.fetchNextPage({ cancelRefetch: false }); }}
+          onRetry={() => { void history.refetch(); }}
+          onBatchAction={() => undefined}
+          promptsEnabled={false}
+          onTileAction={() => undefined}
+          onOpenTile={() => undefined}
+          q=""
+        />
+      </div>
+      <div id="composer" style={{ position: 'absolute', left: 248, right: 0, bottom: 0, height: 150, background: '#101010', borderTop: '1px solid #333' }} />
     </div>
   );
 }
@@ -642,8 +875,10 @@ const CASES: Record<string, () => React.JSX.Element> = {
   moderation: ModerationCase,
   menu: MenuCase,
   feed: FeedCase,
+  'feed-lightbox': FeedLightboxCase,
   plate: PlateCase,
   'phone-feed': PhoneFeedCase,
+  'feed-history': FeedHistoryCase,
   picker: PromptPickerCase,
   library: LibraryCase,
   edit: EditActionsCase,
@@ -654,11 +889,12 @@ const CASES: Record<string, () => React.JSX.Element> = {
   'infinite-status': InfiniteStatusCase,
 };
 const Case = (kase === null ? undefined : CASES[kase]) ?? DialogCase;
-const NEEDS_QUERY_CLIENT = new Set(['feed', 'tile-actions', 'plate', 'phone-feed', 'picker', 'library', 'edit', 'frontend-i2v', 'frontend-save-template', 'frontend-history-refresh']);
+const NEEDS_QUERY_CLIENT = new Set(['feed', 'feed-lightbox', 'feed-history', 'tile-actions', 'plate', 'phone-feed', 'picker', 'library', 'edit', 'frontend-i2v', 'frontend-save-template', 'frontend-history-refresh']);
 if (root) {
   const queryClient = new QueryClient();
   if (kase === 'frontend-i2v' || kase === 'frontend-save-template' || kase === 'frontend-history-refresh') useAtelierStore.setState(initialAtelierState, true);
   if (kase === 'frontend-history-refresh') seedHistoryRefresh(queryClient);
+  if (kase === 'feed-history') installFeedHistoryServer(queryClient);
   if (kase === 'frontend-i2v') {
     // `source=1` opens the composer on a chosen source still (touch-floor specs).
     const withSource = new URLSearchParams(window.location.search).get('source') === '1';
@@ -672,9 +908,10 @@ if (root) {
   // The picker reads its library through TanStack Query; seeding the cache is
   // how the harness stays API-free.
   if (kase === 'picker' || kase === 'library') queryClient.setQueryData(promptKeys.library(), PROMPT_LIBRARY);
-  createRoot(root).render(
-    kase !== null && NEEDS_QUERY_CLIENT.has(kase)
-      ? <QueryClientProvider client={queryClient}><Case /></QueryClientProvider>
-      : <Case />,
-  );
+  const tree = kase !== null && NEEDS_QUERY_CLIENT.has(kase)
+    ? <QueryClientProvider client={queryClient}><Case /></QueryClientProvider>
+    : <Case />;
+  // `strict=1` renders under StrictMode, as the production entry does
+  // (src/main.tsx): effects run twice on mount there.
+  createRoot(root).render(new URLSearchParams(window.location.search).get('strict') === '1' ? <StrictMode>{tree}</StrictMode> : tree);
 }

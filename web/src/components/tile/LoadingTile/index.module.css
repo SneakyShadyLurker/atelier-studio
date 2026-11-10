@@ -84,6 +84,9 @@
   position: absolute;
   bottom: 12px;
   left: 12px;
+  /* Inside the tile with the same inset on the right: a long model name
+     truncates rather than running under the tile edge. */
+  max-width: calc(100% - 24px);
   font-family: var(--sans);
   font-size: var(--text-2xs);
   font-weight: 500;
@@ -109,6 +112,28 @@
 .text > .elapsed {
   font-size: inherit;
   font-weight: inherit;
+  /* One line: a long model name gives way, the readout never wraps. */
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.text > .bar,
+.text > .elapsed > li {
+  flex: none;
+}
+
+/* The model name is the one field that yields: it truncates in both status
+   variants (elapsed only, and the step readout). */
+.text > .elapsed > li:has(> .model) {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.model {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .loading.veiled ~ .text .bar {

@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { restoreArchive } from '../api/archive';
+import { forgetCanceledTiles } from './historyCache';
 import { invalidateLibrary } from './invalidateLibrary';
 import { useToastMutation } from './useToastMutation';
 import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
@@ -20,7 +21,16 @@ export function useRestore() {
   const queryClient = useQueryClient();
   return useToastMutation({
     mutationKey: HISTORY_WRITE_MUTATION_KEY,
-    mutationFn: restoreTiles,
+    mutationFn: async (tileIds: string | readonly string[]) => {
+      try {
+        await restoreTiles(tileIds);
+      } finally {
+        // Before the settle re-read: a restored tile that had been marked
+        // cancelled (its cancel raced its completion) must not stay filtered.
+        // A partly failed set forgets them all; the re-read is authoritative.
+        forgetCanceledTiles(typeof tileIds === 'string' ? [tileIds] : tileIds);
+      }
+    },
     successToast: 'Restored',
     errorFallback: "Couldn't restore that.",
     onSettled: () => invalidateLibrary(queryClient),

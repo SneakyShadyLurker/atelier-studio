@@ -10,7 +10,9 @@ import { runWhenReachable } from './focus';
  * row, else the feed scroller itself.
  *
  * Tiles carry `data-feed-tile` (ImageTile, FailedTile, TilePlaceholder), rows
- * carry `data-batch-id` (Canvas rows and the Batch section inside them).
+ * carry `data-batch-id` (Canvas rows and the Batch section inside them). A
+ * tile whose removal is already under way carries `data-leaving` and is never
+ * a successor: it stays in the DOM until the feed's snapshot commits.
  */
 
 const FOCUSABLE = 'button:not([disabled]):not([aria-disabled="true"]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -36,14 +38,40 @@ function successorRow(row: Element | null): HTMLElement | null {
   return firstFocusable(row.nextElementSibling) ?? firstFocusable(row.previousElementSibling);
 }
 
+function isLiveTile(element: Element): boolean {
+  return element.hasAttribute('data-feed-tile') && !element.hasAttribute('data-leaving');
+}
+
+function liveSiblingControl(tile: Element, direction: 'nextElementSibling' | 'previousElementSibling'): HTMLElement | null {
+  for (let sibling = tile[direction]; sibling; sibling = sibling[direction]) {
+    if (!isLiveTile(sibling)) continue;
+    const control = firstFocusable(sibling);
+    if (control) return control;
+  }
+  return null;
+}
+
 /** The control to focus once the tile holding `from` is removed. */
 export function tileSuccessor(from: Element): HTMLElement | null {
   const tile = from.closest('[data-feed-tile]');
   if (!tile) return null;
-  const next = firstFocusable(tile.nextElementSibling) ?? firstFocusable(tile.previousElementSibling);
+  const next = liveSiblingControl(tile, 'nextElementSibling') ?? liveSiblingControl(tile, 'previousElementSibling');
   if (next) return next;
   const row = rowOf(tile);
   return firstFocusable(row, tile.parentElement) ?? successorRow(row) ?? document.querySelector<HTMLElement>(SCROLLER);
+}
+
+/**
+ * The control to focus once the tile holding `from` is removed by an action
+ * that drops an emptied batch with its last tile (Cancel, Dismiss): with no
+ * other live tile in the grid the whole row leaves, header included, so focus
+ * goes along the row chain instead.
+ */
+export function lastTileSuccessor(from: Element): HTMLElement | null {
+  const tile = from.closest('[data-feed-tile]');
+  if (!tile) return null;
+  const others = Array.from(tile.parentElement?.children ?? []).some((sibling) => sibling !== tile && isLiveTile(sibling));
+  return others ? tileSuccessor(from) : batchSuccessor(from);
 }
 
 /** The control to focus once the batch row holding `from` is removed. */

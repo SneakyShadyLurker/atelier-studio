@@ -20,8 +20,6 @@
 
 .sheet {
   composes: sheet from '../../styles/menuShell.module.css';
-  --sheet-pad: 10px;
-  --sheet-pad-bottom: 18px;
 }
 
 .backdrop {
@@ -30,7 +28,6 @@
 
 .header {
   composes: groupLabel from '../../styles/menuShell.module.css';
-  padding: 8px;
 }
 
 .list {
@@ -81,7 +78,7 @@
 .input {
   width: 100%;
   height: 36px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: var(--radius-control);
   padding: 0 9px;
   background: var(--bg-elev);

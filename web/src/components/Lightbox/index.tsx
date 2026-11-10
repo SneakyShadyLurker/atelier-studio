@@ -4,11 +4,13 @@ import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef,
 import { createPortal, preload } from 'react-dom';
 import { refImageUrl } from '../../api/uploads';
 import { getDoneTiles } from '../../hooks/lightboxNav';
+import { useCachedMedia } from '../../hooks/useCachedMedia';
 import { useExitTransition } from '../../hooks/useExitTransition';
 import { runWhenReachable } from '../../lib/focus';
+import { batchSuccessor, tileSuccessor } from '../../lib/focusSuccessor';
 import { getRatioDefinition } from '../../lib/ratios';
 import { useAtelierStore } from '../../store/atelier';
-import { DialogShell } from '../DialogShell';
+import { DialogShell, focusReachable } from '../DialogShell';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { I } from '../icons/I';
 import type { LightboxCancelHandle, LightboxProps, ViewerDescriptor } from './types';
@@ -33,6 +35,29 @@ function BodyError({ frameHost, onReady, requestClose, returnLabel }: {
       <button className={styles.btn} type="button" onClick={requestClose}>{returnLabel}</button>
     </div>, frameHost,
   ) : null;
+}
+
+/**
+ * Close returns focus to the opening tile. The feed's removal chain is
+ * recorded at open: when the opening tile left while the viewer was open
+ * (archived from here, removed by another tab), focus goes to its neighbour.
+ * When the viewer unmounted with no close (neither its own dismissal ran nor
+ * the store dropped the selection: its whole batch left underneath it), the
+ * opening row is on its way out with the feed's next snapshot, so focus skips
+ * it for the neighbouring row.
+ */
+function feedRestore(opener: HTMLElement, closedByViewer: { readonly current: boolean }): () => HTMLElement | null {
+  const nextTile = tileSuccessor(opener);
+  const nextRow = batchSuccessor(opener);
+  return () => {
+    if (!closedByViewer.current && useAtelierStore.getState().lightbox !== null) return nextRow;
+    return [opener, nextTile, nextRow].find(focusReachable) ?? null;
+  };
+}
+
+/** The noun a Prev/Next control names: the tile it moves to. */
+function navNoun(target: { mime: string } | undefined): 'image' | 'video' {
+  return target !== undefined && isVideoMime(target.mime) ? 'video' : 'image';
 }
 
 export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, onClose, onDownload, onDelete, master, returnLabel = 'Back to Unsorted' }: LightboxProps) {
@@ -63,11 +88,18 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
       ? `Reference image preview, ${imageContext}`
       : `${showingVideo ? 'Video' : 'Image'} preview, ${activeIndex + 1} of ${readyTiles.length}, ${imageContext}`;
   const descriptor: ViewerDescriptor = { tile, activeIndex, tileCount: readyTiles.length, activeRefImageId, fullSrc, thumbSrc, showingMaster, showingReference, showingVideo, fittedRatio, imageContext };
+  // The placeholder under the full image is the feed's thumbnail, read from
+  // the session media cache: opening from the feed paints it from memory.
+  const placeholder = useCachedMedia(showingVideo ? undefined : thumbSrc, { priority: 'high' });
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const cancelRef = useRef<LightboxCancelHandle | null>(null);
   const titleId = useId();
-  const { closing, requestClose } = useExitTransition(onClose);
+  const closedByViewerRef = useRef(false);
+  const { closing, requestClose } = useExitTransition(() => {
+    closedByViewerRef.current = true;
+    onClose();
+  });
   const [bodyReady, setBodyReady] = useState(false);
   const onReady = useCallback(() => { setBodyReady(true); }, []);
   const [frameMounted, setFrameMounted] = useState(!showingVideo);
@@ -79,6 +111,19 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
     const target = closeRef.current;
     runWhenReachable(() => { target?.focus(); }, target);
   }, []);
+
+  // The store knows a viewer is on screen while this one renders its dialog
+  // (clip previews in the feed pause behind it). Neither the selection nor
+  // this component being mounted says so: the batch can leave the scope,
+  // which unmounts the viewer, or lose its last finished tile, which leaves
+  // it mounted with nothing to show.
+  const viewerRendered = tile !== undefined && Boolean(fullSrc);
+  useEffect(() => {
+    if (!viewerRendered) return undefined;
+    const { setViewerOpen } = useAtelierStore.getState();
+    setViewerOpen(true);
+    return () => { setViewerOpen(false); };
+  }, [viewerRendered]);
 
   if (!tile || !fullSrc) return null;
   // The full-size request starts with the shell, not after the lazy body
@@ -94,7 +139,7 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
     ? bodyReady ? undefined : { backgroundColor: 'transparent' }
     : {
         '--frame-ratio': fittedRatio.w / fittedRatio.h,
-        ...(thumbSrc ? { backgroundImage: `url(${JSON.stringify(thumbSrc)})` } : {}),
+        ...(placeholder.src ? { backgroundImage: `url(${JSON.stringify(placeholder.src)})` } : {}),
       } as CSSProperties;
   const showTileAt = (index: number) => {
     const next = readyTiles[index];
@@ -106,15 +151,15 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
   };
 
   return (
-    <DialogShell open onCancel={cancel} closing={closing} labelledBy={titleId} backdropClassName={styles.backdrop} portalRef={dialogRef}>
+    <DialogShell open onCancel={cancel} closing={closing} labelledBy={titleId} backdropClassName={styles.backdrop} portalRef={dialogRef} restoreFocus={(opener) => feedRestore(opener, closedByViewerRef)}>
       <h2 id={titleId} className="srOnly">{dialogLabel}</h2>
       <button ref={closeRef} className={styles.close} type="button" aria-label="Close lightbox" data-tip="Close" data-tip-place="below" onClick={requestClose}>
         <I.close />
       </button>
-      {!showingMaster && <button className={`${styles.nav} ${styles.prev}`} type="button" aria-label="Previous image" data-tip="Previous" disabled={activeIndex === 0} onClick={() => { showTileAt(activeIndex - 1); }}>
+      {!showingMaster && <button className={`${styles.nav} ${styles.prev}`} type="button" aria-label={`Previous ${navNoun(readyTiles[activeIndex - 1] ?? tile)}`} data-tip="Previous" disabled={activeIndex === 0} onClick={() => { showTileAt(activeIndex - 1); }}>
         <I.chevronLeft width="18" height="18" />
       </button>}
-      {!showingMaster && <button className={`${styles.nav} ${styles.next}`} type="button" aria-label="Next image" data-tip="Next" disabled={activeIndex === readyTiles.length - 1} onClick={() => { showTileAt(activeIndex + 1); }}>
+      {!showingMaster && <button className={`${styles.nav} ${styles.next}`} type="button" aria-label={`Next ${navNoun(readyTiles[activeIndex + 1] ?? tile)}`} data-tip="Next" disabled={activeIndex === readyTiles.length - 1} onClick={() => { showTileAt(activeIndex + 1); }}>
         <I.chevronRight width="18" height="18" />
       </button>}
       {frameMounted && <div ref={setFrameHost} className={styles.frame} data-media={showingVideo ? 'video' : 'image'} style={frameStyle} aria-busy={!bodyReady} onMouseDown={(event) => { event.stopPropagation(); }} />}

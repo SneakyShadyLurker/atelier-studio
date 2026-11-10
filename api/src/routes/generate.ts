@@ -404,7 +404,7 @@ export const generateRoutes = new Hono<AppEnv>().post('/generate', async (c) => 
     const prepared = created.prepared;
     // Sealed artifact storage queues instead of starting: the batch may need
     // to read stored refs/sources, and dequeue resumes it on unseal.
-    const needsPreparation = pool === 'local' && needsQueuedPromptPreparation(request.modelId, request.prompt);
+    const needsPreparation = pool === 'local' && needsQueuedPromptPreparation(c.var.config, request.modelId, request.prompt);
     // Every pool keeps this user's accepted queue order even if a newer,
     // smaller request could acquire capacity before its queued predecessor.
     const hasQueuedPredecessor = queue.entries(pool).some((entry) => entry.userId === userId);

@@ -37,8 +37,8 @@ export function textStreamDrainMs(profile: TextLatencyProfile, cloudTimeoutMs: n
   return profile === 'slow' ? Math.max(cloudTimeoutMs, GLM_ABLITERATED_STREAM_DRAIN_MS) : cloudTimeoutMs;
 }
 
-/** Krea condense deadline; condense fails open, so a short one silently skips it. */
-export function kreaCondenseTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
+/** Deadline of a queued prompt rewrite (Krea condense, H3 Image expand); both fail open, so a short one silently skips them. */
+export function promptRewriteTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
   return profile === 'slow'
     ? Math.max(configuredMs, GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS)
     : configuredMs;

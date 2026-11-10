@@ -55,3 +55,15 @@ export function promptMinPerSlotWordsForModel(modelId: string): number {
 export function countPromptWords(text: string): number {
   return text.split(/\s+/).filter((token) => token.length > 0).length;
 }
+
+// MiniMax H3 Image renders very short prompts badly: under 60 words a prompt
+// cannot carry subject, pose, setting, light and framing, so the model fills
+// the gaps with wide cluttered scenes and invented props. Its own enhancer
+// typically writes 120 to 300 words, so shorter prompts are expanded with it
+// before dispatch.
+export const H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS = 60;
+
+export function promptNeedsExpansionForModel(modelId: string, prompt: string): boolean {
+  return classifyImageModelTarget(modelId) === 'h3image'
+    && countPromptWords(prompt) < H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS;
+}

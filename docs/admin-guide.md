@@ -112,8 +112,10 @@ on a real prompt to confirm the result reads well.
 | No routed model can read images | "None of the available text models accepts images" when references are attached |
 | `BYOK_ENCRYPTION_KEY` unset | Image generation still works. Saving a provider with an API key fails, and the key field is disabled with an explanation |
 
-Two features keep working without a text model: Krea prompt condensing and
-automatic video motion rewriting fall back to the original text.
+Three features keep working without a text model: Krea prompt condensing,
+MiniMax H3 Image short-prompt expansion and automatic video motion rewriting
+fall back to the original text. Short MiniMax H3 Image prompts then render
+unexpanded, which that model handles poorly.
 
 ## 5. Optional fine-tuning
 

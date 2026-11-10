@@ -61,6 +61,7 @@ import { finalizeBatch } from './orchestrator/finalize';
 import { settleSequenceAfterBatchTerminal } from './orchestrator/sequenceLifecycle';
 import { RefImagesNotFoundError, resolveRefImagesAfterReservation } from './orchestrator/refImages';
 import { condenseBatchPrompt, persistCondensedPrompt } from './orchestrator/condenseBatchPrompt';
+import { expandBatchPrompt } from './orchestrator/expandBatchPrompt';
 import { doneTileEvent } from './orchestrator/tileEvents';
 import { readModelStepsOverride } from './routing/modelStepsPreference';
 
@@ -176,13 +177,22 @@ export async function runBatchPipeline(prepared: PreparedBatch, ctx: GenerationC
     request = resolveModelSteps(ctx, request);
     // Production queued requests were already prepared before GPU admission.
     // Keep the fail-open fallback for direct/legacy pipeline callers only.
-    const condensed = ctx.promptPrepared ? request.prompt : await condenseBatchPrompt(request.prompt, request.modelId, {
+    // Condensation (Krea) and expansion (MiniMax H3 Image) are exclusive by
+    // target; each returns the prompt untouched when it does not apply.
+    const rewriteDeps = {
       config: ctx.config,
       text: ctx.text,
       logger,
       userId: ctx.userId,
       signal: activeBatchController.signal,
-    });
+    };
+    const condensed = ctx.promptPrepared
+      ? request.prompt
+      : await expandBatchPrompt(
+        await condenseBatchPrompt(request.prompt, request.modelId, rewriteDeps),
+        request.modelId,
+        rewriteDeps,
+      );
     if (condensed !== request.prompt) {
       persistCondensedPrompt(ctx.db, prepared.batch.id, condensed);
       // Keep the in-memory row in step with the write: later frames and

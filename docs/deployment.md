@@ -780,6 +780,8 @@ The text-call resilience layer wraps every upstream call in Cockatiel retry, cir
 | `BRAINSTORM_OPEN_TIMEOUT_MS` | 45000 | 5000-120000 | Per-attempt open-phase cap for character brainstorming. A transient failure before any prompt was emitted fails over once to the next model in routing order (`brainstorm_backend_fallback`). |
 | `AI_FILL_PER_ATTEMPT_TIMEOUT_MS` | 120000 | 30000-180000 | Per-attempt timeout for ai-fill (`maxAttempts: 2`). Models marked Slow model use at least 360000. |
 | `KREA_CONDENSE_TIMEOUT_MS` | 150000 | 1000-300000 | Per-call Krea condensation cap; condensation fails open. Models marked Slow model use at least 420000. |
+| `H3_IMAGE_EXPAND_TIMEOUT_MS` | 120000 | 1000-300000 | Per-call cap on expanding a MiniMax H3 Image prompt under 60 words; expansion fails open and renders the original. Models marked Slow model use at least 420000. |
+| `H3_IMAGE_AUTO_EXPAND` | true | true/false | Kill-switch for that expansion. Off: short MiniMax H3 Image prompts are not prepared at all and render as submitted. |
 | `QUOTA_MIN_RETRY_AFTER_MS` | 300000 | 30000-3600000 | A `429` counts as budget exhaustion (non-retriable, breaker-exempt) only when its `Retry-After` is at least this floor or the body names a token budget. |
 | `SWAG_PROXY_READ_TIMEOUT_MS` | 600000 | 60000-3600000 | Mirrors the proxy's `proxy_read_timeout`. |
 | `INFER_DIMENSIONS_BATCH_CONCURRENCY` | 12 | 1-16 | Concurrent per-list calls during two-pass infer. |

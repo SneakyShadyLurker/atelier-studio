@@ -12,6 +12,9 @@ import { tryDequeueNext } from './dequeue';
 
 const original = Array.from({ length: 400 }, (_, i) => `word${i}`).join(' ');
 const candidate = 'a shorter adult portrait';
+const shortH3 = 'an adult woman reading by a window';
+const expandedH3 = `A candid photograph of an adult woman ${Array.from({ length: 140 }, (_, i) => `detail${i}`).join(' ')}`;
+let reply = candidate;
 const gates: (() => void)[] = [];
 const signals: AbortSignal[] = [];
 let calls = 0;
@@ -23,7 +26,7 @@ function heldProvider(): TestTextFeatureProvider {
       signals.push(signal);
       await new Promise<void>((resolve) => { gates.push(resolve); });
       // Deliberately ignores cancellation: the preparer must reject late work.
-      yield { type: 'delta', text: candidate };
+      yield { type: 'delta', text: reply };
       yield { type: 'done' };
     },
     draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'unused' }),
@@ -63,7 +66,7 @@ beforeEach(() => {
   resetRegistryForTests();
   resetLlmAdmissionForTests();
   resetConcurrencyForTests();
-  calls = 0; gates.length = 0; signals.length = 0;
+  calls = 0; gates.length = 0; signals.length = 0; reply = candidate;
   setTextModelProviderForTests(heldProvider());
 });
 
@@ -280,4 +283,61 @@ test('a recovered now-short prompt waits for the old preparer controller to reti
   expect(getBatchForUser('held', 'alice')).toBeUndefined();
   expect(runtime.db.query("SELECT prompt FROM batches WHERE id='held'").get()).toEqual({ prompt: 'new short prompt' });
   expect(calls).toBe(1);
+});
+
+test('a queued short H3 Image prompt is replaced by its expansion and then dispatched', async () => {
+  reply = expandedH3;
+  const runtime = setup();
+  seed(runtime, 'h3', shortH3, 'minimax-h3-image');
+  prepareQueuedPrompts(runtime.db);
+  await until(() => calls === 1);
+  expect(queue.entries('local')[0]?.promptPreparation).toBe('pending');
+  gates[0]?.();
+  await until(() => queue.entries('local')[0]?.promptPreparation === 'ready');
+  expect(runtime.db.query("SELECT prompt FROM batches WHERE id='h3'").get()).toEqual({ prompt: expandedH3 });
+  const started: string[] = [];
+  const releases: (() => void)[] = [];
+  try {
+    tryDequeueNext('local', {
+      db: runtime.db, config: runtime.config, logger: runtime.logger,
+      registry: { findModel, healthSnapshot: () => new Map() },
+      acquireFor: (_pool, _user, count) => acquireLocalTiles(count, 1),
+      releaseFor: (_pool, user, count) => { releaseLocalTiles(user, count); },
+      startOrchestratorDetached: (entry, reservation) => {
+        started.push(entry.batchId);
+        releases.push(reservation.releaseRemaining);
+        return Promise.resolve();
+      },
+      queueEpoch: queue.currentEpoch(), prepareQueued: () => prepareQueuedPrompts(runtime.db),
+    });
+    expect(started).toEqual(['h3']);
+    expect(calls).toBe(1);
+  } finally {
+    for (const release of releases) release();
+  }
+});
+
+test('a canceled short H3 Image batch keeps its prompt when the expansion lands late', async () => {
+  reply = expandedH3;
+  const runtime = setup();
+  seed(runtime, 'h3', shortH3, 'minimax-h3-image');
+  prepareQueuedPrompts(runtime.db);
+  await until(() => calls === 1);
+  const done = snapshotBatchDonePromises();
+  runtime.db.run("UPDATE batches SET status='done' WHERE id='h3'");
+  getBatchForUser('h3', 'alice')?.batchController.abort();
+  queue.removeById('local', 'h3');
+  gates[0]?.();
+  await Promise.all(done);
+  await Bun.sleep(0);
+  expect(runtime.db.query("SELECT prompt FROM batches WHERE id='h3'").get()).toEqual({ prompt: shortH3 });
+  expect(getBatchForUser('h3', 'alice')).toBeUndefined();
+});
+
+test('with H3_IMAGE_AUTO_EXPAND off a short H3 Image prompt is ready without preparation', () => {
+  const runtime = setup({ H3_IMAGE_AUTO_EXPAND: 'false' });
+  seed(runtime, 'h3', shortH3, 'minimax-h3-image');
+  prepareQueuedPrompts(runtime.db);
+  expect(queue.entries('local')[0]?.promptPreparation).toBe('ready');
+  expect(calls).toBe(0);
 });

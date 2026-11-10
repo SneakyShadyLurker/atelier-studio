@@ -20,6 +20,8 @@ const H3_DEFAULTS: ModelResolutionSetting = {
   textToImage: null,
   defaultReference: '4mp',
   reference: null,
+  outputLongEdge: 2048,
+  downscale: true,
 };
 
 const temps: string[] = [];
@@ -27,21 +29,41 @@ afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** An external override of the H3 row without its reference graph. */
-function h3WithoutReference(): string {
+/** An external override of the H3 row copied from the built-in one. */
+function h3Override(edit: (dir: string, manifest: Record<string, unknown>) => void): string {
   const root = mkdtempSync(join(tmpdir(), 'atelier-model-resolution-'));
   temps.push(root);
   const dir = join(root, 'minimax-h3-image');
   cpSync(join(BUILTIN_MODELS_DIR, 'minimax-h3-image'), dir, { recursive: true });
-  rmSync(join(dir, 'reference.json'));
   const path = join(dir, 'model.json');
   const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
   manifest.overrides = true;
-  manifest.graphs = { base: 'workflow.json' };
-  delete manifest.maxReferenceImages;
-  delete manifest.referenceRatioMap;
+  edit(dir, manifest);
   writeFileSync(path, JSON.stringify(manifest));
   return root;
+}
+
+/** The H3 row without its reference graph. */
+function h3WithoutReference(): string {
+  return h3Override((dir, manifest) => {
+    rmSync(join(dir, 'reference.json'));
+    manifest.graphs = { base: 'workflow.json' };
+    delete manifest.maxReferenceImages;
+    delete manifest.referenceRatioMap;
+  });
+}
+
+/** The H3 row delivering at render size: no `outputLongEdge`, no final scale node. */
+function h3WithoutOutputLongEdge(): string {
+  return h3Override((dir, manifest) => {
+    delete manifest.outputLongEdge;
+    manifest.requiredPlaceholders = (manifest.requiredPlaceholders as string[])
+      .filter((placeholder) => placeholder !== '{{outputScale}}');
+    for (const graph of ['workflow.json', 'reference.json']) {
+      const path = join(dir, graph);
+      writeFileSync(path, readFileSync(path, 'utf8').replaceAll('"{{outputScale}}"', '1'));
+    }
+  });
 }
 
 function headers(user = 'alice') {
@@ -94,6 +116,38 @@ describe('model resolution settings routes', () => {
     expect(await h3(asDefault)).toEqual(H3_DEFAULTS);
   });
 
+  test('PUT turns "Downsize to 2K" off and back on, keeping the sizes', async () => {
+    const rt = testRuntime(LOCAL_ON);
+    const off = await put(rt, 'minimax-h3-image', { downscale: false });
+    expect(off.status).toBe(200);
+    expect(await h3(off)).toEqual({ ...H3_DEFAULTS, downscale: false });
+
+    const sized = await put(rt, 'minimax-h3-image', { textToImage: '8mp' });
+    expect(await h3(sized)).toEqual({ ...H3_DEFAULTS, textToImage: '8mp', downscale: false });
+
+    const on = await put(rt, 'minimax-h3-image', { downscale: true });
+    expect(await h3(on)).toEqual({ ...H3_DEFAULTS, textToImage: '8mp' });
+
+    await put(rt, 'minimax-h3-image', { downscale: false });
+    const reset = await put(rt, 'minimax-h3-image', { textToImage: null, reference: null, downscale: true });
+    expect(await h3(reset)).toEqual(H3_DEFAULTS);
+  });
+
+  test('a row that delivers at render size lists no switch and rejects a downscale write', async () => {
+    const rt = testRuntime({ ...LOCAL_ON, COMFYUI_MODELS_DIR: h3WithoutOutputLongEdge() });
+    const fullSize = { ...H3_DEFAULTS, outputLongEdge: null, downscale: false };
+    expect((await settings(rt)).models).toEqual([fullSize]);
+    for (const downscale of [false, true]) {
+      const res = await put(rt, 'minimax-h3-image', { downscale });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'validation failed',
+        issues: [{ path: ['downscale'], message: 'model delivers at render size' }],
+      });
+    }
+    expect(await h3(await put(rt, 'minimax-h3-image', { textToImage: '8mp' }))).toEqual({ ...fullSize, textToImage: '8mp' });
+  });
+
   test('PUT rejects unknown sizes, extra keys and an empty body', async () => {
     const rt = testRuntime(LOCAL_ON);
     for (const body of [
@@ -101,6 +155,9 @@ describe('model resolution settings routes', () => {
       { reference: '8MP' },
       { textToImage: 8 },
       { textToImage: '8mp', steps: 4 },
+      { downscale: 'off' },
+      { downscale: 0 },
+      { downscale: null },
       {},
     ]) {
       expect((await put(rt, 'minimax-h3-image', body)).status).toBe(400);
@@ -142,8 +199,8 @@ describe('model resolution settings routes', () => {
 
   test("another user's overrides are not visible", async () => {
     const rt = testRuntime(LOCAL_ON);
-    await put(rt, 'minimax-h3-image', { textToImage: '8mp' }, 'alice');
+    await put(rt, 'minimax-h3-image', { textToImage: '8mp', downscale: false }, 'alice');
     expect((await settings(rt, 'bob')).models).toEqual([H3_DEFAULTS]);
-    expect((await settings(rt, 'alice')).models).toEqual([{ ...H3_DEFAULTS, textToImage: '8mp' }]);
+    expect((await settings(rt, 'alice')).models).toEqual([{ ...H3_DEFAULTS, textToImage: '8mp', downscale: false }]);
   });
 });

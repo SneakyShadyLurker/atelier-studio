@@ -12,7 +12,7 @@ const MODEL_ID = 'minimax-h3-image';
 const DEFAULT_STEPS = 6;
 const DEFAULTS = { textToImage: '16mp', reference: '4mp' } as const;
 
-function localEntry(provider: Provider, sized = true): RegistryEntry {
+function localEntry(provider: Provider, sized = true, outputLongEdge: number | null = 2048): RegistryEntry {
   return {
     model: {
       id: MODEL_ID,
@@ -30,23 +30,26 @@ function localEntry(provider: Provider, sized = true): RegistryEntry {
     bind: () => provider,
     timeoutMs: ({ local }) => local,
     defaultSteps: DEFAULT_STEPS,
-    ...(sized ? { resolutions: { defaultTextToImage: DEFAULTS.textToImage, defaultReference: DEFAULTS.reference } } : {}),
+    ...(sized
+      ? { resolutions: { defaultTextToImage: DEFAULTS.textToImage, defaultReference: DEFAULTS.reference, outputLongEdge } }
+      : {}),
   };
 }
 
 interface RunOptions {
   readonly withReferences?: boolean;
   readonly sized?: boolean;
+  readonly outputLongEdge?: number | null;
   readonly beforeDispatch?: () => void;
 }
 
 async function runOne(
   runtime: ReturnType<typeof testRuntime>,
   provider: Provider,
-  { withReferences = false, sized = true, beforeDispatch = () => undefined }: RunOptions = {},
+  { withReferences = false, sized = true, outputLongEdge = 2048, beforeDispatch = () => undefined }: RunOptions = {},
 ): Promise<string> {
   const { db, config, logger } = runtime;
-  const registryEntry = localEntry(provider, sized);
+  const registryEntry = localEntry(provider, sized, outputLongEdge);
   const submitted = { prompt: 'a lighthouse', modelId: MODEL_ID, ratio: '1:1' as const, count: 1 };
   const prepared = createBatch(db, 'alice', submitted, registryEntry);
   db.query("UPDATE batches SET status = 'running' WHERE id = ?").run(prepared.batch.id);
@@ -85,6 +88,42 @@ describe('per-model render size at dispatch', () => {
     expect(await runOne(testRuntime(), capturingProvider(requests))).toBe('done');
     expect(requests).toHaveLength(1);
     expect(requests[0]).not.toHaveProperty('resolution');
+    expect(requests[0]).not.toHaveProperty('nativeOutput');
+  });
+
+  test('"Downsize to 2K" off reaches the provider request in both modes; on carries no flag', async () => {
+    const runtime = testRuntime();
+    // Written after submit: the value is read at dispatch, not at submit.
+    const off = () => {
+      writeModelResolutionOverride(runtime.db, 'alice', MODEL_ID, { downscale: false }, DEFAULTS);
+    };
+    const offRequests: ProviderRequest[] = [];
+    expect(await runOne(runtime, capturingProvider(offRequests), { beforeDispatch: off })).toBe('done');
+    expect(offRequests[0]?.nativeOutput).toBe(true);
+    expect(offRequests[0]).not.toHaveProperty('resolution');
+    const referenceRequests: ProviderRequest[] = [];
+    await runOne(runtime, capturingProvider(referenceRequests), { withReferences: true });
+    expect(referenceRequests[0]?.nativeOutput).toBe(true);
+
+    writeModelResolutionOverride(runtime.db, 'alice', MODEL_ID, { textToImage: '8mp', downscale: true }, DEFAULTS);
+    const onRequests: ProviderRequest[] = [];
+    await runOne(runtime, capturingProvider(onRequests));
+    expect(onRequests[0]?.resolution).toBe('8mp');
+    expect(onRequests[0]).not.toHaveProperty('nativeOutput');
+  });
+
+  test('"Downsize to 2K" off is ignored on a row that delivers at render size, and for other users', async () => {
+    const runtime = testRuntime();
+    writeModelResolutionOverride(runtime.db, 'alice', MODEL_ID, { downscale: false }, DEFAULTS);
+    const fullSize: ProviderRequest[] = [];
+    await runOne(runtime, capturingProvider(fullSize), { outputLongEdge: null });
+    expect(fullSize[0]).not.toHaveProperty('nativeOutput');
+
+    const other = testRuntime();
+    writeModelResolutionOverride(other.db, 'bob', MODEL_ID, { downscale: false }, DEFAULTS);
+    const otherRequests: ProviderRequest[] = [];
+    await runOne(other, capturingProvider(otherRequests));
+    expect(otherRequests[0]).not.toHaveProperty('nativeOutput');
   });
 
   test('the mode follows the presence of reference pictures', async () => {

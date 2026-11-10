@@ -1280,6 +1280,13 @@ export interface ModelResolutionSetting {
   readonly defaultReference: RenderResolution | null;
   /** The user's reference override, or null when the default applies or the row has none. */
   readonly reference: RenderResolution | null;
+  /**
+   * Long edge in pixels the row reduces its render to on delivery; null when
+   * it delivers at render size (no "Downsize to 2K" switch).
+   */
+  readonly outputLongEdge: number | null;
+  /** Effective "Downsize to 2K": true unless the user turned it off; false when `outputLongEdge` is null. */
+  readonly downscale: boolean;
 }
 
 export interface ModelResolutionSettingsResponse {
@@ -1291,6 +1298,8 @@ export interface ModelResolutionPutRequest {
   /** null (or the default value) resets that mode; an absent key leaves it unchanged. */
   readonly textToImage?: RenderResolution | null;
   readonly reference?: RenderResolution | null;
+  /** false delivers the rendered size; true (the default) reduces to `outputLongEdge`. */
+  readonly downscale?: boolean;
 }
 
 /** Advisory leading ai-fill frame naming the text model serving the fill. */

@@ -55,6 +55,11 @@ export interface RegistryResolutions {
   defaultTextToImage: RenderResolution;
   /** Render size with reference pictures; null when the row has no reference graph. */
   defaultReference: RenderResolution | null;
+  /**
+   * Long edge of the delivered image when the row reduces its render (the
+   * "Downsize to 2K" switch is offered); null when it delivers at render size.
+   */
+  outputLongEdge: number | null;
 }
 
 // Drafts spell out `pool` so the routing-relevant attribute is explicit per
@@ -296,6 +301,7 @@ function buildLocalEntries(config: Config): RegistryEntryDraft[] {
             resolutions: {
               defaultTextToImage: def.defaultResolution,
               defaultReference: def.defaultReferenceResolution ?? null,
+              outputLongEdge: def.outputLongEdge ?? null,
             },
           }
         : {}),

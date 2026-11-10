@@ -133,6 +133,15 @@
   line-height: 1.5;
 }
 
+/* The "Downsize to 2K" switch reuses the text-model switch. */
+.switch {
+  composes: switch from '../TextModels/index.module.css';
+}
+
+.switchThumb {
+  composes: switchThumb from '../TextModels/index.module.css';
+}
+
 .stepsInput {
   width: 64px;
   height: 36px;

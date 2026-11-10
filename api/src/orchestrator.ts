@@ -80,6 +80,8 @@ export type ResolvedGenerateRequest = GenerateRequest & {
   steps?: number;
   /** The user's render size for this batch's mode, resolved once per batch at dispatch. */
   resolution?: RenderResolution;
+  /** Set only when the user turned "Downsize to 2K" off; resolved with `resolution`. */
+  nativeOutput?: true;
 };
 
 export interface GenerationContext {
@@ -424,15 +426,24 @@ function rendersWithReferences(request: ResolvedGenerateRequest): boolean {
 }
 
 /**
- * Reads the user's render-size override once, at dispatch start and after
- * references are resolved, so the mode (with or without reference pictures)
- * is known and a batch never mixes sizes. Rows without sizes carry none.
+ * Reads the user's render-size override and "Downsize to 2K" switch once, at
+ * dispatch start and after references are resolved, so the mode (with or
+ * without reference pictures) is known and a batch never mixes sizes. Rows
+ * without sizes carry neither.
  */
 function resolveModelResolution(ctx: GenerationContext, request: ResolvedGenerateRequest): ResolvedGenerateRequest {
-  if (ctx.registryEntry.resolutions === undefined) return request;
+  const resolutions = ctx.registryEntry.resolutions;
+  if (resolutions === undefined) return request;
   const override = readModelResolutionOverride(ctx.db, ctx.userId, request.modelId);
   const resolution = rendersWithReferences(request) ? override?.reference : override?.textToImage;
-  return resolution === undefined || resolution === null ? request : { ...request, resolution };
+  // "Downsize to 2K" off applies only to rows that reduce their render.
+  const nativeOutput = resolutions.outputLongEdge !== null && override?.downscale === false;
+  if ((resolution === undefined || resolution === null) && !nativeOutput) return request;
+  return {
+    ...request,
+    ...(resolution !== undefined && resolution !== null ? { resolution } : {}),
+    ...(nativeOutput ? { nativeOutput: true as const } : {}),
+  };
 }
 
 const RESOLUTION_MEGAPIXELS: Readonly<Record<RenderResolution, number>> = { '4mp': 4, '8mp': 8, '16mp': 16 };
@@ -573,6 +584,7 @@ function providerRequestForTile(
     ...(ctx.request.durationFrames !== undefined ? { durationFrames: ctx.request.durationFrames } : {}),
     ...(ctx.request.steps !== undefined ? { steps: ctx.request.steps } : {}),
     ...(ctx.request.resolution !== undefined ? { resolution: ctx.request.resolution } : {}),
+    ...(ctx.request.nativeOutput ? { nativeOutput: true } : {}),
   };
 }
 

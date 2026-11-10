@@ -16,7 +16,7 @@ export const modelResolutionOpts = () =>
     },
   });
 
-/** null resets a mode to the model default; an absent key leaves it unchanged. */
+/** null resets a mode to the model default, `downscale: true` turns downsizing back on; an absent key leaves it unchanged. */
 export function putModelResolution(
   modelId: string,
   body: ModelResolutionPutRequest,

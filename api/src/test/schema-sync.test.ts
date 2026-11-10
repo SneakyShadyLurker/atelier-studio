@@ -54,7 +54,9 @@ function splitTopLevelTableItems(body: string): string[] {
 // semantically identical). CREATE TABLE items are compared as a sorted
 // multiset; each item still retains its complete normalized CHECK/FK/UNIQUE/PK
 // definition.
-const ALTERED_BY_MIGRATION_33 = new Set(['tag_dimensions', 'dimension_tags', 'option_tags']);
+// Tables whose ALTER-added columns follow a table constraint: migration 33's
+// tag tables and v61's user_model_resolution.downscale.
+const ALTERED_AFTER_CONSTRAINTS = new Set(['tag_dimensions', 'dimension_tags', 'option_tags', 'user_model_resolution']);
 
 function normalizeSql(sql: string, objectName: string): string {
   const normalized = sql
@@ -66,7 +68,7 @@ function normalizeSql(sql: string, objectName: string): string {
     .replaceAll('"', '')
     .trim()
     .toLowerCase();
-  if (!normalized.startsWith('create table ') || !ALTERED_BY_MIGRATION_33.has(objectName)) return normalized;
+  if (!normalized.startsWith('create table ') || !ALTERED_AFTER_CONSTRAINTS.has(objectName)) return normalized;
 
   const open = normalized.indexOf('(');
   if (open < 0) return normalized;

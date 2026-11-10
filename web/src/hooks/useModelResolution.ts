@@ -13,7 +13,7 @@ export function useModelResolution() {
 
 interface SetModelResolutionVars {
   readonly modelId: string;
-  /** Per mode: null resets to the default, an absent key leaves it unchanged. */
+  /** Per mode: null resets to the default, an absent key leaves it unchanged; likewise `downscale`. */
   readonly update: ModelResolutionPutRequest;
 }
 
@@ -50,6 +50,7 @@ function optimistic(model: ModelResolutionSetting, update: ModelResolutionPutReq
     ...model,
     textToImage: applied(update.textToImage, model.textToImage, model.defaultTextToImage),
     reference: applied(update.reference, model.reference, model.defaultReference),
+    downscale: model.outputLongEdge !== null && (update.downscale ?? model.downscale),
   };
 }
 

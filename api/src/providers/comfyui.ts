@@ -539,8 +539,13 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
             ...(req.motionPrompt !== undefined ? { motionPrompt: req.motionPrompt } : {}),
             ...(sourceImage !== undefined ? { sourceImage } : {}),
             ...(referenceImages.length > 0 ? { referenceImages } : {}),
+            // The user's "Downsize to 2K" off delivers the rendered frame (factor 1).
             ...(config.outputLongEdge !== undefined
-              ? { outputScale: Math.min(1, config.outputLongEdge / Math.max(dims.width, dims.height)) }
+              ? {
+                  outputScale: req.nativeOutput
+                    ? 1
+                    : Math.min(1, config.outputLongEdge / Math.max(dims.width, dims.height)),
+                }
               : {}),
             ...(contextVideo !== undefined ? { contextVideo } : {}),
             // The user's per-model override, resolved once per batch, else the

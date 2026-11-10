@@ -97,14 +97,16 @@ person from one picture into a new scene, or to combine a person, a place and
 a garment from three pictures. Enhance rewrites your request into the form
 the model follows best, and a short instruction is rewritten the same way
 automatically before it renders when a text model that accepts images is
-available. Every MiniMax H3 Image result is delivered with a 2048 pixel long
-edge: without pictures the model renders at about 16 megapixels and the
+available. By default every MiniMax H3 Image result is delivered with a 2048
+pixel long edge: without pictures the model renders at about 16 megapixels and the
 result is reduced from that, with pictures it renders at about 4.
 You can change both sizes in Prompt Library → Settings → Render resolution:
 pick 4, 8 or 16 MP for Text to image and for With reference pictures. A
 larger size takes longer; the delivered image stays 2048 pixels on the long
-edge. With pictures, 4 and 8 MP give clean results; 16 MP is available but
-tends to come out harsh and over-sharpened.
+edge while Downsize to 2K is on. With pictures, 4 and 8 MP give clean results; 16 MP is available but
+tends to come out harsh and over-sharpened. Turn off Downsize to 2K in the
+same row to keep the image at the size it was rendered: at the default 16 MP
+that is a PNG of roughly 20 to 34 MB. Reset turns it back on.
 
 Reference uploads are kept with your user data. Removing a reference from the
 current prompt changes the next request; it does not rewrite a completed batch.

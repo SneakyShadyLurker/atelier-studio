@@ -70,6 +70,7 @@ export const BRAINSTORM_PHOTOGRAPH_CONSTRAINT_MOSS = 'a photorealistic real-life
 function photographConstraintForTarget(target: ImageModelTarget): string {
   switch (target) {
     case 'krea':
+    case 'h3image':
       return BRAINSTORM_PHOTOGRAPH_CONSTRAINT;
     case 'moss':
       return BRAINSTORM_PHOTOGRAPH_CONSTRAINT_MOSS;
@@ -82,9 +83,11 @@ function photographConstraintForTarget(target: ImageModelTarget): string {
 
 function constraintsForTarget(target: ImageModelTarget, layout: BrainstormLayout, medium?: BrainstormMedium): string {
   const diptychConstraint = layout === 'diptych' ? BRAINSTORM_DIPTYCH_CONSTRAINT : '';
+  // MiniMax H3 Image has no negative prompt either, so it takes the
+  // all-positive Krea tail.
   const base = target === 'gpt'
     ? BRAINSTORM_CONSTRAINTS_GPT
-    : target === 'krea'
+    : target === 'krea' || target === 'h3image'
       ? BRAINSTORM_CONSTRAINTS_KREA
       : target === 'moss' ? BRAINSTORM_CONSTRAINTS_MOSS : BRAINSTORM_CONSTRAINTS;
   const withMedium = medium === 'photograph'
@@ -215,6 +218,8 @@ ${GPT_IMAGE_PHRASING_RULES}`;
       return 'Target model: Krea 2. Describe exactly what you want to see in plain natural language, with the subject and concrete lighting ahead of supporting detail. Keep the setting sparse: every additional named object has to be lit to be visible, so an inventoried background is what talks this model out of the lighting you described and into a flat, evenly-lit frame — name only the props the moment actually needs. State exclusions positively: describe the visible emptiness of a place the concept already names, rather than writing a negation about what is absent — a negated clause reads to this model as if it were absent, so what it excludes comes back.';
     case 'moss':
       return 'Target model: MOSS Image, an open-weights model with no content filter, trained on long natural-language captions. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. For a photorealistic concept, convey the capture in words that fit the scene rather than the bare word "photograph", which can render a printed photo. Keep a photorealistic image sharp: never add blur, motion blur, grain, noise or softness the brief does not ask for, because MOSS renders them literally; carry a candid or handheld feel through framing, the caught moment and the light instead, and name the fine detail the scene should resolve, such as natural skin texture with fine pores, individual hair strands, fabric weave and crisp edges in the setting. State her adult age range and build plainly, naming a slim waist outright rather than implying it, and give each garment its material. Describe the light by its source, direction and colour temperature and how it falls on her skin. State exclusions positively as the visual state to render: the user cannot write to the image model\'s negative channel, so a negated clause has nothing to act through.';
+    case 'h3image':
+      return 'Target model: MiniMax H3 Image, an open-weights model with no content filter that reads detailed English natural-language descriptions best. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. Open each concept with the kind of image and the subject, and cover identity, pose and contact, scale, setting, light and medium concretely. State her adult age range and build plainly, naming a slim waist outright rather than implying it, and give each garment its material. Replace mood words with the visible cues that carry them. State exclusions positively as the visual state to render: the model has no negative prompt, so a negated clause has nothing to act through.';
     case 'other':
       return 'Target model: a latest-generation text-to-image model. Describe exactly what you want to see and be concrete about shapes, textures and the visual medium rather than relying on minimal cues; spell out framing, wardrobe and setting explicitly.';
   }
@@ -246,7 +251,9 @@ export function buildBrainstormSystemPrompt({ count, layout, medium, modelId, va
       : `a solo-woman concept stays within ~60-180 words across the three fields, while a scene with more than one woman may run longer (up to ~${KREA_MULTI_SUBJECT_FIELD_WORD_CAP} words for two women, plus ~${KREA_PROMPT_PER_EXTRA_SUBJECT_WORDS} words for each further woman)`
     : target === 'moss'
       ? 'MOSS Image takes long captions, so a solo-woman concept runs ~110-250 words across the three fields, while a scene with more than one woman may run longer (up to ~350 words)'
-      : 'a simple solo portrait stays tight (~40-90 words across the three fields), a busy multi-subject scene with setting and props may run longer (up to ~220 words)';
+      : target === 'h3image'
+        ? 'MiniMax H3 Image reads detailed descriptions, so a solo-woman concept runs ~90-220 words across the three fields, while a scene with more than one woman may run longer (up to ~300 words)'
+        : 'a simple solo portrait stays tight (~40-90 words across the three fields), a busy multi-subject scene with setting and props may run longer (up to ~220 words)';
   const diptychFieldOneGuidance = diptych
     ? ' For this batch that mode-setter also names the two-panel structure — e.g. "a side-by-side two-panel front-and-back diptych, candid amateur smartphone snapshot" — stated once and briefly; the full panel contract is appended to every prompt automatically, so spend the rest of your words on her and the place she is in.'
     : '';

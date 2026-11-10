@@ -72,6 +72,65 @@ describe('validate-models', () => {
     expect(result.stderr).toContain(graphPath);
   });
 
+  describe('h3image recipe', () => {
+    type H3Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+    function h3Violation(
+      mutate: (graph: H3Graph, sampler: H3Graph[string]) => void,
+    ): { result: ReturnType<typeof run>; graphPath: string } {
+      const dir = copyFixture(BUILTIN_MODELS_DIR);
+      const graphPath = join(dir, 'minimax-h3-image', 'workflow.json');
+      const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as H3Graph;
+      const sampler = graph['7'];
+      if (sampler === undefined) throw new Error('minimax-h3-image graph has no node 7');
+      mutate(graph, sampler);
+      writeFileSync(graphPath, JSON.stringify(graph));
+      return { result: run(dir), graphPath };
+    }
+
+    test('a batched latent exits 1 naming the batch-1 limit', () => {
+      const { result, graphPath } = h3Violation((graph, sampler) => {
+        graph['11'] = { class_type: 'RepeatLatentBatch', inputs: { samples: ['4', 1], amount: 1 } };
+        sampler.inputs.latent_image = ['11', 0];
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image graphs render one image: MiniMax H3 supports batch size 1 only`);
+    });
+
+    test('a {{count}} placeholder exits 1', () => {
+      const { result, graphPath } = h3Violation((graph) => {
+        graph['11'] = { class_type: 'RepeatLatentBatch', inputs: { samples: ['4', 1], amount: '{{count}}' } };
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image graphs render one image`);
+    });
+
+    test('a CLIPTextEncode exits 1', () => {
+      const { result, graphPath } = h3Violation((graph) => {
+        graph['5'] = { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: '' } };
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image graphs encode through MiniMaxH3ImageConditioning, not CLIPTextEncode`);
+      expect(result.stderr).toContain(`${graphPath}: h3image graphs take a ConditioningZeroOut negative`);
+    });
+
+    test('a sampler off euler / simple / cfg 1.0 exits 1', () => {
+      const { result, graphPath } = h3Violation((_graph, sampler) => {
+        sampler.inputs.cfg = 3.5;
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image KSampler runs euler / simple at cfg 1.0 and denoise 1.0`);
+    });
+
+    test('a latent not taken from the conditioning node exits 1', () => {
+      const { result, graphPath } = h3Violation((graph, sampler) => {
+        graph['11'] = { class_type: 'EmptyLatentImage', inputs: { width: '{{width}}', height: '{{height}}', batch_size: 1 } };
+        sampler.inputs.latent_image = ['11', 0];
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: one MiniMaxH3ImageConditioning feeds the sampler latent from output 1`);
+    });
+  });
+
   test('a row sharing a residency key with different weights exits 1', () => {
     const external = mkdtempSync(join(tmpdir(), 'atelier-validate-'));
     temps.push(external);

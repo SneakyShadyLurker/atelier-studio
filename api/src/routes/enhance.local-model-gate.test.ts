@@ -8,6 +8,7 @@ import {
 } from '../providers/text/featureHelpers';
 import {
   ENHANCE_SYSTEM_PROMPT,
+  H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
   MOSS_ENHANCE_SYSTEM_PROMPT,
 } from '../prompts/enhanceSystemPrompt';
@@ -191,6 +192,44 @@ describe('POST /api/enhance-prompt local-model allowlist', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]?.model).toBe(TEXT_MODELS.kimi);
     expect(systemPromptOf(requests[0] ?? {})).toBe(MOSS_ENHANCE_SYSTEM_PROMPT);
+  });
+
+  test('a listed user sends MiniMax H3 Image through Kimi with the H3 Image prompt', async () => {
+    restoreFetch();
+    const requests: CapturedRequest[] = [];
+    const upstream = serveCapture(requests);
+    const { app } = testRuntime({
+      ...VIDEO_ON,
+      CLIPROXY_BASE_URL: upstream,
+      CLIPROXY_TOKEN: 'sk-x',
+      LOCAL_MODELS_USERS: 'alice',
+    });
+
+    const response = await postEnhance(app, 'alice', 'minimax-h3-image');
+
+    expect(response.status).toBe(200);
+    expect((await parseSse(response)).at(-1)?.event).toBe('done');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.model).toBe(TEXT_MODELS.kimi);
+    expect(systemPromptOf(requests[0] ?? {})).toBe(H3_IMAGE_ENHANCE_SYSTEM_PROMPT);
+  });
+
+  test('a non-listed user sends MiniMax H3 Image through the generic prompt', async () => {
+    restoreFetch();
+    const requests: CapturedRequest[] = [];
+    const upstream = serveCapture(requests);
+    const { app } = testRuntime({
+      ...VIDEO_ON,
+      CLIPROXY_BASE_URL: upstream,
+      CLIPROXY_TOKEN: 'sk-x',
+    });
+
+    const response = await postEnhance(app, 'bob', 'minimax-h3-image');
+
+    expect(response.status).toBe(200);
+    expect((await parseSse(response)).at(-1)?.event).toBe('done');
+    expect(requests).toHaveLength(1);
+    expect(systemPromptOf(requests[0] ?? {})).toBe(ENHANCE_SYSTEM_PROMPT);
   });
 
   test('a non-listed user sends MOSS through the same generic provider as an unknown id', async () => {

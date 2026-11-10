@@ -1,0 +1,37 @@
+{
+  "id": "minimax-h3-image",
+  "name": "MiniMax H3 Image",
+  "family": "h3image",
+  "order": 95,
+  "saveImageNodeId": "9",
+  "requiredPlaceholders": [
+    "{{prompt}}",
+    "{{seed}}",
+    "{{width}}",
+    "{{height}}",
+    "{{steps}}"
+  ],
+  "defaultSteps": 6,
+  "ratioMap": "h3image-8mp",
+  "supportedRatios": [
+    "1:1",
+    "4:5",
+    "3:4",
+    "16:9",
+    "9:16"
+  ],
+  "defaultRatio": "3:4",
+  "size": "≈8MP · INT8 ConvRot",
+  "latency": "medium",
+  "batched": false,
+  "defaultCount": 1,
+  "graphs": {
+    "base": "workflow.json"
+  },
+  "requiredModelFiles": [
+    "minimax_h3_image_pruned_int8_convrot.safetensors",
+    "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "minimax_h3_image_vae_fp16.safetensors"
+  ],
+  "requiredClipType": "minimax"
+}

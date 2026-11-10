@@ -159,6 +159,21 @@ describe('buildAiFillSystemPrompt MOSS target', () => {
   });
 });
 
+describe('buildAiFillSystemPrompt MiniMax H3 Image target', () => {
+  test('H3 Image gets its own prose hint without the Krea budget or MOSS rules', () => {
+    const h3 = buildAiFillSystemPrompt({ modelId: 'minimax-h3-image', slotCount: 2, perSlotWordBudget: 30 });
+    expect(h3).toContain('Target model: MiniMax H3 Image');
+    expect(h3).toContain('There is no word budget');
+    expect(h3).toContain('State exclusions POSITIVELY');
+    expect(h3).toContain('verbatim in double quotes');
+    expect(h3).not.toContain('Target model: Krea 2');
+    expect(h3).not.toContain('Target model: MOSS Image');
+    expect(h3).not.toContain(`roughly ${KREA_PROMPT_WORD_BUDGET} words in total`);
+    expect(h3).not.toContain('can render a printed photo');
+    expect(h3).not.toContain('never add blur');
+  });
+});
+
 describe('buildAiFillUserContent', () => {
   test('renders XML-delimited skeleton and numbered instructions', () => {
     const uc = buildAiFillUserContent({

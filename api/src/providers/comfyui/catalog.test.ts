@@ -381,8 +381,8 @@ describe('loadLocalModelCatalog: residency groups', () => {
 describe('built-in catalog', () => {
   test('registers the enabled bundled rows in order and leaves the H3 templates disabled', () => {
     const catalog = loadBuiltinCatalog();
-    expect(catalog.models.map((model) => model.id)).toEqual(['krea-2-gonzalomo', 'moss-image-sft']);
-    expect(catalog.models.map((model) => model.order)).toEqual([10, 70]);
+    expect(catalog.models.map((model) => model.id)).toEqual(['krea-2-gonzalomo', 'moss-image-sft', 'minimax-h3-image']);
+    expect(catalog.models.map((model) => model.order)).toEqual([10, 70, 95]);
     expect(catalog.kreaModels.map((model) => model.id)).toEqual(['krea-2-gonzalomo']);
     expect(catalog.byId.has('minimax-h3-i2v')).toBe(false);
     expect(catalog.models.every((model) => model.workflowPath.startsWith(BUILTIN_MODELS_DIR))).toBe(true);
@@ -390,9 +390,11 @@ describe('built-in catalog', () => {
 
   test('COMFYUI_ENABLE_MODELS registers the H3 templates on one residency key', () => {
     const catalog = loadLocalModelCatalog({ builtinDir: BUILTIN_MODELS_DIR, enableModels: ['minimax-h3-i2v', 'minimax-h3-t2v'] });
-    expect(catalog.models.map((model) => model.id)).toEqual(['krea-2-gonzalomo', 'moss-image-sft', 'minimax-h3-i2v', 'minimax-h3-t2v']);
-    expect(catalog.models.map((model) => model.order)).toEqual([10, 70, 100, 110]);
+    expect(catalog.models.map((model) => model.id))
+      .toEqual(['krea-2-gonzalomo', 'moss-image-sft', 'minimax-h3-image', 'minimax-h3-i2v', 'minimax-h3-t2v']);
+    expect(catalog.models.map((model) => model.order)).toEqual([10, 70, 95, 100, 110]);
     expect(catalog.residencyKey('minimax-h3-i2v')).toBe('minimax-h3');
     expect(catalog.residencyKey('minimax-h3-t2v')).toBe('minimax-h3');
+    expect(catalog.residencyKey('minimax-h3-image')).toBe('minimax-h3-image');
   });
 });

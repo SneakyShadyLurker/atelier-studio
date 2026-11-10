@@ -181,6 +181,17 @@ Atelier's word budgets, positive-phrasing rules and texture exclusions are local
 | Adult content | The reference pipeline has no safety checker, and stock SFT renders adult nudity; explicit sex acts render with broken anatomy. The official Qwen3.5 prompt enhancer refuses such content; the image model does not, which is why Atelier's own writers carry the MOSS hint. |
 | Anti-patterns | Tag soup; quality words ("masterpiece", "8k", "best quality"); weight syntax; generic Turbo/DMD distills on SFT (plastic skin). Krea's grain ban and 180-word enhance cap are Krea-specific; the skin-marking and liquid rules apply to every writer. |
 
+**MiniMax H3 Image** (`minimax-h3-image`) is a third local lane. Neither the Krea rules nor the MOSS empirical rules (its sharpness warnings, length bands and skin-texture naming) carry over; the house rules on skin markings, liquids, positive exclusions, quoted text, and no quality tags or weight syntax do. Source: MiniMax's official model card.
+
+| Axis | MiniMax H3 Image (Qwen3-VL 32B encoder · euler 6 steps · guidance 1 · ~8 MP) |
+|---|---|
+| Structure | One fluent English natural-language description of the finished image, opening with the kind of image (photograph, illustration, poster, diagram) and the subject. |
+| Length | No Atelier word budget and no condense pass. The enhancer treats roughly 120 to 300 words as typical for a single-subject scene and lets a text-heavy or multi-panel layout run longer; content sets the length, never padding. |
+| Facets | For a scene: subject identity, pose and contact, scale, environment, light, lens or medium, physical plausibility. For a designed artifact (poster, card, interface, infographic, packaging): a finished layout naming what each region holds and its hierarchy. |
+| Text rendering | Renders text well. Literal words verbatim in double quotes, with what carries them and where. |
+| Exclusions | State them as the positive visual state; the model has no negative prompt. |
+| Anti-patterns | Abstract mood words and generic adjectives in place of visible cues; hype and quality words; tag lists; weight syntax. |
+
 ## Prompting guidance for the text LLMs (metaprompts + ai-fill)
 
 The metaprompts live in `api/src/prompts/*.ts` (`aiFillSystemPrompt`, `brainstormCharactersSystemPrompt`, enhance/draft/infer/rescue). Which text model runs them is an admin setting (default model, task assignments and prompt writers) plus each user's own pick per task (see [Connect a text model](connect-a-text-model.md#choose-which-model-writes-what)). When editing them or authoring fill instructions:

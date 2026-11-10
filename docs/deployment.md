@@ -273,7 +273,7 @@ its existing Atelier history.
 
 ## Models directory
 
-The built-in local model manifests ship in the api image under `api/src/providers/comfyui/models/`: `krea-2-gonzalomo`, `moss-image-sft`, and the MiniMax H3 pair `minimax-h3-i2v` and `minimax-h3-t2v` as **disabled templates** derived from ComfyUI's official H3 workflow and unverified on a live host. To add or replace rows, mount a directory with the same layout read-only and point `COMFYUI_MODELS_DIR` at it; the override example binds `${COMFYUI_MODELS_HOST_DIR}` at `/run/comfyui-models`. `COMFYUI_ENABLE_MODELS` registers disabled built-ins. Render through each graph against your ComfyUI before enabling a row.
+The built-in local model manifests ship in the api image under `api/src/providers/comfyui/models/`: `krea-2-gonzalomo`, `moss-image-sft`, the text-to-image row `minimax-h3-image` (needs ComfyUI 0.45.0 or later), and the MiniMax H3 video pair `minimax-h3-i2v` and `minimax-h3-t2v` as **disabled templates** derived from ComfyUI's official H3 workflow and unverified on a live host. To add or replace rows, mount a directory with the same layout read-only and point `COMFYUI_MODELS_DIR` at it; the override example binds `${COMFYUI_MODELS_HOST_DIR}` at `/run/comfyui-models`. `COMFYUI_ENABLE_MODELS` registers disabled built-ins. Render through each graph against your ComfyUI before enabling a row.
 
 For optional model authoring, validate the directory on a workstation with Bun
 and project dependencies installed. Run this command from the **repository

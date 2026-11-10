@@ -52,6 +52,19 @@ describe('validate-models', () => {
     expect(result.stderr).toContain(graphPath);
   });
 
+  test('a krea graph accepts er_sde and rejects other samplers', () => {
+    const dir = copyFixture(join(FIXTURES, 'builtin'));
+    const graphPath = join(dir, 'krea-test-alpha', 'workflow.json');
+    const original = readFileSync(graphPath, 'utf8');
+    expect(original).toContain('"sampler_name": "euler"');
+    writeFileSync(graphPath, original.replace('"sampler_name": "euler"', '"sampler_name": "er_sde"'));
+    expect(run(dir)).toMatchObject({ code: 0, stderr: '' });
+    writeFileSync(graphPath, original.replace('"sampler_name": "euler"', '"sampler_name": "dpmpp_2m"'));
+    const result = run(dir);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`${graphPath}: krea graphs sample with euler or er_sde`);
+  });
+
   test('a node class outside the worker allowlist exits 1', () => {
     const dir = copyFixture(join(FIXTURES, 'builtin'));
     const graphPath = join(dir, 'moss-test-beta', 'workflow.json');

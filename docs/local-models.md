@@ -86,7 +86,7 @@ Startup checks every manifest against the schema, resolves and parses every grap
 `api/scripts/validate-models.ts` runs the same checks over every manifest, disabled ones included, and adds the recipe invariants:
 
 - every graph class is in the worker allowlist (`infra/comfyui/atelier_private/allowed_nodes.json`), the save node has the right class, every required weight file appears in the graph, and every `CLIPLoader` uses `requiredClipType`;
-- Krea: `euler`, `requiredClipType` `krea2`, a `ConditioningZeroOut` negative at CFG 1.0 or a real empty `CLIPTextEncode` above it, and an empty-prompt `TextEncodeKrea2OstrisEdit` negative in reference graphs;
+- Krea: `euler` or `er_sde`, `requiredClipType` `krea2`, a `ConditioningZeroOut` negative at CFG 1.0 or a real empty `CLIPTextEncode` above it, and an empty-prompt `TextEncodeKrea2OstrisEdit` negative in reference graphs;
 - MOSS: `requiredClipType` `moss_image`, one sampler per graph, a `ConditioningZeroOut` negative and no skip-layer guidance at CFG 1.0, a real `CLIPTextEncode` negative above it, and skip-layer guidance only on single block 22 with `er_sde`;
 - H3 Image: `requiredClipType` `minimax`, exactly one `KSampler` at `euler`, `simple`, CFG 1.0 and denoise 1.0 whose latent is output 1 of the single `MiniMaxH3ImageConditioning`, a `ConditioningZeroOut` negative, no `CLIPTextEncode`, and no `{{count}}` or `RepeatLatentBatch` (the model supports batch size 1 only);
 - video: `requiredClipType` `minimax`, one guidance-free `BasicGuider`, no step-reuse cache, `MiniMaxH3SigmaShift` at video 12 and audio 7 feeding `BasicScheduler`, and `MiniMaxH3AddGuide` in continuation graphs.

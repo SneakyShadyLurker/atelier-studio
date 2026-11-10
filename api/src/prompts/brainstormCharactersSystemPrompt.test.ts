@@ -6,6 +6,7 @@ import {
   BRAINSTORM_FIELD_SEPARATOR,
   BRAINSTORM_CONSTRAINTS,
   BRAINSTORM_CONSTRAINTS_GPT,
+  BRAINSTORM_CONSTRAINTS_H3,
   BRAINSTORM_CONSTRAINTS_KREA,
   BRAINSTORM_CONSTRAINTS_MOSS,
   BRAINSTORM_DIPTYCH_CONSTRAINT,
@@ -693,8 +694,12 @@ describe('MOSS brainstorm target', () => {
 describe('MiniMax H3 Image brainstorm target', () => {
   const record = `scene${BRAINSTORM_FIELD_SEPARATOR}subject${BRAINSTORM_FIELD_SEPARATOR}details`;
 
-  it('appends the compact Krea tail', () => {
-    expect(assembleBrainstormCharacterPrompt(record, 'h3image').text).toEndWith(BRAINSTORM_CONSTRAINTS_KREA);
+  it('appends its own compact tail, which names smooth skin instead of skin texture', () => {
+    expect(assembleBrainstormCharacterPrompt(record, 'h3image').text).toEndWith(BRAINSTORM_CONSTRAINTS_H3);
+    expect(assembleBrainstormCharacterPrompt(record, 'krea').text).toEndWith(BRAINSTORM_CONSTRAINTS_KREA);
+    expect(BRAINSTORM_CONSTRAINTS_H3).toBe(
+      BRAINSTORM_CONSTRAINTS_KREA.replace('realistic skin texture', 'smooth, clear, even-toned skin'),
+    );
     const photo = assembleBrainstormCharacterPrompt(record, 'h3image', 'single', 'photograph');
     expect(photo.text).toContain(BRAINSTORM_PHOTOGRAPH_CONSTRAINT);
     expect(photo.text).not.toContain(BRAINSTORM_PHOTOGRAPH_CONSTRAINT_EXPLICIT);
@@ -702,6 +707,8 @@ describe('MiniMax H3 Image brainstorm target', () => {
     for (const assembled of [photo, diptych]) {
       const tail = assembled.text.slice(assembled.text.indexOf('Constraints:'));
       expect(tail).not.toMatch(/\bno\b|\bnot\b|\bwithout\b|\bnever\b/i);
+      // The writer cannot override spliced text, so no skin-texture cue may reach the model.
+      expect(assembled.text).not.toMatch(/skin texture|pores/i);
     }
   });
 
@@ -710,6 +717,13 @@ describe('MiniMax H3 Image brainstorm target', () => {
     expect(sys).toContain('Target model: MiniMax H3 Image');
     expect(sys).toContain('~90-220 words across the three fields');
     expect(sys).toContain('say which hand touches what');
+    expect(sys).toContain('State her adult age as a number or a decade');
+    expect(sys).toContain('Never add skin-realism cues');
+    // The shared goal and exposure sections must not contradict the hint.
+    expect(sys).toContain('realistic proportions, smooth, clear, even-toned skin');
+    expect(sys).not.toContain('detailed skin texture');
+    expect(sys).not.toContain('in plain anatomical words, once');
+    expect(buildBrainstormSystemPrompt({ count: 3, modelId: 'krea-2-gonzalomo' })).toContain('detailed skin texture');
     expect(sys).toContain('an exclusion is a plain statement of what does not appear');
     expect(sys).not.toContain('State exclusions positively');
     expect(sys).not.toContain('Target model: Krea 2');

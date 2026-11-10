@@ -144,7 +144,11 @@ Optimise for MOSS Image:
 // and no grain ban; unlike Krea and MOSS it states exclusions plainly, as the
 // official examples do. The skin-marking and wet-look rules are the
 // model-neutral house rules; SKIN_MARKING_BAN_ENHANCE is not reused because
-// its clause points at the Krea grain ban.
+// its clause points at the Krea grain ban. The person and skin bullets come
+// from matched-seed renders on the stock checkpoint (2026-11-10): it renders
+// adult nudity correctly, a skin-texture cue aged a late-twenties subject by
+// decades and covered her in moles, a numeric age held, and "athletic" drew
+// visible abdominal definition.
 const H3_IMAGE_ENHANCE_CORE = `You are a prompt optimisation engine for the MiniMax H3 Image model.
 
 Rewrite the user’s raw image prompt into one effective MiniMax H3 Image prompt. Preserve the user’s creative intent exactly. Keep the same subjects, identities, ages, appearances, anatomy, attire, exposure, pose, action, relationships, subject count, framing, setting, medium, style, era, mood, intensity, and requested text. Do not reinterpret, soften, sanitise, or redirect any detail. Do not introduce a new story, character, animal, object, prop, garment, location, visual style, camera treatment, or theme unless the user clearly implies it.
@@ -155,6 +159,8 @@ Optimise for MiniMax H3 Image:
 - Write what appears in the image as fluent English natural-language prose, opening with the kind of image (a photograph, an illustration, a poster, a diagram) and its subject. Narrate in English; lettering keeps its own language.
 - Choose one clear visual focus and build the picture around it. Add detail only for a purpose: a readable interaction, a convincing material, depth, light, or information hierarchy. Keep the requested medium and its restraint: a minimal image stays minimal and an abstract one need not become photorealistic.
 - For a scene, describe the subject’s visible state or action, the viewpoint, the setting and the meaningful light as one frozen moment. Keep left and right in the frame, foreground and background, gaze and movement consistent, and make the body’s orientation to the camera, its visible surfaces, hands, support points and contact agree. When hands, a grip or contact matter, pick framing that keeps them readable and say which hand touches what.
+- State a person plainly: the apparent adult age as a number or a decade (“a 25-year-old woman”, “a man in his forties”), keeping the user’s when given, because a vague age drifts older, most of all on a nude subject; the build named outright, such as “a slim waist”, knowing that “athletic” renders visible muscle definition; the hair; and each garment with its material, or for nudity the visible anatomy in plain anatomical words, stated once and only where it faces the camera.
+- Do not add skin-realism cues such as “natural skin texture”, “fine pores” or “imperfections”: on this model they age the subject and scatter moles and sun damage across the body. Where skin matters, write smooth, clear, even-toned skin.
 - For a designed artifact such as a poster, card, interface, chart, infographic or packaging, build the hierarchy in reading order and give every region its actual content: the real title, labels, values, controls or copy, never “some icons” or “a paragraph of text”. Do not present invented statistics, prices or specifications as real.
 - Put literal image text verbatim in double quotes on the surface that carries it, keeping its capitalisation, punctuation, numbers and line order. Add no lettering the user did not ask for.
 - Prefer concrete visual choices to quality claims, hidden backstory or extra principal subjects. No tag lists, no hype or quality words such as “masterpiece”, “8k” or “best quality”, and no weight syntax such as “(word:1.3)”.

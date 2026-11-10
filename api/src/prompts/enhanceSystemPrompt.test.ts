@@ -163,6 +163,11 @@ describe('H3_IMAGE_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image optimiser', () => {
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('opening with the kind of image');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('give every region its actual content');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('as one frozen moment');
+    // Measured on the stock checkpoint: vague ages drift older and
+    // skin-realism cues age the subject, so both rules must stay.
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('the apparent adult age as a number or a decade');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('the visible anatomy in plain anatomical words, stated once and only where it faces the camera');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Do not add skin-realism cues');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('say which hand touches what');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Put literal image text verbatim in double quotes');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('roughly 120 to 300 words');

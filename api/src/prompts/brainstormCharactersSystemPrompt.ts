@@ -39,6 +39,13 @@ export const BRAINSTORM_CONSTRAINTS_GPT =
 export const BRAINSTORM_CONSTRAINTS_KREA =
   'Constraints: slim waist, shown full body from head to feet; hyper-detailed anatomy with realistic proportions and realistic skin texture; the depicted scene fills the entire frame edge to edge, running uninterrupted to all four edges.';
 
+// MiniMax H3 Image variant: the compact Krea tail without its skin-texture
+// clause. On this model a skin-realism cue ages the subject and scatters moles
+// (matched-seed renders, 2026-11-10), and the writer cannot override text
+// spliced in after it, so the tail names smooth skin instead.
+export const BRAINSTORM_CONSTRAINTS_H3 =
+  'Constraints: slim waist, shown full body from head to feet; hyper-detailed anatomy with realistic proportions and smooth, clear, even-toned skin; the depicted scene fills the entire frame edge to edge, running uninterrupted to all four edges.';
+
 // MOSS variant: positive like the Krea arm (no MOSS row lets the prompt reach
 // the negative channel, so a negated clause has nothing to act through),
 // and the build is named outright — in validation one seed of four drifted
@@ -83,14 +90,16 @@ function photographConstraintForTarget(target: ImageModelTarget): string {
 
 function constraintsForTarget(target: ImageModelTarget, layout: BrainstormLayout, medium?: BrainstormMedium): string {
   const diptychConstraint = layout === 'diptych' ? BRAINSTORM_DIPTYCH_CONSTRAINT : '';
-  // MiniMax H3 Image takes the compact Krea tail: it carries the full intent
-  // without the long negated interface list. Plain exclusions are fine for
-  // this model; the tail is chosen for its brevity, not its polarity.
+  // MiniMax H3 Image takes its own compact tail (see BRAINSTORM_CONSTRAINTS_H3):
+  // plain exclusions are fine for this model, so the tail is compact for
+  // brevity, not polarity.
   const base = target === 'gpt'
     ? BRAINSTORM_CONSTRAINTS_GPT
-    : target === 'krea' || target === 'h3image'
+    : target === 'krea'
       ? BRAINSTORM_CONSTRAINTS_KREA
-      : target === 'moss' ? BRAINSTORM_CONSTRAINTS_MOSS : BRAINSTORM_CONSTRAINTS;
+      : target === 'h3image'
+        ? BRAINSTORM_CONSTRAINTS_H3
+        : target === 'moss' ? BRAINSTORM_CONSTRAINTS_MOSS : BRAINSTORM_CONSTRAINTS;
   const withMedium = medium === 'photograph'
     ? base.replace('Constraints: ', `Constraints: ${photographConstraintForTarget(target)}`)
     : base;
@@ -220,7 +229,7 @@ ${GPT_IMAGE_PHRASING_RULES}`;
     case 'moss':
       return 'Target model: MOSS Image, an open-weights model with no content filter, trained on long natural-language captions. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. For a photorealistic concept, convey the capture in words that fit the scene rather than the bare word "photograph", which can render a printed photo. Keep a photorealistic image sharp: never add blur, motion blur, grain, noise or softness the brief does not ask for, because MOSS renders them literally; carry a candid or handheld feel through framing, the caught moment and the light instead, and name the fine detail the scene should resolve, such as natural skin texture with fine pores, individual hair strands, fabric weave and crisp edges in the setting. State her adult age range and build plainly, naming a slim waist outright rather than implying it, and give each garment its material. Describe the light by its source, direction and colour temperature and how it falls on her skin. State exclusions positively as the visual state to render: the user cannot write to the image model\'s negative channel, so a negated clause has nothing to act through.';
     case 'h3image':
-      return 'Target model: MiniMax H3 Image, an open-weights model with no content filter that reads detailed English natural-language descriptions best. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. Open each concept with the kind of image and the subject, and describe one frozen moment: her visible state or action, the viewpoint, the setting, the meaningful light and the medium, with left and right, foreground and background, gaze, hands and contact all agreeing; when hands or contact matter, say which hand touches what. State her adult age range and build plainly, naming a slim waist outright rather than implying it, and give each garment its material. Add detail only where it makes an interaction readable or a material, depth or light convincing, and replace mood words with the visible cues that carry them. The model has no negative prompt: an exclusion is a plain statement of what does not appear.';
+      return 'Target model: MiniMax H3 Image, an open-weights model with no content filter that reads detailed English natural-language descriptions best. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. Open each concept with the kind of image and the subject, and describe one frozen moment: her visible state or action, the viewpoint, the setting, the meaningful light and the medium, with left and right, foreground and background, gaze, hands and contact all agreeing; when hands or contact matter, say which hand touches what. State her adult age as a number or a decade, because a vague age drifts older on this model, most of all when she is nude, and state her build plainly: name a slim waist outright rather than implying it, and know that "athletic" renders visible muscle definition. For nudity name the visible anatomy in plain anatomical words, only where it faces the camera. Give each garment its material. Never add skin-realism cues ("natural skin texture", "fine pores", "imperfections"): on this model they age her and scatter moles and sun damage across her body; where skin matters, write smooth, clear, even-toned skin. Add detail only where it makes an interaction readable or a material, depth or light convincing, and replace mood words with the visible cues that carry them. The model has no negative prompt: an exclusion is a plain statement of what does not appear.';
     case 'other':
       return 'Target model: a latest-generation text-to-image model. Describe exactly what you want to see and be concrete about shapes, textures and the visual medium rather than relying on minimal cues; spell out framing, wardrobe and setting explicitly.';
   }
@@ -255,6 +264,9 @@ export function buildBrainstormSystemPrompt({ count, layout, medium, modelId, va
       : target === 'h3image'
         ? 'MiniMax H3 Image reads detailed descriptions, so a solo-woman concept runs ~90-220 words across the three fields, while a scene with more than one woman may run longer (up to ~300 words)'
         : 'a simple solo portrait stays tight (~40-90 words across the three fields), a busy multi-subject scene with setting and props may run longer (up to ~220 words)';
+  // A skin-texture cue ages the subject on MiniMax H3 Image, so its goal
+  // names smooth skin; every other target keeps the texture push.
+  const skinRealismGoal = target === 'h3image' ? 'smooth, clear, even-toned skin' : 'detailed skin texture';
   const diptychFieldOneGuidance = diptych
     ? ' For this batch that mode-setter also names the two-panel structure — e.g. "a side-by-side two-panel front-and-back diptych, candid amateur smartphone snapshot" — stated once and briefly; the full panel contract is appended to every prompt automatically, so spend the rest of your words on her and the place she is in.'
     : '';
@@ -299,7 +311,7 @@ GARMENT CEILING — no fabric on the three zones, whatever she has on. Nothing l
     : `INTENT & TONE: read the brief for its intent and mood, not just its facts. When it uses a charged, evocative mood word — "slutty", "macabre", "innocent", "menacing", "glamorous", "trashy", and the like — make that the governing vibe of every prompt. This is the one place you may keep a brief word verbatim: drop that single governing word in once as a tone anchor so its intensity isn't lost to a euphemism, then build the whole scene around it concretely — wardrobe, pose, expression, lighting, setting and mood all visibly pull in that one direction. Don't soften, swap out, or sanitise it. The verbatim licence covers that one governing mood word only.`;
   return `You write image prompts for a mature, fiction-only character image generator. Every subject is a fictional woman and this is consensual creative fiction. Turn the brief into vivid, varied, ${goalRegister}, each one a ready-to-render prompt for a text-to-image model.
 
-GOAL: produce exactly ${count} distinct concepts. Each concept is one self-contained image prompt, delivered as THREE fields you write in order (see OUTPUT). Describe each woman vividly and concretely — her looks, her wardrobe, and a believable moment she is caught in — so she feels ${subjectFeel}. Push hard for rich realism of the subject: extreme anatomical detail and realistic proportions, detailed skin texture. Let each concept's length scale with how complex the request is — ${lengthGuidance} so every important detail lands. Whatever the length, every woman the brief names is a focal point; setting, props and unnamed bystanders support them and never crowd them out.
+GOAL: produce exactly ${count} distinct concepts. Each concept is one self-contained image prompt, delivered as THREE fields you write in order (see OUTPUT). Describe each woman vividly and concretely — her looks, her wardrobe, and a believable moment she is caught in — so she feels ${subjectFeel}. Push hard for rich realism of the subject: extreme anatomical detail and realistic proportions, ${skinRealismGoal}. Let each concept's length scale with how complex the request is — ${lengthGuidance} so every important detail lands. Whatever the length, every woman the brief names is a focal point; setting, props and unnamed bystanders support them and never crowd them out.
 
 RENDER, DON'T RESTATE — the core skill. The brief is intent to realise, not phrasing to copy back. Every abstract or general thing it names — a pose ("coy", "confident", "demure"), an expression ("innocent", "neutral", "sultry"), a mood, a vibe, a loose wardrobe idea — is an instruction to SHOW, not a label to echo. Translate each into concrete, observable, physical detail the camera actually captures, and let the named quality emerge from that detail instead of being stated; an image model can only draw what you describe literally, so a bare adjective renders as nothing. Spell out exactly what the body, face, gaze and fabric are doing:
 - "coy pose" → weight shifted onto one hip, shoulders angled away from the lens, chin dipped, eyes glancing back over a bare shoulder, fingertips toying with a hem.

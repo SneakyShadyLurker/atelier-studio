@@ -35,10 +35,14 @@ function baseSampler(graph: Graph): Node | undefined {
   return nodesOf(graph, 'KSampler').find((node) => node.inputs.steps === '{{steps}}');
 }
 
+// Krea rows follow their creator's sampler: the official template's Euler, or
+// er_sde where a finetune's card asks for it.
+const KREA_SAMPLERS: ReadonlySet<string> = new Set(['euler', 'er_sde']);
+
 function checkKrea(graph: Graph, kind: string, model: LocalModelDef, fail: (reason: string) => void): void {
   if (model.requiredClipType !== 'krea2') fail('krea rows require requiredClipType krea2');
   const samplers = nodesOf(graph, 'KSampler');
-  if (samplers.some((node) => node.inputs.sampler_name !== 'euler')) fail('krea graphs sample with euler');
+  if (samplers.some((node) => !KREA_SAMPLERS.has(node.inputs.sampler_name as string))) fail('krea graphs sample with euler or er_sde');
   const sampler = baseSampler(graph);
   if (sampler === undefined) { fail('graph has no {{steps}} KSampler'); return; }
   const cfg = sampler.inputs.cfg;

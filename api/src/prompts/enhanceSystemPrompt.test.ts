@@ -160,11 +160,16 @@ describe('H3_IMAGE_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image optimiser', () => {
 
   it('carries the H3 Image description contract', () => {
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Optimise for MiniMax H3 Image:');
-    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Open with the kind of image');
-    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('describe a finished layout');
-    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Put literal text verbatim in double quotes');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('opening with the kind of image');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('give every region its actual content');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('as one frozen moment');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('say which hand touches what');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Put literal image text verbatim in double quotes');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('roughly 120 to 300 words');
-    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Express exclusions as the positive visual state to render');
+    // The official examples state exclusions plainly, so the Krea/MOSS
+    // positive-state rewrite must not come back for this model.
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('close with one plain sentence that states them');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain('positive visual state');
   });
 
   it('inherits neither the Krea-only nor the MOSS-only rules', () => {

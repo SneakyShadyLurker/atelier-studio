@@ -66,7 +66,7 @@ describe('MiniMax H3 Image workflow', () => {
     expect(h3.batched).toBe(false);
     expect(h3.defaultCount).toBe(1);
     expect(h3.defaultRatio).toBe('3:4');
-    expect(h3.ratioMap).toBe('h3image-8mp');
+    expect(h3.ratioMap).toBe('h3image-16mp');
     expect(h3.referenceWorkflowPath).toBeUndefined();
     expect(h3.extendWorkflowPath).toBeUndefined();
     expect(h3.requiredClipType).toBe('minimax');
@@ -79,18 +79,20 @@ describe('MiniMax H3 Image workflow', () => {
     expect(workflowText).not.toContain('{{count}}');
   });
 
-  test('ratio map stays at ~8 MP with every edge a multiple of 32 and the nominal ratio', () => {
+  test('ratio map stays at ~16 MP, under the worker PNG cap, with every edge a multiple of 32 and the nominal ratio', () => {
     expect(h3.supportedRatios).toEqual([...RATIO_VALUES]);
     for (const ratio of h3.supportedRatios) {
       const { width, height } = h3.ratioDims[ratio];
       expect(width % 32).toBe(0);
       expect(height % 32).toBe(0);
       const megapixels = (width * height) / 1_000_000;
-      expect(megapixels).toBeGreaterThan(7.8);
-      expect(megapixels).toBeLessThan(8.6);
+      expect(megapixels).toBeGreaterThan(16);
+      expect(megapixels).toBeLessThan(16.9);
+      // An 8-bit RGB PNG is at most a few kilobytes larger than its raw pixels.
+      expect(width * height * 3).toBeLessThan(50 * 1024 * 1024 - 1024 * 1024);
       expect(Math.abs(width / height / ratioValue(ratio) - 1)).toBeLessThan(0.02);
     }
-    expect(h3.ratioDims['3:4']).toEqual({ width: 2496, height: 3328 });
+    expect(h3.ratioDims['3:4']).toEqual({ width: 3552, height: 4736 });
   });
 
   test('loaders bind the INT8 DiT, the Qwen3-VL encoder as minimax and the image VAE', () => {

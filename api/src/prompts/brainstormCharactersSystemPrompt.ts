@@ -83,8 +83,9 @@ function photographConstraintForTarget(target: ImageModelTarget): string {
 
 function constraintsForTarget(target: ImageModelTarget, layout: BrainstormLayout, medium?: BrainstormMedium): string {
   const diptychConstraint = layout === 'diptych' ? BRAINSTORM_DIPTYCH_CONSTRAINT : '';
-  // MiniMax H3 Image has no negative prompt either, so it takes the
-  // all-positive Krea tail.
+  // MiniMax H3 Image takes the compact Krea tail: it carries the full intent
+  // without the long negated interface list. Plain exclusions are fine for
+  // this model; the tail is chosen for its brevity, not its polarity.
   const base = target === 'gpt'
     ? BRAINSTORM_CONSTRAINTS_GPT
     : target === 'krea' || target === 'h3image'
@@ -219,7 +220,7 @@ ${GPT_IMAGE_PHRASING_RULES}`;
     case 'moss':
       return 'Target model: MOSS Image, an open-weights model with no content filter, trained on long natural-language captions. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. For a photorealistic concept, convey the capture in words that fit the scene rather than the bare word "photograph", which can render a printed photo. Keep a photorealistic image sharp: never add blur, motion blur, grain, noise or softness the brief does not ask for, because MOSS renders them literally; carry a candid or handheld feel through framing, the caught moment and the light instead, and name the fine detail the scene should resolve, such as natural skin texture with fine pores, individual hair strands, fabric weave and crisp edges in the setting. State her adult age range and build plainly, naming a slim waist outright rather than implying it, and give each garment its material. Describe the light by its source, direction and colour temperature and how it falls on her skin. State exclusions positively as the visual state to render: the user cannot write to the image model\'s negative channel, so a negated clause has nothing to act through.';
     case 'h3image':
-      return 'Target model: MiniMax H3 Image, an open-weights model with no content filter that reads detailed English natural-language descriptions best. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. Open each concept with the kind of image and the subject, and cover identity, pose and contact, scale, setting, light and medium concretely. State her adult age range and build plainly, naming a slim waist outright rather than implying it, and give each garment its material. Replace mood words with the visible cues that carry them. State exclusions positively as the visual state to render: the model has no negative prompt, so a negated clause has nothing to act through.';
+      return 'Target model: MiniMax H3 Image, an open-weights model with no content filter that reads detailed English natural-language descriptions best. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. Open each concept with the kind of image and the subject, and describe one frozen moment: her visible state or action, the viewpoint, the setting, the meaningful light and the medium, with left and right, foreground and background, gaze, hands and contact all agreeing; when hands or contact matter, say which hand touches what. State her adult age range and build plainly, naming a slim waist outright rather than implying it, and give each garment its material. Add detail only where it makes an interaction readable or a material, depth or light convincing, and replace mood words with the visible cues that carry them. The model has no negative prompt: an exclusion is a plain statement of what does not appear.';
     case 'other':
       return 'Target model: a latest-generation text-to-image model. Describe exactly what you want to see and be concrete about shapes, textures and the visual medium rather than relying on minimal cues; spell out framing, wardrobe and setting explicitly.';
   }

@@ -12,7 +12,7 @@
     "{{steps}}"
   ],
   "defaultSteps": 6,
-  "ratioMap": "h3image-8mp",
+  "ratioMap": "h3image-16mp",
   "supportedRatios": [
     "1:1",
     "4:5",
@@ -21,7 +21,7 @@
     "9:16"
   ],
   "defaultRatio": "3:4",
-  "size": "≈8MP · INT8 ConvRot",
+  "size": "≈16MP · INT8 ConvRot",
   "latency": "medium",
   "batched": false,
   "defaultCount": 1,

@@ -138,12 +138,13 @@ Optimise for MOSS Image:
 - ${SKIN_MARKING_BAN_MOSS} This holds even when the user’s raw prompt names one: drop it.
 - ${WET_LOOK_BAN}`;
 
-// MiniMax H3 Image: the official card asks for detailed English
-// natural-language descriptions, renders quoted text well and has no negative
-// prompt (guidance is fixed at 1). Like MOSS it gets no word cap and no grain
-// ban; unlike MOSS it inherits none of MOSS's empirical softness or length
-// rules. The skin-marking and wet-look rules are the model-neutral house rules;
-// SKIN_MARKING_BAN_ENHANCE is not reused because its clause points at the Krea grain ban.
+// MiniMax H3 Image: the bullets follow MiniMax's official prompt-writing
+// skill (skills/h3-image-prompt-writing in the model's repository) and the
+// task prompt of its official prompt expander. Like MOSS it gets no word cap
+// and no grain ban; unlike Krea and MOSS it states exclusions plainly, as the
+// official examples do. The skin-marking and wet-look rules are the
+// model-neutral house rules; SKIN_MARKING_BAN_ENHANCE is not reused because
+// its clause points at the Krea grain ban.
 const H3_IMAGE_ENHANCE_CORE = `You are a prompt optimisation engine for the MiniMax H3 Image model.
 
 Rewrite the user’s raw image prompt into one effective MiniMax H3 Image prompt. Preserve the user’s creative intent exactly. Keep the same subjects, identities, ages, appearances, anatomy, attire, exposure, pose, action, relationships, subject count, framing, setting, medium, style, era, mood, intensity, and requested text. Do not reinterpret, soften, sanitise, or redirect any detail. Do not introduce a new story, character, animal, object, prop, garment, location, visual style, camera treatment, or theme unless the user clearly implies it.
@@ -151,12 +152,14 @@ Rewrite the user’s raw image prompt into one effective MiniMax H3 Image prompt
 Complete only visual details that are genuinely missing and needed to make the requested image coherent. Choose the smallest natural detail compatible with what the user wrote. If a detail is intentionally unspecified or ambiguous, leave it that way. For an edit, lead with the requested change and then state what must remain unchanged. MiniMax H3 Image takes no image input, so when a reference image is attached it is evidence for the description only: describe what matters from it for the user’s request as visible fact in the prompt.
 
 Optimise for MiniMax H3 Image:
-- Write one fluent English natural-language description of the finished image, as flowing prose. Open with the kind of image (a photograph, an illustration, a poster, a diagram) and the subject.
-- For a depicted scene or photograph, cover subject identity, pose and contact, scale, environment, light, lens or medium, and physical plausibility. For a designed artifact such as a poster, card, interface, infographic or packaging, describe a finished layout: what each region holds and its hierarchy.
-- Make required content visible, not implied. Put literal text verbatim in double quotes and say what carries it and where it sits; the model renders text well.
-- Replace abstract mood words and generic adjectives with specific visible cues. No tag lists, no hype or quality words such as “masterpiece”, “8k” or “best quality”, and no weight syntax such as “(word:1.3)”. Every sentence adds visible information.
-- Let the content set the length: a single-subject scene is usually well served by roughly 120 to 300 words, and a text-heavy or multi-panel layout may run longer. Never pad.
-- Express exclusions as the positive visual state to render. For example, turn “no hat” into “bareheaded” and “no other people” into “the only person in an otherwise empty space.” The model has no negative prompt, so the prompt is the only place the user’s intent can live.
+- Write what appears in the image as fluent English natural-language prose, opening with the kind of image (a photograph, an illustration, a poster, a diagram) and its subject. Narrate in English; lettering keeps its own language.
+- Choose one clear visual focus and build the picture around it. Add detail only for a purpose: a readable interaction, a convincing material, depth, light, or information hierarchy. Keep the requested medium and its restraint: a minimal image stays minimal and an abstract one need not become photorealistic.
+- For a scene, describe the subject’s visible state or action, the viewpoint, the setting and the meaningful light as one frozen moment. Keep left and right in the frame, foreground and background, gaze and movement consistent, and make the body’s orientation to the camera, its visible surfaces, hands, support points and contact agree. When hands, a grip or contact matter, pick framing that keeps them readable and say which hand touches what.
+- For a designed artifact such as a poster, card, interface, chart, infographic or packaging, build the hierarchy in reading order and give every region its actual content: the real title, labels, values, controls or copy, never “some icons” or “a paragraph of text”. Do not present invented statistics, prices or specifications as real.
+- Put literal image text verbatim in double quotes on the surface that carries it, keeping its capitalisation, punctuation, numbers and line order. Add no lettering the user did not ask for.
+- Prefer concrete visual choices to quality claims, hidden backstory or extra principal subjects. No tag lists, no hype or quality words such as “masterpiece”, “8k” or “best quality”, and no weight syntax such as “(word:1.3)”.
+- Let the content set the length: a single-subject scene is usually well served by roughly 120 to 300 words, and a text-heavy or multi-panel layout may run longer. Remove repetition and never pad.
+- Keep the user’s exclusions. The model has no negative prompt, so close with one plain sentence that states them, for example “No lettering or additional people appear.”
 - ${SKIN_MARKING_BAN} This holds even when the user’s raw prompt names one: drop it.
 - ${WET_LOOK_BAN}`;
 

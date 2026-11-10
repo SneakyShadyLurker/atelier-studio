@@ -667,10 +667,10 @@ const css = `
   position: absolute; inset: 0;
   display: flex; flex-direction: column;
   padding: 18px;
-  background: var(--bg-elev);
-  background-image: repeating-linear-gradient(45deg,
-    transparent, transparent 8px,
-    var(--bg-sunk) 8px, var(--bg-sunk) 9px);
+  /* The plate: the same mat and plate mark as the queued and loading tiles. */
+  background: var(--bg-sunk);
+  box-shadow: var(--plate-mark);
+  border-radius: var(--radius-tile);
 }
 .failed-icon {
   color: var(--danger);

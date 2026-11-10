@@ -986,11 +986,13 @@ describe('Composer minimized bar (desktop)', () => {
     }
   });
 
-  test('a pointer outside a composer holding text leaves it expanded', () => {
+  // R24: a composer holding text yields the viewport to the feed's rows, and
+  // to nothing else outside it (Composer.yield.test.tsx covers the rows).
+  test('a pointer outside the feed rows leaves a composer holding text expanded', () => {
     installDesktop();
     renderComposer({ prompt: 'a red fox' });
     fireEvent.pointerDown(document.body);
-    expect(screen.queryByRole('button', { name: 'Expand composer' })).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toBeDefined();
   });
 });
 

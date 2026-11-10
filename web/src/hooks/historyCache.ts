@@ -129,6 +129,11 @@ function loadingCountForData(data: HistoryData): number {
   );
 }
 
+/** Loading tiles a cached scope holds, from its tags when present. */
+export function historyLoadingTileCount(data: HistoryData): number {
+  return loadingCountForData(data);
+}
+
 function withLoadingCount(data: HistoryData, nextCount: number): HistoryData {
   return { ...data, loadingTileCount: Math.max(0, nextCount), activeByModel: activeByModelFromPages(data.pages) };
 }
@@ -156,6 +161,133 @@ export function withTaggedPages(data: HistoryData, pages: HistoryPageWithLoading
 
 type TerminalTile = Exclude<Tile, { status: 'loading' }>;
 
+// Confirmed cancellations, per page session: tile id -> confirmation time. A
+// history response read before the cancel committed would otherwise bring the
+// cancelled tile back. Written only once the server confirmed the cancel (an
+// SSE `canceled` terminal or a successful cancel DELETE).
+//
+// A loading copy is filtered for five minutes: a cancelled tile never loads
+// again, and the entry outlives any request by far. A finished copy is
+// filtered only for one minute, long enough for a read that sampled the tile
+// between its completion and the cancel's DELETE to land. After that a
+// finished copy is real: the cancel raced the tile's completion, the server
+// archived it, and a restore (from this tab, which also forgets the entry at
+// once, or from another) brought it back.
+export const CANCEL_TOMBSTONE_TTL_MS = 5 * 60_000;
+export const CANCEL_TOMBSTONE_FINISHED_MS = 60_000;
+const cancelTombstones = new Map<string, number>();
+
+function tombstoneLive(tile: Tile, now: number): boolean {
+  const confirmedAt = cancelTombstones.get(tile.id);
+  if (confirmedAt === undefined) return false;
+  return now - confirmedAt < (tile.status === 'loading' ? CANCEL_TOMBSTONE_TTL_MS : CANCEL_TOMBSTONE_FINISHED_MS);
+}
+
+/** Records server-confirmed cancellations so no older history read shows those tiles again. */
+export function tombstoneCanceledTiles(tileIds: Iterable<string>, confirmedAt = Date.now()): void {
+  const now = Date.now();
+  for (const [tileId, at] of cancelTombstones) {
+    if (now - at >= CANCEL_TOMBSTONE_TTL_MS) cancelTombstones.delete(tileId);
+  }
+  for (const tileId of tileIds) cancelTombstones.set(tileId, confirmedAt);
+}
+
+/**
+ * Forgets cancellations for tiles the server handed back. A cancel that raced
+ * the tile's completion archives the finished tile instead of cancelling it;
+ * restoring it from the Archive must show it again at once.
+ */
+export function forgetCanceledTiles(tileIds: Iterable<string>): void {
+  for (const tileId of tileIds) cancelTombstones.delete(tileId);
+}
+
+export function resetCancelTombstones(): void {
+  cancelTombstones.clear();
+}
+
+function hasTombstonedTile(data: HistoryData, now: number): boolean {
+  if (cancelTombstones.size === 0) return false;
+  for (const page of data.pages) {
+    for (const batch of page.items) {
+      for (const tile of batch.tiles) if (tombstoneLive(tile, now)) return true;
+    }
+  }
+  return false;
+}
+
+// True when the flattened pages are strictly in canonical order, which also
+// rules out duplicate ids (a duplicate compares equal). No allocation.
+function strictlyCanonical(data: HistoryData): boolean {
+  let prior: Batch | undefined;
+  for (const page of data.pages) {
+    for (const batch of page.items) {
+      if (prior !== undefined && !sortsBefore(prior, batch)) return false;
+      prior = batch;
+    }
+  }
+  return true;
+}
+
+function terminalRegresses(incoming: Tile, known: Tile): boolean {
+  return known.status !== 'loading' && (incoming.status === 'loading' || known.completedAt > incoming.completedAt);
+}
+
+// Whether any incoming tile is older than the same tile in `previous`. Both
+// sides are strictly canonical here, so one merge walk pairs each batch with
+// its previous copy without building an index.
+function regressesAgainst(data: HistoryData, previous: HistoryData): boolean {
+  let pageIndex = 0;
+  let itemIndex = 0;
+  const peek = (): Batch | undefined => {
+    while (pageIndex < previous.pages.length) {
+      const items = previous.pages[pageIndex]?.items ?? [];
+      if (itemIndex < items.length) return items[itemIndex];
+      pageIndex += 1;
+      itemIndex = 0;
+    }
+    return undefined;
+  };
+  for (const page of data.pages) {
+    for (const batch of page.items) {
+      let before = peek();
+      while (before !== undefined && sortsBefore(before, batch)) {
+        itemIndex += 1;
+        before = peek();
+      }
+      if (before === undefined) return false;
+      if (before.id !== batch.id || before === batch) continue;
+      for (const tile of batch.tiles) {
+        for (const known of before.tiles) {
+          if (known.id === tile.id && terminalRegresses(tile, known)) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Rows outside the longest canonical run (complement of the longest
+// increasing subsequence in canonical order): the fewest rows to re-place.
+function misplacedRows(rows: readonly Batch[]): Set<Batch> {
+  const tails: number[] = [];
+  const parent = Array.from({ length: rows.length }, () => -1);
+  rows.forEach((row, index) => {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const tail = rows[tails[mid] ?? 0];
+      if (tail !== undefined && sortsBefore(tail, row)) lo = mid + 1;
+      else hi = mid;
+    }
+    parent[index] = lo > 0 ? tails[lo - 1] ?? -1 : -1;
+    tails[lo] = index;
+  });
+  const kept = new Set<number>();
+  for (let index = tails.at(-1) ?? -1; index !== -1; index = parent[index] ?? -1) kept.add(index);
+  return new Set(rows.filter((_, index) => !kept.has(index)));
+}
+
 /**
  * Normalizes every history write at Query's structural-sharing boundary, so
  * writers and readers see the same cache rather than hiding fixes in the view.
@@ -164,19 +296,33 @@ type TerminalTile = Exclude<Tile, { status: 'loading' }>;
  *   later page reaches it, keep the later page's row and authoritative
  *   payload; its server page also puts intervening rows back in canonical
  *   order. Cursor/pageParam coverage stays intact.
+ * - Rows still out of canonical order across page boundaries (a late arrival
+ *   parked on the last page before a page of newer rows was appended) move
+ *   with `upsertHistoryBatch`'s placement rule: the first page whose last
+ *   row they sort before, else the last page.
  * - Tiles only move loading -> terminal. A fetch read before an SSE terminal
  *   landed must not flip a finished tile back to a spinner (or to an older
  *   terminal), so the newest terminal seen for a tile wins. Tile membership
  *   and page placement still come from the incoming data.
+ * - A tile whose cancellation the server confirmed stays gone (see
+ *   `tombstoneCanceledTiles`); a batch left with no tiles by that goes too.
+ *
+ * Returns `data` itself, allocating nothing, when there is nothing to fix.
  */
 export function reconcileHistoryPages(data: HistoryData, previous?: HistoryData): HistoryData {
+  const now = Date.now();
+  const ordered = strictlyCanonical(data);
+  if (ordered && !hasTombstonedTile(data, now)) {
+    if (previous === undefined) return data;
+    if (strictlyCanonical(previous) && !regressesAgainst(data, previous)) return data;
+  }
+  return normalizeHistoryPages(data, previous, now);
+}
+
+function normalizeHistoryPages(data: HistoryData, previous: HistoryData | undefined, now: number): HistoryData {
   const latest = new Map<string, Batch>();
-  const duplicateIds = new Set<string>();
   for (const page of data.pages) {
-    for (const batch of page.items) {
-      if (latest.has(batch.id)) duplicateIds.add(batch.id);
-      latest.set(batch.id, batch);
-    }
+    for (const batch of page.items) latest.set(batch.id, batch);
   }
   const terminals = new Map<string, Map<string, TerminalTile>>();
   const remember = (batch: Batch) => {
@@ -192,23 +338,45 @@ export function reconcileHistoryPages(data: HistoryData, previous?: HistoryData)
   for (const page of data.pages) for (const batch of page.items) remember(batch);
   const newerTerminal = (batchId: string, tile: Tile): TerminalTile | undefined => {
     const terminal = terminals.get(batchId)?.get(tile.id);
-    return terminal && (tile.status === 'loading' || terminal.completedAt > tile.completedAt) ? terminal : undefined;
+    return terminal && terminalRegresses(tile, terminal) ? terminal : undefined;
   };
-  const regressed = data.pages.some((page) => page.items.some((batch) => batch.tiles.some((tile) => newerTerminal(batch.id, tile))));
-  if (duplicateIds.size === 0 && !regressed) return data;
   const seen = new Set<string>();
-  const pages = data.pages.toReversed().map((page) => ({
-    ...page,
-    items: page.items.flatMap((batch) => {
+  const deduped = data.pages.toReversed().map((page) => {
+    const items = page.items.flatMap((batch) => {
       if (seen.has(batch.id)) return [];
       seen.add(batch.id);
       const incoming = latest.get(batch.id) ?? batch;
-      const tiles = incoming.tiles.map((tile) => newerTerminal(batch.id, tile) ?? tile);
-      if (tiles.every((tile, index) => tile === incoming.tiles[index])) return [incoming];
+      const tiles = incoming.tiles
+        .filter((tile) => !tombstoneLive(tile, now))
+        .map((tile) => newerTerminal(batch.id, tile) ?? tile);
+      if (tiles.length === incoming.tiles.length && tiles.every((tile, index) => tile === incoming.tiles[index])) return [incoming];
+      // Every tile of the batch was a confirmed cancellation: the batch goes.
+      if (tiles.length === 0 && incoming.tiles.length > 0) return [];
       const status: Batch['status'] = tiles.length > 0 && tiles.every((tile) => tile.status !== 'loading') ? 'done' : incoming.status;
       return [{ ...incoming, tiles, status }];
-    }),
-  })).reverse();
+    });
+    const same = items.length === page.items.length && items.every((batch, index) => batch === page.items[index]);
+    return same ? page : { ...page, items };
+  }).reverse();
+  const changed = deduped.some((page, index) => page !== data.pages[index]);
+  const flat = deduped.flatMap((page) => page.items);
+  const misplaced = misplacedRows(flat);
+  if (misplaced.size === 0) {
+    return changed ? retagHistoryData({ ...data, pages: deduped }) : data;
+  }
+  const pages = deduped.map((page) => (page.items.some((batch) => misplaced.has(batch))
+    ? { ...page, items: page.items.filter((batch) => !misplaced.has(batch)) }
+    : page));
+  for (const batch of flat) {
+    if (!misplaced.has(batch)) continue;
+    const target = pages.findIndex((page) => {
+      const last = page.items.at(-1);
+      return last !== undefined && sortsBefore(batch, last);
+    });
+    const index = target === -1 ? Math.max(0, pages.length - 1) : target;
+    const page = pages[index];
+    if (page) pages[index] = { ...page, items: insertCanonical(page.items, batch) };
+  }
   return retagHistoryData({ ...data, pages });
 }
 

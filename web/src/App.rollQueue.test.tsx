@@ -15,7 +15,9 @@ const defaultModel = fixtureModels[0] ?? (() => { throw new Error('fixtureModels
 // Mock useGenerate so we can observe fireGenerate calls.
 const generateMock = mock((_request?: GenerateRequest, _options?: GenerateOptions) => Promise.resolve(undefined));
 
+const generateModule = await import('./hooks/useGenerate');
 void mock.module('./hooks/useGenerate', () => ({
+  ...generateModule,
   useGenerate: () => ({ generate: generateMock }),
 }));
 

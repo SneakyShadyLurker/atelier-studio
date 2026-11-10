@@ -191,6 +191,42 @@
   pointer-events: none;
 }
 
+/* Feed clip. The pseudo tree paints in the top layer above every live
+   element, so a row or tile moving behind the view header or the floating
+   Composer would paint over both. With nested groups (Chromium) the feed
+   scroller (Canvas .canvas) is the parent group and clips its children to
+   its box, less the Composer's band at the bottom (--composer-top, the
+   distance from the viewport bottom to the dock's top, set on :root). The
+   Composer and the header stay live and uncaptured, so presses keep landing.
+   Engines without nested groups (WebKit 26) capture the header and the dock
+   instead, only in a feed transition (Canvas .head, Composer .wrap: named
+   while a feed boundary carries React's name), and raise their groups above
+   the feed's, the header's on the page background it otherwise shows
+   through. They hold still, with no cross-fade: the new image is live and
+   opaque over the old one, so typing shows. */
+::view-transition-group-children(atelier-feed) {
+  overflow: clip;
+  clip-path: inset(0 0 var(--composer-top, 0px) 0);
+}
+
+::view-transition-group(atelier-feed-head),
+::view-transition-group(atelier-dock) {
+  z-index: 1;
+  animation: none;
+}
+
+/* The header draws no background of its own; the page's shows behind it. */
+::view-transition-group(atelier-feed-head) {
+  background: var(--bg);
+}
+
+::view-transition-old(atelier-feed-head),
+::view-transition-old(atelier-dock),
+::view-transition-new(atelier-feed-head),
+::view-transition-new(atelier-dock) {
+  animation: none;
+}
+
 @keyframes atelier-view-in-deeper {
   from {
     opacity: 0;

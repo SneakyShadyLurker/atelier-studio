@@ -15,22 +15,15 @@
   margin: -8px -8px 20px 0;
 }
 
+/* The shared icon action (hover gated on hover-capable pointers, focus ring,
+   press, disabled); only the dialog-close size and ink are local. */
 .close {
-  display: grid;
-  place-items: center;
+  composes: iconAction from '../../styles/buttons.module.css';
   flex: 0 0 44px;
   width: 44px;
   height: 44px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
   color: var(--ink-2);
-  cursor: pointer;
 }
-
-.close:hover { background: var(--bg-sunk); }
-.close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 .heading {
   display: flex;

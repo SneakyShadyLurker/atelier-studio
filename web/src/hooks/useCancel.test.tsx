@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { act, cleanup, renderHook } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { Batch } from '@atelier/shared';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { InfiniteQueryObserver, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
+import { historyKeys, historyOpts } from '../api/history';
+import { flushQueryNotifications } from '../../test/fixtures/queryNotifications';
 import { createHistoryBroadcastMutationCache, resetBroadcastForTests } from './broadcastHistory';
+import { resetCancelTombstones, type HistoryData } from './historyCache';
+import { HISTORY_WRITE_MUTATION_KEY } from './historyWrites';
 import { useCancel } from './useCancel';
 
 const originalFetch = globalThis.fetch;
@@ -69,4 +74,88 @@ describe('cross-tab cancel settlement', () => {
       }
     });
   }
+});
+
+describe('cancel convergence', () => {
+  const batchRow = (tiles: readonly string[]): Batch => ({
+    id: 'batch-1', prompt: 'p', ratio: '1:1', modelId: 'm', modelLabel: 'M', createdAt: 5,
+    collectionId: null, pinned: false, status: 'running',
+    tiles: tiles.map((id, index) => ({ id, seed: index, status: 'loading' as const })),
+  });
+  const pageOf = (batches: readonly Batch[]) => ({ pages: [{ items: [...batches], nextCursor: null }], pageParams: [null] });
+
+  function setup(deleteStatus: number) {
+    const reads: string[] = [];
+    let serverRows: readonly Batch[] = [batchRow(['tile-1', 'tile-2'])];
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://local');
+      if (init?.method === 'DELETE') return Promise.resolve(new Response(deleteStatus === 204 ? null : 'failed', { status: deleteStatus }));
+      if (url.pathname === '/api/history') {
+        reads.push(url.search);
+        return Promise.resolve(Response.json({ items: serverRows, nextCursor: null }));
+      }
+      return Promise.resolve(Response.json({ items: [], summary: {} }));
+    }) as unknown as typeof fetch;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const wrapper = ({ children }: PropsWithChildren) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    return { reads, client, wrapper, setServerRows: (rows: readonly Batch[]) => { serverRows = rows; } };
+  }
+
+  afterEach(() => { resetCancelTombstones(); });
+
+  const historySharing = () => {
+    const structuralSharing = historyOpts().structuralSharing;
+    if (typeof structuralSharing !== 'function') throw new Error('history structural sharing missing');
+    return structuralSharing;
+  };
+
+  test('a cancel settling while another history write is pending reads history once, after that write', async () => {
+    const { reads, client, wrapper } = setup(204);
+    await client.infiniteQuery(historyOpts());
+    const observer = new InfiniteQueryObserver(client, historyOpts());
+    const unsubscribe = observer.subscribe(() => undefined);
+    const readsBefore = reads.length;
+    const write = Promise.withResolvers<null>();
+    const other = client.getMutationCache()
+      .build(client, { mutationKey: HISTORY_WRITE_MUTATION_KEY, mutationFn: () => write.promise })
+      .execute(undefined);
+    const { result } = renderHook(() => useCancel(), { wrapper });
+    await act(async () => { await result.current.cancelTile('batch-1', 'tile-1'); await flushQueryNotifications(); });
+    expect(reads.length).toBe(readsBefore);
+    expect(client.getQueryState(historyKeys.list())?.isInvalidated).toBe(true);
+    await act(async () => { write.resolve(null); await other; await flushQueryNotifications(); });
+    await waitFor(() => { expect(reads.length).toBe(readsBefore + 1); });
+    unsubscribe();
+    client.clear();
+  });
+
+  test('a confirmed tile cancel keeps the tile out of a stale read; a failed one leaves no tombstone', async () => {
+    const structuralSharing = historySharing();
+    for (const status of [204, 500]) {
+      const { client, wrapper } = setup(status);
+      client.setDefaultOptions({ queries: { retry: false, structuralSharing } });
+      client.setQueryData(historyKeys.list(), pageOf([batchRow(['tile-1', 'tile-2'])]));
+      const { result } = renderHook(() => useCancel(), { wrapper });
+      await act(async () => { await result.current.cancelTile('batch-1', 'tile-1').catch(() => undefined); });
+      // A read sent before the DELETE committed lands now.
+      client.setQueryData(historyKeys.list(), pageOf([batchRow(['tile-1', 'tile-2'])]));
+      const tiles = client.getQueryData<HistoryData>(historyKeys.list())?.pages[0]?.items[0]?.tiles.map((tile) => tile.id);
+      expect(tiles).toEqual(status === 204 ? ['tile-2'] : ['tile-1', 'tile-2']);
+      cleanup();
+      client.clear();
+      resetCancelTombstones();
+    }
+  });
+
+  test('a confirmed batch cancel tombstones every loading tile so the batch stays gone', async () => {
+    const structuralSharing = historySharing();
+    const { client, wrapper } = setup(204);
+    client.setDefaultOptions({ queries: { retry: false, structuralSharing } });
+    client.setQueryData(historyKeys.list(), pageOf([batchRow(['tile-1', 'tile-2'])]));
+    const { result } = renderHook(() => useCancel(), { wrapper });
+    await act(async () => { await result.current.cancelBatch('batch-1'); });
+    client.setQueryData(historyKeys.list(), pageOf([batchRow(['tile-1', 'tile-2'])]));
+    expect(client.getQueryData<HistoryData>(historyKeys.list())?.pages[0]?.items).toEqual([]);
+    client.clear();
+  });
 });

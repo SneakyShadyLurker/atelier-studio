@@ -4739,7 +4739,11 @@ for (const scenario of [
       const destination = sidebar.getByRole('button', { name: new RegExp(`^${name}`) }).filter({ has: page.getByText(name, { exact: true }) }).first();
       await destination.click();
       await expect(page.getByRole('main').getByRole('heading', { name, exact: true })).toBeVisible();
-      await expect(canvas.getByText(body, { exact: true })).toBeVisible();
+      // An empty collection has its own empty state; the generate hint belongs
+      // to the first-run (empty Unsorted) Canvas only.
+      await expect(canvas.getByRole('heading', { name: 'This collection is empty', exact: true })).toBeVisible();
+      await expect(canvas.getByText('Move batches here from Unsorted.', { exact: true })).toBeVisible();
+      await expect(canvas.getByText(body, { exact: true })).toHaveCount(0);
       if (await expand.isVisible()) await expand.click();
       const remove = sidebar.getByRole('button', { name: `Delete collection ${name}`, exact: true });
       await remove.focus();

@@ -86,3 +86,28 @@ export function InfiniteStatus({
     </div>
   );
 }
+
+interface FeedRefreshStatusProps {
+  /** The failure to announce, or null while the last read succeeded. */
+  message: string | null;
+  onRetry?: () => void;
+}
+
+/**
+ * The feed's newest-end status row for a failed read while rows are shown
+ * (R16), in the load-more row's error vocabulary. The polite live region
+ * stays mounted, empty and without a footprint, so the failure is announced
+ * when it arrives and the row leaves on the next successful read.
+ */
+export function FeedRefreshStatus({ message, onRetry }: FeedRefreshStatusProps) {
+  const failed = message !== null;
+  return (
+    <div className={styles.refresh} data-footprint="end" data-error={failed ? 'true' : undefined} data-testid="history-refresh-status">
+      {failed ? <div className={styles.hairline} aria-hidden="true" /> : null}
+      <div role="status" aria-live="polite" className={styles.status}>{message ?? ''}</div>
+      {failed && onRetry ? (
+        <button type="button" className={styles.fallbackButton} onClick={onRetry}>Retry</button>
+      ) : null}
+    </div>
+  );
+}

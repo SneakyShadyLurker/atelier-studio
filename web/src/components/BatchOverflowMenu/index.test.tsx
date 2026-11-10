@@ -178,3 +178,36 @@ describe('BatchOverflowMenu', () => {
     expect(screen.getByRole('button', { name: 'Close menu' })).toBeTruthy();
   });
 });
+
+describe('BatchOverflowMenu full prompt', () => {
+  const labels = (groups: ReturnType<typeof buildBatchOverflowGroups>) => groups.map((group) => ({ key: group.key, items: group.items.map((item) => ({ action: item.action, disabled: item.disabled })) }));
+
+  for (const isPhone of [false, true]) {
+    it(`offers Show full prompt first in the Prompt group only while the prompt is truncated (${isPhone ? 'phone' : 'desktop'})`, () => {
+      const batch = makeBatch({ pinned: true });
+      const truncated = labels(buildBatchOverflowGroups({ batch, promptsEnabled: true, readOnlyActions: false, isPhone, promptTruncated: true }));
+      const prompt = truncated.find((group) => group.key === 'prompt');
+      expect(prompt?.items[0]).toEqual({ action: 'showPrompt', disabled: false });
+      const whole = labels(buildBatchOverflowGroups({ batch, promptsEnabled: true, readOnlyActions: false, isPhone, promptTruncated: false }));
+      expect(whole.flatMap((group) => group.items).some((item) => item.action === 'showPrompt')).toBe(false);
+    });
+  }
+
+  it('stays enabled while history actions are read-only: it only reads', () => {
+    const groups = labels(buildBatchOverflowGroups({ batch: makeBatch({ pinned: true }), promptsEnabled: false, readOnlyActions: true, isPhone: false, promptTruncated: true }));
+    expect(groups).toEqual([{ key: 'prompt', items: [{ action: 'showPrompt', disabled: false }] }]);
+  });
+
+  it('renders the item with its label and reports the choice', () => {
+    const anchorRef = createRef<HTMLButtonElement>();
+    const onSelect = mock((_a: BatchOverflowAction) => { return; });
+    render(
+      <>
+        <button ref={anchorRef}>anchor</button>
+        <BatchOverflowMenu batch={makeBatch({ pinned: true })} anchorRef={anchorRef} open promptsEnabled={false} readOnlyActions promptTruncated onSelect={onSelect} onClose={() => undefined} />
+      </>,
+    );
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Show full prompt' }));
+    expect(onSelect).toHaveBeenCalledWith('showPrompt');
+  });
+});

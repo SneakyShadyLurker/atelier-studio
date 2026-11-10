@@ -1,12 +1,13 @@
 import { isVideoMime, type DoneTile } from '@atelier/shared';
 import { useRef, useState, type ReactNode, type Ref } from 'react';
+import { useCachedMedia } from '../../../hooks/useCachedMedia';
 import { useTextModelGate } from '../../../hooks/useTextModelGate';
 import { goToTextModels } from '../../../lib/textModelsNav';
 import TextModelNote from '../../TextModelNote';
 import { I } from '../../icons/I';
 import ClipFrame from '../ClipFrame';
 import { Meta } from '../../Meta';
-import { focusSuccessor, tileSuccessor } from '../../../lib/focusSuccessor';
+import { focusSuccessor, lastTileSuccessor } from '../../../lib/focusSuccessor';
 import buttons from '../../../styles/buttons.module.css';
 import styles from './index.module.css';
 
@@ -28,6 +29,13 @@ interface ImageTileProps {
   entered?: boolean;
   disabled?: boolean;
   promptPreview?: string;
+  /**
+   * The last partial preview of a tile that streamed here as a loading plate.
+   * It stays over the mat until the final image is ready, then fades out.
+   */
+  preview?: string | undefined;
+  /** The preview has faded out; its owner may let it go. */
+  onPreviewDone?: (() => void) | undefined;
   /** Inline playback-only override; download and lightbox keep tile.url. */
   videoSrc?: string | undefined;
   /** Show the Animate (image→video) action. Gated upstream by I2V availability. */
@@ -136,41 +144,53 @@ function TellStoryAction({ label, disabled, onTellStory }: { label: string; disa
   );
 }
 
-function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen = false, entered = false, disabled = false, promptPreview, videoSrc, canAnimate = false, canTellStory = false, canExtend = false, extending = false, canEdit = false, canCreateCard = false, creatingCard = false, onOpen, onDownload, onDelete, onEdit, onAnimate, onTellStory, onExtend, onCreateCard }: ImageTileProps) {
+function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen = false, entered = false, disabled = false, promptPreview, preview, onPreviewDone, videoSrc, canAnimate = false, canTellStory = false, canExtend = false, extending = false, canEdit = false, canCreateCard = false, creatingCard = false, onOpen, onDownload, onDelete, onEdit, onAnimate, onTellStory, onExtend, onCreateCard }: ImageTileProps) {
   // Lazy initializer freezes the decision at mount — no re-evaluation per render.
   const [showReveal] = useState(() => Date.now() - tile.completedAt < REVEAL_FRESHNESS_MS);
   // Give SR users the prompt context the Lightbox already provides instead of
   // an index-only "Generated image 3".
   const promptContext = promptPreview ? `: ${promptPreview.slice(0, 80)}` : '';
   const isVideo = isVideoMime(tile.mime);
+  const noun = isVideo ? 'video' : 'image';
   // Thumbnail first, then the full image, then a designed failure state the
-  // user can retry (remounting the <img> re-requests from the thumbnail).
+  // user can retry (a clip fails from its own media error).
   const [media, setMedia] = useState<'thumb' | 'full' | 'failed'>(tile.thumbUrl ? 'thumb' : 'full');
   const [mediaAttempt, setMediaAttempt] = useState(0);
+  // The thumbnail (a clip's poster) comes from the session media cache: a
+  // virtualized remount repaints it from memory without a request. The
+  // original stays a native <img src>; it is never cached here.
+  const thumb = useCachedMedia(
+    tile.thumbUrl !== undefined && (isVideo ? media !== 'failed' : media === 'thumb') ? tile.thumbUrl : undefined,
+    { priority: isAboveFold ? 'high' : undefined },
+  );
+  // The cache has already retried a transient failure: go to the original.
+  if (!isVideo && media === 'thumb' && thumb.status === 'error') setMedia('full');
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [readyImage, setReadyImage] = useState<{ source: string; attempt: number; cached: boolean } | null>(null);
-  const source = media === 'thumb' && tile.thumbUrl ? tile.thumbUrl : tile.url;
-  const ready = readyImage?.source === source && readyImage.attempt === mediaAttempt;
-  const reveal = async (image: HTMLImageElement, cached = false) => {
-    // A completed cache hit needs no second develop on a virtualized remount.
+  const source = media === 'thumb' ? thumb.src : tile.url;
+  const ready = source !== undefined && readyImage?.source === source && readyImage.attempt === mediaAttempt;
+  // Bytes already in memory on this mount: a repaint, not an arrival.
+  const repaint = media === 'thumb' && thumb.cached;
+  const reveal = async (image: HTMLImageElement, { cached, decoded }: { cached: boolean; decoded: boolean }) => {
     // Decode a newly arrived resource before handing the mat to the pixels.
-    if (!cached) await image.decode().catch(() => undefined);
-    if (imageRef.current !== image || image.getAttribute('src') !== source || image.naturalWidth === 0) return;
+    if (!decoded) await image.decode().catch(() => undefined);
+    if (source === undefined || imageRef.current !== image || image.getAttribute('src') !== source || image.naturalWidth === 0) return;
     setReadyImage((current) => current?.source === source && current.attempt === mediaAttempt
       ? current
       : { source, attempt: mediaAttempt, cached });
   };
-  const mediaFailed = !isVideo && media === 'failed';
+  const mediaFailed = media === 'failed';
   const retryMedia = () => {
     setMedia(tile.thumbUrl ? 'thumb' : 'full');
     setMediaAttempt((attempt) => attempt + 1);
   };
+  const showPreview = preview !== undefined && !isVideo && !mediaFailed;
 
   return (
     <div className={styles.tile} data-feed-tile={tile.id} data-seen={seen || entered ? 'true' : undefined}>
       <button
         type="button"
-        aria-label={mediaFailed ? `Image ${index + 1} failed to load. Retry` : `Open image ${index + 1}${promptContext}`}
+        aria-label={mediaFailed ? `${isVideo ? 'Video' : 'Image'} ${index + 1} failed to load. Retry` : `Open ${noun} ${index + 1}${promptContext}`}
         disabled={disabled}
         onClick={mediaFailed ? retryMedia : (event) => {
           event.currentTarget.focus({ preventScroll: true });
@@ -178,24 +198,29 @@ function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen 
         }}
         className={styles.frame}
         data-media-failed={mediaFailed ? 'true' : undefined}
-        data-media-ready={isVideo || ready ? 'true' : undefined}
-        data-cached={ready && readyImage.cached ? 'true' : undefined}
+        data-media-ready={!mediaFailed && (isVideo || ready) ? 'true' : undefined}
+        data-cached={repaint || (ready && readyImage.cached) ? 'true' : undefined}
         data-develop={showReveal && !seen ? 'true' : undefined}
         style={{ aspectRatio }}
       >
-        {isVideo ? (
-          <ClipFrame src={videoSrc ?? tile.url} poster={tile.thumbUrl} />
-        ) : mediaFailed ? (
+        {mediaFailed ? (
           <span className={styles.mediaFailed} aria-hidden="true">
             <I.alert />
             <span>Couldn’t load. Retry</span>
           </span>
-        ) : (
+        ) : isVideo ? (
+          <ClipFrame
+            src={videoSrc ?? tile.url}
+            poster={thumb.status === 'ready' ? thumb.src : undefined}
+            mediaKey={mediaAttempt}
+            onMediaError={() => { setMedia('failed'); }}
+          />
+        ) : source !== undefined ? (
           <img
             key={`${source}:${mediaAttempt}`}
             ref={(image) => {
               imageRef.current = image;
-              if (image?.complete && image.naturalWidth > 0) void reveal(image, true);
+              if (image?.complete && image.naturalWidth > 0) void reveal(image, { cached: true, decoded: true });
             }}
             {...(isAboveFold ? HIGH_PRIORITY_IMAGE_PROPS : {})}
             src={source}
@@ -203,14 +228,30 @@ function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen 
             loading={isAboveFold ? 'eager' : 'lazy'}
             decoding="async"
             draggable={false}
-            onLoad={(event) => { void reveal(event.currentTarget); }}
+            onLoad={(event) => { void reveal(event.currentTarget, { cached: repaint, decoded: false }); }}
             onError={(event) => {
               if (imageRef.current !== event.currentTarget) return;
               setMedia((current) => (current === 'thumb' ? 'full' : 'failed'));
             }}
           />
-        )}
+        ) : null}
         {!isVideo && !mediaFailed && <div className={styles.reveal} aria-hidden="true" />}
+        {showPreview && (
+          // Above the mat: the stream's last frame holds until the final
+          // image has decoded, then cross-fades into it.
+          <img
+            className={styles.preview}
+            src={preview}
+            alt=""
+            aria-hidden="true"
+            decoding="async"
+            draggable={false}
+            data-preview="true"
+            onTransitionEnd={(event) => {
+              if (event.target === event.currentTarget && event.propertyName === 'opacity' && ready) onPreviewDone?.();
+            }}
+          />
+        )}
       </button>
       <div className={styles.overlay}>
         <div className={styles.actions}>
@@ -237,7 +278,7 @@ function ImageTile({ tile, index, isAboveFold = false, ratio, aspectRatio, seen 
             <button type="button" className={buttons.tileAction} aria-label="Download tile" data-tip="Download" disabled={disabled} onClick={(event) => { event.stopPropagation(); onDownload(); }}>
               <I.download />
             </button>
-            <button type="button" className={buttons.tileAction} aria-label="Archive tile" data-tip="Archive" disabled={disabled} onClick={(event) => { event.stopPropagation(); focusSuccessor(tileSuccessor(event.currentTarget)); onDelete(); }}>
+            <button type="button" className={buttons.tileAction} aria-label="Archive tile" data-tip="Archive" disabled={disabled} onClick={(event) => { event.stopPropagation(); focusSuccessor(lastTileSuccessor(event.currentTarget)); onDelete(); }}>
               <I.archive />
             </button>
             <button type="button" className={buttons.tileAction} aria-label={`Expand tile ${index + 1}`} data-tip="Expand" data-tip-place="above-end" disabled={disabled} onClick={(event) => { event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); onOpen(); }}>

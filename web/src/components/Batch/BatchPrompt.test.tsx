@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import BatchPrompt from './BatchPrompt';
 
 // Interaction lifecycle only. Where the card lands (flip, edge clearance,
 // following the prompt through scroll) is native anchor positioning and is
-// asserted in a real browser: web/e2e/native-anchors.spec.ts.
+// asserted in a real browser: web/e2e/native-anchors.spec.ts. The card opens
+// only from the batch More menu; here a button stands in for that item.
 
 const PROMPT = 'A long prompt that the batch header truncates to a single line of text';
 const originalMatchMedia = window.matchMedia.bind(window);
@@ -91,23 +92,38 @@ function prompt(): HTMLElement {
   return host;
 }
 
-function cursor(): HTMLElement | null {
-  return document.body.querySelector<HTMLElement>('[aria-hidden="true"]:not([role])');
-}
-
 async function wait(ms: number): Promise<void> {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
 }
 
-// Past the 400ms dwell.
-const dwell = () => wait(450);
-// Past the 200ms leave grace.
-const grace = () => wait(250);
+async function flush(): Promise<void> {
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+}
 
-async function openByDwell(): Promise<HTMLElement> {
-  fireEvent.mouseEnter(prompt(), { clientX: 40, clientY: 30 });
-  await dwell();
-  return screen.getByRole('tooltip');
+// The owner (BatchView): a More button that opens the card, which reports
+// truncation up and asks to close.
+function Owner({ text = PROMPT, onTruncated }: { text?: string; onTruncated?: (truncated: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  const moreRef = useRef<HTMLButtonElement | null>(null);
+  return (
+    <>
+      <button ref={moreRef} type="button" onClick={() => { setOpen(true); }}>More actions</button>
+      <BatchPrompt prompt={text} open={open} onClose={() => { setOpen(false); }} onTruncatedChange={(next) => { onTruncated?.(next); }} returnFocusRef={moreRef} />
+      <button type="button">elsewhere</button>
+    </>
+  );
+}
+
+function card(): HTMLElement {
+  return screen.getByRole('dialog', { name: 'Full prompt' });
+}
+
+async function openCard(): Promise<HTMLElement> {
+  const more = screen.getByRole('button', { name: 'More actions' });
+  act(() => { more.focus(); });
+  fireEvent.click(more);
+  await flush();
+  return card();
 }
 
 // An overlay owning Escape the way useModalChrome does: document capture,
@@ -120,341 +136,198 @@ function WithOverlay({ onOverlayEscape }: { onOverlayEscape: () => void }) {
     document.addEventListener('keydown', onKeyDown, true);
     return () => { document.removeEventListener('keydown', onKeyDown, true); };
   }, [onOverlayEscape]);
-  return <BatchPrompt prompt={PROMPT} />;
+  return <Owner />;
 }
 
-describe('BatchPrompt full-text card', () => {
-  test('a dwell opens a card anchored to a stand-in at the pointer, which follows the pointer', async () => {
-    render(<BatchPrompt prompt={PROMPT} />);
+describe('BatchPrompt full-prompt card', () => {
+  test('reports whether the prompt is truncated', () => {
+    const reports: boolean[] = [];
+    render(<Owner onTruncated={(next) => { reports.push(next); }} />);
+    expect(reports.at(-1)).toBe(true);
+    cleanup();
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => 100 });
+    const short: boolean[] = [];
+    render(<Owner text="Short" onTruncated={(next) => { short.push(next); }} />);
+    expect(short.at(-1)).toBe(false);
+  });
+
+  test('a card whose prompt fits again closes for good: it does not come back when the prompt truncates again', async () => {
+    // A ResizeObserver the test drives (a rotation or a window resize).
+    const observers: (() => void)[] = [];
+    const originalResizeObserver = Reflect.get(globalThis, 'ResizeObserver') as unknown;
+    class ManualResizeObserver {
+      private readonly callback: () => void;
+      constructor(callback: () => void) { this.callback = callback; observers.push(() => { this.callback(); }); }
+      observe(): void { /* driven by the test */ }
+      unobserve(): void { /* unused */ }
+      disconnect(): void { /* unused */ }
+    }
+    Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, writable: true, value: ManualResizeObserver });
+    try {
+      render(<Owner />);
+      await openCard();
+      // The prompt now fits.
+      Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => 100 });
+      act(() => { for (const notify of observers) notify(); });
+      await wait(400);
+      expect(screen.queryByRole('dialog', { name: 'Full prompt' }) === null).toBe(true);
+      // It truncates again: nobody chose Show full prompt, so no card.
+      Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => 600 });
+      act(() => { for (const notify of observers) notify(); });
+      await wait(400);
+      expect(screen.queryByRole('dialog', { name: 'Full prompt' }) === null).toBe(true);
+    } finally {
+      if (originalResizeObserver === undefined) Reflect.deleteProperty(globalThis, 'ResizeObserver');
+      else Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, writable: true, value: originalResizeObserver });
+    }
+  });
+
+  test('no implicit trigger: resting the pointer, focus and a tap open nothing, and the prompt is no tab stop', async () => {
+    render(<Owner />);
     fireEvent.mouseEnter(prompt(), { clientX: 40, clientY: 30 });
-    expect(screen.queryByRole('tooltip')).toBeNull();
-    await dwell();
-
-    const card = screen.getByRole('tooltip');
-    expect(card.textContent).toBe(PROMPT);
-    expect(card.getAttribute('data-anchor')).toBe('pointer');
-    // Page layer, under the toast stack: a declared name, not a popover.
-    expect(card.hasAttribute('popover')).toBe(false);
-    expect(card.getAttribute('data-anchored')).toBe('name');
-    expect(card.parentElement).toBe(document.body);
-    expect(prompt().getAttribute('aria-describedby')).toBe(card.id);
-    // The card itself never carries coordinates; only the stand-in does.
-    expect(card.style.left).toBe('');
-    expect(card.style.top).toBe('');
-    const stand = cursor();
-    expect(stand?.style.left).toBe('40px');
-    expect(stand?.style.top).toBe('30px');
-    // The stand-in is the active source: it alone declares the card's name.
-    const name = nameOf(card);
-    expect(name).toMatch(/^--prompt-[\w-]+$/);
-    expect(nameOf(stand)).toBe(name);
+    fireEvent.mouseMove(prompt(), { clientX: 42, clientY: 31 });
+    await wait(1000);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(prompt().hasAttribute('tabindex')).toBe(false);
+    act(() => { prompt().focus(); });
+    installHover(false);
+    fireEvent.pointerDown(prompt(), { pointerType: 'touch' });
+    fireEvent.click(prompt());
+    await flush();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(nameOf(prompt())).toBe('');
-    // Pointer mode is dismissed by scroll instead: no liveness observer.
-    expect(liveObservers()).toHaveLength(0);
-
-    fireEvent.mouseMove(prompt(), { clientX: 90, clientY: 35 });
-    expect(stand?.style.left).toBe('90px');
-    expect(stand?.style.top).toBe('35px');
-
-    // Leaving closes it once the travel grace has passed.
-    fireEvent.mouseLeave(prompt());
-    expect(screen.queryByRole('tooltip')).not.toBeNull();
-    await grace();
-    expect(screen.queryByRole('tooltip')).toBeNull();
   });
 
-  test('the pointer can travel onto the card and stay there to read; leaving both closes it', async () => {
-    render(<BatchPrompt prompt={PROMPT} />);
-    const card = await openByDwell();
-    fireEvent.mouseLeave(prompt());
-    fireEvent.pointerEnter(card);
-    const stand = cursor();
-    const position = stand?.getAttribute('style');
-    fireEvent.mouseMove(card, { clientX: 320, clientY: 240 });
-    expect(stand?.getAttribute('style')).toBe(position);
-    await grace();
-    expect(screen.getByRole('tooltip')).toBe(card);
-
-    // Scrolling a long prompt inside the card is reading, not a dismissal.
-    fireEvent.scroll(card);
-    expect(screen.queryByRole('tooltip')).not.toBeNull();
-
-    // Back onto the prompt and off again: still one card, then gone.
-    fireEvent.pointerLeave(card);
-    // React's logical portal ancestry can omit a second parent mouseenter.
-    fireEvent.mouseMove(prompt(), { clientX: 60, clientY: 30 });
-    await grace();
-    expect(screen.getByRole('tooltip')).toBe(card);
-    fireEvent.mouseLeave(prompt());
-    await grace();
-    expect(screen.queryByRole('tooltip')).toBeNull();
+  test('opening shows a non-modal dialog named Full prompt, anchored to the prompt, holding focus', async () => {
+    render(<Owner />);
+    const opened = await openCard();
+    expect(opened.textContent).toBe(PROMPT);
+    expect(opened.getAttribute('aria-modal')).toBe('false');
+    expect(document.activeElement === opened).toBe(true);
+    expect(nameOf(prompt())).not.toBe('');
+    expect(nameOf(opened)).toBe(nameOf(prompt()));
   });
 
-  test('a scroll dismisses the pointer card: the point it was opened at is stale', async () => {
-    render(<BatchPrompt prompt={PROMPT} />);
-    await openByDwell();
-    fireEvent.scroll(window);
-    expect(screen.queryByRole('tooltip')).toBeNull();
-  });
-
-  test('Escape closes a pointer card while focus is elsewhere, before any overlay sees the key', async () => {
-    const onOverlayEscape = mock();
-    render(<WithOverlay onOverlayEscape={onOverlayEscape} />);
-    await openByDwell();
-    expect(document.activeElement).toBe(document.body);
-
+  test('Escape closes it and returns focus to the More button', async () => {
+    render(<Owner />);
+    await openCard();
     fireEvent.keyDown(document.body, { key: 'Escape' });
-    expect(screen.queryByRole('tooltip')).toBeNull();
-    expect(onOverlayEscape).not.toHaveBeenCalled();
-
-    // Nothing left to dismiss: the next Escape belongs to the overlay.
-    fireEvent.keyDown(document.body, { key: 'Escape' });
-    expect(onOverlayEscape).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement === screen.getByRole('button', { name: 'More actions' })).toBe(true);
   });
 
-  test('a dismissed card stays closed while the pointer rests on the prompt, and re-arms once it leaves', async () => {
-    render(<BatchPrompt prompt={PROMPT} />);
-    await openByDwell();
-    fireEvent.keyDown(document.body, { key: 'Escape' });
-
-    // Still over the prompt: neither a move nor a fresh enter reopens it.
-    fireEvent.mouseMove(prompt(), { clientX: 50, clientY: 30 });
-    fireEvent.mouseEnter(prompt(), { clientX: 50, clientY: 30 });
-    await dwell();
-    expect(screen.queryByRole('tooltip')).toBeNull();
-
-    fireEvent.mouseLeave(prompt());
-    await openByDwell();
-    expect(screen.getByRole('tooltip')).toBeTruthy();
+  test('a press outside closes it; a press inside does not', async () => {
+    render(<Owner />);
+    const opened = await openCard();
+    fireEvent.pointerDown(opened);
+    await flush();
+    expect(screen.getByRole('dialog', { name: 'Full prompt' })).toBeTruthy();
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'elsewhere' }));
+    await flush();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  test('Escape that another owner already took, or that ends an IME composition, is left alone', async () => {
-    render(<BatchPrompt prompt={PROMPT} />);
-    await openByDwell();
-    fireEvent.keyDown(document.body, { key: 'Escape', isComposing: true });
-    expect(screen.queryByRole('tooltip')).not.toBeNull();
-
-    const taken = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-    taken.preventDefault();
-    document.body.dispatchEvent(taken);
-    expect(screen.queryByRole('tooltip')).not.toBeNull();
-  });
-
-  test('focus opens the card against the prompt itself, which survives scroll and closes on Escape', () => {
-    const onOverlayEscape = mock();
-    render(<WithOverlay onOverlayEscape={onOverlayEscape} />);
-    act(() => { prompt().focus(); });
-
-    const card = screen.getByRole('tooltip');
-    expect(card.getAttribute('data-anchor')).toBe('element');
-    expect(cursor()).toBeNull();
-    // The prompt is the active source and declares the card's name.
-    expect(nameOf(card)).not.toBe('');
-    expect(nameOf(prompt())).toBe(nameOf(card));
-
-    // Anchored to an element, the card follows it; scrolling is not a dismissal.
-    fireEvent.scroll(window);
-    expect(screen.getByRole('tooltip')).toBeTruthy();
-
-    fireEvent.keyDown(prompt(), { key: 'Escape' });
-    expect(screen.queryByRole('tooltip')).toBeNull();
-    expect(onOverlayEscape).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(prompt());
-  });
-
-  test('a focused prompt clipped wholly out of view closes its hidden card and stops owning Escape', () => {
-    const onOverlayEscape = mock();
-    render(<WithOverlay onOverlayEscape={onOverlayEscape} />);
-    act(() => { prompt().focus(); });
-    expect(screen.getByRole('tooltip')).toBeTruthy();
-    // One observer, on the prompt, only while the element card is open.
-    const [observer] = liveObservers();
+  test('its prompt scrolling out of view closes it', async () => {
+    render(<Owner />);
+    await openCard();
     expect(liveObservers()).toHaveLength(1);
-    expect(observer?.targets).toEqual([prompt()]);
-
-    // Still intersecting: nothing changes.
-    act(() => { observer?.report(true); });
-    expect(screen.getByRole('tooltip')).toBeTruthy();
-
-    act(() => { observer?.report(false); });
-    expect(screen.queryByRole('tooltip')).toBeNull();
-    expect(document.activeElement).toBe(prompt());
+    act(() => { liveObservers()[0]?.report(false); });
+    await flush();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(liveObservers()).toHaveLength(0);
-    // Nothing visible is left to dismiss: Escape belongs to the overlay.
-    fireEvent.keyDown(prompt(), { key: 'Escape' });
-    expect(onOverlayEscape).toHaveBeenCalledTimes(1);
-
-    // A fresh focus opens it again, observed again.
-    act(() => { prompt().blur(); });
-    act(() => { prompt().focus(); });
-    expect(screen.getByRole('tooltip').getAttribute('data-anchor')).toBe('element');
-    expect(liveObservers()).toHaveLength(1);
-    // A queued report from the released observer cannot close the new card.
-    act(() => { observer?.report(false); });
-    expect(screen.getByRole('tooltip').getAttribute('data-anchor')).toBe('element');
   });
 
-  test('closing an element card by blur or unmount releases its observer', () => {
-    const view = render(
-      <>
-        <BatchPrompt prompt={PROMPT} />
-        <button type="button">elsewhere</button>
-      </>,
+  test('with the More button gone, closing hands focus along the successor chain', async () => {
+    // No More button to return to: the row's successor takes focus.
+    function Direct() {
+      const [open, setOpen] = useState(true);
+      const gone = useRef<HTMLElement | null>(null);
+      return <BatchPrompt prompt={PROMPT} open={open} onClose={() => { setOpen(false); }} returnFocusRef={gone} />;
+    }
+    render(
+      <div data-testid="canvas-scroller" tabIndex={0}>
+        <div data-batch-id="a"><section data-batch-id="a"><Direct /></section></div>
+        <div data-batch-id="b"><section data-batch-id="b"><button type="button" id="next-row">next row</button></section></div>
+      </div>,
     );
-    act(() => { prompt().focus(); });
-    expect(liveObservers()).toHaveLength(1);
-    act(() => { screen.getByRole('button', { name: 'elsewhere' }).focus(); });
-    expect(liveObservers()).toHaveLength(0);
-    act(() => { prompt().focus(); });
-    expect(liveObservers()).toHaveLength(1);
-    view.unmount();
-    expect(liveObservers()).toHaveLength(0);
+    await flush();
+    expect(document.activeElement === card()).toBe(true);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await flush();
+    expect(document.activeElement?.id).toBe('next-row');
+  });
+
+  test('the row unmounting while open removes the card and hands focus on', async () => {
+    function Row({ mounted }: { mounted: boolean }) {
+      return (
+        <div data-testid="canvas-scroller" tabIndex={0}>
+          {mounted && <div data-batch-id="a"><section data-batch-id="a"><Owner /></section></div>}
+          <div data-batch-id="b"><section data-batch-id="b"><button type="button" id="next-row">next row</button></section></div>
+        </div>
+      );
+    }
+    const view = render(<Row mounted />);
+    await openCard();
+    view.rerender(<Row mounted={false} />);
+    await flush();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement?.id).toBe('next-row');
   });
 
   test('a card whose prompt a modal has since made inert leaves Escape to that modal', async () => {
     const onOverlayEscape = mock();
     const view = render(<WithOverlay onOverlayEscape={onOverlayEscape} />);
-    await openByDwell();
-    // The custom-modal sweep: the prompt's top-level subtree goes inert.
+    await openCard();
     view.container.setAttribute('inert', '');
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(onOverlayEscape).toHaveBeenCalledTimes(1);
   });
 
-  test('repeated prompts declare their own names; only the active one binds', async () => {
+  test('Escape that another owner already took, or that ends an IME composition, is left alone', async () => {
+    render(<Owner />);
+    await openCard();
+    const taken = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    taken.preventDefault();
+    act(() => { window.dispatchEvent(taken); });
+    fireEvent.keyDown(document.body, { key: 'Escape', isComposing: true });
+    await flush();
+    expect(screen.getByRole('dialog', { name: 'Full prompt' })).toBeTruthy();
+  });
+
+  test('closing plays the shared fade: the card is stamped data-closing, then unmounts', async () => {
+    render(<Owner />);
+    const opened = await openCard();
+    expect(opened.hasAttribute('data-closing')).toBe(false);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    // Closed for assistive tech at once; the visual card stays through its exit.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(opened.isConnected).toBe(true);
+    expect(opened.getAttribute('data-closing')).toBe('true');
+    expect(opened.getAttribute('aria-hidden')).toBe('true');
+    await wait(250);
+    expect(opened.isConnected).toBe(false);
+    expect(nameOf(prompt())).toBe('');
+  });
+
+  test('repeated prompts declare their own names; only the shown one binds', async () => {
     const other = `${PROMPT} (again)`;
     render(
       <>
-        <BatchPrompt prompt={PROMPT} />
+        <Owner />
         <BatchPrompt prompt={other} />
       </>,
     );
     const second = screen.getByText(other, { selector: 'span' }).parentElement;
-    if (!second) throw new Error('missing second prompt host');
-    act(() => { prompt().focus(); });
-    const first = nameOf(screen.getByRole('tooltip'));
-    expect(nameOf(prompt())).toBe(first);
+    const opened = await openCard();
+    expect(nameOf(prompt())).toBe(nameOf(opened));
     expect(nameOf(second)).toBe('');
-
-    act(() => { second.focus(); });
-    const next = nameOf(screen.getByRole('tooltip'));
-    expect(next).not.toBe(first);
-    expect(nameOf(second)).toBe(next);
-    // The first card fades out against its own prompt, then that name goes.
-    expect(nameOf(prompt())).toBe(first);
-    await wait(250);
-    expect(nameOf(prompt())).toBe('');
-    expect(nameOf(second)).toBe(next);
   });
 
-  test('a focused prompt card takes Escape before an older hovered card', async () => {
-    const other = `${PROMPT} (focused)`;
-    render(<><BatchPrompt prompt={PROMPT} /><BatchPrompt prompt={other} /></>);
-    await openByDwell();
-    const second = screen.getByText(other, { selector: 'span' }).parentElement;
-    if (!second) throw new Error('missing second prompt');
-    act(() => { second.focus(); });
-    expect(screen.getAllByRole('tooltip')).toHaveLength(2);
-    fireEvent.keyDown(second, { key: 'Escape' });
-    expect(screen.getAllByRole('tooltip').map((card) => card.textContent)).toEqual([PROMPT]);
-    expect(document.activeElement).toBe(second);
-    fireEvent.keyDown(second, { key: 'Escape' });
-    expect(screen.queryByRole('tooltip')).toBeNull();
-  });
-
-  test('blur closes a focus-opened card; a new focus reopens it', () => {
-    render(
-      <>
-        <BatchPrompt prompt={PROMPT} />
-        <button type="button">elsewhere</button>
-      </>,
-    );
-    act(() => { prompt().focus(); });
-    expect(screen.getByRole('tooltip')).toBeTruthy();
-    act(() => { screen.getByRole('button', { name: 'elsewhere' }).focus(); });
-    expect(screen.queryByRole('tooltip')).toBeNull();
-    act(() => { prompt().focus(); });
-    expect(screen.getByRole('tooltip').getAttribute('data-anchor')).toBe('element');
-  });
-
-  test('the pointer takes over a focus-opened card at once, and leaving closes it', async () => {
-    render(<BatchPrompt prompt={PROMPT} />);
-    act(() => { prompt().focus(); });
-    fireEvent.mouseEnter(prompt(), { clientX: 12, clientY: 18 });
-    const card = screen.getByRole('tooltip');
-    expect(card.getAttribute('data-anchor')).toBe('pointer');
-    expect(cursor()?.style.left).toBe('12px');
-    // The name moves to the new source; the prompt no longer declares it.
-    expect(nameOf(cursor())).toBe(nameOf(card));
-    expect(nameOf(prompt())).toBe('');
-    fireEvent.mouseLeave(prompt());
-    await grace();
-    expect(screen.queryByRole('tooltip')).toBeNull();
-  });
-
-  test('touch: a tap toggles the element card and never starts a dwell', async () => {
-    installHover(false);
-    render(<BatchPrompt prompt={PROMPT} />);
-    fireEvent.mouseEnter(prompt(), { clientX: 40, clientY: 30 });
-    await dwell();
-    expect(screen.queryByRole('tooltip')).toBeNull();
-
-    fireEvent.click(prompt());
-    expect(screen.getByRole('tooltip').getAttribute('data-anchor')).toBe('element');
-    fireEvent.click(prompt());
-    expect(screen.queryByRole('tooltip')).toBeNull();
-  });
-
-  test('unmounting mid-dwell or while open leaves no card behind', async () => {
-    const view = render(<BatchPrompt prompt={PROMPT} />);
-    fireEvent.mouseEnter(prompt(), { clientX: 40, clientY: 30 });
-    view.unmount();
-    await dwell();
-    expect(screen.queryByRole('tooltip')).toBeNull();
-
-    const again = render(<BatchPrompt prompt={PROMPT} />);
-    await openByDwell();
-    again.unmount();
-    expect(screen.queryByRole('tooltip')).toBeNull();
-    expect(cursor()).toBeNull();
-  });
-
-  test('closing plays the shared fade: the card is stamped data-closing, then unmounts', async () => {
-    render(<BatchPrompt prompt={PROMPT} />);
-    const card = await openByDwell();
-    expect(card.hasAttribute('data-closing')).toBe(false);
-
-    fireEvent.keyDown(document.body, { key: 'Escape' });
-    // Closed for assistive tech at once; the visual card stays through its exit.
-    expect(screen.queryByRole('tooltip')).toBeNull();
-    expect(prompt().hasAttribute('aria-describedby')).toBe(false);
-    expect(card.isConnected).toBe(true);
-    expect(card.getAttribute('data-closing')).toBe('true');
-    expect(card.getAttribute('aria-hidden')).toBe('true');
-    await wait(250);
-    expect(card.isConnected).toBe(false);
-    expect(cursor()).toBeNull();
-
-    // A reopen during the exit takes the card back instead of letting it go.
-    fireEvent.mouseLeave(prompt());
-    const again = await openByDwell();
-    act(() => { prompt().focus(); });
-    fireEvent.keyDown(prompt(), { key: 'Escape' });
-    expect(again.getAttribute('data-closing')).toBe('true');
-    act(() => { prompt().blur(); });
-    act(() => { prompt().focus(); });
-    await wait(250);
-    expect(screen.getByRole('tooltip').hasAttribute('data-closing')).toBe(false);
-  });
-
-  test('an untruncated prompt never opens a card', async () => {
+  test('an untruncated prompt never shows the card, even when asked', async () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => 100 });
-    render(<BatchPrompt prompt="Short" />);
-    const host = screen.getByText('Short', { selector: 'span' }).parentElement;
-    if (!host) throw new Error('missing prompt host');
-    fireEvent.mouseEnter(host, { clientX: 40, clientY: 30 });
-    await dwell();
-    expect(screen.queryByRole('tooltip')).toBeNull();
-    expect(host.hasAttribute('tabindex')).toBe(false);
+    render(<BatchPrompt prompt="Short" open />);
+    await flush();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

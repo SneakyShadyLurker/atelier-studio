@@ -3,6 +3,9 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  /* A missing or failed poster paints the element's background: the plate
+     mat under the play badge, never a broken image. */
+  background: var(--bg-sunk);
   animation: global(atelier-img-in) var(--dur-reveal) var(--ease-out) both;
 }
 

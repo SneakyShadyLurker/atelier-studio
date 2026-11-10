@@ -369,6 +369,12 @@ interface ViewSlice {
 
 interface LightboxSlice {
   lightbox: LightboxState | null;
+  /**
+   * A Lightbox is mounted. Not the same as `lightbox !== null`: a selection
+   * whose batch left the visible scope renders no viewer.
+   */
+  viewerOpen: boolean;
+  setViewerOpen: (open: boolean) => void;
   openLightbox: (batchId: string, tileId: string) => void;
   openMasterLightbox: (batchId: string, tileId: string, sequenceId: string) => void;
   setLightboxTile: (tileId: string) => void;
@@ -858,6 +864,8 @@ const createViewSlice: StateCreator<AtelierState, [], [], ViewSlice> = (set) => 
 
 const createLightboxSlice: StateCreator<AtelierState, [], [], LightboxSlice> = (set) => ({
   lightbox: null,
+  viewerOpen: false,
+  setViewerOpen: (open) => { set({ viewerOpen: open }); },
   openLightbox: (batchId, tileId) => { set({ lightbox: { batchId, tileId } }); },
   openMasterLightbox: (batchId, tileId, sequenceId) => { set({ lightbox: { batchId, tileId, masterSequenceId: sequenceId } }); },
   setLightboxTile: (tileId) => {

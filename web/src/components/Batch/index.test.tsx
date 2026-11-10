@@ -1,4 +1,4 @@
-import type { Batch, Tile } from '@atelier/shared';
+import type { Batch, Model, Tile } from '@atelier/shared';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -449,13 +449,13 @@ describe('BatchView tile memoization (SSE re-render path)', () => {
     const { rerender } = render(view(standalone), { wrapper: wrap() });
     expect(screen.getByRole('button', { name: 'Extend video 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Tell story from video 1' })).toBeTruthy();
-    const frameBefore = screen.getByRole('button', { name: 'Open image 1: old prompt' });
+    const frameBefore = screen.getByRole('button', { name: 'Open video 1: old prompt' });
 
     rerender(view(segment));
 
     expect(screen.queryByRole('button', { name: 'Extend video 1' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Tell story from video 1' })).toBeNull();
-    const frameAfter = screen.getByRole('button', { name: 'Open image 1: new prompt' });
+    const frameAfter = screen.getByRole('button', { name: 'Open video 1: new prompt' });
     // Existing DOM identity survives the re-render.
     expect(frameAfter).toBe(frameBefore);
 
@@ -756,11 +756,11 @@ describe('BatchView running clock', () => {
 });
 
 describe('BatchView live status', () => {
-  function renderLive(current: Batch) {
+  function renderLive(current: Batch, models: readonly Model[] = fixtureModels) {
     return render(
       <BatchView
         batch={current}
-        modelById={new Map(fixtureModels.map((model) => [model.id, model]))}
+        modelById={new Map(models.map((model) => [model.id, model]))}
         activeView={APP_VIEW_UNSORTED}
         promptsEnabled={false}
         onBatchAction={mock()}
@@ -775,6 +775,19 @@ describe('BatchView live status', () => {
   const liveRegion = (_container: HTMLElement) => document.body.querySelector(':scope > [role="status"][aria-live="polite"]')?.textContent;
   const pageRegion = () => document.querySelector('[data-atelier-queue-live]')?.textContent;
   afterEach(() => { resetAnnouncedBatchesForTests(); });
+
+  test('a queued batch says queued, not generating', () => {
+    const queued: Batch = { ...batch, id: 'b-queued', status: 'queued', queueLengthAhead: 1, tiles: [loadingTile('t-a', 1), loadingTile('t-b', 2)] };
+    const view = renderLive(queued);
+    expect(liveRegion(view.container)).toBe('Queued: 2 images');
+  });
+
+  test('a video batch counts videos', () => {
+    const videoModel = { ...firstModel, id: 'live-i2v', name: 'Live I2V', supportsI2V: true, outputsVideo: true, maxCountPerBatch: 1 };
+    const rendering: Batch = { ...batch, id: 'b-video', modelId: videoModel.id, status: 'running', tiles: [loadingTile('t-v', 1)] };
+    const view = renderLive(rendering, [...fixtureModels, videoModel]);
+    expect(liveRegion(view.container)).toBe('Generating 1 video: 0 of 1 ready');
+  });
 
   test('hands completion to the page-level announcer once the batch it watched finishes', () => {
     const generating: Batch = { ...batch, id: 'b-live', status: 'running', tiles: [loadingTile('t-a', 1), loadingTile('t-b', 2)] };
@@ -815,5 +828,98 @@ describe('BatchView live status', () => {
     );
     expect(liveRegion(view.container)).toBe('');
     expect(pageRegion()).toBe('1 image failed to generate');
+  });
+});
+
+describe('BatchView full prompt from the More menu', () => {
+  const descriptors = {
+    scrollWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth'),
+    clientWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth'),
+  };
+  afterEach(() => {
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, key, descriptor);
+      else Reflect.deleteProperty(HTMLElement.prototype, key);
+    }
+  });
+
+  test('a truncated prompt is offered in More, even read-only; choosing it opens the card and Escape returns to More', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => 600 });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 200 });
+    render(
+      <BatchView
+        batch={{ ...batch, pinned: true }}
+        modelById={new Map(fixtureModels.map((model) => [model.id, model]))}
+        activeView={APP_VIEW_UNSORTED}
+        promptsEnabled={false}
+        readOnlyActions
+        onBatchAction={mock()}
+        onTileAction={mock()}
+        onOpenTile={mock()}
+        q=""
+      />,
+      { wrapper: wrap() },
+    );
+    const more = screen.getByRole('button', { name: 'More actions' });
+    act(() => { more.focus(); });
+    fireEvent.click(more);
+    const item = screen.getByRole('menuitem', { name: 'Show full prompt' });
+    expect(item.hasAttribute('disabled') || item.getAttribute('aria-disabled') === 'true').toBe(false);
+    fireEvent.click(item);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    const card = screen.getByRole('dialog', { name: 'Full prompt' });
+    expect(card.textContent).toBe(batch.prompt);
+    expect(document.activeElement === card).toBe(true);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByRole('dialog', { name: 'Full prompt' })).toBeNull();
+    expect(document.activeElement === screen.getByRole('button', { name: 'More actions' })).toBe(true);
+  });
+});
+
+describe('BatchView preview handoff', () => {
+  function view(current: Batch) {
+    return (
+      <BatchView
+        batch={current}
+        modelById={new Map(fixtureModels.map((model) => [model.id, model]))}
+        activeView={APP_VIEW_UNSORTED}
+        promptsEnabled={false}
+        onBatchAction={mock()}
+        onTileAction={mock()}
+        onOpenTile={mock()}
+        q=""
+      />
+    );
+  }
+
+  test('a streamed tile keeps its last partial preview after the store entry clears, until the final image takes over', async () => {
+    const preview = 'data:image/png;base64,TEFTVA==';
+    const streaming: Batch = { ...batch, status: 'running', tiles: [loadingTile('tile-live', 1)] };
+    const { container, rerender } = render(view(streaming), { wrapper: wrap() });
+    act(() => { useAtelierStore.getState().setTilePreview('tile-live', { url: 'data:image/png;base64,RklSU1Q=', index: 0 }); });
+    act(() => { useAtelierStore.getState().setTilePreview('tile-live', { url: preview, index: 1 }); });
+    // The terminal event clears the store entry before or with the done tile.
+    act(() => { useAtelierStore.getState().clearTilePreview('tile-live'); });
+    rerender(view({ ...streaming, status: 'done', tiles: [doneTile('tile-live', 1, 'LIVE')] }));
+    await waitFor(() => { expect(container.querySelector('button[aria-label^="Open image 1"]')).toBeTruthy(); });
+
+    const underlay = container.querySelector<HTMLImageElement>('img[data-preview]');
+    expect(underlay?.getAttribute('src')).toBe(preview);
+
+    const image = screen.getByRole<HTMLImageElement>('img', { name: /^Generated image 1/ });
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 400 });
+    image.decode = () => Promise.resolve();
+    await act(async () => { fireEvent.load(image); await Promise.resolve(); });
+    if (!underlay) throw new Error('missing preview');
+    const end = new Event('transitionend', { bubbles: true });
+    Object.defineProperty(end, 'propertyName', { value: 'opacity' });
+    act(() => { underlay.dispatchEvent(end); });
+    expect(container.querySelector('img[data-preview]')).toBeNull();
+  });
+
+  test('a tile that was already done when the row mounted has no preview', () => {
+    const { container } = render(view({ ...batch, tiles: [doneTile('tile-old', 1, 'OLD')] }), { wrapper: wrap() });
+    expect(container.querySelector('img[data-preview]')).toBeNull();
   });
 });

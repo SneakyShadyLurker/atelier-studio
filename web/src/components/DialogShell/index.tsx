@@ -2,7 +2,6 @@ import { useLayoutEffect, useRef } from 'react';
 import type { RefObject, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useModalChrome } from '../../hooks/useModalChrome';
-import { runWhenReachable } from '../../lib/focus';
 import styles from '../../styles/dialog.module.css';
 
 interface DialogShellProps {
@@ -28,7 +27,20 @@ interface DialogShellProps {
   // backdrop so the shared exit animations play, and freezes backdrop
   // dismissal during the leave.
   closing?: boolean;
+  /**
+   * Where focus goes when the dialog closes. Called once per open with the
+   * opener, while the page still holds it, so the owner can record what it
+   * needs from the DOM; the resolver it returns runs after a real close (never
+   * after a re-run of the open effect) and names the target, or null for none.
+   * Default: the opener, when it is still connected and not inert.
+   */
+  restoreFocus?: ((opener: HTMLElement) => () => HTMLElement | null) | undefined;
   children: ReactNode;
+}
+
+/** Connected and outside every inert subtree: focus() would land. */
+export function focusReachable(target: HTMLElement | null | undefined): target is HTMLElement {
+  return target !== null && target !== undefined && target.isConnected && target.closest('[inert]') === null;
 }
 
 export function DialogShell({
@@ -43,6 +55,7 @@ export function DialogShell({
   portalRef: externalPortalRef,
   roleOnBackdrop = true,
   closing = false,
+  restoreFocus,
   children,
 }: DialogShellProps) {
   const internalPortalRef = useRef<HTMLDialogElement | null>(null);
@@ -61,6 +74,10 @@ export function DialogShell({
   // inerting and top-layer stacking come from — the platform's, not ours, so
   // no dialog can ship without them. React owns `open`, so the element is only
   // ever opened here and closed by unmounting.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const resolveRef = useRef<(() => HTMLElement | null) | null>(null);
+  const restoreFocusRef = useRef(restoreFocus);
+  useLayoutEffect(() => { restoreFocusRef.current = restoreFocus; });
   useLayoutEffect(() => {
     if (!open) return undefined;
     const element = portalRef.current;
@@ -69,16 +86,36 @@ export function DialogShell({
     // focused. useModalChrome cannot do it (hence `nativeModal`): it runs as a
     // passive effect, i.e. after this layout effect, by which time the dialog
     // already holds focus and it would capture a control inside the dialog.
-    const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-      ? document.activeElement
-      : null;
+    // React may run this effect again while the dialog stays open (StrictMode's
+    // simulated remount, an Activity reveal): focus is then already inside the
+    // dialog, so the opener captured by the first run stands.
+    const active = document.activeElement;
+    if (!(element && active instanceof Node && element.contains(active))) {
+      const opener = active instanceof HTMLElement && active !== document.body ? active : null;
+      openerRef.current = opener;
+      resolveRef.current = opener
+        ? restoreFocusRef.current?.(opener) ?? (() => (focusReachable(opener) ? opener : null))
+        : null;
+    }
     if (element && !element.open) element.showModal();
     return () => {
       // close() rather than a bare unmount so the element leaves the top layer
       // through the platform's own path; the restore is ours because the
       // platform's does not survive React removing the node in the same commit.
       if (element?.open) element.close();
-      if (opener) runWhenReachable(() => { opener.focus(); }, opener);
+      const opener = openerRef.current;
+      const resolve = resolveRef.current;
+      // A microtask: the close commit lifts the background's inert first.
+      queueMicrotask(() => {
+        // Re-shown by a re-run of this effect: the dialog keeps focus.
+        if (element?.isConnected && element.open) return;
+        // The owner already handed focus on (a removal's successor).
+        const current = document.activeElement;
+        if (current instanceof HTMLElement && current !== document.body && !element?.contains(current)) return;
+        const target = resolve?.() ?? null;
+        if (!focusReachable(target)) return;
+        target.focus(target === opener ? undefined : { preventScroll: true });
+      });
     };
   }, [open, portalRef]);
 

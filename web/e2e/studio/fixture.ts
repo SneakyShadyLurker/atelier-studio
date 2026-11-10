@@ -1,4 +1,4 @@
-import type { AdminProvider, Batch, Collection, CollectionsResponse, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse, TextModelsResponse, TextRoutingResponse } from '@atelier/shared';
+import type { AdminProvider, Batch, Collection, CollectionsResponse, GenerateRequest, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse, TextModelsResponse, TextRoutingResponse } from '@atelier/shared';
 
 // Local SVG stills keep the preview deterministic and completely offline.
 function still(primary: string, secondary: string, accent: string, motif: number): string {
@@ -224,10 +224,9 @@ export function installOfflineResponses(): void {
   const generates = motionParams.get('generate') === '1';
   const generateDelay = Number(motionParams.get('generateDelay') ?? 250);
   const generateCap = Number(motionParams.get('generateCap') ?? Number.POSITIVE_INFINITY);
-  // `generateFinish=N` lets each accepted generation finish: N ms after its
-  // batch event the stream delivers the tile's `done` terminal and `done`, and
-  // the row is served by `/api/history/refresh` and `/api/history` from then
-  // on, so the loading → done handoff can run against the real App.
+  // Accepted rows exist in history immediately, including while queued or
+  // running. `generateFinish=N` finishes them N ms after their batch event,
+  // so the loading → done handoff can run against the real App.
   const generateFinish = Number(motionParams.get('generateFinish') ?? 0);
   const generatedRows = new Map<string, Batch>();
   const studioWindow = window as Window & { __studioGenerated?: number };
@@ -241,6 +240,13 @@ export function installOfflineResponses(): void {
       }
       studioWindow.__studioGenerated = (studioWindow.__studioGenerated ?? 0) + 1;
       const batchId = `studio-generated-${String(studioWindow.__studioGenerated)}`;
+      const request = JSON.parse(typeof init?.body === 'string' ? init.body : '') as GenerateRequest;
+      generatedRows.set(batchId, {
+        id: batchId, prompt: request.prompt, ratio: request.ratio, modelId: request.modelId,
+        modelLabel: models.find((model) => model.id === request.modelId)?.name ?? request.modelId,
+        createdAt: Date.now(), collectionId: null, pinned: false, status: 'queued',
+        tiles: [{ id: `${batchId}-tile`, status: 'loading', seed: request.seed ?? 1 }],
+      });
       return new Promise((resolve) => {
         window.setTimeout(() => { resolve(json({ batchId }, 201)); }, generateDelay);
       });
@@ -248,9 +254,14 @@ export function installOfflineResponses(): void {
     const generatedEvents = generates ? /^\/api\/batches\/(studio-generated-\d+)\/events$/.exec(url.pathname) : null;
     if (generatedEvents?.[1]) {
       const batchId = generatedEvents[1];
-      const createdAt = Date.now();
+      const accepted = generatedRows.get(batchId);
+      if (!accepted) return Promise.resolve(json({ error: 'not found' }, 404));
+      const running: Batch = { ...accepted, status: 'running' };
+      generatedRows.set(batchId, running);
+      const { createdAt } = running;
       const tileId = `${batchId}-tile`;
-      const frame = `event: batch\ndata: ${JSON.stringify({ batchId, createdAt, status: 'running', tiles: [{ tileId, tileIndex: 0, seed: 1 }] })}\n\n`;
+      const seed = running.tiles[0]?.seed ?? 1;
+      const frame = `event: batch\ndata: ${JSON.stringify({ batchId, createdAt, status: 'running', tiles: [{ tileId, tileIndex: 0, seed }] })}\n\n`;
       const encoder = new TextEncoder();
       return Promise.resolve(new Response(new ReadableStream({
         start(controller) {
@@ -260,9 +271,8 @@ export function installOfflineResponses(): void {
             const completedAt = Date.now();
             const url = stills[0];
             generatedRows.set(batchId, {
-              id: batchId, prompt: 'Studio generation', ratio: '1:1', modelId: 'gpt-image-2.6-sunburst', modelLabel: 'GPT Image',
-              createdAt, collectionId: null, pinned: false, status: 'done',
-              tiles: [{ id: tileId, status: 'done', url, ext: 'png', mime: 'image/png', seed: 1, completedAt }],
+              ...running, status: 'done',
+              tiles: [{ id: tileId, status: 'done', url, ext: 'png', mime: 'image/png', seed, completedAt }],
             });
             controller.enqueue(encoder.encode(`event: tile\ndata: ${JSON.stringify({ tileId, tileIndex: 0, status: 'done', url, ext: 'png', mime: 'image/png', completedAt })}\n\n`));
             controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify({ batchId })}\n\n`));

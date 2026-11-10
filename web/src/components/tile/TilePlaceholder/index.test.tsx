@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import TilePlaceholder from './index';
 import { initialAtelierState, useAtelierStore, type TileProgress } from '../../../store/atelier';
@@ -155,5 +155,60 @@ describe('TilePlaceholder step progress', () => {
     expect(fraction.text).toBe('Krea20s');
     expect(fraction.bar?.getAttribute('aria-valuetext')).toBe('40%');
     expect(fraction.bar?.hasAttribute('data-steps')).toBe(false);
+  });
+});
+
+describe('TilePlaceholder model name truncation', () => {
+  test('both status variants wrap the model name in the truncating slot', () => {
+    const elapsedOnly = render(
+      <TilePlaceholder tileId="t-name" batchId="b" batchStatus="running" aspectRatio="1 / 1" modelName="An exceptionally long local model name" startedAt={Date.now()} />,
+      { wrapper: wrapper() },
+    );
+    // CSS modules resolve to no class names under test: the structure (the
+    // name in its own slot inside the first field) is what the rule targets.
+    expect(elapsedOnly.container.querySelector('ul > li:first-child > span')?.textContent).toBe('An exceptionally long local model name');
+    cleanup();
+    useAtelierStore.setState({ tileProgress: { 't-name': {
+      progress: 0.5, msPerUnit: 20_000, lastDelta: 0.04, observations: 1, lastAt: Date.now(), step: 1, totalSteps: 2, pass: 1, passCount: 1,
+    } } });
+    const steps = render(
+      <TilePlaceholder tileId="t-name" batchId="b" batchStatus="running" aspectRatio="1 / 1" modelName="An exceptionally long local model name" startedAt={Date.now()} />,
+      { wrapper: wrapper() },
+    );
+    expect(steps.container.querySelector('ul > li:first-child > span')?.textContent).toBe('An exceptionally long local model name');
+  });
+});
+
+describe('TilePlaceholder cancel focus', () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = originalFetch; });
+
+  test('cancelling the last loading tiles one after another never drops focus to body', async () => {
+    globalThis.fetch = mock(() => Promise.resolve(new Response(null, { status: 204 }))) as unknown as typeof fetch;
+    const view = render(
+      <div data-testid="canvas-scroller" tabIndex={0}>
+        <div data-batch-id="older"><section data-batch-id="older"><div><div data-feed-tile="done"><button type="button" id="older-open">open</button></div></div></section></div>
+        <div data-batch-id="b">
+          <section data-batch-id="b">
+            <header><button type="button" id="header-archive">Archive batch</button></header>
+            <div>
+              <TilePlaceholder tileId="tile-a" batchId="b" batchStatus="running" aspectRatio="1 / 1" modelName="GPT" startedAt={Date.now()} />
+              <TilePlaceholder tileId="tile-b" batchId="b" batchStatus="running" aspectRatio="1 / 1" modelName="GPT" startedAt={Date.now()} />
+            </div>
+          </section>
+        </div>
+      </div>,
+      { wrapper: wrapper() },
+    );
+    const [cancelA, cancelB] = Array.from(view.container.querySelectorAll<HTMLButtonElement>('button[aria-label="Cancel generation"]'));
+    if (!cancelA || !cancelB) throw new Error('expected two cancel buttons');
+    cancelA.focus();
+    await act(async () => { cancelA.click(); await Promise.resolve(); });
+    expect(document.activeElement === cancelB).toBe(true);
+    // Tile A is still in the DOM (its exit has not committed) but leaving.
+    expect(cancelA.closest('[data-feed-tile]')?.getAttribute('data-leaving')).toBe('true');
+    await act(async () => { cancelB.click(); await Promise.resolve(); });
+    // The emptied batch leaves with its last tile: its header is no successor.
+    expect(document.activeElement?.id).toBe('older-open');
   });
 });

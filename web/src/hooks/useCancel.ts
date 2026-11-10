@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { deleteBatch, deleteTile, historyKeys } from '../api/history';
 import { useAtelierStore } from '../store/atelier';
 import { emitHistoryCancel, emitHistoryInvalidate } from './broadcastHistory';
-import { historyScopesWithBatch, loadingTileIdsInBatch, removeBatchFromCache, removeTileFromCache } from './historyCache';
+import { historyScopesWithBatch, loadingTileIdsInBatch, removeBatchFromCache, removeTileFromCache, tombstoneCanceledTiles } from './historyCache';
 import { invalidateLibrary } from './invalidateLibrary';
 import { activeScopeKey, liveActiveScopeKey, type ActiveScope } from './scopedHistoryMutation';
 import { getBatch } from './inFlightBatches';
@@ -53,19 +53,22 @@ export function useCancel(scope: Partial<ActiveScope> = {}): {
     // would reintroduce stale `loading` tiles that fight the server until
     // the next focus refetch. cancelQueries stops an in-flight refetch from
     // resurrecting the rows between here and onSettled.
-    onMutate: async (input) => {
+    // The context carries the tiles a confirmed cancel tombstones: the tile, or
+    // every loading tile of the batch as the cache showed it here.
+    onMutate: async (input): Promise<{ canceledTileIds: readonly string[] }> => {
       await queryClient.cancelQueries({ queryKey: historyKeys.all() });
       const activeKey = resolveActiveKey();
       // The active key first (a scope whose cache is missing still gets the
       // no-op), then every other cached scope that holds the batch.
       const keys = [activeKey, ...historyScopesWithBatch(queryClient, historyKeys.all(), input.batchId)
         .filter((key) => JSON.stringify(key) !== JSON.stringify(activeKey))];
+      const tileIds = new Set<string>();
       if (input.kind === 'tile') {
+        tileIds.add(input.tileId);
         for (const key of keys) removeTileFromCache(queryClient, key, input.batchId, input.tileId);
         clearTilePreview(input.tileId);
         clearTileProgress(input.tileId);
       } else {
-        const tileIds = new Set<string>();
         for (const key of keys) {
           for (const tileId of loadingTileIdsInBatch(queryClient, key, input.batchId)) tileIds.add(tileId);
         }
@@ -78,6 +81,13 @@ export function useCancel(scope: Partial<ActiveScope> = {}): {
       emitHistoryInvalidate(input.batchId);
       // Only a batch cancel ends the stream; the owning tab aborts on this.
       if (input.kind === 'batch') emitHistoryCancel(input.batchId);
+      return { canceledTileIds: [...tileIds] };
+    },
+    // Only a confirmed cancel tombstones: a history read sent before the
+    // DELETE committed must not show those tiles again. A failed cancel
+    // writes nothing, so the settle re-read brings a surviving tile back.
+    onSuccess: (_data, _input, context) => {
+      tombstoneCanceledTiles(context.canceledTileIds);
     },
     // The optimistic removal hid the tile, so a failed DELETE would otherwise
     // be invisible until onSettled's refetch quietly brings it back.
@@ -86,10 +96,10 @@ export function useCancel(scope: Partial<ActiveScope> = {}): {
     },
     // The early signal may have made siblings read before DELETE committed;
     // the app MutationCache notifies them again once this write settles, even
-    // on failure, when the generation may survive.
+    // on failure, when the generation may survive. invalidateLibrary is the
+    // one history re-read: it waits behind any other pending history write.
     onSettled: async () => {
       await invalidateLibrary(queryClient);
-      await queryClient.invalidateQueries({ queryKey: historyKeys.all() });
     },
   });
 

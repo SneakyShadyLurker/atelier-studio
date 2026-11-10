@@ -6,7 +6,7 @@ import OverflowMenu from '../OverflowMenu';
 import { useIsPhone } from '../../hooks/useIsPhone';
 
 export type BatchOverflowAction =
-  | 'reroll' | 'reopen' | 'copy' | 'saveTemplate' | 'pin' | 'move'
+  | 'reroll' | 'reopen' | 'showPrompt' | 'copy' | 'saveTemplate' | 'pin' | 'move'
   | 'playMaster' | 'downloadMaster' | 'extendSequence' | 'discardSequenceTail' | 'cancelStory';
 
 interface BatchOverflowMenuProps {
@@ -16,6 +16,8 @@ interface BatchOverflowMenuProps {
   promptsEnabled: boolean;
   readOnlyActions: boolean;
   i2vAvailable?: boolean;
+  /** The header prompt is cut off: offer the full text (read-only, so never disabled). */
+  promptTruncated?: boolean;
   onSelect: (action: BatchOverflowAction) => void;
   onClose: () => void;
 }
@@ -41,8 +43,8 @@ const GROUP_ORDER: readonly { key: GroupKey; label: string }[] = [
 ];
 
 export function buildBatchOverflowGroups({
-  batch, promptsEnabled, readOnlyActions, i2vAvailable = false, isPhone,
-}: Pick<BatchOverflowMenuProps, 'batch' | 'promptsEnabled' | 'readOnlyActions' | 'i2vAvailable'> & { isPhone: boolean }) {
+  batch, promptsEnabled, readOnlyActions, i2vAvailable = false, promptTruncated = false, isPhone,
+}: Pick<BatchOverflowMenuProps, 'batch' | 'promptsEnabled' | 'readOnlyActions' | 'i2vAvailable' | 'promptTruncated'> & { isPhone: boolean }) {
   const hasTemplate = batch.provenance != null && batch.provenance.templateId !== null;
   const sequenceActions = sequenceActionAvailability(batch, i2vAvailable);
 
@@ -54,6 +56,7 @@ export function buildBatchOverflowGroups({
     { action: 'extendSequence', label: 'Extend', icon: <I.extend />, group: 'sequence', show: sequenceActions.extend, disabled: readOnlyActions },
     { action: 'discardSequenceTail', label: 'Discard tail', icon: <I.trash />, group: 'sequence', show: sequenceActions.discardTail, disabled: readOnlyActions, danger: true },
     { action: 'cancelStory', label: 'Cancel story', icon: <I.close />, group: 'sequence', show: batch.story?.status === 'rendering', disabled: readOnlyActions, danger: true },
+    { action: 'showPrompt', label: 'Show full prompt', icon: <I.expand />, group: 'prompt', show: promptTruncated, disabled: false },
     { action: 'copy', label: 'Copy prompt', icon: <I.copy />, group: 'prompt', show: isPhone, disabled: false },
     { action: 'saveTemplate', label: 'Save to templates', icon: <I.library />, group: 'prompt', show: promptsEnabled, disabled: readOnlyActions },
     { action: 'pin', label: 'Pin batch', icon: <I.star />, group: 'organize', show: !batch.pinned, disabled: readOnlyActions },
@@ -66,9 +69,9 @@ export function buildBatchOverflowGroups({
 }
 
 export default function BatchOverflowMenu({
-  batch, anchorRef, open, promptsEnabled, readOnlyActions, i2vAvailable = false, onSelect, onClose,
+  batch, anchorRef, open, promptsEnabled, readOnlyActions, i2vAvailable = false, promptTruncated = false, onSelect, onClose,
 }: BatchOverflowMenuProps) {
   const isPhone = useIsPhone();
-  const groups = buildBatchOverflowGroups({ batch, promptsEnabled, readOnlyActions, i2vAvailable, isPhone });
+  const groups = buildBatchOverflowGroups({ batch, promptsEnabled, readOnlyActions, i2vAvailable, promptTruncated, isPhone });
   return <OverflowMenu label="Batch actions" anchorRef={anchorRef} open={open && groups.length > 0} groups={groups} onSelect={onSelect} onClose={onClose} />;
 }

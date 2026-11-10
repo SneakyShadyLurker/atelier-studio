@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import { historyKeys } from '../src/api/history';
 import { useHistory } from '../src/hooks/useHistory';
-import { APP_VIEW_UNSORTED } from '../src/store/atelier';
+import { APP_VIEW_PINNED, APP_VIEW_UNSORTED, collectionView, type AppView } from '../src/store/atelier';
 
 afterEach(() => {
   cleanup();
@@ -86,5 +86,44 @@ describe('useHistory', () => {
       url: '/api/img/tile-new?media=2',
       thumbUrl: '/api/img/tile-new/thumb?media=2',
     });
+  });
+  test('loads until the first data exists: a collection scope awaiting its list is loading, a scope switch is not', async () => {
+    const collections = Promise.withResolvers<Response>();
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith('/collections')) return collections.promise;
+      const inCollection = url.includes('collectionId=c1');
+      return Promise.resolve(Response.json({ items: [{ id: inCollection ? 'batch-c1' : 'batch-pinned', prompt: 'p', ratio: '1:1', modelId: 'm', modelLabel: 'M', createdAt: 1, collectionId: inCollection ? 'c1' : null, pinned: !inCollection, status: 'done', tiles: [] }], nextCursor: null }));
+    }) as unknown as typeof fetch;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(({ view }: { view: AppView }) => useHistory(view), {
+      wrapper: wrapper(client),
+      initialProps: { view: collectionView('c1') },
+    });
+    // The query is disabled (pending, idle) until the list validates c1.
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => {
+      collections.resolve(Response.json({ items: [{ id: 'c1', name: 'One', count: 1, archivedCount: 0, createdAt: 1 }], summary: { totalCount: 1, pinnedCount: 1, unsortedCount: 0, archivedTotalCount: 0, archivedPinnedCount: 0, archivedUnsortedCount: 0 } }));
+      await Promise.resolve();
+    });
+    await waitFor(() => { expect(result.current.batches.length).toBe(1); });
+    expect(result.current.isLoading).toBe(false);
+
+    // A scope switch keeps the previous rows as placeholder data, no plate.
+    rerender({ view: APP_VIEW_PINNED });
+    expect(result.current.isPlaceholderData).toBe(true);
+    expect(result.current.isLoading).toBe(false);
+    await waitFor(() => { expect(result.current.isPlaceholderData).toBe(false); });
+  });
+
+  test('a collection id the list does not hold never loads, so it is not loading', async () => {
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith('/collections')) return Promise.resolve(Response.json({ items: [], summary: { totalCount: 0, pinnedCount: 0, unsortedCount: 0, archivedTotalCount: 0, archivedPinnedCount: 0, archivedUnsortedCount: 0 } }));
+      return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+    }) as unknown as typeof fetch;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useHistory(collectionView('gone')), { wrapper: wrapper(client) });
+    await waitFor(() => { expect(result.current.isLoading).toBe(false); });
   });
 });

@@ -155,3 +155,18 @@ describe('Lightbox Animate action', () => {
     expect(screen.queryByRole('button', { name: 'Animate this image' })).toBeNull();
   });
 });
+
+describe('Lightbox busy actions', () => {
+  test('Animate stays focusable while preparing: aria-disabled, never disabled', async () => {
+    // The tile fetch never settles, so the action stays busy.
+    globalThis.fetch = mock(() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+    await renderLightbox();
+    const animate = screen.getByRole('button', { name: 'Animate this image' });
+    animate.focus();
+    fireEvent.click(animate);
+    await waitFor(() => { expect(animate.getAttribute('aria-busy')).toBe('true'); });
+    expect(animate.getAttribute('aria-disabled')).toBe('true');
+    expect(animate.hasAttribute('disabled')).toBe(false);
+    expect(document.activeElement === animate).toBe(true);
+  });
+});

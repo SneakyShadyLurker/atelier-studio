@@ -24,6 +24,17 @@
 /* Chrome belongs to the animated footprint, not the full-height form inside
    its shrinking clip. Painting the edge last keeps all four corners intact
    during collapse, expansion and a reversal, without scaling the controls. */
+/* Engines without nested view-transition groups: during a feed transition
+   the dock is captured as its own group, painted above the feed's rows and
+   tiles (Canvas .head and motion.css, "Feed clip"). The gate is a feed
+   boundary carrying React's view-transition name. The frame's own
+   composer-parts name, inline, wins over this one. */
+@supports not (view-transition-group: contain) {
+  :root:has([data-testid='canvas-scroller'] [style*='view-transition-name']) .wrap {
+    view-transition-name: atelier-dock;
+  }
+}
+
 .wrap::before {
   content: '';
   position: absolute;

@@ -554,6 +554,37 @@ describe('boundPersistedHistory (via persistClient)', () => {
     expect(restored.queueLengthAhead).toBeUndefined();
   });
 
+  test('persists whole pages only while the batch total stays within 150', async () => {
+    const sized = (counts: readonly number[]): PersistedClient => {
+      const base = clientWithHistory(DEFAULT_SCOPE_KEY, counts.length);
+      const data = storedHistoryData(base) as { pages: { items: Batch[] }[]; pageParams: unknown[] };
+      data.pages = counts.map((count, page) => ({ items: Array.from({ length: count }, (_, i) => ({ ...batchWith([{ ...doneTile, id: `t-${page}-${i}` }]), id: `b-${page}-${i}` })) }));
+      return base;
+    };
+    await createIDBPersister('scope-a').persistClient(sized([60, 60, 60, 10]));
+    await flushPersisterForTests();
+    let stored = await get<PersistedClient>(IDB_KEY);
+    if (!stored) throw new Error('expected a persisted client');
+    let data = storedHistoryData(stored) as { pages: { items: Batch[] }[]; pageParams: unknown[] };
+    // 60 + 60 = 120 fits; a third page would reach 180, and a page is never cut.
+    expect(data.pages.map((page) => page.items.length)).toEqual([60, 60]);
+    expect(data.pageParams).toEqual([null, 'cursor-1']);
+
+    await createIDBPersister('scope-a').persistClient(sized([151, 10]));
+    await flushPersisterForTests();
+    stored = await get<PersistedClient>(IDB_KEY);
+    if (!stored) throw new Error('expected a persisted client');
+    // A first page alone over the bound: the scope is not persisted at all.
+    expect(stored.clientState.queries).toEqual([]);
+
+    await createIDBPersister('scope-a').persistClient(sized([150]));
+    await flushPersisterForTests();
+    stored = await get<PersistedClient>(IDB_KEY);
+    if (!stored) throw new Error('expected a persisted client');
+    data = storedHistoryData(stored) as { pages: { items: Batch[] }[]; pageParams: unknown[] };
+    expect(data.pages.map((page) => page.items.length)).toEqual([150]);
+  });
+
   test('does not trim non-default history scopes', async () => {
     const persister = createIDBPersister('scope-a');
     const input = clientWithHistory(['history', { view: { kind: 'collection', id: 'c1' }, q: '' }], 8);

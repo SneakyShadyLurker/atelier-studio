@@ -168,8 +168,9 @@ describe('active history refresh', () => {
   });
 
   test('twenty cached pages with one deep active job use one request and preserve pagination', async () => {
-    const active = batch();
-    const pages = Array.from({ length: 20 }, (_, index) => ({ items: [index === 19 ? active : done(batch())], nextCursor: index === 19 ? null : `cursor-${index + 1}` }));
+    // Pages are newest first, so each page's row is older than the one before.
+    const active = batch({ createdAt: 100_000 - 19 });
+    const pages = Array.from({ length: 20 }, (_, index) => ({ items: [index === 19 ? active : done(batch({ createdAt: 100_000 - index }))], nextCursor: index === 19 ? null : `cursor-${index + 1}` }));
     const { client, data } = setup(pages);
     const requests: string[] = [];
     globalThis.fetch = mock((input: RequestInfo | URL) => { requests.push(urlOf(input)); return Promise.resolve(Response.json({ items: [done(active)], missingBatchIds: [] })); }) as unknown as typeof fetch;
@@ -319,8 +320,11 @@ describe('active history refresh', () => {
   }
 
   test('an unrelated SSE update cannot starve a deep job refresh or overwrite the newer tile', async () => {
-    const deep = batch();
-    const live = batch();
+    // Canonical order: the live row is newer than the deep one. Equal
+    // timestamps would leave the page order to the random ids, and the cache
+    // re-places a row that is out of canonical order.
+    const deep = batch({ createdAt: 1_000 });
+    const live = batch({ createdAt: 2_000 });
     const { client } = setup([{ items: [live], nextCursor: 'next' }, { items: [deep], nextCursor: null }]);
     const response = Promise.withResolvers<Response>();
     globalThis.fetch = mock(() => response.promise) as unknown as typeof fetch;

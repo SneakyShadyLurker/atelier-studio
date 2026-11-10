@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useIsRestoring } from '@tanstack/react-query';
 import type { Batch } from '@atelier/shared';
 import { historyOpts } from '../api/history';
 import type { AppView } from '../store/atelier';
@@ -22,6 +22,13 @@ export function useHistory(view: AppView = { kind: 'unsorted' }, q = '') {
     : true;
   const enabled = isFeedView && (!isCollectionView || (collectionsQuery.isSuccess && isValidCollectionId));
   const query = useInfiniteQuery(historyOpts(view, q, enabled));
+  // A persisted-cache restore holds every query pending and idle, and a
+  // collection scope waits idle for the collection list that validates it:
+  // neither is "no history yet", so both count as loading. A scope that can
+  // never load (a stale collection id, a non-feed view) does not.
+  const isRestoring = useIsRestoring();
+  const awaitingScope = isCollectionView && collectionsQuery.isPending;
+  const isLoading = query.isLoading || (query.isPending && (isRestoring || awaitingScope));
   const refresh = useHistoryRefresh(view, q, query.data, enabled && !query.isPlaceholderData);
 
   // THE ordering boundary. Wire + cache are `created_at DESC` (newest first) and
@@ -60,10 +67,11 @@ export function useHistory(view: AppView = { kind: 'unsorted' }, q = '') {
     isError: query.isError || refresh.isError,
     error: query.error ?? refresh.error,
     hasNextPage: query.hasNextPage,
-    // isLoading is true only when pending with no cached/placeholder data —
-    // with keepPreviousData a scope/search switch keeps the prior results
-    // visible (isPlaceholderData), so the spinner shows only on a cold load.
-    isLoading: query.isLoading,
+    // isLoading is true only while no data or error exists yet: a cold
+    // load, a persisted-cache restore, or a collection scope awaiting its
+    // list. With keepPreviousData a scope/search switch keeps the prior
+    // results visible (isPlaceholderData), so it never shows the plate.
+    isLoading,
     isPlaceholderData: query.isPlaceholderData,
     // `isFetching` is deliberately not exposed: TanStack tracks the result
     // fields a component reads, and nothing reads it, so exposing it would

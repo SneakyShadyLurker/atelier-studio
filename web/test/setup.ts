@@ -5,6 +5,13 @@ import compilerPkg from 'babel-plugin-react-compiler/package.json' with { type: 
 
 GlobalRegistrator.register();
 
+// No unit test reaches the network. Components fetch on mount (the session
+// media cache reads every thumbnail with `fetch`), and an unstubbed call would
+// open a real connection to the page origin. A test that cares about a
+// request installs its own `fetch`; everything else gets an immediate
+// network-style rejection.
+globalThis.fetch = (() => Promise.reject(new TypeError('fetch is not stubbed in this test'))) as unknown as typeof fetch;
+
 // TanStack Query delivers observer updates to React from its own deferred
 // batches (a `setTimeout(0)` each), outside any act scope a test holds. A fixed
 // number of awaited ticks cannot reliably catch them on a loaded runner, so

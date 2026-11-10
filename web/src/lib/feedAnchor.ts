@@ -112,3 +112,40 @@ export function settleFeedScrollMargin(scroller: HTMLElement, state: FeedMarginS
   if (owed < 0 && scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) return;
   virtualizer.scrollBy(owed);
 }
+
+/** One row size change, as TanStack's `shouldAdjustScrollPositionOnItemSizeChange` sees it. */
+export interface RowResize {
+  /** The row's start and its size before this change, in scroller coordinates. */
+  start: number;
+  size: number;
+  delta: number;
+  /** The viewport top in the same coordinates. */
+  scrollOffset: number;
+  /** The row's first measurement (its estimate is being replaced). */
+  firstMeasure: boolean;
+  backward: boolean;
+  /**
+   * How far the reader's first visible tile moved inside this row since it
+   * was recorded, or null when this row does not hold it.
+   */
+  tileShift: number | null;
+}
+
+/**
+ * Whether a row's size change moves the scroll offset by its delta. TanStack
+ * anchors at row boundaries: by default it compensates a first measurement
+ * above the fold and a re-measurement of a row entirely above the fold (not
+ * while scrolling backward), and leaves a row that spans the viewport top
+ * alone, since a streaming row grows below the reader. A feed row holds up
+ * to four tiles, so a tile above the reader's inside that same row can fail
+ * to a compact card or leave. The spanning row compensates when the reader's
+ * first visible tile moved inside it by more than half the change, that is
+ * when the change sits above that tile; a change below it moves nothing.
+ */
+export function shouldAnchorRowResize(resize: RowResize): boolean {
+  const { start, size, delta, scrollOffset, firstMeasure, backward, tileShift } = resize;
+  if (firstMeasure) return start < scrollOffset;
+  if (start + size <= scrollOffset) return !backward;
+  if (start >= scrollOffset || tileShift === null || tileShift === 0) return false;
+  return Math.abs(tileShift - delta) < Math.abs(tileShift);
+}

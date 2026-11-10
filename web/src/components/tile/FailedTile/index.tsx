@@ -2,7 +2,7 @@ import type { Tile, TileErrorCategory } from '@atelier/shared';
 import type { CSSProperties } from 'react';
 import { I } from '../../icons/I';
 import { moderationCopy, useModerationNotice } from '../../../lib/moderationNotice';
-import { focusSuccessor, tileSuccessor } from '../../../lib/focusSuccessor';
+import { focusSuccessor, lastTileSuccessor } from '../../../lib/focusSuccessor';
 import styles from './index.module.css';
 
 interface FailedTileProps {
@@ -62,7 +62,7 @@ function FailedTile({ tile, aspectRatio, seen = false, entered = false, disabled
   const moderation = tile.moderation;
   const copy = moderation ? moderationCopy(moderation) : null;
   return (
-    <div className={styles.tile} data-feed-tile={tile.id} data-seen={seen || entered ? 'true' : undefined} data-moderation={moderation ? 'true' : undefined}>
+    <div className={styles.tile} data-feed-tile={tile.id} data-seen={seen || entered ? 'true' : undefined} data-entered={entered ? 'true' : undefined} data-moderation={moderation ? 'true' : undefined}>
       {/* The ratio travels as a custom property so the phone layout can drop
           the image footprint (the tile collapses to its content there). */}
       <div className={styles.frame} style={{ '--tile-ratio': aspectRatio } as CSSProperties}>
@@ -84,7 +84,7 @@ function FailedTile({ tile, aspectRatio, seen = false, entered = false, disabled
                 Retry
               </button>
             ) : null}
-            <button className={styles.mini} type="button" aria-label="Dismiss failed tile" disabled={disabled} onClick={(event) => { focusSuccessor(tileSuccessor(event.currentTarget)); onDismiss(); }}>
+            <button className={styles.mini} type="button" aria-label="Dismiss failed tile" disabled={disabled} onClick={(event) => { focusSuccessor(lastTileSuccessor(event.currentTarget)); onDismiss(); }}>
               <I.close />
               Dismiss
             </button>

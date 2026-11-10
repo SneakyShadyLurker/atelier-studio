@@ -320,9 +320,8 @@ test('without the optional popover source member, panels and labels remain usabl
   await expect(menuPanel(page)).toHaveCount(0);
   // The prompt card never needed the source member: it is anchored by the
   // name its prompt declares, in the page layer.
-  const prompt = page.locator('#corner div[tabindex="0"]');
-  await prompt.focus();
-  await expect(card(page)).toBeVisible();
+  const prompt = edgePrompt(page);
+  await openEdgeCard(page);
   await settle(card(page));
   await expect(card(page)).toHaveAttribute('data-anchored', 'name');
   expect(await inTopLayer(card(page))).toBe(false);
@@ -591,28 +590,36 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, tabl
 
 // ── BatchPrompt card ──
 
-const card = (page: Page) => page.getByRole('tooltip');
-const feedPrompt = (page: Page, index = 0) => page.locator('section[data-batch-id] header > div[tabindex="0"]').nth(index);
+// Opened only from the batch More menu's "Show full prompt": a non-modal
+// dialog named "Full prompt", anchored under the prompt in the page layer.
+const card = (page: Page) => page.getByRole('dialog', { name: 'Full prompt' });
+const feedPrompt = (page: Page, index = 0) => page.locator('section[data-batch-id] header > div:first-of-type').nth(index);
+const edgePrompt = (page: Page) => page.locator('#corner > div:last-child > div');
 
-async function pinnedPrompt(page: Page, index: number): Promise<Locator> {
+async function pinnedSection(page: Page, index: number): Promise<Locator> {
   const id = await feedPrompt(page, index).evaluate((element) => element.closest('section')?.getAttribute('data-batch-id') ?? '');
-  return page.locator(`section[data-batch-id="${id}"] header > div[tabindex="0"]`);
+  return page.locator(`section[data-batch-id="${id}"]`);
 }
 
-async function visiblePrompt(page: Page): Promise<Locator> {
-  const target = await pinnedPrompt(page, 0);
-  await target.scrollIntoViewIfNeeded();
-  return target;
-}
-
-async function focusPrompt(page: Page, target: Locator): Promise<void> {
+async function openPromptCard(page: Page, section: Locator): Promise<Locator> {
   // A mounted row may be overscan, and initial landing still owns the feed
-  // while rows measure. Model the reader taking over before positioning it:
-  // focus() alone bypasses Canvas's wheel/key/pointer gesture handlers.
+  // while rows measure. Model the reader taking over before positioning it.
   await scroller(page).dispatchEvent('wheel');
-  await target.scrollIntoViewIfNeeded();
-  await expect(target).toBeInViewport({ ratio: 1 });
-  await target.focus();
+  await section.locator('header').scrollIntoViewIfNeeded();
+  await expect(section.locator('header')).toBeInViewport({ ratio: 1 });
+  const trigger = section.getByRole('button', { name: 'More actions' });
+  await trigger.click();
+  await page.getByRole('menuitem', { name: 'Show full prompt' }).click();
+  await expect(card(page)).toBeVisible();
+  await settle(card(page));
+  return trigger;
+}
+
+async function openEdgeCard(page: Page): Promise<void> {
+  await page.locator('#edge-more').click();
+  await page.getByRole('menuitem', { name: 'Show full prompt' }).click();
+  await expect(card(page)).toBeVisible();
+  await settle(card(page));
 }
 
 test.describe('feed prompt card · desktop', () => {
@@ -623,191 +630,75 @@ test.describe('feed prompt card · desktop', () => {
     await expect(feedPrompt(page)).toBeVisible();
   });
 
-  async function dwell(page: Page, host: Box): Promise<{ x: number; y: number }> {
-    const point = { x: host.left + 40, y: host.top + host.height / 2 };
-    await page.mouse.move(point.x, point.y);
-    await expect(card(page)).toBeVisible({ timeout: 2000 });
-    await settle(card(page));
-    return point;
-  }
-
-  test('a dwell opens the card beside the pointer, which it follows; leaving closes it', async ({ page }) => {
-    const host = await box(await visiblePrompt(page));
-    const point = await dwell(page, host);
-    const shown = await box(card(page));
-    // Page layer, under the toast stack, anchored by its declared name.
-    expect(await inTopLayer(card(page))).toBe(false);
-    if (await anchored(page, card(page))) {
-      near(shown.left, point.x + 16, 2);
-      near(shown.top, point.y + 16, 2);
-      await page.mouse.move(point.x + 60, point.y);
-      await frames(page);
-      near((await box(card(page))).left, point.x + 76, 2);
-    } else {
-      near(shown.top, EDGE);
-    }
-    expectOnScreen(page, shown);
-    await page.mouse.move(4, 4);
-    await expect(card(page)).toHaveCount(0);
-  });
-
-  test('the pointer can travel onto the card and read it there', async ({ page }) => {
-    const host = await box(await visiblePrompt(page));
-    const point = await dwell(page, host);
-    test.skip(!(await anchored(page, card(page))), 'no anchor in this engine: the card rests top-centre');
-    // Read the destination before leaving: driver round trips while crossing
-    // the gap must not consume the product's 200ms travel grace.
-    const resting = await box(card(page));
-    await page.mouse.move(resting.left + resting.width / 2, resting.top + resting.height / 2);
-    await page.waitForTimeout(500);
-    await expect(card(page)).toBeVisible();
-    expect(await topmostAt(card(page))).toBe(true);
-    await page.mouse.move(point.x, point.y);
-    await page.waitForTimeout(500);
-    await expect(card(page)).toBeVisible();
-    await page.mouse.move(4, 4);
-    await expect(card(page)).toHaveCount(0);
-  });
-
-  test('Escape closes a pointer card although focus never moved, and it stays closed until the pointer leaves', async ({ page }) => {
-    const target = await visiblePrompt(page);
+  test('resting the pointer on a truncated prompt shows no card; the prompt is no tab stop', async ({ page }) => {
+    const section = await pinnedSection(page, 0);
+    const target = section.locator('header > div:first-of-type');
+    await target.scrollIntoViewIfNeeded();
+    expect(await target.evaluate((element) => {
+      const text = element.firstElementChild;
+      return !!text && (text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight);
+    })).toBe(true);
     const host = await box(target);
-    const point = await dwell(page, host);
-    // A dwell never moves focus: the prompt is not the focused element.
-    expect(await target.evaluate((element) => document.activeElement !== element)).toBe(true);
-    await page.keyboard.press('Escape');
+    await page.mouse.move(host.left + 40, host.top + host.height / 2);
+    await page.mouse.move(host.left + 44, host.top + host.height / 2);
+    await page.waitForTimeout(1000);
     await expect(card(page)).toHaveCount(0);
-    await page.mouse.move(point.x + 20, point.y);
-    await page.waitForTimeout(700);
+    await expect(target).not.toHaveAttribute('tabindex');
+    await target.click();
+    await page.waitForTimeout(300);
     await expect(card(page)).toHaveCount(0);
-    await page.mouse.move(4, 4);
-    await dwell(page, host);
   });
 
-  test('keyboard focus anchors the card under the prompt; it follows scroll and resize', async ({ page }) => {
+  test('More shows the full prompt under the prompt, holding focus; it follows scroll; Escape returns to More', async ({ page }) => {
     // The second batch: its virtual row is offset, so a card resolved against
     // the row's untranslated box would land on the first batch instead.
-    const target = await pinnedPrompt(page, 1);
-    await focusPrompt(page, target);
-    expect(await target.evaluate((element) => {
-      const text = element.firstElementChild;
-      return !!text && (text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight);
-    })).toBe(true);
-    await expect(card(page)).toBeVisible();
-    await settle(card(page));
-    test.skip(!(await anchored(page, card(page))), 'no anchor in this engine: the card rests top-centre');
-    let host = await box(target);
-    let shown = await box(card(page));
-    near(shown.top, host.bottom + GAP);
-    near(shown.left, host.left);
-    await scrollFeedBy(page, 30);
-    await expect(card(page)).toBeVisible();
-    host = await box(target);
-    shown = await box(card(page));
-    near(shown.top, host.bottom + GAP);
-    await expect(target).toBeFocused();
-    const resizeVisibility = await target.evaluateHandle((source) => {
-      const intersections: boolean[] = [];
-      const observer = new IntersectionObserver((entries) => { intersections.push(...entries.map((entry) => entry.isIntersecting)); });
-      observer.observe(source);
-      return { source, intersections, disconnect: () => { observer.disconnect(); } };
-    });
-    await expect.poll(() => resizeVisibility.evaluate(({ intersections }) => intersections.at(-1))).toBe(true);
-    await page.setViewportSize({ width: 1100, height: 760 });
-    await frames(page);
-    // Feed reflow can move this virtual row out of the clip. Bring the same
-    // source back into view before asserting visible anchored geometry.
-    await target.scrollIntoViewIfNeeded();
-    await frames(page);
-    const clippedDuringResize = await resizeVisibility.evaluate(({ intersections }) => intersections.includes(false));
-    expect(await resizeVisibility.evaluate(({ source }) => source.isConnected && document.activeElement === source)).toBe(true);
-    expect(await target.evaluate((element) => {
-      const text = element.firstElementChild;
-      return !!text && (text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight);
-    })).toBe(true);
-    if (clippedDuringResize) {
-      // A wholly clipped source dismisses its card. Revealing the same still-
-      // focused source does not re-arm it; a fresh native keyboard focus does.
-      await expect(card(page)).toHaveCount(0);
-      await page.keyboard.press('Tab');
-      await expect(target).not.toBeFocused();
-      await page.keyboard.press('Shift+Tab');
+    const section = await pinnedSection(page, 1);
+    const target = section.locator('header > div:first-of-type');
+    const full = await target.evaluate((element) => element.textContent);
+    const trigger = await openPromptCard(page, section);
+    await expect(card(page)).toHaveText(full);
+    expect(await card(page).evaluate((element) => document.activeElement === element)).toBe(true);
+    expect(await inTopLayer(card(page))).toBe(false);
+    if (await anchored(page, card(page))) {
+      let host = await box(target);
+      let shown = await box(card(page));
+      near(shown.top, host.bottom + GAP);
+      near(shown.left, host.left);
+      await scrollFeedBy(page, 30);
+      await expect(card(page)).toBeVisible();
+      host = await box(target);
+      shown = await box(card(page));
+      near(shown.top, host.bottom + GAP);
+      expectOnScreen(page, shown, EDGE);
+    } else {
+      near((await box(card(page))).top, EDGE);
     }
-    await expect(target).toBeFocused();
-    await expect(card(page)).toBeVisible();
-    await settle(card(page));
-    await resizeVisibility.evaluate(({ disconnect }) => { disconnect(); });
-    await resizeVisibility.dispose();
-    host = await box(target);
-    shown = await box(card(page));
-    near(shown.top, host.bottom + GAP);
-    expectOnScreen(page, shown, EDGE);
     await page.keyboard.press('Escape');
     await expect(card(page)).toHaveCount(0);
-    await expect(target).toBeFocused();
+    await expect(trigger).toBeFocused();
   });
 
-  test('a focused prompt scrolled away leaves no stranded card', async ({ page }) => {
-    const target = await pinnedPrompt(page, 0);
-    await focusPrompt(page, target);
-    await expect(card(page)).toBeVisible();
-    await scroller(page).evaluate((element) => { element.scrollTop = element.scrollTop > 0 ? 0 : element.scrollHeight; });
-    await expect(target).toHaveCount(0);
+  test('a press outside the card closes it', async ({ page }) => {
+    await openPromptCard(page, await pinnedSection(page, 0));
+    await page.mouse.click(4, 4);
     await expect(card(page)).toHaveCount(0);
   });
 
-  test('keyboard focus survives a late virtual-row measurement', async ({ page }) => {
-    // Deliver a real row-resize record during focus, before the browser can
-    // dispatch the focus-induced scroll event. This forces the trace's race
-    // between Canvas's initial bottom landing and focusing an overscan row.
-    await page.addInitScript(() => {
-      const NativeResizeObserver = window.ResizeObserver;
-      window.ResizeObserver = class extends NativeResizeObserver {
-        constructor(callback: ResizeObserverCallback) {
-          super((entries, observer) => {
-            if (document.documentElement.dataset.holdRowMeasurements !== 'true'
-              || !entries.some((entry) => entry.target.matches('[data-index]'))) {
-              callback(entries, observer);
-              return;
-            }
-            document.documentElement.dataset.rowMeasurementPending = 'true';
-            window.addEventListener('release-row-measurements', () => {
-              callback(entries, observer);
-            }, { once: true });
-          });
-        }
-      };
-    });
-    await page.goto(`${HARNESS}?case=feed`);
-    const target = await pinnedPrompt(page, 0);
-    await expect(target).not.toBeInViewport();
-    await target.evaluate((element) => {
-      document.documentElement.dataset.holdRowMeasurements = 'true';
-      const row = element.closest('[data-index]');
-      if (!(row instanceof HTMLElement)) throw new Error('Missing virtual row');
-      row.style.paddingBottom = '160px';
-      element.addEventListener('focus', () => {
-        delete document.documentElement.dataset.holdRowMeasurements;
-        window.dispatchEvent(new Event('release-row-measurements'));
-      }, { once: true });
-    });
-    await expect(page.locator('html')).toHaveAttribute('data-row-measurement-pending', 'true');
-    await focusPrompt(page, target);
-    await frames(page);
-    await expect(card(page)).toBeVisible();
-    await expect(target).toBeInViewport({ ratio: 1 });
-    await expect(target).toBeFocused();
+  test('a prompt scrolled away leaves no stranded card', async ({ page }) => {
+    const section = await pinnedSection(page, 0);
+    await openPromptCard(page, section);
+    await scroller(page).evaluate((element) => { element.scrollTop = element.scrollTop > 0 ? 0 : element.scrollHeight; });
+    await expect(section).toHaveCount(0);
+    await expect(card(page)).toHaveCount(0);
   });
 
-  test('a focused prompt clipped out of its retained row closes its hidden card, and Escape passes on', async ({ page }) => {
-    const target = page.locator('section[data-batch-id="batch-23"] header > div[tabindex="0"]');
-    await target.scrollIntoViewIfNeeded();
-    await target.focus();
-    await expect(card(page)).toBeVisible();
+  test('a prompt clipped out of its retained row closes its hidden card, and Escape passes on', async ({ page }) => {
+    const section = page.locator('section[data-batch-id="batch-23"]');
+    await openPromptCard(page, section);
     await scrollFeedBy(page, -800);
-    // The row stays mounted and focused, but its prompt is wholly clipped.
+    // The row stays mounted, but its prompt is wholly clipped.
+    const target = section.locator('header > div:first-of-type');
     await expect(target).toHaveCount(1);
-    await expect(target).toBeFocused();
     const clip = await box(scroller(page));
     const host = await box(target);
     expect(host.top >= clip.bottom - SLOP || host.bottom <= clip.top + SLOP).toBe(true);
@@ -815,15 +706,6 @@ test.describe('feed prompt card · desktop', () => {
     await expect(card(page)).toHaveCount(0);
     const before = await documentEscapes(page);
     await page.keyboard.press('Escape');
-    expect(await documentEscapes(page)).toBe(before + 1);
-    await expect(target).toBeFocused();
-    // Back in view, a fresh focus opens it again.
-    await target.scrollIntoViewIfNeeded();
-    await target.blur();
-    await target.focus();
-    await expect(card(page)).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(card(page)).toHaveCount(0);
     expect(await documentEscapes(page)).toBe(before + 1);
   });
 });
@@ -839,12 +721,7 @@ test.describe('prompt card under a global Undo', () => {
       // Centre the tall card on the toast column (the Undo sits right of
       // centre), so the overlap holds when toast copy or type metrics shift.
       await page.locator('#corner').evaluate((element) => { element.style.left = '380px'; });
-      const host = page.locator('#corner div[tabindex="0"]');
-      const openCard = async () => {
-        await host.focus();
-        await expect(card(page)).toBeVisible();
-        await settle(card(page));
-      };
+      const openCard = async () => { await openEdgeCard(page); };
       const openToast = async () => {
         await raiseToast(page, 'Review Undo reachability');
         await expect(undoButton(page)).toBeVisible();
@@ -921,47 +798,19 @@ test.describe('editor name field · desktop', () => {
 
 // ── Viewport edges: every corner, desktop and a short landscape window ──
 
-test('the focused prompt card owns Escape before an older hovered card', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 1600 });
-  await page.goto(`${HARNESS}?case=feed&seed=2`);
-  const first = page.locator('section[data-batch-id="batch-0"] header > div[tabindex="0"]');
-  const second = page.locator('section[data-batch-id="batch-1"] header > div[tabindex="0"]');
-  await first.hover();
-  await expect(card(page)).toHaveCount(1);
-  await second.focus();
-  await expect(card(page)).toHaveCount(2);
-  const before = await documentEscapes(page);
-  await page.keyboard.press('Escape');
-  await expect(card(page)).toHaveCount(1);
-  await expect(card(page)).toHaveText(/^0 · /);
-  await expect(second).toBeFocused();
-  expect(await documentEscapes(page)).toBe(before);
-  await page.keyboard.press('Escape');
-  await expect(card(page)).toHaveCount(0);
-  expect(await documentEscapes(page)).toBe(before);
-});
-
 const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
 
 for (const corner of CORNERS) {
   test(`a very long prompt scrolls inside the short window · ${corner}`, async ({ page }) => {
     await page.setViewportSize(VIEWPORTS.phoneLandscape);
     await page.goto(`${HARNESS}?case=edges&at=${corner}&longPrompt`);
-    const host = page.locator('#corner div[tabindex="0"]');
-    for (const mode of ['keyboard', 'pointer']) {
-      if (mode === 'keyboard') await host.focus();
-      else await host.hover();
-      await expect(card(page)).toBeVisible();
-      await settle(card(page));
-      expectOnScreen(page, await box(card(page)), EDGE);
-      expect(await card(page).evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
-      await card(page).evaluate((element) => { element.scrollTop = 120; });
-      await expect(card(page)).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(card(page)).toHaveCount(0);
-      await host.blur();
-      await page.mouse.move(4, 4);
-    }
+    await openEdgeCard(page);
+    expectOnScreen(page, await box(card(page)), EDGE);
+    expect(await card(page).evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+    await card(page).evaluate((element) => { element.scrollTop = 120; });
+    await expect(card(page)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(card(page)).toHaveCount(0);
   });
 }
 
@@ -1029,20 +878,12 @@ for (const [name, viewport] of Object.entries({ desktop: VIEWPORTS.desktop, phon
         else near(panel.left, anchor.left);
       });
 
-      test('the prompt card keeps clear of the edges by keyboard and by pointer', async ({ page }) => {
-        const host = page.locator('#corner div[tabindex="0"]');
-        await host.focus();
-        await expect(card(page)).toBeVisible();
-        await settle(card(page));
+      test('the prompt card keeps clear of the edges', async ({ page }) => {
+        await openEdgeCard(page);
         if (await anchored(page, card(page))) expectOnScreen(page, await box(card(page)), EDGE);
-        await host.blur();
+        await page.keyboard.press('Escape');
         await expect(card(page)).toHaveCount(0);
-
-        const anchor = await box(host);
-        await page.mouse.move(anchor.left + anchor.width / 2, anchor.top + anchor.height / 2);
-        await expect(card(page)).toBeVisible({ timeout: 2000 });
-        await settle(card(page));
-        if (await anchored(page, card(page))) expectOnScreen(page, await box(card(page)), EDGE);
+        await expect(page.locator('#edge-more')).toBeFocused();
       });
 
       for (const place of ['', 'below', 'above-end', 'below-start'] as const) {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { batchSuccessor, focusSuccessor, focusWhenPresent, tileSuccessor } from './focusSuccessor';
+import { batchSuccessor, focusSuccessor, focusWhenPresent, lastTileSuccessor, tileSuccessor } from './focusSuccessor';
 
 function feed(): HTMLElement {
   document.body.innerHTML = `
@@ -54,6 +54,27 @@ describe('feed focus successors', () => {
     expect(tileSuccessor(el('t4-frame'))?.id).toBe('t1-frame');
     one('[data-batch-id="b1"]').remove();
     expect(tileSuccessor(el('t4-frame'))?.getAttribute('data-testid')).toBe('canvas-scroller');
+  });
+
+  test('a tile already leaving is never a successor', () => {
+    feed();
+    one('[data-feed-tile="t2"]').setAttribute('data-leaving', 'true');
+    expect(tileSuccessor(el('t1-archive'))?.id).toBe('t3-dismiss');
+    expect(tileSuccessor(el('t3-dismiss'))?.id).toBe('t1-frame');
+  });
+
+  test('a batch losing its last live tile leaves with it: focus goes to a neighbouring row', () => {
+    feed();
+    // Siblings remain: the ordinary tile chain.
+    expect(lastTileSuccessor(el('t1-archive'))?.id).toBe('t2-frame');
+    // The last tile left standing (the others are leaving): the row goes too,
+    // so its header is no successor.
+    one('[data-feed-tile="t1"]').setAttribute('data-leaving', 'true');
+    one('[data-feed-tile="t3"]').setAttribute('data-leaving', 'true');
+    expect(lastTileSuccessor(el('t2-frame'))?.id).toBe('t4-frame');
+    expect(lastTileSuccessor(el('t4-frame'))?.id).toBe('b1-archive');
+    one('[data-batch-id="b1"]').remove();
+    expect(lastTileSuccessor(el('t4-frame'))?.getAttribute('data-testid')).toBe('canvas-scroller');
   });
 
   test('a removed batch row hands focus to the next row, else the previous one, else the scroller', () => {

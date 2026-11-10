@@ -9,7 +9,7 @@ import { I } from '../../icons/I';
 import LoadingTileBody from '../LoadingTile/body';
 import loadingStyles from '../LoadingTile/index.module.css';
 import QueuedTile from '../QueuedTile';
-import { focusSuccessor, tileSuccessor } from '../../../lib/focusSuccessor';
+import { focusSuccessor, lastTileSuccessor } from '../../../lib/focusSuccessor';
 import styles from './index.module.css';
 
 interface TilePlaceholderProps {
@@ -49,7 +49,11 @@ function TilePlaceholder({
     if (canceling) return;
     setCanceling(true);
     // The tile leaves with the cancel; the keyboard moves on before it does.
-    focusSuccessor(tileSuccessor(from));
+    // A batch emptied by the cancel leaves too, header included. The tile is
+    // marked leaving at once (not through state), so a cancel of its sibling
+    // in the same frame never picks it.
+    from.closest('[data-feed-tile]')?.setAttribute('data-leaving', 'true');
+    focusSuccessor(lastTileSuccessor(from));
     // Suppress the cancel only when the tile is DEFINITIVELY already
     // terminal in cache (the feed renders a deferred snapshot, so the button
     // can outlive the tile's completion by a frame). A cache miss (undefined)
@@ -71,7 +75,7 @@ function TilePlaceholder({
   };
 
   return (
-    <div className={loadingStyles.tile} data-feed-tile={tileId} data-seen={seen ? 'true' : undefined}>
+    <div className={loadingStyles.tile} data-feed-tile={tileId} data-seen={seen ? 'true' : undefined} data-leaving={canceling ? 'true' : undefined}>
       <button
         type="button"
         className={loadingStyles.cancelBtn}

@@ -1,7 +1,8 @@
 /* Shared shell for the anchored action menus (OverflowMenu,
    MovePopover): portal root, surface, desktop popover, scrolling content,
    phone sheet and backdrop, with their enter/leave motion. Owners compose
-   these classes and set --menu-width plus the sheet padding properties.
+   these classes and set --menu-width; the sheet padding and the phone row
+   geometry are shared here so every menu sheet reads the same.
    `.row` is the one menu row variant (geometry, hover mat, focus ring,
    press, disabled, touch floor) and `.groupLabel` its small-caps group
    label; owners compose both and keep only their own states (OverflowMenu's
@@ -45,6 +46,8 @@
 
 .sheet {
   composes: sheet from './sheet.module.css';
+  --sheet-pad: 8px;
+  --sheet-pad-bottom: 18px;
   overflow-y: auto;
 }
 
@@ -98,6 +101,14 @@
 @media (hover: none), (any-pointer: coarse) {
   .row {
     min-height: 44px;
+  }
+}
+
+/* Phone sheet rows: one geometry for every menu sheet. */
+@media (width < 768px) {
+  .row {
+    min-height: 48px;
+    font-size: var(--text-md);
   }
 }
 

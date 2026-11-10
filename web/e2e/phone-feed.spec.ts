@@ -170,3 +170,81 @@ test.describe('failed tile on desktop', () => {
     expect(Math.abs(layout.frame.height - layout.frame.width)).toBeLessThanOrEqual(2);
   });
 });
+
+/* R11 at phone width: rendered rows match their estimate within 8px. */
+test('row estimates match the rendered grid at 390×844', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?case=phone-feed&seed=8&mix=1');
+  await expect(page.getByTestId('canvas-scroller')).toBeVisible();
+  await page.waitForTimeout(600);
+  const rows = await page.evaluate(() => {
+    const estimate = (window as unknown as { __feedEstimate: (id: string) => number | null }).__feedEstimate;
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-index][data-batch-id]')).map((row) => ({
+      id: row.dataset.batchId ?? '',
+      rendered: row.offsetHeight,
+      estimate: estimate(row.dataset.batchId ?? '') ?? Number.NaN,
+    }));
+  });
+  console.log('phone-estimate-errors', JSON.stringify(rows));
+  expect(rows.length).toBeGreaterThan(1);
+  for (const row of rows) expect(Math.abs(row.rendered - row.estimate), row.id).toBeLessThanOrEqual(8);
+});
+
+/*
+ * R10: a tile above the reader's first visible tile inside the same batch
+ * changes height (here it fails, and a failed tile is a compact card on a
+ * phone): the reader's tile holds within 2px. A change below it moves nothing.
+ */
+test.describe('intra-batch anchor', () => {
+  async function tileTop(page: Page, id: string): Promise<number> {
+    return page.evaluate((tileId) => {
+      const el = document.querySelector<HTMLElement>('[data-testid="canvas-scroller"]');
+      const tile = document.querySelector<HTMLElement>(`[data-feed-tile="${tileId}"]`);
+      if (!el || !tile) throw new Error(`no tile ${tileId}`);
+      return tile.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    }, id);
+  }
+
+  async function bringTileTo(page: Page, id: string, offset: number): Promise<void> {
+    await page.getByTestId('canvas-scroller').evaluate((el, [tileId, at]) => {
+      const tile = document.querySelector<HTMLElement>(`[data-feed-tile="${tileId}"]`);
+      if (!tile) throw new Error('no tile');
+      el.scrollTop += tile.getBoundingClientRect().top - el.getBoundingClientRect().top - at;
+    }, [id, offset] as const);
+    await page.waitForTimeout(300);
+  }
+
+  test('an earlier tile failing in the reader’s batch leaves their tile in place', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?case=phone-feed&seed=4&pair=1');
+    await expect(page.locator('[data-feed-tile="pair-tile-1"]')).toBeAttached();
+    await page.waitForTimeout(600);
+    // The reader's first visible tile is the second one; the first sits wholly above the viewport.
+    await bringTileTo(page, 'pair-tile-1', 4);
+    const before = await tileTop(page, 'pair-tile-1');
+    expect(await page.locator('[data-feed-tile="pair-tile-0"]').evaluate((tile) => {
+      const el = document.querySelector<HTMLElement>('[data-testid="canvas-scroller"]');
+      return el ? tile.getBoundingClientRect().bottom - el.getBoundingClientRect().top : Number.NaN;
+    })).toBeLessThan(0);
+    await page.locator('#fail-tile-0').click();
+    await expect(page.locator('[data-feed-tile="pair-tile-0"]')).toContainText(/./);
+    await page.waitForTimeout(600);
+    const after = await tileTop(page, 'pair-tile-1');
+    console.log('intra-batch-anchor', JSON.stringify({ before, after }));
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
+  });
+
+  test('a later tile failing below the reader does not move the viewport', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?case=phone-feed&seed=4&pair=1');
+    await expect(page.locator('[data-feed-tile="pair-tile-0"]')).toBeAttached();
+    await page.waitForTimeout(600);
+    await bringTileTo(page, 'pair-tile-0', -80);
+    const before = await tileTop(page, 'pair-tile-0');
+    const scrollBefore = await page.getByTestId('canvas-scroller').evaluate((el) => el.scrollTop);
+    await page.locator('#fail-tile-1').click();
+    await page.waitForTimeout(600);
+    const after = await tileTop(page, 'pair-tile-0');
+    const scrollAfter = await page.getByTestId('canvas-scroller').evaluate((el) => el.scrollTop);
+    console.log('intra-batch-below', JSON.stringify({ before, after, scrollBefore, scrollAfter }));
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
+    expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThanOrEqual(2);
+  });
+});

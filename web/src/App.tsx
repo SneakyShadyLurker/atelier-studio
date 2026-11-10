@@ -2,6 +2,7 @@ import { isVideoMime } from '@atelier/shared';
 import type { ArchivedTile, Batch, Collection, DoneTile, GenerateRequest, Ratio, Tile, VideoDurationFrames } from '@atelier/shared';
 import { resolveDuration } from './lib/durations';
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, ViewTransition } from 'react';
+import { flushSync } from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { HISTORY_WRITE_MUTATION_KEY } from './hooks/historyWrites';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
@@ -19,6 +20,7 @@ import Canvas, { type CanvasHandle } from './components/Canvas';
 import Composer from './components/Composer';
 import Lightbox from './components/Lightbox';
 import { runWhenReachable } from './lib/focus';
+import { batchSuccessor, focusSuccessor } from './lib/focusSuccessor';
 import ConfirmDialog from './components/ConfirmDialog';
 import StoryDialog, { type StoryDialogSource } from './components/StoryDialog';
 import SaveTemplateDialog from './components/SaveTemplateDialog';
@@ -43,6 +45,7 @@ import { useDownloadSequenceMaster } from './hooks/useDownloadSequenceMaster';
 import { useDiscardSequenceTail } from './hooks/useDiscardSequenceTail';
 import { useGenerate } from './hooks/useGenerate';
 import { useHistory } from './hooks/useHistory';
+import { useHistoryHeadProbe } from './hooks/useHistoryHeadProbe';
 import { useIsPhone } from './hooks/useIsPhone';
 import { useKeyboard } from './hooks/useKeyboard';
 import { useTooltipDismiss } from './hooks/useTooltipDismiss';
@@ -137,6 +140,13 @@ async function prepareStorySource(
   }
   const sourceUploadId = await uploadTileSource(tile);
   return { mode: 'i2v', sourceUploadId, sourcePrompt: batch.prompt, ratio: batch.ratio };
+}
+
+// A leaf of its own: the probe's visibility, cache and mutation subscriptions
+// re-render this null component, never the app shell.
+function HistoryHeadProbe({ view, q }: { view: AppView; q: string }) {
+  useHistoryHeadProbe(view, q);
+  return null;
 }
 
 function AppContent() {
@@ -662,8 +672,12 @@ function AppContent() {
     && view.kind !== 'prompts'
     && view.kind !== 'text-models'
     && historyQuery.isPlaceholderData;
-  const mainInert = effectiveSidebarOpen || lightbox !== null || confirmOpen || clearConfirmOpen || discardTailBatch !== null || storySource !== null;
-  const sidebarInert = (isPhone && !effectiveSidebarOpen) || lightbox !== null || confirmOpen || clearConfirmOpen || discardTailBatch !== null || storySource !== null || (!isPhone && sidebarCollapsed);
+  // The viewer renders only while its batch is in the visible scope. A
+  // selection whose batch left underneath it (archived or moved from another
+  // tab) shows no dialog, so it must not keep the shell inert.
+  const lightboxShown = lightbox !== null && visibleLightboxBatch !== undefined;
+  const mainInert = effectiveSidebarOpen || lightboxShown || confirmOpen || clearConfirmOpen || discardTailBatch !== null || storySource !== null;
+  const sidebarInert = (isPhone && !effectiveSidebarOpen) || lightboxShown || confirmOpen || clearConfirmOpen || discardTailBatch !== null || storySource !== null || (!isPhone && sidebarCollapsed);
   const feedInert = isPhone && composerExpanded && shouldShowComposer(view);
 
   // Scoped fallback for the lazy full-screen views (Archive, PromptManager):
@@ -723,6 +737,7 @@ function AppContent() {
       {...(sidebarCollapsed ? { 'data-sidebar-collapsed': 'true' } : {})}
       {...(isViewPending ? { 'data-view-pending': 'true' } : {})}
     >
+      <HistoryHeadProbe view={view} q={debouncedQ} />
       <h1 className="srOnly">Atelier</h1>
       <a
         className={styles.skipLink}
@@ -924,7 +939,13 @@ function AppContent() {
             if (view.kind === 'archive') {
               setLightboxPermanentDeleteTileId(tile.id);
             } else if (visibleLightboxBatch.tiles.length <= 1) {
-              closeLightbox();
+              // The batch leaves with its last tile, so the opener's restore
+              // would land on a row about to go: pick the row's successor now,
+              // close synchronously (lifting the feed's inert), then hand on.
+              const row = document.querySelector(`[data-batch-id="${CSS.escape(visibleLightboxBatch.id)}"]`);
+              const successor = row ? batchSuccessor(row) : null;
+              flushSync(() => { closeLightbox(); });
+              focusSuccessor(successor);
               deleteBatch.mutate({ batchId: visibleLightboxBatch.id });
             } else {
               deleteTile.mutate({ batchId: visibleLightboxBatch.id, tileId: tile.id });

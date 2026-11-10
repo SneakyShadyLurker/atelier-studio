@@ -5,7 +5,9 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef, useLayoutEffect, type PropsWithChildren } from 'react';
 import Canvas, { canvasBatchKey, type CanvasHandle } from './index';
 import { flushSeenBatches, getSeenBatches, resetSeenBatches, SEEN_BATCHES_STORAGE_KEY } from '../../lib/seenBatches';
-import { APP_VIEW_UNSORTED, useAtelierStore } from '../../store/atelier';
+import { historyKeys, type HistoryData } from '../../api/history';
+import { registerComposerYield } from '../Composer/composerYield';
+import { APP_VIEW_PINNED, APP_VIEW_UNSORTED, useAtelierStore } from '../../store/atelier';
 
 const originalMatchMedia = window.matchMedia.bind(window);
 
@@ -89,8 +91,8 @@ afterEach(() => {
 });
 
 describe('Canvas passive keyboard access', () => {
-  test.each([APP_VIEW_UNSORTED, { kind: 'collection' as const, id: 'empty' }])('shares the approved hint alternatives in an empty $kind canvas', (activeView) => {
-    render(<Canvas {...canvasProps} activeView={activeView} />);
+  test('shares the approved hint alternatives in an empty Unsorted canvas', () => {
+    render(<Canvas {...canvasProps} activeView={APP_VIEW_UNSORTED} />);
     expect(screen.getByText(/Write a prompt, pick a model, press/).textContent).toBe('Write a prompt, pick a model, press ⌘ ↵.');
     expect(screen.getByText('Write a prompt, pick a model, tap Generate.').tagName).toBe('SPAN');
     expect(screen.getAllByRole('heading', { name: 'What would you like to make?' })).toHaveLength(1);
@@ -124,6 +126,122 @@ describe('Canvas passive keyboard access', () => {
     expect(document.activeElement).toBe(scroller);
     fireEvent.keyDown(scroller, { key: 'PageDown' });
     expect(document.activeElement).toBe(scroller);
+  });
+});
+
+describe('Canvas scope-aware empty states', () => {
+  test.each([
+    { activeView: APP_VIEW_PINNED, title: 'Nothing pinned yet', body: 'Pin a batch from its menu to keep it here.' },
+    { activeView: { kind: 'collection' as const, id: 'empty' }, title: 'This collection is empty', body: 'Move batches here from Unsorted.' },
+  ])('an empty $activeView.kind scope has its own title and body, not the invitation', ({ activeView, title, body }) => {
+    render(<Canvas {...canvasProps} activeView={activeView} />);
+    expect(screen.getByRole('heading', { name: title })).toBeTruthy();
+    expect(screen.getByText(body).tagName).toBe('P');
+    expect(screen.queryByRole('heading', { name: 'What would you like to make?' })).toBeNull();
+    expect(screen.queryByText(/Write a prompt/)).toBeNull();
+  });
+});
+
+describe('Canvas refresh failure', () => {
+  test('a failed read with rows shown is one polite status row with Retry at the newest end', () => {
+    installPhone(false);
+    const onRetry = mock();
+    const props = { ...canvasProps, batches: [batchAt(1), batchAt(2)], modelById: new Map([[model.id, model]]), onRetry };
+    const { container, rerender } = render(<Canvas {...props} error={null} />, { wrapper: wrapper() });
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    const status = screen.getByTestId('history-refresh-status');
+    const live = status.querySelector('[role="status"]');
+    expect(live?.getAttribute('aria-live')).toBe('polite');
+    expect(live?.textContent).toBe('');
+
+    rerender(<Canvas {...props} error="History unavailable: try again." />);
+    // The rows stay; the failure does not replace them.
+    expect(container.querySelector('section[data-batch-id="batch-2"]')).toBeTruthy();
+    expect(screen.getByTestId('history-refresh-status')).toBe(status);
+    expect(live?.textContent).toBe('Couldn’t refresh Unsorted.');
+    // At the newest end: after the virtual list, not above it.
+    const list = container.querySelector('[data-virtualized="canvas"]');
+    expect(list && (list.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    rerender(<Canvas {...props} error={null} />);
+    expect(live?.textContent).toBe('');
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  test('a failed next page stays with the load-more row, not the refresh row', () => {
+    installPhone(false);
+    render(<Canvas {...canvasProps} batches={[batchAt(1)]} modelById={new Map([[model.id, model]])} hasNextPage isFetchNextPageError error="History unavailable" />, { wrapper: wrapper() });
+    expect(screen.getByTestId('history-refresh-status').querySelector('[role="status"]')?.textContent).toBe('');
+    expect(screen.getByText('Could not load more')).toBeTruthy();
+  });
+});
+
+describe('Canvas retention trigger', () => {
+  function historyPages(count: number): HistoryData {
+    return {
+      pages: Array.from({ length: count }, (_, page) => ({
+        items: Array.from({ length: 2 }, (_, row) => batchAt(1000 - page * 2 - row)),
+        nextCursor: page === count - 1 ? null : `cursor-${String(page + 1)}`,
+      })),
+      pageParams: Array.from({ length: count }, (_, page) => (page === 0 ? null : `cursor-${String(page)}`)),
+    };
+  }
+
+  function setVisibility(state: DocumentVisibilityState): void {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'visibilityState');
+  });
+
+  test('hiding the document while the reader is at the newest end trims the active scope', () => {
+    installPhone(false);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const key = historyKeys.scoped(APP_VIEW_UNSORTED, '');
+    client.setQueryData(key, historyPages(5));
+    render(
+      <QueryClientProvider client={client}>
+        <Canvas {...canvasProps} batches={[batchAt(1), batchAt(2)]} modelById={new Map([[model.id, model]])} />
+      </QueryClientProvider>,
+    );
+    // happy-dom has no layout: every scroll metric is 0, so a scroll reads as at the end.
+    fireEvent.scroll(screen.getByTestId('canvas-scroller'));
+    setVisibility('hidden');
+    const data = client.getQueryData<HistoryData>(key);
+    expect(data?.pages).toHaveLength(3);
+    expect(data?.pages[2]?.nextCursor).toBe('cursor-3');
+  });
+
+  test('a reader away from the end keeps every page when the document hides', () => {
+    installPhone(false);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const key = historyKeys.scoped(APP_VIEW_UNSORTED, '');
+    client.setQueryData(key, historyPages(5));
+    render(
+      <QueryClientProvider client={client}>
+        <Canvas {...canvasProps} batches={[batchAt(1), batchAt(2)]} modelById={new Map([[model.id, model]])} />
+      </QueryClientProvider>,
+    );
+    const scroller = screen.getByTestId('canvas-scroller');
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 5000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 800 });
+    scroller.scrollTop = 1000;
+    fireEvent.scroll(scroller);
+    setVisibility('hidden');
+    expect(client.getQueryData<HistoryData>(key)?.pages).toHaveLength(5);
+    // Far from the end the jump control is offered.
+    expect(screen.getByTestId('jump-to-latest').getAttribute('data-visible')).toBe('true');
+  });
+
+  test('the jump control is hidden at the end', () => {
+    installPhone(false);
+    render(<Canvas {...canvasProps} batches={[batchAt(1)]} modelById={new Map([[model.id, model]])} />, { wrapper: wrapper() });
+    fireEvent.scroll(screen.getByTestId('canvas-scroller'));
+    expect(screen.getByTestId('jump-to-latest').getAttribute('data-visible')).toBeNull();
   });
 });
 
@@ -241,11 +359,14 @@ describe('Canvas deferred placeholder rows', () => {
       </>
     );
     const { rerender, container } = render(view(stale, true), { wrapper: wrapper() });
+    // The mount commit renders no row (it waits for the scroller); the
+    // placeholder row is there, read-only, once the mount settles.
+    expect(container.querySelector<HTMLButtonElement>('[data-batch-id="batch-1"] button[aria-label="Archive batch"]')?.disabled).toBe(true);
+    urgent.length = 0;
 
     rerender(view(fresh, false));
 
     expect(urgent).toEqual([
-      { batchId: 'batch-1', disabled: true },
       { batchId: 'batch-1', disabled: true },
     ]);
     const archive = container.querySelector<HTMLButtonElement>('[data-batch-id="batch-2"] button[aria-label="Archive batch"]');
@@ -324,5 +445,107 @@ describe('Canvas scroll-collapse', () => {
     fireEvent.touchMove(scroller);
     fireEvent.scroll(scroller, { target: { scrollTop: 200 } });
     expect(useAtelierStore.getState().composerExpanded).toBe(true);
+  });
+});
+
+describe('Canvas reader scroll yields the desktop composer', () => {
+  function renderDesktopScroller(): { scroller: HTMLElement; yielded: ReturnType<typeof mock>; release: () => void } {
+    installPhone(false);
+    const yielded = mock();
+    const release = registerComposerYield(yielded);
+    const { container } = render(<Canvas {...canvasProps} />);
+    const scroller = container.querySelector<HTMLElement>('[data-testid="canvas-scroller"]');
+    if (!scroller) throw new Error('canvas scroller not found');
+    return { scroller, yielded, release };
+  }
+
+  test('a reader scroll of more than 24 px in either direction asks the composer to yield', () => {
+    const { scroller, yielded, release } = renderDesktopScroller();
+    try {
+      fireEvent.scroll(scroller, { target: { scrollTop: 400 } });
+      fireEvent.wheel(scroller);
+      fireEvent.scroll(scroller, { target: { scrollTop: 420 } });
+      expect(yielded).not.toHaveBeenCalled();
+      fireEvent.scroll(scroller, { target: { scrollTop: 430 } });
+      expect(yielded).toHaveBeenCalledTimes(1);
+      fireEvent.wheel(scroller);
+      for (const top of [420, 410, 400]) fireEvent.scroll(scroller, { target: { scrollTop: top } });
+      expect(yielded).toHaveBeenCalledTimes(2);
+    } finally {
+      release();
+    }
+  });
+
+  test('keyboard scrolling is a reader scroll too', () => {
+    const { scroller, yielded, release } = renderDesktopScroller();
+    try {
+      fireEvent.scroll(scroller, { target: { scrollTop: 400 } });
+      fireEvent.keyDown(scroller, { key: 'PageDown' });
+      fireEvent.scroll(scroller, { target: { scrollTop: 900 } });
+      expect(yielded).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+    }
+  });
+
+  test('a scrollbar drag is a reader scroll until the pointer lifts', () => {
+    const { scroller, yielded, release } = renderDesktopScroller();
+    try {
+      fireEvent.scroll(scroller, { target: { scrollTop: 900 } });
+      // happy-dom has no layout: give the scroller a 1000px box with an
+      // overlay scrollbar (no gutter), so the strip is its last 16px.
+      scroller.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800, toJSON: () => ({}) });
+      Object.defineProperty(scroller, 'offsetWidth', { configurable: true, value: 1000 });
+      Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 1000 });
+      // A mouse press on the scroller's empty area is not a scrollbar drag.
+      fireEvent.pointerDown(scroller, { pointerType: 'mouse', clientX: 500 });
+      fireEvent.scroll(scroller, { target: { scrollTop: 600 } });
+      expect(yielded).not.toHaveBeenCalled();
+      fireEvent.pointerUp(window);
+      // Neither is a touch on the strip (touch scrolls through touchmove).
+      fireEvent.pointerDown(scroller, { pointerType: 'touch', clientX: 995 });
+      fireEvent.scroll(scroller, { target: { scrollTop: 900 } });
+      expect(yielded).not.toHaveBeenCalled();
+      fireEvent.pointerUp(window);
+      // A mouse press on the scrollbar strip is.
+      fireEvent.pointerDown(scroller, { pointerType: 'mouse', clientX: 995 });
+      fireEvent.scroll(scroller, { target: { scrollTop: 400 } });
+      expect(yielded).toHaveBeenCalledTimes(1);
+      fireEvent.pointerUp(window);
+      // Released: the feed's own scroll afterwards is not the reader's.
+      fireEvent.scroll(scroller, { target: { scrollTop: 900 } });
+      expect(yielded).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+    }
+  });
+
+  test('arrow keys a menu uses for itself are not a reader scroll', () => {
+    const { scroller, yielded, release } = renderDesktopScroller();
+    try {
+      const menu = document.createElement('div');
+      menu.setAttribute('role', 'menu');
+      const item = document.createElement('button');
+      menu.append(item);
+      scroller.append(menu);
+      fireEvent.scroll(scroller, { target: { scrollTop: 400 } });
+      fireEvent.keyDown(item, { key: 'ArrowDown' });
+      fireEvent.scroll(scroller, { target: { scrollTop: 900 } });
+      expect(yielded).not.toHaveBeenCalled();
+      menu.remove();
+    } finally {
+      release();
+    }
+  });
+
+  test('a scroll the feed makes itself does not ask the composer to yield', () => {
+    const { scroller, yielded, release } = renderDesktopScroller();
+    try {
+      fireEvent.scroll(scroller, { target: { scrollTop: 400 } });
+      fireEvent.scroll(scroller, { target: { scrollTop: 900 } });
+      expect(yielded).not.toHaveBeenCalled();
+    } finally {
+      release();
+    }
   });
 });

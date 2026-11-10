@@ -36,13 +36,21 @@ export interface AnimateFromTileOptions {
   ratio?: Ratio;
 }
 
-/** Fetch and upload a completed still for any feature that needs an upload id. */
+async function uploadTileSource(tile: DoneTile): Promise<string> {
+  const blob = await fetchImageBlob(tile);
+  const file = new File([blob], `${tile.id}.${tile.ext}`, { type: tile.mime });
+  return (await uploadRefImage(file)).id;
+}
+
+/**
+ * Fetch and upload a completed still for any feature that needs an upload id.
+ * One module-level function, so every caller holds the same identity: the
+ * handlers built on it (Animate, Tell Story) thread through the feed's
+ * memoized rows, and a fresh closure per render re-rendered every mounted
+ * batch whenever the app shell did.
+ */
 export function useUploadTileSource(): (tile: DoneTile) => Promise<string> {
-  return async (tile) => {
-    const blob = await fetchImageBlob(tile);
-    const file = new File([blob], `${tile.id}.${tile.ext}`, { type: tile.mime });
-    return (await uploadRefImage(file)).id;
-  };
+  return uploadTileSource;
 }
 
 /**

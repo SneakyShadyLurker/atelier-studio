@@ -6,11 +6,12 @@
  *
  *   ?case=feed      the virtualized Canvas feed: repeated batch headers, the
  *                   More menu, the Move popover (from More and from the
- *                   collection chip) and the BatchPrompt card, in the real
- *                   contain:strict scroller.
+ *                   collection chip) and the BatchPrompt card (from More's
+ *                   "Show full prompt"), in the real contain:strict scroller.
  *   ?case=composer  the Composer with its chip menus and the Prompt Picker
  *                   (anchored to the Composer) with its axis menus.
- *   ?case=edges     ChipSelect, BatchOverflowMenu, BatchPrompt and a long
+ *   ?case=edges     ChipSelect, BatchOverflowMenu, BatchPrompt (its card
+ *                   opened from the menu's "Show full prompt") and a long
  *                   data-tip host pinned to one viewport corner
  *                   (&at=top-left|top-right|bottom-left|bottom-right, and
  *                   &place= for the tip) to drive flips, mirroring and edge
@@ -248,6 +249,8 @@ function EdgesCase() {
   const [moreMounted, setMoreMounted] = useState(true);
   const [tipMounted, setTipMounted] = useState(true);
   const menuRef = useRef<HTMLButtonElement | null>(null);
+  const [promptTruncated, setPromptTruncated] = useState(false);
+  const [promptOpen, setPromptOpen] = useState(false);
   // Synchronous, so a browser check can sample the very next frames.
   useEffect(() => {
     Object.assign(harness, {
@@ -297,7 +300,13 @@ function EdgesCase() {
           </button>
         ) : null}
         <div style={{ width: 220 }}>
-          <BatchPrompt prompt={params.has('longPrompt') ? LONG_PROMPT.repeat(24) : LONG_PROMPT} />
+          <BatchPrompt
+            prompt={params.has('longPrompt') ? LONG_PROMPT.repeat(24) : LONG_PROMPT}
+            open={promptOpen}
+            onClose={() => { setPromptOpen(false); }}
+            onTruncatedChange={setPromptTruncated}
+            returnFocusRef={menuRef}
+          />
         </div>
       </div>
       <BatchOverflowMenu
@@ -306,7 +315,11 @@ function EdgesCase() {
         open={menuOpen}
         promptsEnabled
         readOnlyActions={false}
-        onSelect={() => { setMenuOpen(false); }}
+        promptTruncated={promptTruncated}
+        onSelect={(action) => {
+          setMenuOpen(false);
+          if (action === 'showPrompt') setPromptOpen(true);
+        }}
         onClose={() => { setMenuOpen(false); }}
       />
       <AppChrome />

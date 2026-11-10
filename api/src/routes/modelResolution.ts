@@ -33,7 +33,7 @@ function settingsResponse(c: Context<AppEnv>): ModelResolutionSettingsResponse {
     options: RENDER_RESOLUTIONS,
     models: visibleSizedEntries(c.var.config, c.var.userId).map((entry) => {
       const override = overrides.get(entry.model.id);
-      const { defaultTextToImage, defaultReference } = entry.resolutions;
+      const { defaultTextToImage, defaultReference, outputLongEdge } = entry.resolutions;
       return {
         modelId: entry.model.id,
         name: entry.model.name,
@@ -41,6 +41,8 @@ function settingsResponse(c: Context<AppEnv>): ModelResolutionSettingsResponse {
         textToImage: override?.textToImage ?? null,
         defaultReference,
         reference: defaultReference === null ? null : override?.reference ?? null,
+        outputLongEdge,
+        downscale: outputLongEdge !== null && override?.downscale !== false,
       };
     }),
   };
@@ -61,9 +63,12 @@ export const modelResolutionRoutes = new Hono<AppEnv>()
     }
     const parsed = await parseBody(c, ModelResolutionPutBody);
     if (!parsed.ok) return parsed.response;
-    const { defaultTextToImage, defaultReference } = entry.resolutions;
+    const { defaultTextToImage, defaultReference, outputLongEdge } = entry.resolutions;
     if (parsed.value.reference !== undefined && defaultReference === null) {
       return invalidFieldResponse(c, 'reference', 'model takes no reference pictures');
+    }
+    if (parsed.value.downscale !== undefined && outputLongEdge === null) {
+      return invalidFieldResponse(c, 'downscale', 'model delivers at render size');
     }
 
     writeModelResolutionOverride(

@@ -1,4 +1,4 @@
--- Atelier database schema — cumulative state after migrations 1-60.
+-- Atelier database schema — cumulative state after migrations 1-61.
 -- Reference only (migrate.ts is the runtime source of truth); the version
 -- in this header must track BINARY_SCHEMA_VERSION when migrations are added.
 --
@@ -312,14 +312,17 @@ CREATE TABLE user_text_models (
 CREATE INDEX idx_user_text_models_model ON user_text_models(text_model_id);
 
 -- Per-user render-size overrides per mode for local rows that offer them
--- (v60). NULL means the row's default for that mode; a row with both columns
--- NULL is deleted. updated_at is epoch ms.
+-- (v60), plus the "Downsize to 2K" switch (v61, only 0 = off is stored). NULL
+-- means the row's default; a row with all three setting columns NULL is
+-- deleted. updated_at is epoch ms. v61 added `downscale` with ALTER TABLE, so
+-- SQLite stores it after the PRIMARY KEY clause.
 CREATE TABLE user_model_resolution (
   user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   model_id      TEXT NOT NULL,
   text_to_image TEXT CHECK (text_to_image IN ('4mp', '8mp', '16mp')),
   reference     TEXT CHECK (reference IN ('4mp', '8mp', '16mp')),
   updated_at    INTEGER NOT NULL,
+  downscale     INTEGER CHECK (downscale IN (0, 1)),
   PRIMARY KEY (user_id, model_id)
 );
 

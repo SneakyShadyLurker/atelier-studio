@@ -17,6 +17,11 @@ const RESOLUTION_LABELS: Readonly<Record<RenderResolution, string>> = {
   '16mp': '16 MP',
 };
 
+/** "2K" for a 2048 px long edge, else the pixel count. */
+function longEdgeLabel(pixels: number): string {
+  return pixels === 2048 ? '2K' : `${pixels} px`;
+}
+
 function optionLabel(value: RenderResolution, fallback: RenderResolution): string {
   return value === fallback ? `${RESOLUTION_LABELS[value]} (default)` : RESOLUTION_LABELS[value];
 }
@@ -57,6 +62,35 @@ function ModeControl({ label, modelName, options, fallback, override, saving, on
   );
 }
 
+interface DownscaleControlProps {
+  readonly modelName: string;
+  readonly outputLongEdge: number;
+  readonly checked: boolean;
+  readonly saving: boolean;
+  readonly onChange: (downscale: boolean) => void;
+}
+
+/** "Downsize to 2K": on reduces the render to the row's long edge, off delivers it as rendered. */
+function DownscaleControl({ modelName, outputLongEdge, checked, saving, onChange }: DownscaleControlProps) {
+  const size = longEdgeLabel(outputLongEdge);
+  return (
+    <label className={styles.modeControl}>
+      <span className={styles.modeLabel} aria-hidden>Downsize to {size}</span>
+      <button
+        type="button"
+        role="switch"
+        className={styles.switch}
+        aria-checked={checked}
+        aria-label={`Downsize ${modelName} to ${size}`}
+        disabled={saving}
+        onClick={() => { onChange(!checked); }}
+      >
+        <span className={styles.switchThumb} aria-hidden="true" />
+      </button>
+    </label>
+  );
+}
+
 interface ResolutionRowProps {
   readonly model: ModelResolutionSetting;
   readonly options: readonly RenderResolution[];
@@ -65,8 +99,9 @@ interface ResolutionRowProps {
 }
 
 function ResolutionRow({ model, options, saving, onSave }: ResolutionRowProps) {
-  const { defaultReference } = model;
-  const tuned = model.textToImage !== null || model.reference !== null;
+  const { defaultReference, outputLongEdge } = model;
+  const downsizeOff = outputLongEdge !== null && !model.downscale;
+  const tuned = model.textToImage !== null || model.reference !== null || downsizeOff;
   return (
     <div className={`${styles.row} ${styles.sizeRow}`}>
       <div className={styles.rowMain}>
@@ -93,14 +128,27 @@ function ResolutionRow({ model, options, saving, onSave }: ResolutionRowProps) {
             onChange={(reference) => { onSave({ reference }); }}
           />
         )}
+        {outputLongEdge !== null && (
+          <DownscaleControl
+            modelName={model.name}
+            outputLongEdge={outputLongEdge}
+            checked={model.downscale}
+            saving={saving}
+            onChange={(downscale) => { onSave({ downscale }); }}
+          />
+        )}
         <button
           type="button"
           className={buttons.secondary}
           aria-label={`Reset ${model.name} to its default resolutions`}
           disabled={!tuned || saving}
           onClick={() => {
-            // A row without reference pictures has no reference mode to reset.
-            onSave(defaultReference === null ? { textToImage: null } : { textToImage: null, reference: null });
+            // Only the settings the row offers are reset.
+            onSave({
+              textToImage: null,
+              ...(defaultReference !== null ? { reference: null } : {}),
+              ...(outputLongEdge !== null ? { downscale: true } : {}),
+            });
           }}
         >
           Reset

@@ -271,6 +271,14 @@ for (const withReferences of [false, true]) {
     expect(state.prompt?.['2']?.inputs).toMatchObject({ width: size, height: size });
     expect(state.prompt?.['14']?.inputs.scale_by).toBe(128 / size);
   });
+
+  test(`with downsizing off the ${graph} graph delivers its rendered size at the requested dims`, async () => {
+    const { state, baseUrl } = startMock();
+    expect(await collect(sizedProviderFor(baseUrl), { ...REQUEST, ...extra, resolution: '8mp', nativeOutput: true }))
+      .toMatchObject([{ status: 'ready' }]);
+    expect(state.prompt?.['2']?.inputs).toMatchObject({ width: 512, height: 640 });
+    expect(state.prompt?.['14']?.inputs.scale_by).toBe(1);
+  });
 }
 
 test('a requested size on a row without sizes keeps the row dims', async () => {

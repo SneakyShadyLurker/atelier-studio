@@ -1497,18 +1497,44 @@ describe('migration 60 - user_model_resolution', () => {
       migrate(db, dataDir);
       expect(db.query('SELECT COUNT(*) AS count FROM schema_versions WHERE version = 60').get()).toEqual({ count: 1 });
       db.run("INSERT INTO users (id, created_at) VALUES ('u1', 1)");
-      db.run("INSERT INTO user_model_resolution VALUES ('u1', 'minimax-h3-image', '8mp', NULL, 1)");
-      db.run("INSERT INTO user_model_resolution VALUES ('u1', 'other-row', NULL, '16mp', 1)");
+      db.run("INSERT INTO user_model_resolution (user_id, model_id, text_to_image, reference, updated_at) VALUES ('u1', 'minimax-h3-image', '8mp', NULL, 1)");
+      db.run("INSERT INTO user_model_resolution (user_id, model_id, text_to_image, reference, updated_at) VALUES ('u1', 'other-row', NULL, '16mp', 1)");
       for (const bad of ['2mp', '8MP', '']) {
-        expect(() => db.query("INSERT INTO user_model_resolution VALUES ('u1', 'bad-text', ?, NULL, 1)").run(bad))
+        expect(() => db.query("INSERT INTO user_model_resolution (user_id, model_id, text_to_image, reference, updated_at) VALUES ('u1', 'bad-text', ?, NULL, 1)").run(bad))
           .toThrow(/CHECK constraint failed/i);
-        expect(() => db.query("INSERT INTO user_model_resolution VALUES ('u1', 'bad-ref', NULL, ?, 1)").run(bad))
+        expect(() => db.query("INSERT INTO user_model_resolution (user_id, model_id, text_to_image, reference, updated_at) VALUES ('u1', 'bad-ref', NULL, ?, 1)").run(bad))
           .toThrow(/CHECK constraint failed/i);
       }
-      expect(() => db.run("INSERT INTO user_model_resolution VALUES ('u1', 'minimax-h3-image', '4mp', NULL, 2)"))
+      expect(() => db.run("INSERT INTO user_model_resolution (user_id, model_id, text_to_image, reference, updated_at) VALUES ('u1', 'minimax-h3-image', '4mp', NULL, 2)"))
         .toThrow(/UNIQUE constraint failed/i);
       db.run("DELETE FROM users WHERE id = 'u1'");
       expect(db.query('SELECT COUNT(*) AS count FROM user_model_resolution').get()).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe('migration 61 - user_model_resolution.downscale', () => {
+  test('adds a nullable downscale column, keeps existing rows and accepts only 0 or 1', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'atelier-migration61-'));
+    const db = new Database(':memory:');
+    try {
+      migrate(db, dataDir, { targetVersion: 60 });
+      expect(db.query('SELECT MAX(version) AS version FROM schema_versions').get()).toEqual({ version: 60 });
+      db.run("INSERT INTO users (id, created_at) VALUES ('u1', 1)");
+      db.run("INSERT INTO user_model_resolution VALUES ('u1', 'minimax-h3-image', '8mp', '16mp', 7)");
+
+      migrate(db, dataDir);
+      expect(db.query('SELECT COUNT(*) AS count FROM schema_versions WHERE version = 61').get()).toEqual({ count: 1 });
+      expect(db.query('SELECT model_id, text_to_image, reference, updated_at, downscale FROM user_model_resolution').all())
+        .toEqual([{ model_id: 'minimax-h3-image', text_to_image: '8mp', reference: '16mp', updated_at: 7, downscale: null }]);
+      db.run("INSERT INTO user_model_resolution (user_id, model_id, downscale, updated_at) VALUES ('u1', 'off', 0, 1)");
+      db.run("INSERT INTO user_model_resolution (user_id, model_id, downscale, updated_at) VALUES ('u1', 'on', 1, 1)");
+      for (const bad of [2, -1]) {
+        expect(() => db.query("INSERT INTO user_model_resolution (user_id, model_id, downscale, updated_at) VALUES ('u1', 'bad', ?, 1)").run(bad))
+          .toThrow(/CHECK constraint failed/i);
+      }
     } finally {
       db.close();
     }

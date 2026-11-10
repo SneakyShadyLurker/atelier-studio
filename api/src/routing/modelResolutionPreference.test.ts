@@ -36,20 +36,20 @@ describe('model resolution preference', () => {
       expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image')).toBeUndefined();
       writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { textToImage: '8mp' }, H3, 1);
       writeModelResolutionOverride(db, 'bob', 'minimax-h3-image', { reference: '16mp' }, H3, 2);
-      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image')).toEqual({ textToImage: '8mp', reference: null });
+      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image')).toEqual({ textToImage: '8mp', reference: null, downscale: null });
 
       // An absent key leaves that mode unchanged.
       writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { reference: '8mp' }, H3, 3);
-      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image')).toEqual({ textToImage: '8mp', reference: '8mp' });
+      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image')).toEqual({ textToImage: '8mp', reference: '8mp', downscale: null });
       expect(db.query('SELECT updated_at FROM user_model_resolution WHERE user_id = ?').get('alice')).toEqual({ updated_at: 3 });
 
       writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { textToImage: null }, H3);
-      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image')).toEqual({ textToImage: null, reference: '8mp' });
+      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image')).toEqual({ textToImage: null, reference: '8mp', downscale: null });
       writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { reference: null }, H3);
       expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image')).toBeUndefined();
 
       expect([...readModelResolutionOverrides(db, 'bob')]).toEqual([
-        ['minimax-h3-image', { textToImage: null, reference: '16mp' }],
+        ['minimax-h3-image', { textToImage: null, reference: '16mp', downscale: null }],
       ]);
       expect(readModelResolutionOverrides(db, 'alice').size).toBe(0);
     });
@@ -68,9 +68,44 @@ describe('model resolution preference', () => {
   test('a row without a reference default keeps the reference column NULL', () => {
     withDb((db) => {
       writeModelResolutionOverride(db, 'alice', 'text-only', { textToImage: '4mp' }, NO_REFERENCE);
-      expect(readModelResolutionOverride(db, 'alice', 'text-only')).toEqual({ textToImage: '4mp', reference: null });
+      expect(readModelResolutionOverride(db, 'alice', 'text-only')).toEqual({ textToImage: '4mp', reference: null, downscale: null });
       writeModelResolutionOverride(db, 'alice', 'text-only', { textToImage: '8mp' }, NO_REFERENCE);
       expect(rowCount(db)).toBe(0);
+    });
+  });
+
+  test('downsizing off stores 0, on stores NULL, and an all-NULL row is deleted', () => {
+    withDb((db) => {
+      writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { downscale: false }, H3, 1);
+      expect(db.query('SELECT text_to_image, reference, downscale FROM user_model_resolution').get())
+        .toEqual({ text_to_image: null, reference: null, downscale: 0 });
+      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image'))
+        .toEqual({ textToImage: null, reference: null, downscale: false });
+      expect(readModelResolutionOverride(db, 'bob', 'minimax-h3-image')).toBeUndefined();
+
+      writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { downscale: true }, H3, 2);
+      expect(rowCount(db)).toBe(0);
+    });
+  });
+
+  test('a resolution override survives a downscale write and vice versa', () => {
+    withDb((db) => {
+      writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { textToImage: '8mp' }, H3);
+      writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { downscale: false }, H3);
+      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image'))
+        .toEqual({ textToImage: '8mp', reference: null, downscale: false });
+
+      writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { reference: '8mp' }, H3);
+      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image'))
+        .toEqual({ textToImage: '8mp', reference: '8mp', downscale: false });
+
+      writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { textToImage: null, reference: null }, H3);
+      expect(readModelResolutionOverride(db, 'alice', 'minimax-h3-image'))
+        .toEqual({ textToImage: null, reference: null, downscale: false });
+
+      writeModelResolutionOverride(db, 'alice', 'minimax-h3-image', { textToImage: '4mp', downscale: true }, H3);
+      expect(db.query('SELECT text_to_image, reference, downscale FROM user_model_resolution').get())
+        .toEqual({ text_to_image: '4mp', reference: null, downscale: null });
     });
   });
 });

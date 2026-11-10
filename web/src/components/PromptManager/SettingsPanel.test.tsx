@@ -574,10 +574,11 @@ describe('SettingsPanel model steps', () => {
 
 const H3_RESOLUTION: ModelResolutionSetting = {
   modelId: 'minimax-h3-image', name: 'MiniMax H3 Image', defaultTextToImage: '16mp', textToImage: null, defaultReference: '4mp', reference: null,
+  outputLongEdge: 2048, downscale: true,
 };
 const RESOLUTION_MODELS: readonly ModelResolutionSetting[] = [H3_RESOLUTION];
 const TEXT_ONLY_RESOLUTION_MODELS: readonly ModelResolutionSetting[] = [
-  { modelId: 'text-only', name: 'Text Only', defaultTextToImage: '8mp', textToImage: '4mp', defaultReference: null, reference: null },
+  { modelId: 'text-only', name: 'Text Only', defaultTextToImage: '8mp', textToImage: '4mp', defaultReference: null, reference: null, outputLongEdge: null, downscale: false },
 ];
 
 function renderResolution(models: readonly ModelResolutionSetting[] = RESOLUTION_MODELS, putStatus = 200) {
@@ -598,6 +599,7 @@ function renderResolution(models: readonly ModelResolutionSetting[] = RESOLUTION
                 ...m,
                 ...(body.textToImage !== undefined ? { textToImage: body.textToImage === m.defaultTextToImage ? null : body.textToImage } : {}),
                 ...(body.reference !== undefined ? { reference: body.reference === m.defaultReference ? null : body.reference } : {}),
+                ...(body.downscale !== undefined ? { downscale: body.downscale } : {}),
               }
             : m)),
         };
@@ -661,11 +663,14 @@ describe('SettingsPanel render resolution', () => {
     });
   });
 
-  test('Reset clears both modes', async () => {
-    const fetchMock = renderResolution([{ ...H3_RESOLUTION, textToImage: '8mp', reference: '16mp' }]);
+  test('Reset clears both modes and turns downsizing back on', async () => {
+    const fetchMock = renderResolution([{ ...H3_RESOLUTION, textToImage: '8mp', reference: '16mp', downscale: false }]);
     fireEvent.click(await screen.findByRole('button', { name: 'Reset MiniMax H3 Image to its default resolutions' }));
     await waitFor(() => {
-      expect(resolutionPuts(fetchMock)).toEqual([{ textToImage: null, reference: null }]);
+      expect(resolutionPuts(fetchMock)).toEqual([{ textToImage: null, reference: null, downscale: true }]);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Downsize MiniMax H3 Image to 2K' }).getAttribute('aria-checked')).toBe('true');
     });
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Reset MiniMax H3 Image to its default resolutions' }).hasAttribute('disabled')).toBe(true);
@@ -690,10 +695,46 @@ describe('SettingsPanel render resolution', () => {
     expect(await screen.findByRole('button', { name: 'Text to image resolution for Text Only, currently 4 MP' })).toBeTruthy();
     expect(screen.queryByText('With reference pictures')).toBeNull();
     expect(screen.queryByRole('button', { name: /^With reference pictures resolution/ })).toBeNull();
+    // It delivers at render size: no "Downsize to 2K" switch.
+    expect(screen.queryByRole('switch')).toBeNull();
+    expect(screen.queryByText(/^Downsize to/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Reset Text Only to its default resolutions' }));
     await waitFor(() => {
       expect(resolutionPuts(fetchMock)).toEqual([{ textToImage: null }]);
     });
+  });
+
+  test('the "Downsize to 2K" switch is on by default and turning it off saves only it', async () => {
+    const fetchMock = renderResolution();
+    const toggle = await screen.findByRole('switch', { name: 'Downsize MiniMax H3 Image to 2K' });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByText('Downsize to 2K')).toBeTruthy();
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(resolutionPuts(fetchMock)).toEqual([{ downscale: false }]);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Downsize MiniMax H3 Image to 2K' }).getAttribute('aria-checked')).toBe('false');
+    });
+    // Off is not the default, so Reset becomes available.
+    expect(screen.getByRole('button', { name: 'Reset MiniMax H3 Image to its default resolutions' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  test('a failed switch save rolls back and shows an error toast', async () => {
+    renderResolution(RESOLUTION_MODELS, 500);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Downsize MiniMax H3 Image to 2K' }));
+    await waitFor(() => {
+      expect(useAtelierStore.getState().toasts.some((toast) => toast.tone === 'error')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Downsize MiniMax H3 Image to 2K' }).getAttribute('aria-checked')).toBe('true');
+    });
+  });
+
+  test('another delivered long edge is labelled in pixels', async () => {
+    renderResolution([{ ...H3_RESOLUTION, outputLongEdge: 1536 }]);
+    expect(await screen.findByRole('switch', { name: 'Downsize MiniMax H3 Image to 1536 px' })).toBeTruthy();
+    expect(screen.getByText('Downsize to 1536 px')).toBeTruthy();
   });
 
   test('is hidden when the endpoint lists no models', async () => {

@@ -47,6 +47,12 @@ export interface ProviderRequest {
    * the row's default size for that mode.
    */
   resolution?: RenderResolution;
+  /**
+   * Set only when the user turned "Downsize to 2K" off for this model,
+   * resolved once per batch at dispatch: the image is delivered at the size
+   * it was rendered instead of the row's `outputLongEdge`.
+   */
+  nativeOutput?: true;
 }
 
 export interface ProviderProgress {

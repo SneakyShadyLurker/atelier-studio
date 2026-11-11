@@ -182,36 +182,43 @@ describe('MiniMax H3 Image workflow', () => {
     expect(single(graph, 'VAELoader').inputs.vae_name).toBe('minimax_h3_image_vae_fp16.safetensors');
   });
 
-  test('samples euler / simple at CFG 1 with the substituted seed and steps through the attention patch', () => {
+  test('samples LCM with the 1.1 to 0.9 noise ramp on simple sigmas, with the substituted seed and steps', () => {
     const graph = build();
-    const sampler = single(graph, 'KSampler');
-    expect(sampler.inputs).toMatchObject({
-      seed: params.seed,
-      steps: 6,
-      cfg: 1,
-      sampler_name: 'euler',
-      scheduler: 'simple',
-      denoise: 1,
+    const sampler = single(graph, 'SamplerCustomAdvanced');
+    expect(Object.values(graph).some((n) => n.class_type === 'KSampler')).toBe(false);
+    // The checkpoint is step-distilled: LCM re-noises between steps, where an
+    // ODE solver such as Euler over-sharpens skin and ages faces.
+    expect(linked(graph, sampler, 'sampler')).toEqual({
+      class_type: 'SamplerLCM',
+      inputs: { s_noise: 1.1, s_noise_end: 0.9, noise_clip_std: 0 },
     });
-    const attention = linked(graph, sampler, 'model');
-    expect(attention.class_type).toBe('ModelAttentionBackend');
-    expect(attention.inputs.attention).toBe('comfy kitchen attention');
-    expect(linked(graph, attention, 'model').class_type).toBe('UNETLoader');
+    expect(linked(graph, sampler, 'noise')).toEqual({ class_type: 'RandomNoise', inputs: { noise_seed: params.seed } });
+    const sigmas = linked(graph, sampler, 'sigmas');
+    expect(sigmas.class_type).toBe('BasicScheduler');
+    expect(sigmas.inputs).toMatchObject({ scheduler: 'simple', steps: 6, denoise: 1 });
+    const guider = linked(graph, sampler, 'guider');
+    expect(guider.class_type).toBe('BasicGuider');
+    for (const consumer of [sigmas, guider]) {
+      const attention = linked(graph, consumer, 'model');
+      expect(attention.class_type).toBe('ModelAttentionBackend');
+      expect(attention.inputs.attention).toBe('comfy kitchen attention');
+      expect(linked(graph, attention, 'model').class_type).toBe('UNETLoader');
+    }
   });
 
-  test('the conditioning node takes the prompt and size and feeds positive, zeroed negative and latent', () => {
+  test('the conditioning node takes the prompt and size and feeds the guidance-free guider and the latent', () => {
     const graph = build();
-    const sampler = single(graph, 'KSampler');
+    const sampler = single(graph, 'SamplerCustomAdvanced');
     const conditioning = single(graph, 'MiniMaxH3ImageConditioning');
     expect(conditioning.inputs).toMatchObject({ prompt: params.prompt, width: params.width, height: params.height });
     expect(linked(graph, conditioning, 'clip').class_type).toBe('CLIPLoader');
     expect(linked(graph, conditioning, 'vae').class_type).toBe('VAELoader');
-    expect(linked(graph, sampler, 'positive')).toBe(conditioning);
+    expect(linked(graph, single(graph, 'BasicGuider'), 'conditioning')).toBe(conditioning);
     expect(linked(graph, sampler, 'latent_image', 1)).toBe(conditioning);
-    const negative = linked(graph, sampler, 'negative');
-    expect(negative.class_type).toBe('ConditioningZeroOut');
-    expect(linked(graph, negative, 'conditioning')).toBe(conditioning);
-    expect(Object.values(graph).some((n) => n.class_type === 'CLIPTextEncode')).toBe(false);
+    // Guidance is fixed at 1, so the graph carries no negative branch at all.
+    for (const absent of ['CLIPTextEncode', 'ConditioningZeroOut', 'CFGGuider']) {
+      expect(Object.values(graph).some((n) => n.class_type === absent)).toBe(false);
+    }
   });
 
   test('decodes into a single SaveImageWebsocket terminal with every link resolving', () => {
@@ -225,7 +232,7 @@ describe('MiniMax H3 Image workflow', () => {
     expect(Object.values(graph).filter((n) => n.class_type === 'ImageScaleBy')).toHaveLength(1);
     const decode = linked(graph, downscale, 'image');
     expect(decode.class_type).toBe('VAEDecode');
-    expect(linked(graph, decode, 'samples').class_type).toBe('KSampler');
+    expect(linked(graph, decode, 'samples').class_type).toBe('SamplerCustomAdvanced');
     expect(linked(graph, decode, 'vae').class_type).toBe('VAELoader');
     for (const node of Object.values(graph)) {
       for (const value of Object.values(node.inputs)) {

@@ -48,40 +48,29 @@
       ]
     }
   },
-  "5": {
-    "class_type": "ConditioningZeroOut",
-    "inputs": {
-      "conditioning": [
-        "4",
-        0
-      ]
-    }
-  },
   "7": {
-    "class_type": "KSampler",
+    "class_type": "SamplerCustomAdvanced",
     "inputs": {
-      "model": [
-        "10",
+      "noise": [
+        "13",
         0
       ],
-      "positive": [
-        "4",
+      "guider": [
+        "14",
         0
       ],
-      "negative": [
-        "5",
+      "sampler": [
+        "16",
+        0
+      ],
+      "sigmas": [
+        "15",
         0
       ],
       "latent_image": [
         "4",
         1
-      ],
-      "seed": "{{seed}}",
-      "steps": "{{steps}}",
-      "cfg": 1.0,
-      "sampler_name": "euler",
-      "scheduler": "simple",
-      "denoise": 1.0
+      ]
     }
   },
   "8": {
@@ -143,6 +132,45 @@
       ],
       "upscale_method": "lanczos",
       "scale_by": "{{outputScale}}"
+    }
+  },
+  "13": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": "{{seed}}"
+    }
+  },
+  "14": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": [
+        "10",
+        0
+      ],
+      "conditioning": [
+        "4",
+        0
+      ]
+    }
+  },
+  "15": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "10",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": "{{steps}}",
+      "denoise": 1.0
+    }
+  },
+  "16": {
+    "class_type": "SamplerLCM",
+    "inputs": {
+      "s_noise": 1.1,
+      "s_noise_end": 0.9,
+      "noise_clip_std": 0.0
     }
   }
 }

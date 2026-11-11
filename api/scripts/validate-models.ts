@@ -91,27 +91,45 @@ function checkMoss(graph: Graph, model: LocalModelDef, fail: (reason: string) =>
 // latent, and the model's ComfyUI implementation renders batch size 1 only.
 // The same node takes the reference images: `images.image_N` is <Picture N> in
 // the prompt, and with the VAE connected each one is also a reference latent.
+// The checkpoint is step-distilled, so it samples with LCM, which re-noises
+// between steps: an ODE solver such as Euler on the same sigmas over-sharpens
+// skin and ages faces. Guidance is fixed at 1, so the guider takes no negative.
 function checkH3Image(graph: Graph, text: string, kind: string, model: LocalModelDef, fail: (reason: string) => void): void {
   if (model.requiredClipType !== 'minimax') fail('h3image rows require requiredClipType minimax');
   if (text.includes('{{count}}') || nodesOf(graph, 'RepeatLatentBatch').length > 0) {
     fail('h3image graphs render one image: MiniMax H3 supports batch size 1 only');
   }
   if (nodesOf(graph, 'CLIPTextEncode').length > 0) fail('h3image graphs encode through MiniMaxH3ImageConditioning, not CLIPTextEncode');
-  const samplers = nodesOf(graph, 'KSampler');
+  const samplers = nodesOf(graph, 'SamplerCustomAdvanced');
   const sampler = samplers[0];
-  if (samplers.length !== 1 || sampler === undefined) { fail('h3image graphs run exactly one KSampler'); return; }
-  const { sampler_name, scheduler, cfg, denoise } = sampler.inputs;
-  if (sampler_name !== 'euler' || scheduler !== 'simple' || cfg !== 1 || denoise !== 1) {
-    fail('h3image KSampler runs euler / simple at cfg 1.0 and denoise 1.0');
+  if (samplers.length !== 1 || sampler === undefined || nodesOf(graph, 'KSampler').length > 0) {
+    fail('h3image graphs run exactly one SamplerCustomAdvanced and no KSampler');
+    return;
+  }
+  const lcm = linkedNode(graph, sampler.inputs.sampler);
+  if (lcm?.class_type !== 'SamplerLCM' || lcm.inputs.s_noise !== 1.1 || lcm.inputs.s_noise_end !== 0.9 || lcm.inputs.noise_clip_std !== 0) {
+    fail('h3image graphs sample with SamplerLCM at s_noise 1.1 to 0.9 without noise clipping');
+  }
+  const sigmas = linkedNode(graph, sampler.inputs.sigmas);
+  if (nodesOf(graph, 'BasicScheduler').length !== 1 || sigmas?.class_type !== 'BasicScheduler'
+    || sigmas.inputs.scheduler !== 'simple' || sigmas.inputs.steps !== '{{steps}}' || sigmas.inputs.denoise !== 1) {
+    fail('h3image sigmas come from one BasicScheduler on simple at {{steps}} and denoise 1.0');
+  }
+  const noise = linkedNode(graph, sampler.inputs.noise);
+  if (nodesOf(graph, 'RandomNoise').length !== 1 || noise?.class_type !== 'RandomNoise' || noise.inputs.noise_seed !== '{{seed}}') {
+    fail('h3image noise comes from one RandomNoise seeded by {{seed}}');
   }
   const conditioning = nodesOf(graph, 'MiniMaxH3ImageConditioning');
+  const guider = linkedNode(graph, sampler.inputs.guider);
+  const positive = guider?.inputs.conditioning;
+  if (nodesOf(graph, 'BasicGuider').length !== 1 || nodesOf(graph, 'CFGGuider').length > 0 || guider?.class_type !== 'BasicGuider'
+    || linkedNode(graph, positive)?.class_type !== 'MiniMaxH3ImageConditioning' || !Array.isArray(positive) || positive[1] !== 0) {
+    fail("h3image graphs run one guidance-free BasicGuider on the conditioning node's output 0");
+  }
   const latent = sampler.inputs.latent_image;
   if (conditioning.length !== 1 || linkedNode(graph, latent)?.class_type !== 'MiniMaxH3ImageConditioning'
     || !Array.isArray(latent) || latent[1] !== 1) {
     fail('one MiniMaxH3ImageConditioning feeds the sampler latent from output 1');
-  }
-  if (linkedNode(graph, sampler.inputs.negative)?.class_type !== 'ConditioningZeroOut') {
-    fail('h3image graphs take a ConditioningZeroOut negative');
   }
   const pictures = Object.entries(conditioning[0]?.inputs ?? {}).filter(([name]) => name.startsWith('images.'));
   const slots = kind === 'reference' ? REFERENCE_IMAGE_PLACEHOLDERS.slice(0, model.maxReferenceImages ?? 1) : [];

@@ -124,15 +124,82 @@ describe('validate-models', () => {
       });
       expect(result.code).toBe(1);
       expect(result.stderr).toContain(`${graphPath}: h3image graphs encode through MiniMaxH3ImageConditioning, not CLIPTextEncode`);
-      expect(result.stderr).toContain(`${graphPath}: h3image graphs take a ConditioningZeroOut negative`);
     });
 
-    test('a sampler off euler / simple / cfg 1.0 exits 1', () => {
-      const { result, graphPath } = h3Violation((_graph, sampler) => {
-        sampler.inputs.cfg = 3.5;
+    const LCM = 'h3image graphs sample with SamplerLCM at s_noise 1.1 to 0.9 without noise clipping';
+    const node = (graph: H3Graph, classType: string): H3Graph[string] => {
+      const found = Object.values(graph).find((candidate) => candidate.class_type === classType);
+      if (found === undefined) throw new Error(`minimax-h3-image graph has no ${classType}`);
+      return found;
+    };
+
+    test.each(['workflow.json', 'reference.json'])('a KSampler in %s exits 1', (file) => {
+      const { result, graphPath } = h3Violation((graph) => {
+        graph['11'] = {
+          class_type: 'KSampler',
+          inputs: { model: ['10', 0], positive: ['4', 0], negative: ['4', 0], latent_image: ['4', 1], seed: '{{seed}}', steps: '{{steps}}', cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: 1 },
+        };
+      }, file);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image graphs run exactly one SamplerCustomAdvanced and no KSampler`);
+    });
+
+    test('an ODE sampler in place of SamplerLCM exits 1', () => {
+      const { result, graphPath } = h3Violation((graph) => {
+        const lcm = node(graph, 'SamplerLCM');
+        lcm.class_type = 'KSamplerSelect';
+        lcm.inputs = { sampler_name: 'euler' };
       });
       expect(result.code).toBe(1);
-      expect(result.stderr).toContain(`${graphPath}: h3image KSampler runs euler / simple at cfg 1.0 and denoise 1.0`);
+      expect(result.stderr).toContain(`${graphPath}: ${LCM}`);
+    });
+
+    test('a noise ramp off 1.1 to 0.9 or clipped noise exits 1', () => {
+      for (const [input, value] of [['s_noise', 1], ['s_noise_end', 1.1], ['noise_clip_std', 2]] as const) {
+        const { result, graphPath } = h3Violation((graph) => { node(graph, 'SamplerLCM').inputs[input] = value; });
+        expect(result.code).toBe(1);
+        expect(result.stderr).toContain(`${graphPath}: ${LCM}`);
+      }
+    });
+
+    const SIGMAS = 'h3image sigmas come from one BasicScheduler on simple at {{steps}} and denoise 1.0';
+
+    test('sigmas off simple or partially denoised exit 1', () => {
+      for (const [input, value] of [['scheduler', 'beta'], ['denoise', 0.5]] as const) {
+        const { result, graphPath } = h3Violation((graph) => { node(graph, 'BasicScheduler').inputs[input] = value; });
+        expect(result.code).toBe(1);
+        expect(result.stderr).toContain(`${graphPath}: ${SIGMAS}`);
+      }
+    });
+
+    // The catalog already rejects a graph that drops a placeholder, so these
+    // park it on an input no rule reads; only the value clause can then fail.
+    test('a fixed step count on the sampler sigmas exits 1', () => {
+      const { result, graphPath } = h3Violation((graph) => {
+        node(graph, 'BasicScheduler').inputs.steps = 6;
+        node(graph, 'SamplerLCM').inputs.parked = '{{steps}}';
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: ${SIGMAS}`);
+    });
+
+    test('a CFG guider exits 1', () => {
+      const { result, graphPath } = h3Violation((graph) => {
+        const guider = node(graph, 'BasicGuider');
+        guider.class_type = 'CFGGuider';
+        guider.inputs = { model: ['10', 0], positive: ['4', 0], negative: ['4', 0], cfg: 3.5 };
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image graphs run one guidance-free BasicGuider on the conditioning node's output 0`);
+    });
+
+    test('sampler noise not seeded from {{seed}} exits 1', () => {
+      const { result, graphPath } = h3Violation((graph) => {
+        node(graph, 'RandomNoise').inputs.noise_seed = 7;
+        node(graph, 'SamplerLCM').inputs.parked = '{{seed}}';
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image noise comes from one RandomNoise seeded by {{seed}}`);
     });
 
     test('a latent not taken from the conditioning node exits 1', () => {

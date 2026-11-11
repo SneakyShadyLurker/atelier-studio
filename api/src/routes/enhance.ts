@@ -197,8 +197,8 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
             if (chunk.type === 'delta') {
               send('delta', { text: chunk.text });
             } else if (chunk.type === 'reasoning') {
-              // The enhance stream carries text only; the client renders deltas
-              // as they land, so there is no waiting state to narrate.
+              // The enhance stream carries text only; the client accumulates the
+              // deltas and generates from the finished rewrite.
               continue;
             } else if (chunk.type === 'done') {
               send('done', {});

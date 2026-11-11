@@ -156,7 +156,9 @@ describe('H3_IMAGE_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image optimiser', () => {
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('as one frozen moment');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('apparent age as a number or a decade');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('name the build outright');
-    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Do not add skin-realism cues');
+    // Skin wording is the user's call on this model.
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain('skin-realism');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain('smooth, clear, even-toned skin');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('say which hand touches what');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('Put literal image text verbatim in double quotes');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('roughly 120 to 300 words');
@@ -194,9 +196,10 @@ describe('H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image reference-edit wr
     expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('with the rest of the source image unchanged');
   });
 
-  it('keeps the H3 Image person, skin and exclusion rules and the plain-text output rule', () => {
+  it('keeps the H3 Image person and exclusion rules and the plain-text output rule, and leaves skin to the user', () => {
     expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('apparent age as a number or a decade');
-    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('Do not add skin-realism cues');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).not.toContain('skin-realism');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).not.toContain('smooth, clear, even-toned skin');
     expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('state them in one plain closing sentence');
     expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('Return only the final enhanced prompt');
     expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).not.toContain('Krea');

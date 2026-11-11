@@ -151,7 +151,9 @@ describe('buildAiFillSystemPrompt MiniMax H3 Image target', () => {
     expect(h3).toContain('one plain closing statement of what does not appear');
     expect(h3).toContain('State the subject\'s apparent age as a number or a decade');
     expect(h3).toContain('state the subject\'s build plainly');
-    expect(h3).toContain('Never add skin-realism cues');
+    // Skin wording is the user's call on this model.
+    expect(h3).not.toContain('skin-realism');
+    expect(h3).not.toContain('smooth, clear, even-toned skin');
     expect(h3).not.toContain('State exclusions POSITIVELY');
     expect(h3).toContain('verbatim in double quotes');
     expect(h3).not.toContain('Target model: Krea 2');

@@ -85,6 +85,9 @@ export type PreparationUnit =
 /** Motion-enhance context forwarded with every h3-motion format request. */
 export type MotionFields = Pick<EnhancePromptRequest, 'sourcePrompt' | 'durationFrames' | 'extendContext'>;
 
+/** The press's references and ratio, forwarded with every Enhance rewrite request. */
+export type EnhanceFields = Pick<EnhancePromptRequest, 'refImageIds' | 'ratio'>;
+
 /** Everything the preparation functions read, instead of closing over the hook. */
 export interface PrepareContext {
   /** Undefined when the library is gated: ai-fill tokens stay literal. */
@@ -97,6 +100,9 @@ export interface PrepareContext {
   /** The target model takes an h3-motion enhanced prompt. */
   readonly wantsMotion: boolean;
   readonly motionFields: MotionFields;
+  /** An Enhance press: the item's resolved text is rewritten before it fires. */
+  readonly wantsEnhance: boolean;
+  readonly enhanceFields: EnhanceFields;
   /** Cancels in-flight fills, formats and their retry backoff (Stop, unmount). */
   readonly signal: AbortSignal;
   readonly addToast: (text: string, tone?: ToastMessage['tone']) => string;
@@ -192,12 +198,14 @@ export interface DrainPumpContext {
    */
   readonly canTake: (roll: QueuedRoll) => boolean;
   /**
-   * The drain-starting press's settings. A taken roll without its own binds to
-   * them when the pump first takes it, and keeps them through restoration,
-   * reload and later passes. Absent: such a roll stays unbound and
-   * `makeRequest` decides.
+   * The settings library rolls bind to, read every pass: the drain-starting
+   * press's, or those of a Generate press that lifted the limit of a drain
+   * continuing an Enhance press. A taken roll without its own binds to them
+   * when the pump first takes it, and keeps them through restoration, reload
+   * and later passes. Absent: such a roll stays unbound and `makeRequest`
+   * decides.
    */
-  readonly defaultSubmission?: RollSubmission;
+  readonly defaultSubmission?: RollSubmission | undefined;
   readonly generate: (request: GenerateRequest, options?: { onAccepted?: (batchId: string) => void }) => Promise<unknown>;
   readonly addToast: (
     text: string,

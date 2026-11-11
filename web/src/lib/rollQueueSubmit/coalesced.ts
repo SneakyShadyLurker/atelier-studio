@@ -7,7 +7,7 @@ import { isAbortError } from '../abort';
 import { buildAiFillRequest, type AiFillRequestBuild } from '../resolveAiFillItem';
 import { nextSeed } from '../seed';
 import { admitPrepared, turnOrAbort, type AdmissionContext } from './orderedSubmission';
-import { formatItem, groupAiFillEntriesByModel, itemModelId, prepareItem } from './prepare';
+import { finishItem, groupAiFillEntriesByModel, itemModelId, prepareItem } from './prepare';
 import type { BufferedFireItem, PrepareContext, SingleFillOutcome } from './types';
 
 export interface CoalescedFlushContext {
@@ -23,9 +23,10 @@ export interface CoalescedFlushContext {
   /**
    * Starts a queue-only drain for the items this flush queued, unless one
    * runs. It pins the feed only as the queued press would, never by the view
-   * current at restart.
+   * current at restart. `boundOnly`: the queued press was an Enhance press,
+   * so the restart takes only rolls that carry their own settings.
    */
-  readonly ensureDrain: (pinFeedScope: () => void) => void;
+  readonly ensureDrain: (pinFeedScope: () => void, boundOnly: boolean) => void;
 }
 
 interface FastBatchReadyItem {
@@ -58,10 +59,13 @@ export async function runCoalescedFlush(
   const flushCtx = ctx.prepareContext(flushSignal);
   ctx.registerFlushController(flushController);
   const quotaWasStopped = () => fast.quotaStopped;
+  // Enhance presses in the flush give it the Enhance button's working state.
+  const enhancing = items.some(({ item }) => item.submission?.wantsEnhance === true);
   const endResolvingOnce = () => {
     if (resolvingEnded) return;
     resolvingEnded = true;
     useAtelierStore.getState().endResolving();
+    if (enhancing) useAtelierStore.getState().endResolvingEnhance();
   };
   // Each press pins the feed scope it was made in, never the flush's, and
   // queues only while it is still owned: a POST refused after Clear, a
@@ -83,7 +87,7 @@ export async function runCoalescedFlush(
       ctx.addToast(CAPACITY_TOAST, 'soft');
     }
     // After Stop the item stays queued for the next press, as a stopped drain leaves it.
-    if (!flushSignal.aborted) ctx.ensureDrain(buffered.pinFeedScope);
+    if (!flushSignal.aborted) ctx.ensureDrain(buffered.pinFeedScope, buffered.item.submission?.wantsEnhance === true);
   };
 
   // undefined: never prepared (Stop, quota, unmount), so nothing is submitted.
@@ -185,7 +189,10 @@ export async function runCoalescedFlush(
           if (!outcome.ok) {
             await prepareSingle(entry.buffered);
           } else {
-            complete(entry.buffered, await formatItem(flushCtx, { ...entry.buffered.item, text: outcome.prompt }));
+            const finished = await finishItem(flushCtx, { ...entry.buffered.item, text: outcome.prompt }, null);
+            // Quota from the rewrite stops the flush, as quota from a fill does.
+            if (finished !== null && 'preserve' in finished) fast.quotaStopped = true;
+            complete(entry.buffered, finished);
           }
           if (quotaWasStopped()) break;
         }
@@ -247,6 +254,7 @@ export async function runCoalescedFlush(
 
   try {
     useAtelierStore.getState().beginResolving();
+    if (enhancing) useAtelierStore.getState().beginResolvingEnhance();
     await Promise.all([prepareAll(), ...items.map(admit)]);
   } finally {
     ctx.unregisterFlushController(flushController);

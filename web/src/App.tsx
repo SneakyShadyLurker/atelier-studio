@@ -403,7 +403,7 @@ function AppContent() {
     generateFn(request).catch(() => { /* handled in onError */ });
   }, [generateFn]);
 
-  const { submitDraft, submitPrepared, stopDraining, retryingPrepared } = useRollQueueSubmit({
+  const { submitDraft, submitEnhanced, submitPrepared, stopDraining, retryingPrepared } = useRollQueueSubmit({
     draft,
     effectiveModel,
     effectiveRatio,
@@ -565,13 +565,7 @@ function AppContent() {
           addToast(promptsEnabled ? 'Switch to an image model to reopen templates' : 'Templates aren’t available right now', 'soft', 1800);
           return;
         }
-        const opened = reopenBatchInPicker(batch.provenance);
-        if (!opened) {
-          // Picker render is gated `promptPickerOpen && !enhancing`; opening
-          // mid-enhance would hide it then pop it open when enhance ends.
-          addToast('Finish enhancing first', 'soft', 1800);
-          return;
-        }
+        reopenBatchInPicker(batch.provenance);
         setComposerExpanded(true); // phone: surface the composer so the now-open picker is visible
         addToast('Reopened in picker', 'soft', 1800);
       }
@@ -912,6 +906,7 @@ function AppContent() {
                 onDurationChange={onDurationChange}
                 onCountChange={onCountChange}
                 onSubmit={submitDraft}
+                onSubmitEnhanced={submitEnhanced}
                 onTellStory={handleComposerTellStory}
                 onStopDraining={stopDraining}
                 retryingPrepared={retryingPrepared}

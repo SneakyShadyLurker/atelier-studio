@@ -804,9 +804,7 @@ export default function PromptPicker({
                         data.variableLists,
                         { seed: live.seed, pins: { ...live.pins } },
                       );
-                      // A library paste is a new brief: drop the Enhance anchor
-                      // so Undo can't swap it for an earlier, unrelated prompt.
-                      setDraft({ prompt, enhanceAnchor: undefined, enhancedText: undefined });
+                      setDraft({ prompt });
                       requestClose();
                     }}
                   >

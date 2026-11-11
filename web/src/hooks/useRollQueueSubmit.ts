@@ -30,7 +30,7 @@ import { nextSeed } from '../lib/seed';
 import { UNCERTAIN_SUBMISSION_NOTICE } from '../lib/errorCopy';
 import { inFlightRollIds } from '../lib/rollQueuePersist';
 import { makeSubmissionRequest } from '../lib/rollQueueSubmit/request';
-import { prepareItem } from '../lib/rollQueueSubmit/prepare';
+import { enhanceFieldsOf, prepareItem } from '../lib/rollQueueSubmit/prepare';
 import { runCoalescedFlush } from '../lib/rollQueueSubmit/coalesced';
 import {
   admitPrepared,
@@ -81,6 +81,11 @@ interface UseRollQueueSubmitArgs {
 
 interface UseRollQueueSubmitResult {
   submitDraft: () => void;
+  /**
+   * An Enhance press: the composer prompt resolved with a fresh roll, filled,
+   * rewritten through /enhance-prompt, then submitted. The draft is untouched.
+   */
+  submitEnhanced: () => void;
   /** A standalone replay is retrying capacity; does not own the paused queue. */
   retryingPrepared: boolean;
   /** Already-resolved historical inputs, admitted in the same press order. */
@@ -104,6 +109,17 @@ interface SubmitDraftOptions {
   readonly coalescedItems?: readonly BufferedFireItem[];
   /** The feed pin of the press an internal restart continues. */
   readonly pinFeedScope?: () => void;
+  /**
+   * An Enhance press: the Composer prompt is rewritten before it fires. It
+   * admits that one item only and never binds library rolls waiting in the
+   * queue, which stay there for a Generate press.
+   */
+  readonly enhance?: boolean;
+  /**
+   * A queue-only restart that continues an Enhance press: it takes only rolls
+   * that carry their own press's settings, as that press did.
+   */
+  readonly boundOnly?: boolean;
 }
 
 export function useRollQueueSubmit({
@@ -125,6 +141,17 @@ export function useRollQueueSubmit({
   // Settles when the latest drain has finished. A stopped drain may still await
   // one submission's answer; the next drain waits for it before taking the queue.
   const drainSettledRef = useRef<Promise<void> | null>(null);
+  // The settings the running drain binds library rolls to, or null while it
+  // takes only rolls carrying their own. A plain Generate press authorizes
+  // library rolls: the drain it starts binds them to it. A drain that only
+  // continues an Enhance press (`drainEnhanceOnlyRef`) takes none by itself,
+  // and binds them to a Generate press it meets while that press is
+  // unfinished. A drain whose composer cannot carry them (BYOK, video, an
+  // invalid composer) leaves them queued whoever joins, as it always has.
+  const drainLibraryRef = useRef<RollSubmission | null>(null);
+  const drainEnhanceOnlyRef = useRef(false);
+  // Plain Generate presses not yet finished, by press key, with their settings.
+  const libraryPressesRef = useRef(new Map<string, RollSubmission>());
   // Explicit Resume may adopt a capacity-held replay, but only after its
   // current POST answers. Interrupt backoff and hand off this one owner.
   const standaloneAdmissionRef = useRef<{
@@ -268,6 +295,10 @@ export function useRollQueueSubmit({
     };
     const effectiveCap = effectiveModel?.maxCountPerBatch;
     const picker = store().promptPickerDraft;
+    const wantsMotion = preparedRequest === undefined && effectiveModel?.promptFormat === 'h3-motion';
+    // Enhance is an image action: a replay is never rewritten again, and a
+    // motion model formats its own prompt instead.
+    const wantsEnhance = options.enhance === true && preparedRequest === undefined && !wantsMotion;
     // This press's settings, bound to every item it submits, so a model or
     // setting change made afterwards never rewrites a press already made. A
     // seed locked in the picker reproduces; otherwise every fire draws a fresh
@@ -278,9 +309,10 @@ export function useRollQueueSubmit({
         count: preparedRequest === undefined && effectiveCap !== undefined && pressRequest.count > effectiveCap ? effectiveCap : pressRequest.count,
       },
       lockedSeed: preparedRequest === undefined ? (picker.lockSeed ? picker.seed : null) : capturedSeed ?? null,
-      wantsMotion: preparedRequest === undefined && effectiveModel?.promptFormat === 'h3-motion',
+      wantsMotion,
       motionFields: preparedRequest === undefined ? motionFields : {},
       ...(preparedRequest === undefined ? {} : { prepared: true as const }),
+      ...(wantsEnhance ? { wantsEnhance: true } : {}),
     };
     // Library rolls queued without settings (stash, sweep, older saved rolls)
     // bind to the press whose drain first takes them (DrainPumpContext.defaultSubmission).
@@ -297,7 +329,11 @@ export function useRollQueueSubmit({
     // rolls stay queued (not consumed) and survive a round-trip back to an
     // image model. A roll carrying its own press's settings fires under those,
     // so any press, or a queue-only restart, takes it in its place.
-    const libraryRollsBindable = preparedRequest === undefined && effectiveModelId !== ''
+    // An Enhance press, and a restart continuing one, leaves them queued too:
+    // Enhance fires the Composer prompt alone, and binding a library roll to it
+    // would rewrite and fire work the user never pressed Enhance for.
+    const boundOnly = wantsEnhance || options.boundOnly === true;
+    const libraryRollsBindable = !boundOnly && preparedRequest === undefined && effectiveModelId !== ''
       && effectiveModel?.supportsI2V !== true
       && !requiresKey
       && canSubmitDraft(draft, effectiveModel);
@@ -345,6 +381,8 @@ export function useRollQueueSubmit({
       effectiveModelId,
       wantsMotion: submission.wantsMotion,
       motionFields,
+      wantsEnhance,
+      enhanceFields: enhanceFieldsOf(submission.request),
       signal,
       addToast,
       recordHeadError: (message) => { fillError.message = message; },
@@ -394,9 +432,16 @@ export function useRollQueueSubmit({
     // which waits for a stopped drain still settling before it takes the queue.
     // It starts synchronously otherwise, so a later press sees it at its turn.
     // It pins the feed as the press whose work it continues would.
-    const ensureDrain = (pin: () => void = pinFeedScope) => {
-      if (owned() && !store().draining) void submitDraftAsyncRef.current({ queueOnly: true, pinFeedScope: pin });
+    // A restart that continues an Enhance press keeps that press's limit: it
+    // takes only rolls carrying their own settings (`restrict`). A flush names
+    // the limit per buffered press; a toast action is the user's own queue
+    // press and works the whole queue.
+    const ensureDrain = (pin: () => void = pinFeedScope, restrict: boolean = boundOnly) => {
+      if (owned() && !store().draining) {
+        void submitDraftAsyncRef.current({ queueOnly: true, pinFeedScope: pin, ...(restrict ? { boundOnly: true } : {}) });
+      }
     };
+
     const admission: AdmissionContext = {
       generate,
       makeRequest: makeReq,
@@ -408,7 +453,7 @@ export function useRollQueueSubmit({
       },
       onSaved: () => {
         addToast(UNCERTAIN_SUBMISSION_NOTICE.text, 'error', 30_000, {
-          label: UNCERTAIN_SUBMISSION_NOTICE.actionLabel, onClick: () => { ensureDrain(); },
+          label: UNCERTAIN_SUBMISSION_NOTICE.actionLabel, onClick: () => { ensureDrain(pinFeedScope, false); },
         });
       },
     };
@@ -460,8 +505,9 @@ export function useRollQueueSubmit({
       }
     }
 
-    // Nothing submittable → bail before showing any "resolving" feedback.
-    if (activeItem === null && queuedItems.length === 0) return;
+    // Nothing submittable → bail before showing any "resolving" feedback. An
+    // Enhance press without a prompt has nothing to rewrite, whatever is queued.
+    if (activeItem === null && (wantsEnhance || queuedItems.length === 0)) return;
 
     // The press's media stays held until it is accepted, queued (the queue
     // holds it from there), refused or retired, so a ref replaced or a thread
@@ -469,7 +515,23 @@ export function useRollQueueSubmit({
     const releaseUploads = activeItem !== null ? holdSubmissionUploads([activeItem.submission]) : () => undefined;
     const earlierPressKeys = [...unfinishedPressKeysRef.current];
     if (activeItem !== null) unfinishedPressKeysRef.current.add(activeItem.key);
+    // A plain Generate press authorizes the library rolls in the queue until
+    // it is finished. A drain continuing an Enhance press that is running
+    // now, or starts meanwhile, binds them to this press's settings from then
+    // on, so they never wait for a further press behind an Enhance retry.
+    if (libraryRollsBindable && !queueOnly) {
+      libraryPressesRef.current.set(pressKey, submission);
+      if (store().draining && drainEnhanceOnlyRef.current && drainLibraryRef.current === null) {
+        drainLibraryRef.current = submission;
+        // The lift changes what the drain may take, not the queue it watches.
+        // A pump idling on a running generation wakes on a new queue identity,
+        // so the library rolls start now and not when that generation ends.
+        const queue = store().draft.rollQueue;
+        if (queue.some((roll) => roll.submission === undefined)) store().setDraft({ rollQueue: [...queue] });
+      }
+    }
     const finishPress = () => {
+      libraryPressesRef.current.delete(pressKey);
       pressControllersRef.current.delete(pressController);
       unfinishedPressKeysRef.current.delete(pressKey);
       releaseUploads();
@@ -579,16 +641,22 @@ export function useRollQueueSubmit({
     // only settles on stream `done`, which would pin the spinner and mask the
     // at-capacity badge for the whole generation). beginResolving lives INSIDE the
     // try so the finally always balances it — no permanent stuck-spinner leak.
-    const priorResolving = store().resolving;
+    // Enhance presses are counted on the status line ("Enhancing N prompts")
+    // and are made to be repeated, so they neither raise this toast nor count
+    // toward a plain press's.
+    const priorResolving = wantsEnhance ? 0 : store().resolving - store().resolvingEnhance;
     let resolvingEnded = false;
     const endResolvingOnce = () => {
       if (resolvingEnded) return;
       resolvingEnded = true;
       store().endResolving();
+      if (wantsEnhance) store().endResolvingEnhance();
     };
 
     try {
       store().beginResolving();
+      // The Enhance button's own working state (a share of `resolving`).
+      if (wantsEnhance) store().beginResolvingEnhance();
       if (priorResolving > 0) {
         addToast(`Resolving ${priorResolving + 1} prompts…`, 'soft');
       }
@@ -764,6 +832,10 @@ export function useRollQueueSubmit({
       const drainController = new AbortController();
       drain.controller = drainController;
       drainAbortRef.current = drainController;
+      drainEnhanceOnlyRef.current = boundOnly;
+      drainLibraryRef.current = libraryRollsBindable
+        ? submission
+        : boundOnly ? [...libraryPressesRef.current.values()].at(-1) ?? null : null;
       store().setDraining(true);
       // Presses behind this one now see the drain and join its queue.
       turn?.release();
@@ -777,8 +849,10 @@ export function useRollQueueSubmit({
         queuedBeforeHead,
         prepareContext,
         makeRequest: makeReq,
-        canTake,
-        defaultSubmission: submission,
+        // Read every pass: a Generate press met while the drain runs lifts a
+        // bound-only limit (drainLibraryRef).
+        canTake: (roll) => roll.submission !== undefined || drainLibraryRef.current !== null,
+        get defaultSubmission() { return drainLibraryRef.current ?? undefined; },
         generate,
         addToast,
         onFirstFire: () => {
@@ -797,7 +871,13 @@ export function useRollQueueSubmit({
       finishPress();
       // Release the single-owner drain so the next Generate can start one. Only the
       // owning run clears its own controller ref (a later run may already own it).
-      if (drainAbortRef.current === drain.controller) drainAbortRef.current = null;
+      if (drainAbortRef.current === drain.controller) {
+        drainAbortRef.current = null;
+        if (drain.controller) {
+          drainLibraryRef.current = null;
+          drainEnhanceOnlyRef.current = false;
+        }
+      }
       if (drain.controller) store().setDraining(false);
       if (drain.settled) {
         if (drainSettledRef.current === drain.settled.promise) drainSettledRef.current = null;
@@ -842,6 +922,7 @@ export function useRollQueueSubmit({
   // press while it is running adds the active composer item to that owner's live
   // queue instead of spawning an overlapping pass.
   const submitDraft = useCallback(() => { void submitDraftAsync(); }, [submitDraftAsync]);
+  const submitEnhanced = useCallback(() => { void submitDraftAsync({ enhance: true }); }, [submitDraftAsync]);
   // Feed actions must stay stable while the composer draft changes. Read the
   // latest admission closure through the same ref used by queue-only Resume.
   const submitPrepared = useCallback((request: GenerateRequest) => {
@@ -861,5 +942,5 @@ export function useRollQueueSubmit({
     useAtelierStore.getState().setDraining(false);
   }, [retirePresses, abortCoalescedFlushes, discardCoalesced]);
 
-  return { submitDraft, submitPrepared, stopDraining, retryingPrepared };
+  return { submitDraft, submitEnhanced, submitPrepared, stopDraining, retryingPrepared };
 }

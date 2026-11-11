@@ -1285,8 +1285,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
   }
 }
 
-// Use the studio's existing offline fetch seam; keep the real Enhance action
-// pending so both labels can be measured without a provider or capture hook.
+// Use the studio's existing offline fetch seam; keep the real Enhance request
+// pending so the working state can be measured without a provider or capture hook.
 async function withPendingEnhance(page: Page): Promise<void> {
   await page.addInitScript(() => {
     let inner = window.fetch.bind(window);
@@ -1359,7 +1359,7 @@ for (const scenario of [
       const reachable = async () => {
         expect(await noHorizontalOverflow(page)).toBe(true);
         expect(await composer.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-        for (const name of ['Attach reference images', 'Templates', 'Enhance', 'Undo enhance', 'Model', 'Ratio', 'Count', 'Generate', ...(scenario.width >= 768 ? ['Clear prompt and reference images', 'Minimize composer'] : ['Collapse composer'])]) {
+        for (const name of ['Attach reference images', 'Templates', 'Enhance and generate', 'Model', 'Ratio', 'Count', 'Generate', ...(scenario.width >= 768 ? ['Clear prompt and reference images', 'Minimize composer'] : ['Collapse composer'])]) {
           const control = composer.getByRole('button', { name, exact: true });
           await expect(control).toBeVisible();
           const box = await control.boundingBox();
@@ -1502,14 +1502,15 @@ for (const viewport of [
         if (await expand.isVisible()) await expand.click();
         const composer = page.locator('#atelier-composer');
         const model = composer.getByRole('button', { name: 'Model', exact: true });
-        const enhance = composer.getByRole('button', { name: 'Enhance', exact: true });
+        const enhance = composer.getByTestId('composer-drop-surface').getByRole('button', { name: 'Enhance and generate', exact: true });
         const generate = composer.getByRole('button', { name: 'Generate', exact: true });
-        const undo = composer.getByRole('button', { name: 'Undo enhance', exact: true });
         const checkGeometry = async (token: string) => {
           await expect(model).toContainText(token);
           const value = model.locator('[data-tip]');
           expect(await value.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), 'full short family token is visible').toBe(true);
-          await expect(enhance.locator('span')).toBeVisible();
+          await expect(enhance.getByText('Enhance', { exact: true })).toBeVisible();
+          expect(await enhance.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), 'Enhance label is not clipped').toBe(true);
+          expect(await composer.getByRole('button', { name: 'Undo enhance', exact: true }).count()).toBe(0);
           expect(await noHorizontalOverflow(page)).toBe(true);
           expect(await composer.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), 'composer has no internal horizontal overflow').toBe(true);
           const selects = await Promise.all(['Model', 'Ratio', 'Count'].map((name) => composer.getByRole('button', { name, exact: true }).boundingBox()));
@@ -1521,16 +1522,21 @@ for (const viewport of [
           expect(ratio.x + ratio.width).toBeLessThanOrEqual(count.x);
           expect(count.x + count.width).toBeLessThanOrEqual(viewport.width);
           if (viewport.width !== 1440) {
-            for (const target of [model, composer.getByRole('button', { name: 'Ratio', exact: true }), composer.getByRole('button', { name: 'Count', exact: true }), enhance, undo, generate]) {
+            for (const target of [model, composer.getByRole('button', { name: 'Ratio', exact: true }), composer.getByRole('button', { name: 'Count', exact: true }), enhance, generate]) {
               const box = await target.boundingBox();
               if (!box) throw new Error('missing touch control');
               expect(box.height).toBeGreaterThanOrEqual(43.9);
               expect(box.width).toBeGreaterThanOrEqual(43.9);
             }
           }
-          const enhanceBox = await enhance.boundingBox();
-          if (!enhanceBox) throw new Error('missing Enhance');
-          expect(enhanceBox.width).toBeGreaterThanOrEqual(104);
+          // Enhance sits in the fixed dock, immediately left of Generate, on
+          // Generate's row.
+          const dock = composer.locator('[data-zone="dock"]');
+          expect(await dock.getByRole('button', { name: 'Enhance and generate', exact: true }).count()).toBe(1);
+          const [enhanceBox, generateBox] = await Promise.all([enhance.boundingBox(), generate.boundingBox()]);
+          if (!enhanceBox || !generateBox) throw new Error('missing Enhance or Generate');
+          expect(enhanceBox.x + enhanceBox.width).toBeLessThanOrEqual(generateBox.x);
+          expect(Math.abs(enhanceBox.y + enhanceBox.height / 2 - generateBox.y - generateBox.height / 2)).toBeLessThanOrEqual(1);
         };
         await checkGeometry('GPT');
         // Keep the local model's token and health dot independently visible.
@@ -1545,6 +1551,7 @@ for (const viewport of [
         await page.getByRole('option', { name: /GPT Image/ }).click();
         await composer.getByRole('textbox', { name: 'Prompt', exact: true }).fill('A quiet coastal observatory');
         await expect(enhance).toBeEnabled();
+        await expect(enhance).not.toHaveAttribute('aria-disabled', 'true');
         // Let the existing finite surface/footprint transitions finish before
         // comparing the live controls, without changing their motion.
         await enhance.evaluate(async () => {
@@ -1555,8 +1562,13 @@ for (const viewport of [
         const beforeGenerate = await generate.boundingBox();
         const beforeEnhance = await enhance.boundingBox();
         await enhance.click();
-        await expect(enhance).toHaveText('Enhancing…');
-        await expect(enhance).toBeDisabled();
+        // The request stays pending: Enhance is busy, keeps its label and
+        // stays pressable for the next press.
+        await expect(enhance).toHaveAttribute('aria-busy', 'true');
+        await expect(enhance).toHaveText('Enhance');
+        await expect(enhance).toBeEnabled();
+        await expect(enhance).not.toHaveAttribute('aria-disabled', 'true');
+        await expect(composer.getByTestId('composer-drop-surface').getByRole('textbox', { name: 'Prompt', exact: true })).toHaveValue('A quiet coastal observatory');
         await checkGeometry('GPT');
         expect(await ordering()).toEqual(beforeOrder);
         await expect.poll(async () => {
@@ -1566,7 +1578,12 @@ for (const viewport of [
         }, 'Generate stays anchored during Enhance').toBeLessThanOrEqual(1);
         const afterEnhance = await enhance.boundingBox();
         if (!beforeEnhance || !afterEnhance) throw new Error('missing Enhance bounds');
-        expect(Math.abs(afterEnhance.width - beforeEnhance.width), 'Enhance reserves its working label width').toBeLessThanOrEqual(1);
+        expect(Math.abs(afterEnhance.width - beforeEnhance.width), 'Enhance keeps its width while working').toBeLessThanOrEqual(1);
+        expect(Math.max(Math.abs(afterEnhance.x - beforeEnhance.x), Math.abs(afterEnhance.y - beforeEnhance.y)), 'Enhance stays in place while working').toBeLessThanOrEqual(1);
+        // A second press while the first is pending is accepted, not blocked.
+        await enhance.click();
+        await expect(enhance).toHaveAttribute('aria-busy', 'true');
+        await expect(composer.getByRole('status').filter({ hasText: 'Enhancing 2 prompts' })).toHaveCount(1);
       } finally {
         await context.close();
       }
@@ -3071,7 +3088,7 @@ test.describe('prerequisite readiness:', () => {
             const generate = composer.getByRole('button', { name: 'Generate', exact: true });
             await expect(generate).toBeEnabled();
             await expect(generate).not.toHaveAttribute('aria-disabled', 'true');
-            const enhance = page.getByRole('button', { name: 'Enhance', exact: true, includeHidden: true });
+            const enhance = composer.getByRole('button', { name: 'Enhance and generate', exact: true, includeHidden: true });
             await expect(enhance).toHaveAttribute('data-tip', 'Needs a text model');
             await expect(enhance).toBeEnabled();
             await enhance.click();
@@ -3110,7 +3127,7 @@ test.describe('prerequisite readiness:', () => {
               await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).click();
               await approvedExpand(page);
               await expect(status).toHaveCount(0);
-              await expect(enhance).toHaveAttribute('data-tip', 'Rewrite prompt');
+              await expect(enhance).toHaveAttribute('data-tip', 'Rewrite and generate');
               await expect(generate).not.toHaveAttribute('aria-disabled', 'true');
               await composer.getByRole('button', { name: 'Templates', exact: true }).click();
               await expect(page.getByRole('dialog', { name: 'Editorial portrait', exact: true })).toBeVisible();
@@ -3135,7 +3152,7 @@ test.describe('AI actions without a text model', () => {
     await page.goto('/e2e/studio/index.html?noTextModels=1');
     await page.getByRole('textbox', { name: 'Prompt', exact: true }).fill('A quiet harbour at dawn');
     // includeHidden: the open note inerts and aria-hides the app beneath it.
-    const enhance = page.getByRole('button', { name: 'Enhance', exact: true, includeHidden: true });
+    const enhance = page.getByTestId('composer-drop-surface').getByRole('button', { name: 'Enhance and generate', exact: true, includeHidden: true });
     await expect(enhance).toBeEnabled();
     await enhance.click();
     const note = page.getByRole('dialog', { name: 'Enhance needs a text model.' });
@@ -3355,7 +3372,7 @@ test('the composer toolbar beside the open rail wraps to at most two rows at 820
   await expect(page.getByRole('button', { name: 'Generate', exact: true })).toBeVisible();
   await page.waitForTimeout(400);
   const tops = await page.locator('#atelier-composer').evaluate((composer) => {
-    const toolbar = ['Templates', 'Enhance', 'Undo enhance', 'Model', 'Ratio', 'Count', 'Clear prompt and reference images', 'Generate'];
+    const toolbar = ['Templates', 'Enhance and generate', 'Model', 'Ratio', 'Count', 'Clear prompt and reference images', 'Generate'];
     const rows: number[] = [];
     for (const button of composer.querySelectorAll('button')) {
       const name = button.getAttribute('aria-label') ?? button.textContent.trim();

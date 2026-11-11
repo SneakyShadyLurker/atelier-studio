@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'bun:test';
-import { SKIN_MARKING_BAN, SKIN_MARKING_BAN_ENHANCE, SKIN_MARKING_BAN_MOSS, WET_LOOK_BAN } from './skinRenderRules';
+import { SKIN_MARKING_BAN, SKIN_MARKING_BAN_ENHANCE, SKIN_MARKING_BAN_H3, SKIN_MARKING_BAN_MOSS, WET_LOOK_BAN } from './skinRenderRules';
 import {
   BRAINSTORM_CONSTRAINTS,
   BRAINSTORM_CONSTRAINTS_GPT,
+  BRAINSTORM_CONSTRAINTS_H3,
   BRAINSTORM_CONSTRAINTS_KREA,
   BRAINSTORM_CONSTRAINTS_MOSS,
   BRAINSTORM_DIPTYCH_CONSTRAINT,
@@ -19,6 +20,7 @@ import {
 } from './aiFillSystemPrompt';
 import {
   ENHANCE_SYSTEM_PROMPT,
+  H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
   H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
   KREA_ENHANCE_SYSTEM_PROMPT,
   MOSS_ENHANCE_SYSTEM_PROMPT,
@@ -53,6 +55,7 @@ const ENHANCE_WRITERS: Record<string, string> = {
 const SPLICED_TAILS = [
   BRAINSTORM_CONSTRAINTS,
   BRAINSTORM_CONSTRAINTS_GPT,
+  BRAINSTORM_CONSTRAINTS_H3,
   BRAINSTORM_CONSTRAINTS_KREA,
   BRAINSTORM_CONSTRAINTS_MOSS,
   BRAINSTORM_DIPTYCH_CONSTRAINT,
@@ -68,23 +71,43 @@ describe('skin-marking ban', () => {
 
   for (const [name, prompt] of Object.entries(writers)) {
     const moss = name.endsWith('/moss-image-sft');
-    it(`${name} carries the ${moss ? 'MOSS' : 'no-micro-texture'} ban`, () => {
-      expect(prompt).toContain(moss ? SKIN_MARKING_BAN_MOSS : SKIN_MARKING_BAN);
+    const h3 = name.endsWith('/minimax-h3-image');
+    it(`${name} carries the ${moss ? 'MOSS' : h3 ? 'H3 Image' : 'no-micro-texture'} ban`, () => {
+      expect(prompt).toContain(moss ? SKIN_MARKING_BAN_MOSS : h3 ? SKIN_MARKING_BAN_H3 : SKIN_MARKING_BAN);
     });
   }
 
-  // The texture tail is per family: only MOSS writers name skin texture, and
-  // every other writer keeps the no-micro-texture tail.
-  it('names pores for MOSS writers only', () => {
+  // The texture tail is per family: only MOSS writers name skin texture,
+  // MiniMax H3 Image writers leave skin wording to the user, and every other
+  // writer keeps the no-micro-texture tail.
+  it('names pores for MOSS writers only, and bans a micro-texture outside MOSS and H3 Image', () => {
     for (const [name, prompt] of Object.entries({
       ...writers,
       'enhance/moss': MOSS_ENHANCE_SYSTEM_PROMPT,
       'enhance/h3image': H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
+      'enhance/h3image-edit': H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
       ...ENHANCE_WRITERS,
     })) {
       const moss = name.endsWith('/moss-image-sft') || name === 'enhance/moss';
+      const h3 = name.endsWith('/minimax-h3-image') || name.startsWith('enhance/h3image');
       expect(prompt.includes('fine visible pores')).toBe(moss);
-      expect(prompt.includes('never a named micro-texture')).toBe(!moss);
+      expect(prompt.includes('never a named micro-texture')).toBe(!moss && !h3);
+    }
+  });
+
+  // Skin wording on MiniMax H3 Image is the user's call: no writer for it may
+  // forbid a skin texture or push a skin finish of its own.
+  it('no MiniMax H3 Image writer steers skin texture either way', () => {
+    const steering = /skin-realism|natural skin texture|fine pores|imperfections|smooth, clear|even-toned|detailed skin texture|realistic skin texture/i;
+    const h3Writers = {
+      ...Object.fromEntries(Object.entries(writers).filter(([name]) => name.endsWith('/minimax-h3-image'))),
+      'enhance/h3image': H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
+      'enhance/h3image-edit': H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
+      'brainstorm-tail/h3image': BRAINSTORM_CONSTRAINTS_H3,
+    };
+    expect(Object.keys(h3Writers).length).toBeGreaterThanOrEqual(9);
+    for (const [name, prompt] of Object.entries(h3Writers)) {
+      expect(steering.test(prompt), name).toBe(false);
     }
   });
 
@@ -106,11 +129,16 @@ describe('skin-marking ban', () => {
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('exactly as with grain');
   });
 
-  // MiniMax H3 Image has no grain ban either, and keeps the no-micro-texture tail.
+  // MiniMax H3 Image has no grain ban either. Its arm bans the marks and
+  // keeps a requested skin texture.
   it('enhance/h3image carries the request-proof ban', () => {
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain(
-      `${SKIN_MARKING_BAN} This holds even when the user’s raw prompt names one: drop it.`,
+      `${SKIN_MARKING_BAN_H3} This holds even when the user’s raw prompt names one: drop it.`,
     );
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain(
+      `${SKIN_MARKING_BAN_H3} This applies to newly described skin`,
+    );
+    expect(SKIN_MARKING_BAN_H3).toContain('is not a marking: keep it when it is asked for');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain('exactly as with grain');
   });
 

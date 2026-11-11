@@ -19,7 +19,6 @@ import { useDeleteUpload } from '../../hooks/useDeleteUpload';
 import { useAttachRefImages } from '../../hooks/useAttachRefImages';
 import { useComposerViewportInsets } from '../../hooks/useComposerViewportInsets';
 import { useIsPhone } from '../../hooks/useIsPhone';
-import { useEnhancePrompt } from '../../hooks/useEnhancePrompt';
 import { useProbeModel } from '../../hooks/useProbeModel';
 import { useKeyboardScopeActive, useKeyboardScoped } from '../../hooks/useKeyboard';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -108,6 +107,8 @@ interface ComposerProps {
   onDurationChange: (frames: VideoDurationFrames) => void;
   onCountChange: (count: Count) => void;
   onSubmit: () => void;
+  /** Enhance and generate: rewrite the prompt as it stands and generate from the rewrite. */
+  onSubmitEnhanced?: () => void;
   onTellStory?: (() => void) | undefined;
   onStopDraining?: () => void;
   retryingPrepared?: boolean;
@@ -133,6 +134,7 @@ function Composer({
   onDurationChange,
   onCountChange,
   onSubmit,
+  onSubmitEnhanced = () => undefined,
   onTellStory,
   onStopDraining = () => undefined,
   retryingPrepared = false,
@@ -148,6 +150,7 @@ function Composer({
   const stopRef = useRef<HTMLButtonElement | null>(null);
   const barGoRef = useRef<HTMLButtonElement | null>(null);
   const barStopRef = useRef<HTMLButtonElement | null>(null);
+  const barEnhanceRef = useRef<HTMLButtonElement | null>(null);
   // Desktop yield guards that no render reads: the pointer resting over the
   // Composer and an IME composition in one of its fields.
   const pointerOverRef = useRef(false);
@@ -170,6 +173,7 @@ function Composer({
   const queuePanelId = useId();
   const rollQueue = useAtelierStore((state) => state.draft.rollQueue);
   const resolving = useAtelierStore((state) => state.resolving);
+  const resolvingEnhance = useAtelierStore((state) => state.resolvingEnhance);
   const preparing = useAtelierStore((state) => state.preparing);
   const aiFillActive = useAtelierStore((state) => state.aiFillActive);
   const aiFillLabels = useAtelierStore((state) => state.aiFillLabels);
@@ -205,10 +209,6 @@ function Composer({
   const removeRefImage = useAtelierStore((state) => state.removeRefImage);
   const setDraft = useAtelierStore((state) => state.setDraft);
   const addToast = useAtelierStore((state) => state.addToast);
-  const readyRefImageIds = useMemo(
-    () => refImages.flatMap((ref) => (ref.status === 'ready' && ref.serverId ? [ref.serverId] : [])),
-    [refImages],
-  );
   const composerExpanded = useAtelierStore((state) => state.composerExpanded);
   const composerMinimized = useAtelierStore((state) => state.composerMinimized);
   const setComposerMinimized = useAtelierStore((state) => state.setComposerMinimized);
@@ -217,8 +217,6 @@ function Composer({
   const attachRefImages = useAttachRefImages();
   const deleteUpload = useDeleteUpload();
   const probeMutation = useProbeModel();
-  const { enhance, undo, editPrompt, status: enhanceStatus, canUndo } = useEnhancePrompt({ prompt, refImageIds: readyRefImageIds, modelId, ratio, onPromptChange });
-  const enhancing = enhanceStatus === 'streaming';
   // AI actions stay enabled without a text model; with none configured at
   // all, pressing one opens the note under it instead (decision 3).
   const textModelGate = useTextModelGate();
@@ -348,7 +346,7 @@ function Composer({
   // hidden-prompt I2V mode never fires ai-fill, so leftover tokens can't block it.
   const aiFillCount = hasAiFillTokens(prompt) ? parseAiFillTokens(prompt).slots.length : 0;
   const aiFillExceeded = !isI2VMode && aiFillCount > AI_FILL_MAX_SLOTS;
-  const generateDisabled = disabled || enhancing || !hasSubmittableInput || hasUploadingRefs
+  const generateDisabled = disabled || !hasSubmittableInput || hasUploadingRefs
     || hasErrorRefs || refsUnsupported || !draftSubmittable || refsOverCap || selectedModelOffline || aiFillExceeded
     || sourceUploading || missingI2VSource || missingMotion;
   const canSubmitNow = !generateDisabled;
@@ -437,7 +435,7 @@ function Composer({
   const composerKeyboardActive = isPhone ? composerExpanded : composerFocused && !collapsed;
   // R24: the desktop Composer yields the viewport to the feed, text or not.
   // It stays while the reader is using it: an owned popover or dialog, an
-  // upload or Enhance run, an IME composition, or (for scroll and idle) the
+  // upload, an IME composition, or (for scroll and idle) the
   // pointer resting on it. Only popover triggers count (ChipSelect,
   // Templates): a persistent disclosure such as the roll-queue expander must
   // not pin the composer open.
@@ -445,7 +443,7 @@ function Composer({
     const wrap = wrapRef.current;
     if (!wrap || isPhone || collapsed || forceExpanded) return true;
     if ((pointerMatters && pointerOverRef.current) || imeComposingRef.current) return true;
-    if (hasUploadingRefs || sourceUploading || enhancing || textNote !== null) return true;
+    if (hasUploadingRefs || sourceUploading || textNote !== null) return true;
     if (wrap.querySelector('[aria-haspopup][aria-expanded="true"]')) return true;
     const active = document.activeElement;
     return active instanceof Element && active.closest('dialog, [role="dialog"], [role="listbox"], [role="menu"]') !== null;
@@ -523,7 +521,8 @@ function Composer({
     previousComposerExpanded.current = composerExpanded;
   }, [composerExpanded, isPhone, parts.isI2VMode]);
 
-  const submit = () => {
+  // One guard for both fire actions, so Generate and Enhance cannot drift.
+  const fire = (run: () => void) => {
     if (retryingPrepared || !selectedModel) return;
     if (selectedModel.requiresKey) {
       useAtelierStore.getState().openByok();
@@ -534,14 +533,34 @@ function Composer({
       return;
     }
     if (generateDisabled) return;
-    onSubmit();
+    run();
   };
+  const submit = () => { fire(onSubmit); };
+  // Enhance and generate, image mode only. A missing text model opens the
+  // note anchored to the pressed button (the dock's or the collapsed bar's).
+  // It rewrites the prompt in the Composer and nothing else, so it needs one:
+  // rolls waiting in the queue are Generate's to fire.
+  const enhanceAvailable = !isI2VMode;
+  const canEnhanceNow = enhanceAvailable && promptHasContent && canSubmitNow && !retryingPrepared;
+  const enhanceFrom = (anchorRef: RefObject<HTMLButtonElement | null>) => {
+    if (!enhanceAvailable || !promptHasContent) return;
+    fire(() => { gateTextAction('Enhance', anchorRef, onSubmitEnhanced); });
+  };
+  const enhanceWorking = resolvingEnhance > 0 && !canStop;
+  const generateWorking = resolving - resolvingEnhance > 0 && !canStop;
 
   // R25: a press on Generate or Stop survives the frames in which a view
   // transition's capture suspends hit-testing (the click lands on the root).
   useRootClickRescue([
     { ref: collapsed ? barStopRef : stopRef, active: canStop, activate: onStopDraining },
     { ref: collapsed ? barGoRef : goRef, active: canSubmitNow && !retryingPrepared, activate: submit },
+    // Enhance is pressed repeatedly, and each fire starts the feed transition
+    // that would swallow the next press.
+    {
+      ref: collapsed ? barEnhanceRef : enhanceButtonRef,
+      active: canEnhanceNow,
+      activate: () => { enhanceFrom(collapsed ? barEnhanceRef : enhanceButtonRef); },
+    },
   ]);
 
   // A printable key on the focused collapsed bar: expand, focus the field
@@ -549,7 +568,7 @@ function Composer({
   const typeIntoComposer = (character: string) => {
     setComposerExpanded(true);
     if (parts.isI2VMode) setDraft({ motionPrompt: `${motionPrompt ?? ''}${character}` });
-    else editPrompt(`${prompt}${character}`);
+    else onPromptChange(`${prompt}${character}`);
     runWhenReachable(() => {
       const target = parts.isI2VMode ? motionRef.current : textRef.current;
       if (!target) return;
@@ -667,7 +686,9 @@ function Composer({
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !isImeComposing(event)) {
       event.preventDefault();
-      submit();
+      // Shift adds Enhance: rewrite and generate. Without it, plain Generate.
+      if (event.shiftKey) enhanceFrom(enhanceButtonRef);
+      else submit();
     }
   };
 
@@ -753,15 +774,13 @@ function Composer({
     // onDismiss — NOT a parallel wall-clock timer — so pause-on-hover/focus
     // (WCAG) defers teardown along with the Undo affordance and a restore
     // always gets live previews and valid serverIds.
-    const { enhanceAnchor, enhancedText } = useAtelierStore.getState().draft;
-    const snapshot = { prompt, refImages, i2vSourceUploadId, i2vSourcePrompt, motionPrompt, extendsTileId, extendPrevPrompt, enhanceAnchor, enhancedText };
+    const snapshot = { prompt, refImages, i2vSourceUploadId, i2vSourcePrompt, motionPrompt, extendsTileId, extendPrevPrompt };
     const releaseUndoHold = holdUploadsForUndo([
       ...refImages.flatMap((ref) => (ref.serverId ? [ref.serverId] : [])),
       ...(i2vSourceUploadId ? [i2vSourceUploadId] : []),
     ]);
     let undone = false;
     supersedeSourceHandoffs();
-    // Clear is the ONLY place the Enhance anchor is dropped (see useEnhancePrompt).
     setDraft({
       prompt: '',
       refImages: [],
@@ -770,8 +789,6 @@ function Composer({
       motionPrompt: undefined,
       extendsTileId: undefined,
       extendPrevPrompt: undefined,
-      enhanceAnchor: undefined,
-      enhancedText: undefined,
     });
     addToast('Composer cleared', 'soft', 5000, {
       label: 'Undo',
@@ -787,8 +804,6 @@ function Composer({
           motionPrompt: snapshot.motionPrompt,
           extendsTileId: snapshot.extendsTileId,
           extendPrevPrompt: snapshot.extendPrevPrompt,
-          enhanceAnchor: snapshot.enhanceAnchor,
-          enhancedText: snapshot.enhancedText,
         });
       },
     }, () => {
@@ -806,8 +821,8 @@ function Composer({
   if (disabled) {
     statusMessage = 'Generation unavailable';
     statusTone = 'danger';
-  } else if (enhancing) {
-    statusMessage = 'Enhancing prompt';
+  } else if (resolvingEnhance > 0) {
+    statusMessage = resolvingEnhance === 1 ? 'Enhancing prompt' : `Enhancing ${String(resolvingEnhance)} prompts`;
   } else if (selectedModelOffline) {
     statusMessage = `${selectedModel.name} is offline`;
     statusTone = 'danger';
@@ -924,6 +939,13 @@ function Composer({
           onType={typeIntoComposer}
           generateRef={barGoRef}
           stopRef={barStopRef}
+          enhance={enhanceAvailable && promptHasContent ? {
+            working: enhanceWorking,
+            needsTextModel: textModelGate.availability === 'none',
+            iconOnly: isPhone,
+            onEnhance: () => { enhanceFrom(barEnhanceRef); },
+            ref: barEnhanceRef,
+          } : undefined}
         />
       </div>
       <div className={styles.expandedTrack} inert={collapsed} aria-hidden={collapsed}>
@@ -1080,7 +1102,7 @@ function Composer({
                 className={styles.motionTextarea}
                 value={motionPrompt ?? ''}
                 placeholder="Describe camera motion, timing, and how the still should animate…"
-                disabled={disabled || enhancing}
+                disabled={disabled}
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck
@@ -1099,11 +1121,11 @@ function Composer({
             className={styles.textarea}
             value={prompt}
             placeholder="Describe an image…"
-            disabled={disabled || enhancing}
+            disabled={disabled}
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck
-            onChange={(event) => { editPrompt(event.target.value); }}
+            onChange={(event) => { onPromptChange(event.target.value); }}
             onKeyDown={handleKeyDown}
             rows={1}
           />
@@ -1159,7 +1181,7 @@ function Composer({
                   aria-label="Templates"
                   aria-haspopup="dialog"
                   aria-expanded={promptPickerOpen}
-                  disabled={disabled || enhancing}
+                  disabled={disabled}
                   onClick={() => { if (promptPickerOpen) { closePicker(); } else { openPicker(); } }}
                 >
                   <I.library />
@@ -1167,7 +1189,7 @@ function Composer({
                   <I.caret className={styles.chipCaret} />
                 </button>
                 <PromptPicker
-                  open={promptPickerOpen && !enhancing}
+                  open={promptPickerOpen}
                   onClose={closePicker}
                   targetContextLine={targetContextLine}
                   modelOptions={modelOptions}
@@ -1192,17 +1214,6 @@ function Composer({
               </button>
               </ViewTransition>
             ) : null}
-            {!isI2VMode && (
-              <EnhanceControl
-                enhancing={enhancing}
-                canUndo={canUndo}
-                needsTextModel={textModelGate.availability === 'none'}
-                disabled={disabled || !prompt.trim() || hasUploadingRefs || hasErrorRefs || refsOverCap}
-                onEnhance={() => { gateTextAction('Enhance', enhanceButtonRef, enhance); }}
-                onUndo={undo}
-                enhanceRef={enhanceButtonRef}
-              />
-            )}
             {selectedModel.outputsVideo === true && onTellStory ? (
               <button
                 ref={tellStoryButtonRef}
@@ -1210,7 +1221,7 @@ function Composer({
                 className={buttons.ai}
                 aria-haspopup="dialog"
                 data-tip={textModelGate.availability === 'none' ? 'Needs a text model' : undefined}
-                disabled={disabled || enhancing}
+                disabled={disabled}
                 onClick={() => { gateTextAction('Tell Story', tellStoryButtonRef, onTellStory); }}
               >
                 <I.sparkle aria-hidden="true" />
@@ -1287,7 +1298,7 @@ function Composer({
               type="button"
               aria-label="Clear prompt and reference images"
               data-tip="Clear all"
-              disabled={!canClear || enhancing}
+              disabled={!canClear}
               onClick={clearAll}
             >
               Clear
@@ -1309,6 +1320,18 @@ function Composer({
                 <span className={styles.spinner} aria-hidden="true" />
               </button>
             ) : null}
+            {/* Enhance sits immediately left of Generate in the spatially
+                fixed dock: a button meant for repeated presses must not move
+                when the controls zone wraps. */}
+            {enhanceAvailable ? (
+              <EnhanceControl
+                working={enhanceWorking}
+                disabled={!canEnhanceNow}
+                needsTextModel={textModelGate.availability === 'none'}
+                onEnhance={() => { enhanceFrom(enhanceButtonRef); }}
+                enhanceRef={enhanceButtonRef}
+              />
+            ) : null}
             {retryingPrepared ? null : (
               <button
                 ref={goRef}
@@ -1316,13 +1339,13 @@ function Composer({
                 type="button"
                 aria-disabled={generateDisabled || undefined}
                 aria-describedby={generateDisabled && statusMessage ? statusId : undefined}
-                data-working={resolving > 0 && !canStop ? '' : undefined}
+                data-working={generateWorking ? '' : undefined}
                 data-tip={selectedModelOffline ? `${selectedModel.name} is offline` : undefined}
                 onClick={submit}
               >
                 {generateBaseLabel}
                 {showRollCount ? <>{' '}<span className={styles.goCount}>{totalToFire}</span></> : null}
-                {resolving > 0 && !canStop ? <span className={styles.spinner} aria-hidden="true" /> : null}
+                {generateWorking ? <span className={styles.spinner} aria-hidden="true" /> : null}
               </button>
             )}
           </div>

@@ -100,8 +100,8 @@ canceled.
 Reusable templates, weighted variable lists and tag dimensions that keep random
 picks coherent. `{{ai-fill: …}}` blanks let a text model fill parts of a prompt
 at generate time while your own text around them stays byte for byte, and Brainstorm
-streams fresh character concepts into the roll queue. Enhance rewrites a prompt
-for the selected model in one click, and a prompt too short for MiniMax H3
+streams fresh character concepts into the roll queue. Enhance generates from a
+rewrite of the prompt for the selected model in one click, and a prompt too short for MiniMax H3
 Image is expanded automatically before it renders. These features run on text models an
 admin connects in the app, such as a local Ollama or LM Studio, OpenAI,
 Anthropic or OpenRouter ([Admin guide](docs/admin-guide.md)). Prompt Library

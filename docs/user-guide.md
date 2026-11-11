@@ -24,7 +24,9 @@ or [Deployment](deployment.md).
    times as you want variations; there is no need to wait for the last one.
    Once your waiting batches reach the server's limit (60 by default), further
    presses wait in the roll queue and start as capacity frees; **Stop** appears
-   beside Generate while that queue drains.
+   beside Generate while that queue drains. **Enhance**, beside Generate (or
+   **Shift+Cmd+Enter** / **Shift+Ctrl+Enter**), generates from a text model's
+   rewrite of the prompt instead; see Prompt Library below.
 5. Watch the tiles. Some providers stream previews; others return only the
    finished image. A queued batch waits for capacity. Local models show the
    sampler step (for example `12/25`) and, after a few steps, the estimated
@@ -94,8 +96,8 @@ On **MiniMax H3 Image** the pictures are numbered in the order you attached
 them, and the prompt can name them `<Picture 1>`, `<Picture 2>` and
 `<Picture 3>`. Use it to edit a picture ("remove the newspaper"), to put the
 person from one picture into a new scene, or to combine a person, a place and
-a garment from three pictures. Enhance rewrites your request into the form
-the model follows best, and a short instruction is rewritten the same way
+a garment from three pictures. Enhance generates from a rewrite of your
+request in the form the model follows best, and a short instruction is rewritten the same way
 automatically before it renders when a text model that accepts images is
 available. By default every MiniMax H3 Image result is delivered with a 2048
 pixel long edge: without pictures the model renders at about 16 megapixels and the
@@ -160,7 +162,15 @@ you prepare multiple prompts before generating them.
 Reordering templates, variable lists or dimensions keeps the current editor
 open, including its unsaved draft.
 
-**Enhance** asks a text model to rewrite a prompt. **Brainstorm** produces ideas
+**Enhance** asks a text model to rewrite the prompt and generates from the
+rewrite. Every press rolls the prompt's tokens afresh, rewrites that result and
+starts one batch, so you can press it repeatedly without waiting; the prompt
+itself, including any `{{var::…}}` lists, stays as you wrote it. It fires the
+prompt in the Composer only: rolls waiting in the queue stay there for
+**Generate**. The rewrite
+that rendered is the batch's prompt: use **Copy prompt** on the batch to keep
+it. **Shift+Cmd+Enter** on macOS / **Shift+Ctrl+Enter** elsewhere presses
+Enhance from the prompt. **Brainstorm** produces ideas
 for the queue, and `{{ai-fill: instruction}}` asks a text model to fill a part
 of a template at generation time. These actions need a text model connected by
 an admin. A working image provider or local GPU alone does not provide one.
@@ -179,8 +189,8 @@ still wins.
 On **MiniMax H3 Image**, a prompt under 60 words is expanded automatically
 before it renders, because that model draws very short prompts poorly. The
 batch then shows the expanded prompt. A prompt of 60 words or more is sent as
-written, so write a fuller prompt, or press **Enhance** and edit the result,
-to keep full control. An operator can switch the expansion off.
+written, so write a fuller prompt, or press **Enhance**, copy the batch's
+prompt and edit it, to keep full control. An operator can switch the expansion off.
 
 Read [Prompt Library authoring](prompt-library-authoring.md) for syntax,
 weights, dimensions and worked examples.

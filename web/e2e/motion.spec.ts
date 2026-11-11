@@ -2152,7 +2152,7 @@ test.describe('feed micro-interactions', () => {
       });
     });
     await page.getByRole('textbox', { name: 'Prompt' }).fill('a brass lamp');
-    await page.getByRole('button', { name: 'Generate' }).click();
+    await page.getByRole('button', { name: 'Generate', exact: true }).click();
     const generated = page.locator('section[data-batch-id="studio-generated-1"]');
     await expect(generated.getByRole('button', { name: 'Cancel generation' })).toBeVisible();
     await expect(generated.getByRole('button', { name: /^Open image 1/ })).toBeVisible({ timeout: 5000 });

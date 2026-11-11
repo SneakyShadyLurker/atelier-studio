@@ -144,8 +144,17 @@ function parseSubmission(value: unknown): RollSubmission | undefined {
     || lockedSeed === undefined
     || lockedSeed === INVALID
     || (value.prepared !== undefined && value.prepared !== true)
+    || (value.wantsEnhance !== undefined && typeof value.wantsEnhance !== 'boolean')
   ) return undefined;
-  return { request, lockedSeed, wantsMotion, motionFields, ...(value.prepared === true ? { prepared: true } : {}) };
+  return {
+    request,
+    lockedSeed,
+    wantsMotion,
+    motionFields,
+    ...(value.prepared === true ? { prepared: true } : {}),
+    // Absent on rolls saved before Enhance went through the queue: not enhanced.
+    ...(typeof value.wantsEnhance === 'boolean' ? { wantsEnhance: value.wantsEnhance } : {}),
+  };
 }
 
 function parseQueuedRoll(value: unknown): QueuedRoll | null {

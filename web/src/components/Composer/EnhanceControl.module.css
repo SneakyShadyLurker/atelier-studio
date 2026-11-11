@@ -1,137 +1,113 @@
-.seg {
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+/* Enhance and generate: the btn.ai vocabulary rendered flat (accent ink and
+   sparkle on --bg, not the filled accent pill), so it never competes with the
+   ink-filled Generate beside it. Composes buttons.secondary; the doubled class
+   outranks it without relying on source order. Height and font size match
+   Composer .go so the two sit on one baseline; the width is the label's, and
+   the spinner takes the sparkle's footprint, so nothing moves between states. */
+.enhance.enhance {
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 8px 14px;
   background: var(--bg);
-  overflow: hidden;
-  transition: border-color var(--dur-hover) var(--ease-out);
-}
-
-.segActive {
-  border-color: var(--line-2);
-}
-
-.seg .enhance,
-.seg .revert {
-  gap: 6px;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  font-family: var(--sans);
-  font-variant-caps: all-small-caps;
-  font-size: var(--text-xs);
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: var(--ink-2);
-  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
-}
-
-.seg .enhance:active:not(:disabled),
-.seg .revert:active:not(:disabled) {
-  transform: scale(var(--m-press));
-}
-
-/* Flat segment rendering of the btn.ai vocabulary: accent ink + sparkle
-   instead of the filled accent pill, so the segmented control keeps its
-   chrome while the "accent = AI call" cue still reads. */
-.seg .enhance {
-  min-width: 104px;
-  justify-content: flex-start;
   color: var(--accent);
-}
-
-.enhanceLabel {
-  min-width: 10ch;
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  letter-spacing: -0.005em;
+  line-height: normal;
   white-space: nowrap;
 }
 
-/* Reserve the working label's actual font width in both states. The hidden
-   zero-height line participates only in intrinsic inline sizing. */
-.enhanceLabel::after {
-  content: 'Enhancing…';
-  display: block;
-  height: 0;
-  visibility: hidden;
+.enhance.enhance[data-icon-only] {
+  gap: 0;
+  padding-inline: 10px;
 }
 
-.enhance svg,
-.revert svg {
-  color: var(--ink-3);
+/* Without its label the button would lose the text line that sets its
+   height; a zero-width space keeps it level with Generate at every size. */
+.enhance.enhance[data-icon-only]::after {
+  content: '\200b';
+}
+
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
 }
 
-.seg .enhance svg {
+.glyph svg {
   color: var(--accent);
 }
 
-.seg .enhance:hover:not(:disabled) {
-  background: var(--accent-soft);
-  filter: none;
+/* The working ring in accent: a translucent track, a solid head. */
+.spinner {
+  composes: ring from '../../styles/spinner.module.css';
+  --spinner-track: color-mix(in srgb, var(--accent) 28%, transparent);
+  --spinner-head: var(--accent);
 }
 
-.revert:hover:not(:disabled) svg {
-  color: var(--ink);
+.label {
+  white-space: nowrap;
 }
 
-.enhance:focus-visible,
-.revert:focus-visible {
+@media (hover: hover) {
+  .enhance.enhance:hover:not([aria-disabled='true']) {
+    background: var(--accent-soft);
+    border-color: var(--line-control);
+  }
+
+  /* A closed gate keeps the resting look (buttons.secondary would sink it). */
+  .enhance.enhance[aria-disabled='true']:hover {
+    background: var(--bg);
+    border-color: var(--line-control);
+  }
+}
+
+.enhance.enhance:active:not([aria-disabled='true']) {
+  transform: scale(var(--m-press));
+}
+
+.enhance.enhance:focus-visible {
   outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
-.sep {
-  width: 1px;
-  background: var(--line);
-  align-self: stretch;
-  flex: 0 0 auto;
-}
-
-.revert {
-  padding: 6px 9px;
-  color: var(--ink-3);
-}
-
-.revert:not(:disabled) {
-  color: var(--ink);
-}
-
-.revert:not(:disabled) svg {
-  color: var(--ink);
+.enhance.enhance[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 @media (width < 768px) {
-  .seg .enhance {
-    padding: 0 14px;
+  .enhance.enhance {
+    padding: 10px 14px;
+    font-size: var(--text-md);
   }
 
-  .seg .revert {
-    padding: 0 14px;
+  .enhance.enhance[data-icon-only] {
+    padding-inline: 12px;
   }
 }
 
 @media (hover: none), (any-pointer: coarse) {
   /* The touch gate sets the height floor for phones and iPad. */
-  .seg .enhance,
-  .seg .revert {
+  .enhance.enhance {
     min-height: 44px;
   }
 
-  .seg .revert {
+  .enhance.enhance[data-icon-only] {
     min-width: 44px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .seg,
-  .enhance,
-  .revert {
+  .enhance.enhance {
     transition-duration: var(--dur-reduced);
   }
 
-  .seg .enhance:active:not(:disabled),
-  .seg .revert:active:not(:disabled) {
+  .enhance.enhance:active:not([aria-disabled='true']) {
     transform: none;
   }
 }

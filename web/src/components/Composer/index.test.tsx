@@ -665,121 +665,106 @@ describe('Composer textarea autosize', () => {
 });
 
 describe('Composer enhance', () => {
-  const realFetch = globalThis.fetch;
-  afterEach(() => { globalThis.fetch = realFetch; });
+  const ENHANCE = 'Enhance and generate';
 
-  function sseFetch(body: string) {
-    return mock(() => Promise.resolve(new Response(body, {
-      status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
-    }))) as unknown as typeof fetch;
-  }
-
-  function composer(props: Partial<Parameters<typeof Composer>[0]>) {
-    return (
-      <Composer
-        models={models}
-        modelById={new Map(models.map((model) => [model.id, model]))}
-        prompt="original"
-        modelId="gpt-image-2.6-sunburst-cloud"
-        ratio="1:1"
-        count={1}
-        onPromptChange={mock()}
-        onModelChange={mock()}
-        onRatioChange={mock()}
-        onDurationChange={mock()}
-        onCountChange={mock()}
-        onSubmit={mock()}
-        {...props}
-      />
-    );
-  }
-
-  test('Enhance is disabled when the prompt is empty', () => {
-    renderComposer({ prompt: '   ' });
-    expect(screen.getByRole('button', { name: 'Enhance' }).hasAttribute('disabled')).toBe(true);
+  test('Enhance follows the Generate gate: aria-disabled with a click guard, never natively disabled', () => {
+    const onSubmitEnhanced = mock();
+    renderComposer({ prompt: '   ', onSubmitEnhanced });
+    const enhance = screen.getByRole('button', { name: ENHANCE });
+    expect(enhance.hasAttribute('disabled')).toBe(false);
+    expect(enhance.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(enhance);
+    expect(onSubmitEnhanced).not.toHaveBeenCalled();
   });
 
-  test('Enhance is enabled with a non-empty prompt', () => {
-    renderComposer({ prompt: 'a cat' });
-    expect(screen.getByRole('button', { name: 'Enhance' }).hasAttribute('disabled')).toBe(false);
-  });
-
-  test('successful enhance enables Undo; submit fires onSubmit and keeps Undo live', async () => {
-    globalThis.fetch = sseFetch('event: delta\ndata: {"text":"rewritten prompt"}\n\nevent: done\ndata: {}\n\n');
-    const onPromptChange = mock();
+  test('Enhance needs a prompt: queued rolls alone enable Generate, not Enhance', () => {
+    const onSubmitEnhanced = mock();
     const onSubmit = mock();
-    const { rerender } = render(composer({ prompt: 'original', onPromptChange, onSubmit }), { wrapper: wrapper() });
-    fireEvent.click(screen.getByRole('button', { name: 'Enhance' }));
-    await waitFor(() => { expect(onPromptChange).toHaveBeenLastCalledWith('rewritten prompt'); });
-
-    rerender(composer({ prompt: 'rewritten prompt', onPromptChange, onSubmit }));
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Undo enhance' }).hasAttribute('disabled')).toBe(false);
+    renderComposer({ prompt: '', onSubmitEnhanced, onSubmit });
+    act(() => {
+      useAtelierStore.getState().setDraft({ rollQueue: [{ id: 'sweep-1', text: 'a stashed roll', seed: 1, source: 'sweep' }] });
     });
-
-    fireEvent.click(screen.getByRole('button', { name: /Generate/ }));
-    expect(onSubmit).toHaveBeenCalled();
-    // Generate does not end the enhance run: the user can still return to the
-    // typed prompt after seeing what the rewrite produced.
-    expect(screen.getByRole('button', { name: 'Undo enhance' }).hasAttribute('disabled')).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Undo enhance' }));
-    expect(onPromptChange).toHaveBeenLastCalledWith('original');
+    const generate = screen.getByRole('button', { name: /^Generate/ });
+    expect(generate.getAttribute('aria-disabled')).toBeNull();
+    const enhance = screen.getByRole('button', { name: ENHANCE });
+    expect(enhance.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(enhance);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Prompt' }), { key: 'Enter', metaKey: true, shiftKey: true });
+    expect(onSubmitEnhanced).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  test('Clear drops the enhance anchor; its toast Undo restores it', async () => {
-    globalThis.fetch = sseFetch('event: delta\ndata: {"text":"rewritten prompt"}\n\nevent: done\ndata: {}\n\n');
+  test('a press fires the Enhance submission and leaves the prompt alone', () => {
+    const onSubmitEnhanced = mock();
+    const onSubmit = mock();
     const onPromptChange = mock();
-    const { rerender } = render(composer({ prompt: 'original', onPromptChange }), { wrapper: wrapper() });
-    fireEvent.click(screen.getByRole('button', { name: 'Enhance' }));
-    await waitFor(() => { expect(onPromptChange).toHaveBeenLastCalledWith('rewritten prompt'); });
-    rerender(composer({ prompt: 'rewritten prompt', onPromptChange }));
-    expect(useAtelierStore.getState().draft.enhanceAnchor).toBe('original');
-
-    // Flush Clear's follow-up updates inside act.
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Clear prompt and reference images' })); await Promise.resolve(); });
-    expect(useAtelierStore.getState().draft.prompt).toBe('');
-    expect(useAtelierStore.getState().draft.enhanceAnchor).toBeUndefined();
-    expect(useAtelierStore.getState().draft.enhancedText).toBeUndefined();
-
-    const undoToast = useAtelierStore.getState().toasts.find((t) => t.text === 'Composer cleared');
-    act(() => { undoToast?.action?.onClick(); });
-    expect(useAtelierStore.getState().draft.prompt).toBe('rewritten prompt');
-    expect(useAtelierStore.getState().draft.enhanceAnchor).toBe('original');
+    renderComposer({ prompt: 'a {{var::Era}} cat', onSubmitEnhanced, onSubmit, onPromptChange });
+    const enhance = screen.getByRole('button', { name: ENHANCE });
+    expect(enhance.getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(enhance);
+    fireEvent.click(enhance);
+    expect(onSubmitEnhanced).toHaveBeenCalledTimes(2);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onPromptChange).not.toHaveBeenCalled();
   });
 
-  test('Undo restores the original prompt', async () => {
-    globalThis.fetch = sseFetch('event: delta\ndata: {"text":"rewritten"}\n\nevent: done\ndata: {}\n\n');
-    const onPromptChange = mock();
-    const { rerender } = render(composer({ prompt: 'original', onPromptChange }), { wrapper: wrapper() });
-    fireEvent.click(screen.getByRole('button', { name: 'Enhance' }));
-    await waitFor(() => { expect(onPromptChange).toHaveBeenLastCalledWith('rewritten'); });
-    rerender(composer({ prompt: 'rewritten', onPromptChange }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Undo enhance' }));
-    expect(onPromptChange).toHaveBeenLastCalledWith('original');
+  test('Shift+Cmd/Ctrl+Enter fires Enhance; Cmd/Ctrl+Enter stays Generate', () => {
+    const onSubmitEnhanced = mock();
+    const onSubmit = mock();
+    renderComposer({ prompt: 'a cat', onSubmitEnhanced, onSubmit });
+    const textarea = screen.getByRole('textbox', { name: 'Prompt' });
+    fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true, shiftKey: true });
+    expect(onSubmitEnhanced).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmitEnhanced).toHaveBeenCalledTimes(1);
   });
 
-  test('Templates and Clear are disabled while an enhance stream is open', async () => {
-    // One delta then the stream stays open → status stays 'streaming'.
-    globalThis.fetch = (() => Promise.resolve(new Response(
-      new ReadableStream<Uint8Array>({
-        start(ctrl) {
-          ctrl.enqueue(new TextEncoder().encode('event: delta\ndata: {"text":"x"}\n\n'));
-          // intentionally never closed
-        },
-      }),
-      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
-    ))) as unknown as typeof fetch;
-    render(composer({ prompt: 'cat', promptsEnabled: true, onPromptChange: mock() }), { wrapper: wrapper() });
-    fireEvent.click(screen.getByRole('button', { name: 'Enhance' }));
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Enhance' }).hasAttribute('disabled')).toBe(true);
-    });
-    expect(screen.getByRole('button', { name: 'Templates' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Clear prompt and reference images' }).hasAttribute('disabled')).toBe(true);
+  test('a keyed model opens BYOK instead of enhancing, as Generate does', () => {
+    const onSubmitEnhanced = mock();
+    renderComposer({ prompt: 'a cat', modelId: 'gemini-3-pro-image-preview', onSubmitEnhanced });
+    fireEvent.click(screen.getByRole('button', { name: ENHANCE }));
+    expect(onSubmitEnhanced).not.toHaveBeenCalled();
+    expect(useAtelierStore.getState().byokOpen).toBe(true);
   });
 
-  test('with zero text models, Enhance stays enabled and opens the note anchored to it instead of enhancing', async () => {
+  test('working: Enhance spins and stays pressable, Generate does not spin for it', () => {
+    useAtelierStore.setState({ resolving: 2, resolvingEnhance: 2 });
+    try {
+      const onSubmitEnhanced = mock();
+      renderComposer({ prompt: 'a cat', onSubmitEnhanced });
+      const enhance = screen.getByRole('button', { name: ENHANCE });
+      expect(enhance.getAttribute('aria-busy')).toBe('true');
+      expect(enhance.getAttribute('aria-disabled')).toBeNull();
+      expect(enhance.textContent).toBe('Enhance');
+      fireEvent.click(enhance);
+      expect(onSubmitEnhanced).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: 'Generate' }).hasAttribute('data-working')).toBe(false);
+      expect(screen.getAllByText('Enhancing 2 prompts').length).toBeGreaterThan(0);
+    } finally {
+      useAtelierStore.setState({ resolving: 0, resolvingEnhance: 0 });
+    }
+  });
+
+  test('Templates and Clear stay usable: the prompt is never rewritten in place', () => {
+    useAtelierStore.setState({ resolving: 1, resolvingEnhance: 1 });
+    try {
+      renderComposer({ prompt: 'cat', promptsEnabled: true });
+      expect(screen.getByRole('button', { name: 'Templates' }).hasAttribute('disabled')).toBe(false);
+      expect(screen.getByRole('button', { name: 'Clear prompt and reference images' }).hasAttribute('disabled')).toBe(false);
+      expect(screen.getByRole('textbox', { name: 'Prompt' }).hasAttribute('disabled')).toBe(false);
+    } finally {
+      useAtelierStore.setState({ resolving: 0, resolvingEnhance: 0 });
+    }
+  });
+
+  test('video mode has no Enhance', () => {
+    renderComposer({ models: [healthyI2VModel], modelById: new Map([[healthyI2VModel.id, healthyI2VModel]]), modelId: healthyI2VModel.id });
+    expect(screen.queryByRole('button', { name: ENHANCE })).toBeNull();
+  });
+
+  test('with zero text models, Enhance opens the note anchored to it instead of enhancing', async () => {
     const requests: string[] = [];
     globalThis.fetch = mock((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -787,20 +772,29 @@ describe('Composer enhance', () => {
       if (url.endsWith('/text-models')) return Promise.resolve(Response.json({ models: [], tasks: [], defaults: { byTask: {} }, writers: {} }));
       return Promise.resolve(new Response('not found', { status: 404 }));
     }) as unknown as typeof fetch;
-    const onPromptChange = mock();
-    render(composer({ prompt: 'a cat', onPromptChange }), { wrapper: wrapper() });
-    const enhance = screen.getByRole('button', { name: 'Enhance' });
+    const onSubmitEnhanced = mock();
+    renderComposer({ prompt: 'a cat', onSubmitEnhanced });
+    const enhance = screen.getByRole('button', { name: ENHANCE });
     // The gate settles before the press; the button never disables for it.
     await waitFor(() => { expect(requests.some((url) => url.endsWith('/text-models'))).toBe(true); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-    expect(enhance.hasAttribute('disabled')).toBe(false);
+    expect(enhance.getAttribute('aria-disabled')).toBeNull();
     fireEvent.click(enhance);
     const note = await screen.findByRole('dialog', { name: 'Enhance needs a text model.' });
-    expect(note.getAttribute('data-anchor-place')).toBe('below-start');
     expect(note.textContent).toContain('Ask your admin to connect a text model.');
-    expect(requests.some((url) => url.includes('/enhance'))).toBe(false);
-    expect(onPromptChange).not.toHaveBeenCalled();
+    expect(onSubmitEnhanced).not.toHaveBeenCalled();
     expect(useAtelierStore.getState().toasts).toEqual([]);
+  });
+
+  test('the collapsed bar offers Enhance beside Generate, so a fire that collapses keeps it in reach', () => {
+    useAtelierStore.setState({ composerMinimized: true });
+    const onSubmitEnhanced = mock();
+    renderComposer({ prompt: 'a cat', onSubmitEnhanced });
+    const bar = screen.getByRole('button', { name: 'Expand composer' }).parentElement;
+    const buttons = [...(bar?.querySelectorAll('button') ?? [])].map((button) => button.getAttribute('aria-label') ?? button.textContent);
+    expect(buttons.slice(-2)).toEqual([ENHANCE, 'Generate']);
+    fireEvent.click(screen.getByRole('button', { name: ENHANCE }));
+    expect(onSubmitEnhanced).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -814,9 +808,12 @@ describe('Composer action-bar stability', () => {
     expect(controls?.contains(generate)).toBe(false);
   });
 
-  test('Undo enhance is always rendered, disabled before any enhance', () => {
+  test('Enhance sits in the dock immediately left of Generate', () => {
     renderComposer({ prompt: 'a cat' });
-    expect(screen.getByRole('button', { name: 'Undo enhance' }).hasAttribute('disabled')).toBe(true);
+    const dock = document.querySelector('[data-zone="dock"]');
+    const labels = [...(dock?.querySelectorAll('button') ?? [])].map((button) => button.getAttribute('aria-label') ?? button.textContent);
+    expect(labels.slice(-2)).toEqual(['Enhance and generate', 'Generate']);
+    expect(screen.queryByRole('button', { name: 'Undo enhance' })).toBeNull();
   });
 
   test('the templates chip reads "Templates", matching the picker it opens', () => {
@@ -1117,9 +1114,9 @@ describe('Composer prerequisite readiness', () => {
   for (const availability of ['none', 'available', 'unknown'] as const) {
     test(`${availability} changes only factual copy, leaving Generate available`, () => {
       const { onSubmit } = readiness(availability);
-      const enhance = screen.getByRole('button', { name: 'Enhance' });
-      expect(enhance.getAttribute('data-tip')).toBe(availability === 'none' ? 'Needs a text model' : 'Rewrite prompt');
-      expect(enhance.hasAttribute('disabled')).toBe(false);
+      const enhance = screen.getByRole('button', { name: 'Enhance and generate' });
+      expect(enhance.getAttribute('data-tip')).toBe(availability === 'none' ? 'Needs a text model' : 'Rewrite and generate');
+      expect(enhance.getAttribute('aria-disabled')).toBeNull();
       const warning = screen.queryByText(readinessStatus);
       expect(warning !== null).toBe(availability === 'none');
       if (warning) expect(warning.getAttribute('data-tone')).toBe('info');
@@ -1154,7 +1151,7 @@ describe('Composer prerequisite readiness', () => {
     // The observer update lands on TanStack's deferred batch; under a loaded
     // runner that can exceed the default 1s wait.
     await waitFor(() => { expect(screen.queryByText(readinessStatus)).toBeNull(); }, { timeout: 4000 });
-    expect(screen.getByRole('button', { name: 'Enhance' }).getAttribute('data-tip')).toBe('Rewrite prompt');
+    expect(screen.getByRole('button', { name: 'Enhance and generate' }).getAttribute('data-tip')).toBe('Rewrite and generate');
   });
 
   for (const scenario of [

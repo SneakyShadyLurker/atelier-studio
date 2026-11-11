@@ -342,8 +342,7 @@ describe('PromptPicker', () => {
     expect(screen.getByRole('button', { name: 'Simulate this prompt' }).getAttribute('data-tip')).toBe("Preview the final prompt here — resolves AI fills too. Doesn't fill the composer.");
   });
 
-  test('Use prompt with no pins pastes the unresolved body verbatim (full re-roll) and drops the Enhance anchor', async () => {
-    useAtelierStore.getState().setDraft({ enhanceAnchor: 'old brief', enhancedText: 'old rewrite' });
+  test('Use prompt with no pins pastes the unresolved body verbatim (full re-roll)', async () => {
     const { onClose } = renderPicker();
 
     fireEvent.click(screen.getByRole('button', { name: /Constraint portrait/i }));
@@ -352,8 +351,6 @@ describe('PromptPicker', () => {
     const draft = useAtelierStore.getState().draft;
     expect(draft.prompt).toBe('{{var::era}} portrait in {{var::wardrobe}}');
     expect(draft.provenance).toBeUndefined();
-    expect(draft.enhanceAnchor).toBeUndefined();
-    expect(draft.enhancedText).toBeUndefined();
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();
   });

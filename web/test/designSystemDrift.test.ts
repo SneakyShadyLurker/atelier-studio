@@ -267,7 +267,8 @@ describe('design system drift guards', () => {
     expect(read('docs/web-conventions.md')).toContain('hardcoded across four update categories');
     expect(read('docs/web-conventions.md')).toContain('web/src/styles/buttons.module.css');
     expect(read('web/src/components/Composer/EnhanceControl.tsx')).not.toContain('↺');
-    expect(read('web/src/components/Composer/EnhanceControl.tsx')).toContain('<I.reroll />');
+    expect(read('web/src/components/Composer/EnhanceControl.tsx')).not.toContain('✦');
+    expect(read('web/src/components/Composer/EnhanceControl.tsx')).toContain('<I.sparkle aria-hidden="true" />');
   });
 
   test('overlay and on-dark glass values use shared tokens outside the token source files', () => {

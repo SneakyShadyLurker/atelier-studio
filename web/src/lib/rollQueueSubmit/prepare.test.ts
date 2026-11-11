@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { AiFillBatchRequest, AiFillRequest, EnhancePromptRequest } from '@atelier/shared';
+import { MAX_PROMPT_CHARS } from '@atelier/shared';
 import { AI_FILL_BATCH_MAX, AI_FILL_MAX_INPUT_CHARS } from '@atelier/shared/ai-fill';
 import type { QueuedRoll, RollSubmission } from '../../store/atelier';
 import type { FireItem, PassItem, PrepareContext } from './types';
+import { QueueFullError } from '../../api/queueFullRetry';
+import { QuotaExhaustedError } from '../../api/sse';
 
 interface BatchMockResult {
   items: ({ ok: true; prompt: string; fills: string[] } | { ok: false })[];
@@ -48,6 +51,8 @@ function context(overrides: Partial<PrepareContext> = {}): PrepareContext {
     effectiveModelId: 'model-1',
     wantsMotion: false,
     motionFields: {},
+    wantsEnhance: false,
+    enhanceFields: {},
     signal: new AbortController().signal,
     addToast: () => '',
     recordHeadError: () => undefined,
@@ -218,5 +223,123 @@ describe('prepareBatch', () => {
     expect(outcomes[1]).toEqual({ key: 'head', text: 'head SINGLE', provenance: undefined });
     expect(resolveAiFillBatchMock.mock.calls[0]?.[1]).toBe(signal);
     expect(resolveAiFillMock.mock.calls[0]?.[1]).toBe(signal);
+  });
+});
+
+describe('the Enhance step', () => {
+  const enhanceSubmission: RollSubmission = {
+    request: { modelId: 'model-e', ratio: '3:4', count: 1, refImageIds: ['ref-1'] },
+    lockedSeed: null,
+    wantsMotion: false,
+    motionFields: {},
+    wantsEnhance: true,
+  };
+  const enhanceItem = (text = 'a fox in snow', submission: RollSubmission = enhanceSubmission): FireItem => ({
+    key: 'press', text, provenance: undefined, submission,
+  });
+
+  beforeEach(() => {
+    formatMock.mockClear();
+    formatMock.mockImplementation(() => Promise.resolve('a red fox stepping through deep fresh snow'));
+  });
+
+  test('fires the rewrite of the resolved text, and the rewritten item no longer asks for enhancement', async () => {
+    resolveAiFillMock.mockImplementation((req) => Promise.resolve({ prompt: req.staticSegments.join('FILLED'), fills: ['FILLED'] }));
+    const outcome = await prepareItem(context(), enhanceItem('a {{ai-fill: animal}} in snow'));
+    expect(formatMock).toHaveBeenCalledTimes(1);
+    const [request, purpose] = formatMock.mock.calls[0] ?? [];
+    expect(request).toEqual({ prompt: 'a FILLED in snow', modelId: 'model-e', refImageIds: ['ref-1'], ratio: '3:4' });
+    expect(purpose).toBe('enhance');
+    expect(outcome).toEqual({
+      ...enhanceItem(),
+      text: 'a red fox stepping through deep fresh snow',
+      submission: { ...enhanceSubmission, wantsEnhance: false },
+    });
+  });
+
+  test('a finished rewrite is saved at once, before the rest of its pass settles', async () => {
+    const saved: FireItem[] = [];
+    const outcome = await prepareItem(context({ onFilled: (item) => { saved.push(item); } }), enhanceItem('a fox'));
+    expect(saved).toEqual([{
+      ...enhanceItem('a fox'),
+      text: 'a red fox stepping through deep fresh snow',
+      submission: { ...enhanceSubmission, wantsEnhance: false },
+    }]);
+    expect(saved[0]).toBe(outcome as FireItem);
+  });
+
+  test('no references: the request omits refImageIds', async () => {
+    await prepareItem(context(), enhanceItem('a fox', { ...enhanceSubmission, request: { ...enhanceSubmission.request, refImageIds: [] } }));
+    expect(formatMock.mock.calls[0]?.[0]).toEqual({ prompt: 'a fox', modelId: 'model-e', ratio: '3:4' });
+  });
+
+  test('an item whose press did not ask for enhancement makes no enhance call', async () => {
+    const plain = enhanceItem('a fox', { ...enhanceSubmission, wantsEnhance: false });
+    expect(await prepareItem(context(), plain)).toBe(plain);
+    const unflagged = enhanceItem('a fox', { request: enhanceSubmission.request, lockedSeed: null, wantsMotion: false, motionFields: {} });
+    expect(await prepareItem(context(), unflagged)).toBe(unflagged);
+    expect(formatMock).not.toHaveBeenCalled();
+  });
+
+  test('Stop mid-rewrite propagates the abort', async () => {
+    formatMock.mockImplementation(() => Promise.reject(new DOMException('stopped', 'AbortError')));
+    const result = await prepareItem(context(), enhanceItem()).catch((error: unknown) => error);
+    expect(result).toBeInstanceOf(DOMException);
+  });
+
+  test('QUEUE_FULL keeps the roll with its filled text so the retry does not roll the fill again', async () => {
+    resolveAiFillMock.mockImplementation((req) => Promise.resolve({ prompt: req.staticSegments.join('FILLED'), fills: ['FILLED'] }));
+    formatMock.mockImplementation(() => Promise.reject(new QueueFullError(1500)));
+    const source = roll('press', 'a {{ai-fill: animal}}');
+    const outcome = await prepareItem(context(), enhanceItem('a {{ai-fill: animal}}'), source);
+    expect(outcome).toEqual({
+      backpressure: true,
+      roll: source,
+      retryAfterMs: 1500,
+      advancedItem: enhanceItem('a FILLED'),
+    });
+  });
+
+  test('quota keeps the roll and shows the quota toast', async () => {
+    formatMock.mockImplementation(() => Promise.reject(new QuotaExhaustedError(60)));
+    const toasts: string[] = [];
+    const outcome = await prepareItem(context({ addToast: (text) => { toasts.push(text); return ''; } }), enhanceItem());
+    expect(outcome).toEqual({ preserve: true, roll: null });
+    expect(toasts).toHaveLength(1);
+  });
+
+  test('a failed rewrite fires nothing and records an actionable head message', async () => {
+    formatMock.mockImplementation(() => Promise.reject(new Error('upstream exploded')));
+    const messages: string[] = [];
+    const outcome = await prepareItem(context({ recordHeadError: (message) => { messages.push(message); } }), enhanceItem());
+    expect(outcome).toBeNull();
+    expect(messages).toEqual(["Couldn't enhance the prompt. Nothing was generated."]);
+  });
+
+  test('an over-length rewrite fires nothing', async () => {
+    formatMock.mockImplementation(() => Promise.resolve('x'.repeat(MAX_PROMPT_CHARS + 1)));
+    const messages: string[] = [];
+    const outcome = await prepareItem(context({ recordHeadError: (message) => { messages.push(message); } }), enhanceItem());
+    expect(outcome).toBeNull();
+    expect(messages).toEqual(["Couldn't enhance the prompt. Nothing was generated."]);
+  });
+
+  test("a queued roll's failure never records the head message", async () => {
+    formatMock.mockImplementation(() => Promise.reject(new Error('upstream exploded')));
+    const messages: string[] = [];
+    const outcome = await prepareItem(context({ recordHeadError: (message) => { messages.push(message); } }), enhanceItem(), roll('press', 'a fox in snow'));
+    expect(outcome).toBeNull();
+    expect(messages).toEqual([]);
+  });
+
+  test('a batch fill goes through the rewrite too', async () => {
+    resolveAiFillBatchMock.mockImplementation(() => Promise.resolve({ items: [{ ok: true, prompt: 'batch filled', fills: ['x'] }] }));
+    const ctx = context();
+    const source = roll('press', 'a {{ai-fill: x}}');
+    const [unit] = buildPreparationUnits(ctx, [{ item: enhanceItem('a {{ai-fill: x}}'), sourceRoll: source }], () => false);
+    if (unit?.kind !== 'batch') throw new Error('expected one batch unit');
+    const [outcome] = await prepareBatch(ctx, unit.entries);
+    expect(formatMock.mock.calls[0]?.[0].prompt).toBe('batch filled');
+    expect(outcome).toMatchObject({ text: 'a red fox stepping through deep fresh snow', submission: { wantsEnhance: false } });
   });
 });

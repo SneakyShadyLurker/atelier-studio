@@ -4,57 +4,49 @@ import buttons from '../../styles/buttons.module.css';
 import styles from './EnhanceControl.module.css';
 
 interface EnhanceControlProps {
-  /** True while an enhance stream is open. */
-  enhancing: boolean;
-  /** True when the composer differs from the anchored user prompt and can revert to it. */
-  canUndo: boolean;
-  /** Composer-level gate (offline / empty prompt). Combined with `enhancing`. */
+  /** An Enhance press is still being rewritten. The button stays pressable. */
+  working: boolean;
+  /** The composer-level gate Generate uses (offline, empty prompt, refs). */
   disabled: boolean;
   needsTextModel?: boolean;
+  /** Sparkle only, same accessible name (the phone collapsed bar). */
+  iconOnly?: boolean;
   onEnhance: () => void;
-  onUndo: () => void;
   /** The Enhance button, which anchors the no-text-model note. */
   enhanceRef?: Ref<HTMLButtonElement> | undefined;
 }
 
-function EnhanceControl({ enhancing, canUndo, disabled, needsTextModel = false, onEnhance, onUndo, enhanceRef }: EnhanceControlProps) {
-  // Announce the async enhance lifecycle to assistive tech: the textarea is
-  // disabled mid-stream and its value is swapped on completion, neither of
-  // which a screen reader picks up on its own. Derived from props (no extra
-  // state) — the transition through "Enhancing…" makes the completion message
-  // a content change the live region will announce.
-  const liveMessage = enhancing ? 'Enhancing prompt…' : canUndo ? 'Prompt rewritten.' : '';
+/**
+ * Enhance and generate: every press rewrites the composer prompt as it stands
+ * (tokens resolved with a fresh roll) and generates from the rewrite. The
+ * prompt itself is never changed. Repeated presses are the point, so the
+ * button never blocks on its own work: it is never natively disabled, and a
+ * closed gate is `aria-disabled` with a click guard, keeping focus.
+ */
+function EnhanceControl({ working, disabled, needsTextModel = false, iconOnly = false, onEnhance, enhanceRef }: EnhanceControlProps) {
   return (
-    <div
-      className={`${styles.seg} ${canUndo ? styles.segActive : ''}`}
-      role="group"
-      aria-label="Prompt enhancement"
-    >
-      <div className="srOnly" role="status" aria-live="polite" aria-atomic="true">{liveMessage}</div>
+    <>
+      <span className="srOnly" role="status" aria-live="polite" aria-atomic="true">{working ? 'Enhancing prompt…' : ''}</span>
       <button
         ref={enhanceRef}
         type="button"
-        className={`${buttons.ai} ${styles.enhance}`}
-        aria-label="Enhance"
-        data-tip={needsTextModel ? 'Needs a text model' : 'Rewrite prompt'}
-        disabled={disabled || enhancing}
-        onClick={onEnhance}
+        className={`${buttons.secondary} ${styles.enhance}`}
+        aria-label="Enhance and generate"
+        aria-disabled={disabled || undefined}
+        aria-busy={working || undefined}
+        data-icon-only={iconOnly ? '' : undefined}
+        data-tip={needsTextModel ? 'Needs a text model' : 'Rewrite and generate'}
+        onClick={() => {
+          if (disabled) return;
+          onEnhance();
+        }}
       >
-        <I.sparkle aria-hidden="true" />
-        <span className={styles.enhanceLabel}>{enhancing ? 'Enhancing…' : 'Enhance'}</span>
+        <span className={styles.glyph} aria-hidden="true">
+          {working ? <span className={styles.spinner} /> : <I.sparkle aria-hidden="true" />}
+        </span>
+        {iconOnly ? null : <span className={styles.label}>Enhance</span>}
       </button>
-      <span className={styles.sep} aria-hidden="true" />
-      <button
-        type="button"
-        className={`${buttons.secondary} ${styles.revert}`}
-        aria-label="Undo enhance"
-        data-tip="Restore the original prompt"
-        disabled={!canUndo}
-        onClick={onUndo}
-      >
-        <I.reroll />
-      </button>
-    </div>
+    </>
   );
 }
 

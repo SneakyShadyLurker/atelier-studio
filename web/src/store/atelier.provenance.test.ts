@@ -89,26 +89,4 @@ describe('reopenBatchInPicker', () => {
     expect(useAtelierStore.getState().promptPickerDraft.templateId).toBeNull();
     expect(useAtelierStore.getState().pickerOpen).toBe(true);
   });
-
-  // Finding E: reopening while an enhance is in flight is a no-op (returns
-  // false). The picker render is gated `promptPickerOpen && !enhancing`, so
-  // opening mid-enhance would leave store-open + visually-hidden, then pop the
-  // picker open unexpectedly when enhance ends. Caller toasts on the false.
-  test('is a no-op (returns false, picker stays closed) while enhancing', () => {
-    useAtelierStore.getState().setEnhanceInFlight(true);
-    const opened = useAtelierStore.getState().reopenBatchInPicker({ templateId: 'tpl1', rollSeed: 9, pins: {} });
-    expect(opened).toBe(false);
-    expect(useAtelierStore.getState().pickerOpen).toBe(false);
-    // Draft is untouched too.
-    expect(useAtelierStore.getState().promptPickerDraft.templateId).toBeNull();
-  });
-
-  test('opens (returns true) once enhancing clears', () => {
-    useAtelierStore.getState().setEnhanceInFlight(true);
-    expect(useAtelierStore.getState().reopenBatchInPicker({ templateId: 'tpl1', rollSeed: 9, pins: {} })).toBe(false);
-    useAtelierStore.getState().setEnhanceInFlight(false);
-    const opened = useAtelierStore.getState().reopenBatchInPicker({ templateId: 'tpl1', rollSeed: 9, pins: {} });
-    expect(opened).toBe(true);
-    expect(useAtelierStore.getState().pickerOpen).toBe(true);
-  });
 });

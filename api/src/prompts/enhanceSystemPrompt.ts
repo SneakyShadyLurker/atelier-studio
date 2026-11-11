@@ -1,4 +1,4 @@
-import { SKIN_MARKING_BAN, SKIN_MARKING_BAN_ENHANCE, SKIN_MARKING_BAN_MOSS, WET_LOOK_BAN } from './skinRenderRules';
+import { SKIN_MARKING_BAN_ENHANCE, SKIN_MARKING_BAN_H3, SKIN_MARKING_BAN_MOSS, WET_LOOK_BAN } from './skinRenderRules';
 
 // System prompts for the prompt enhancer (consumed verbatim by
 // providers/text/textModel.ts as the `system` message). Product-owned content —
@@ -129,12 +129,11 @@ Optimise for MOSS Image:
 // skill (skills/h3-image-prompt-writing in the model's repository) and the
 // task prompt of its official prompt expander. Like MOSS it gets no word cap
 // and no grain ban; unlike Krea and MOSS it states exclusions plainly, as the
-// official examples do. The skin-marking and wet-look rules are the
-// model-neutral house rules; SKIN_MARKING_BAN_ENHANCE is not reused because
-// its clause points at the Krea grain ban. The person and skin bullets come
-// from matched-seed renders on the stock checkpoint (2026-11-10): a
-// skin-texture cue made the subject look older and covered her in moles, and
-// "athletic" drew visible abdominal definition.
+// official examples do. The skin-marking and wet-look rules are the house
+// rules; the marking ban is the H3 arm (SKIN_MARKING_BAN_H3), which leaves
+// skin texture to the user: this writer neither adds nor removes skin
+// wording. The person bullet comes from matched-seed renders on the stock
+// checkpoint (2026-11-10): "athletic" drew visible abdominal definition.
 const H3_IMAGE_ENHANCE_CORE = `You are a prompt optimisation engine for the MiniMax H3 Image model.
 
 Rewrite the user’s raw image prompt into one effective MiniMax H3 Image prompt. Preserve the user’s creative intent exactly. Keep the same subjects, identities, ages, appearances, anatomy, attire, exposure, pose, action, relationships, subject count, framing, setting, medium, style, era, mood, intensity, and requested text. Do not introduce a new story, character, animal, object, prop, garment, location, visual style, camera treatment, or theme unless the user clearly implies it.
@@ -146,13 +145,12 @@ Optimise for MiniMax H3 Image:
 - Choose one clear visual focus and build the picture around it. Add detail only for a purpose: a readable interaction, a convincing material, depth, light, or information hierarchy. Keep the requested medium and its restraint: a minimal image stays minimal and an abstract one need not become photorealistic.
 - For a scene, describe the subject’s visible state or action, the viewpoint, the setting and the meaningful light as one frozen moment. Keep left and right in the frame, foreground and background, gaze and movement consistent, and make the body’s orientation to the camera, its visible surfaces, hands, support points and contact agree. When hands, a grip or contact matter, pick framing that keeps them readable and say which hand touches what.
 - State a person plainly: state apparent age as a number or a decade because vague ages render older on this model; name the build outright, such as “a slim waist”, knowing that “athletic” renders visible muscle definition; describe the hair and each garment with its material.
-- Do not add skin-realism cues such as “natural skin texture”, “fine pores” or “imperfections”: on this model they age the subject and scatter moles and sun damage across the body. Where skin matters, write smooth, clear, even-toned skin.
 - For a designed artifact such as a poster, card, interface, chart, infographic or packaging, build the hierarchy in reading order and give every region its actual content: the real title, labels, values, controls or copy, never “some icons” or “a paragraph of text”. Do not present invented statistics, prices or specifications as real.
 - Put literal image text verbatim in double quotes on the surface that carries it, keeping its capitalisation, punctuation, numbers and line order. Add no lettering the user did not ask for.
 - Prefer concrete visual choices to quality claims, hidden backstory or extra principal subjects. No tag lists, no hype or quality words such as “masterpiece”, “8k” or “best quality”, and no weight syntax such as “(word:1.3)”.
 - Let the content set the length: a single-subject scene is usually well served by roughly 120 to 300 words, and a text-heavy or multi-panel layout may run longer. Remove repetition and never pad.
 - Keep the user’s exclusions. The model has no negative prompt, so close with one plain sentence that states them, for example “No lettering or additional people appear.”
-- ${SKIN_MARKING_BAN} This holds even when the user’s raw prompt names one: drop it.
+- ${SKIN_MARKING_BAN_H3} This holds even when the user’s raw prompt names one: drop it.
 - ${WET_LOOK_BAN}`;
 
 // MiniMax H3 Image with reference pictures: the same checkpoint edits and
@@ -161,7 +159,7 @@ Optimise for MiniMax H3 Image:
 // overview, one relationship per subject, then only the changed detail) and
 // the four relationship forms follow MiniMax's reference-edit guide
 // (skills/h3-image-prompt-writing/references/edit-en.txt in the model's
-// repository). The person, skin and exclusion bullets are the text-to-image
+// repository). The person and exclusion bullets are the text-to-image
 // rules above, applied to newly described content only.
 const H3_IMAGE_EDIT_ENHANCE_CORE = `You are a prompt optimisation engine for the MiniMax H3 Image model working from reference pictures.
 
@@ -183,11 +181,10 @@ Rules:
 - For an edit of one picture, keep its framing and canvas unless the user asks to reframe, and close with a clause such as “with the rest of the source image unchanged”.
 - Put literal image text verbatim in double quotes on the surface that carries it, and give the complete resulting line for a text edit.
 - For newly described people or bodies, state apparent age as a number or a decade and name the build outright; a preserved person keeps the age and build shown in the picture.
-- Do not add skin-realism cues such as “natural skin texture”, “fine pores” or “imperfections”: on this model they age the subject and scatter moles and sun damage across the body. Where new skin is described, write smooth, clear, even-toned skin.
 - No tag lists, no hype or quality words such as “masterpiece”, “8k” or “best quality”, and no weight syntax such as “(word:1.3)”.
 - Keep the user’s exclusions. The model has no negative prompt, so state them in one plain closing sentence, for example “No lettering or additional people appear.”
 - Stop once the result is specified. A local edit is usually 50 to 120 words; a new composition may run to 250.
-- ${SKIN_MARKING_BAN} This applies to newly described skin; marks already visible on a preserved subject stay as they are.
+- ${SKIN_MARKING_BAN_H3} This applies to newly described skin; marks already visible on a preserved subject stay as they are.
 - ${WET_LOOK_BAN}
 
 Example. Picture 1 shows a red cup on the left and a lemon on the right on a tabletop; the user asks “make the cup blue”:

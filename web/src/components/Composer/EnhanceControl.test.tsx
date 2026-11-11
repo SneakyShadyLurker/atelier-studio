@@ -6,63 +6,70 @@ afterEach(cleanup);
 
 function setup(over: Partial<Parameters<typeof EnhanceControl>[0]> = {}) {
   const onEnhance = mock();
-  const onUndo = mock();
-  render(
+  const result = render(
     <EnhanceControl
-      enhancing={false}
-      canUndo={false}
+      working={false}
       disabled={false}
       onEnhance={onEnhance}
-      onUndo={onUndo}
       {...over}
     />,
   );
-  return { onEnhance, onUndo };
+  return { onEnhance, ...result };
 }
 
+const ENHANCE = 'Enhance and generate';
+
 describe('EnhanceControl', () => {
-  test('prerequisite tooltip preserves Enhance, Undo and callbacks', () => {
-    const { onEnhance, onUndo } = setup({ needsTextModel: true, canUndo: true });
-    const enhance = screen.getByRole('button', { name: 'Enhance' });
-    expect(enhance.getAttribute('data-tip')).toBe('Needs a text model');
-    expect(enhance.hasAttribute('disabled')).toBe(false);
+  test('one button named for what it does, labelled Enhance, with no Undo', () => {
+    const { onEnhance } = setup();
+    const enhance = screen.getByRole('button', { name: ENHANCE });
+    expect(enhance.textContent).toBe('Enhance');
+    expect(enhance.getAttribute('data-tip')).toBe('Rewrite and generate');
+    expect(screen.getAllByRole('button')).toHaveLength(1);
     fireEvent.click(enhance);
-    fireEvent.click(screen.getByRole('button', { name: 'Undo enhance' }));
     expect(onEnhance).toHaveBeenCalledTimes(1);
-    expect(onUndo).toHaveBeenCalledTimes(1);
   });
 
-  test('renders both segments; revert always present, disabled until canUndo', () => {
+  test('without a text model the tip says so and the press still reaches the owner (the note)', () => {
+    const { onEnhance } = setup({ needsTextModel: true });
+    const enhance = screen.getByRole('button', { name: ENHANCE });
+    expect(enhance.getAttribute('data-tip')).toBe('Needs a text model');
+    fireEvent.click(enhance);
+    expect(onEnhance).toHaveBeenCalledTimes(1);
+  });
+
+  test('a closed gate is aria-disabled with a click guard, never natively disabled', () => {
+    const { onEnhance } = setup({ disabled: true });
+    const enhance = screen.getByRole('button', { name: ENHANCE });
+    expect(enhance.hasAttribute('disabled')).toBe(false);
+    expect(enhance.getAttribute('aria-disabled')).toBe('true');
+    enhance.focus();
+    fireEvent.click(enhance);
+    expect(onEnhance).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(enhance);
+  });
+
+  test('working: busy and announced, the label unchanged, and still pressable', () => {
+    const { onEnhance } = setup({ working: true });
+    const enhance = screen.getByRole('button', { name: ENHANCE });
+    expect(enhance.getAttribute('aria-busy')).toBe('true');
+    expect(enhance.getAttribute('aria-disabled')).toBeNull();
+    expect(enhance.textContent).toBe('Enhance');
+    expect(screen.getByRole('status').textContent).toBe('Enhancing prompt…');
+    fireEvent.click(enhance);
+    fireEvent.click(enhance);
+    expect(onEnhance).toHaveBeenCalledTimes(2);
+  });
+
+  test('idle: no busy state and a silent status line', () => {
     setup();
-    expect(screen.getByRole('button', { name: 'Enhance' })).toBeDefined();
-    expect(screen.getByRole('button', { name: 'Enhance' }).getAttribute('data-tip')).toBe('Rewrite prompt');
-    const undo = screen.getByRole('button', { name: 'Undo enhance' });
-    expect(undo.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: ENHANCE }).hasAttribute('aria-busy')).toBe(false);
+    expect(screen.getByRole('status').textContent).toBe('');
   });
 
-  test('canUndo enables the revert segment', () => {
-    setup({ canUndo: true });
-    expect(screen.getByRole('button', { name: 'Undo enhance' }).hasAttribute('disabled')).toBe(false);
-  });
-
-  test('enhancing swaps the label and disables the enhance segment', () => {
-    setup({ enhancing: true });
-    const enhance = screen.getByRole('button', { name: 'Enhance' });
-    expect(enhance.hasAttribute('disabled')).toBe(true);
-    expect(enhance.textContent).toContain('Enhancing…');
-  });
-
-  test('disabled prop disables the enhance segment but not a valid revert', () => {
-    setup({ disabled: true, canUndo: true });
-    expect(screen.getByRole('button', { name: 'Enhance' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Undo enhance' }).hasAttribute('disabled')).toBe(false);
-  });
-
-  test('clicks fire the right callbacks', () => {
-    const { onEnhance, onUndo } = setup({ canUndo: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Enhance' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Undo enhance' }));
-    expect(onEnhance).toHaveBeenCalledTimes(1);
-    expect(onUndo).toHaveBeenCalledTimes(1);
+  test('icon-only keeps the accessible name and drops the visible label', () => {
+    setup({ iconOnly: true });
+    const enhance = screen.getByRole('button', { name: ENHANCE });
+    expect(enhance.textContent).toBe('');
   });
 });

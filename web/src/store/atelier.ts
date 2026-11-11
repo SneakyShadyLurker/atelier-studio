@@ -86,16 +86,6 @@ export interface ComposerDraft {
   /** Previous segment motion prompt used only as motion-enhance continuation context. */
   extendPrevPrompt?: string | undefined;
   /**
-   * The user's own prompt, anchored by the first Enhance and kept across
-   * Generate / Undo / view switches — every further Enhance re-rolls it and
-   * Undo restores it. It follows the user's own edits of that text and is
-   * dropped only when the brief is replaced outright (Clear, Use prompt, or
-   * emptying the box). Client-only; never on the wire.
-   */
-  enhanceAnchor?: string | undefined;
-  /** Last completed Enhance output, so an unedited rewrite can be told apart from user text. */
-  enhancedText?: string | undefined;
-  /**
    * The most recent non-I2V (image) model the user actively selected. Tracked so
    * the video panel's "back to image" affordance can restore the model the user
    * was on before entering animate mode, rather than always snapping to the
@@ -169,6 +159,12 @@ export interface RollSubmission {
   readonly motionFields: Pick<EnhancePromptRequest, 'sourcePrompt' | 'durationFrames' | 'extendContext'>;
   /** Historical replay: submit these inputs without resolving or enhancing them again. */
   readonly prepared?: true;
+  /**
+   * An Enhance press: each item's resolved text goes through the enhance
+   * rewrite before it fires. Cleared on an item once its rewrite succeeded,
+   * so a requeue or reload never enhances the same roll twice.
+   */
+  readonly wantsEnhance?: boolean;
 }
 
 export interface ToastAction {
@@ -292,6 +288,11 @@ interface UiSlice {
   resolving: number;
   beginResolving: () => void;
   endResolving: () => void;
+  // The share of `resolving` that belongs to Enhance presses, so the Enhance
+  // and Generate buttons each show their own working state.
+  resolvingEnhance: number;
+  beginResolvingEnhance: () => void;
+  endResolvingEnhance: () => void;
   // Count of individual prompts still being resolved (ai-fill + format) before
   // their generate() fires. Distinct from `resolving` (submission-depth, drives
   // the button): `preparing` counts DOWN per item to drive the "Preparing N
@@ -346,15 +347,7 @@ interface PromptLibraryUiSlice {
   openPicker: () => void;
   closePicker: () => void;
   setPickerOpen: (open: boolean) => void;
-  // Mirrors the Composer's enhance-stream status into the store so callers that
-  // open the picker (e.g. batch Reopen) can refuse while an enhance is in
-  // flight — the picker render is gated `promptPickerOpen && !enhancing`, so an
-  // open during enhance would leave store-open but visually-hidden, then pop
-  // open unexpectedly when enhance ends.
-  enhanceInFlight: boolean;
-  setEnhanceInFlight: (inFlight: boolean) => void;
-  // Returns false (no-op) when an enhance is in flight; true once opened.
-  reopenBatchInPicker: (provenance: { templateId: string | null; rollSeed: number; pins: Readonly<Record<string, string>> }) => boolean;
+  reopenBatchInPicker: (provenance: { templateId: string | null; rollSeed: number; pins: Readonly<Record<string, string>> }) => void;
 }
 
 interface ViewSlice {
@@ -721,6 +714,9 @@ const createUiSlice: StateCreator<AtelierState, [], [], UiSlice> = (set) => ({
   resolving: 0,
   beginResolving: () => { set((state) => ({ resolving: state.resolving + 1 })); },
   endResolving: () => { set((state) => ({ resolving: Math.max(0, state.resolving - 1) })); },
+  resolvingEnhance: 0,
+  beginResolvingEnhance: () => { set((state) => ({ resolvingEnhance: state.resolvingEnhance + 1 })); },
+  endResolvingEnhance: () => { set((state) => ({ resolvingEnhance: Math.max(0, state.resolvingEnhance - 1) })); },
   preparing: 0,
   addPreparing: (n) => { set((state) => ({ preparing: state.preparing + n })); },
   settlePreparing: (n) => { set((state) => ({ preparing: Math.max(0, state.preparing - n) })); },
@@ -760,7 +756,7 @@ const createSaveTemplateSlice: StateCreator<AtelierState, [], [], SaveTemplateSl
   closeSaveTemplate: () => { set({ saveTemplatePrompt: null }); },
 });
 
-const createPromptLibraryUiSlice: StateCreator<AtelierState, [], [], PromptLibraryUiSlice> = (set, get) => ({
+const createPromptLibraryUiSlice: StateCreator<AtelierState, [], [], PromptLibraryUiSlice> = (set) => ({
   promptManagerTab: 'templates',
   setPromptManagerTab: (tab) => { set({ promptManagerTab: tab }); },
   promptPickerDraft: initialPromptPickerDraft,
@@ -814,10 +810,7 @@ const createPromptLibraryUiSlice: StateCreator<AtelierState, [], [], PromptLibra
   openPicker: () => { set({ pickerOpen: true }); },
   closePicker: () => { set({ pickerOpen: false }); },
   setPickerOpen: (open) => { set({ pickerOpen: open }); },
-  enhanceInFlight: false,
-  setEnhanceInFlight: (inFlight) => { set({ enhanceInFlight: inFlight }); },
   reopenBatchInPicker: (provenance) => {
-    if (get().enhanceInFlight) return false;
     set({
       promptPickerDraft: {
         ...initialPromptPickerDraft,
@@ -827,7 +820,6 @@ const createPromptLibraryUiSlice: StateCreator<AtelierState, [], [], PromptLibra
       },
       pickerOpen: true,
     });
-    return true;
   },
 });
 

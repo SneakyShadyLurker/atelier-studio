@@ -1,5 +1,6 @@
 import { ViewTransition, type KeyboardEvent, type Ref } from 'react';
 import { isImeComposing } from '../../lib/ime';
+import EnhanceControl from './EnhanceControl';
 import styles from './index.module.css';
 
 interface CollapsedBarProps {
@@ -19,6 +20,18 @@ interface CollapsedBarProps {
   ref?: Ref<HTMLButtonElement>;
   generateRef?: Ref<HTMLButtonElement>;
   stopRef?: Ref<HTMLButtonElement>;
+  /**
+   * Enhance and generate beside Generate (image mode only), so a fire that
+   * collapses the Composer leaves the button in reach. Absent: no button.
+   */
+  enhance?: {
+    readonly working: boolean;
+    readonly needsTextModel: boolean;
+    /** Phones: the sparkle alone, same accessible name. */
+    readonly iconOnly: boolean;
+    readonly onEnhance: () => void;
+    readonly ref: Ref<HTMLButtonElement>;
+  } | undefined;
 }
 
 /**
@@ -47,6 +60,7 @@ export function CollapsedBar({
   ref,
   generateRef,
   stopRef,
+  enhance,
 }: CollapsedBarProps) {
   return (
     <div className={styles.collapsedBar} {...(dangerTint ? { 'data-tone': 'danger' } : {})}>
@@ -100,6 +114,16 @@ export function CollapsedBar({
           <span className={styles.spinner} aria-hidden="true" />
         </button>
       )}
+      {canSubmit && enhance ? (
+        <EnhanceControl
+          working={enhance.working}
+          disabled={false}
+          needsTextModel={enhance.needsTextModel}
+          iconOnly={enhance.iconOnly}
+          onEnhance={enhance.onEnhance}
+          enhanceRef={enhance.ref}
+        />
+      ) : null}
       {canSubmit && (
         <button ref={generateRef} type="button" className={styles.go} onClick={onSubmit}>
           Generate

@@ -409,7 +409,7 @@ describe('visual scaffold components', () => {
       expect(screen.getByRole('img', { name: 'Reference image 1' })).toBeTruthy();
       expect(useAtelierStore.getState().toasts[0]?.text).toBe('quota exceeded');
     });
-    expect(screen.getByRole('button', { name: /generate/i }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: /^generate/i }).getAttribute('aria-disabled')).toBe('true');
   });
 
   test('Composer Clear button resets the prompt and removes ref images, disabled when empty', () => {
@@ -523,7 +523,7 @@ describe('visual scaffold components', () => {
     fireEvent.drop(screen.getByTestId('composer-drop-surface'), { dataTransfer: { files: [file()] } });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /generate/i }).getAttribute('aria-disabled')).toBe('true');
+      expect(screen.getByRole('button', { name: /^generate/i }).getAttribute('aria-disabled')).toBe('true');
     });
     // Clear is gated too: an uploading ref has no serverId yet, so the
     // deferred teardown couldn't delete the server artifact and Undo would
@@ -569,7 +569,7 @@ describe('visual scaffold components', () => {
     ));
 
     expect(screen.getByText('Model does not accept refs')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /generate/i }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: /^generate/i }).getAttribute('aria-disabled')).toBe('true');
   });
 
   test('Composer rejects a fifth dropped reference without mutating existing chips', () => {

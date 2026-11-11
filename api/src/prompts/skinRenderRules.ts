@@ -12,7 +12,8 @@ const SKIN_MARKING_CORE =
 
 // The texture tail is per model family. Krea 2 (and the cloud and generic lanes,
 // which share its writer bodies) get skin realism from tone and light and are
-// never handed a named micro-texture.
+// never handed a named micro-texture. MOSS and MiniMax H3 Image have their own
+// tails below.
 export const SKIN_MARKING_BAN =
   `${SKIN_MARKING_CORE} Skin realism comes from tone, and from the way the light falls across the body and the flesh sits under it — write that instead, never a named micro-texture.`;
 
@@ -21,14 +22,21 @@ export const SKIN_MARKING_BAN =
 export const SKIN_MARKING_BAN_MOSS =
   `${SKIN_MARKING_CORE} Skin realism comes from naming the natural texture of healthy skin — fine visible pores and subtle variation in tone — together with the way the light falls across the body and the flesh sits under it; that texture is not a marking.`;
 
+// MiniMax H3 Image: skin wording is the user's call, so its writers carry
+// neither a texture push nor a texture exclusion. The tail only keeps a
+// requested skin texture from being read as one of the marks above.
+export const SKIN_MARKING_BAN_H3 =
+  `${SKIN_MARKING_CORE} The natural texture of healthy skin, such as visible pores, is not a marking: keep it when it is asked for.`;
+
 export function skinMarkingBanFor(target: ImageModelTarget): string {
   switch (target) {
     case 'moss':
       return SKIN_MARKING_BAN_MOSS;
+    case 'h3image':
+      return SKIN_MARKING_BAN_H3;
     case 'gemini':
     case 'gpt':
     case 'krea':
-    case 'h3image':
     case 'other':
       return SKIN_MARKING_BAN;
   }

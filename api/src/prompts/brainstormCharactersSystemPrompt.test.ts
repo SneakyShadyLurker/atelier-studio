@@ -681,11 +681,11 @@ describe('MOSS brainstorm target', () => {
 describe('MiniMax H3 Image brainstorm target', () => {
   const record = `scene${BRAINSTORM_FIELD_SEPARATOR}subject${BRAINSTORM_FIELD_SEPARATOR}details`;
 
-  it('appends its own compact tail, which names smooth skin instead of skin texture', () => {
+  it('appends its own compact tail, which says nothing about skin', () => {
     expect(assembleBrainstormCharacterPrompt(record, 'h3image').text).toEndWith(BRAINSTORM_CONSTRAINTS_H3);
     expect(assembleBrainstormCharacterPrompt(record, 'krea').text).toEndWith(BRAINSTORM_CONSTRAINTS_KREA);
     expect(BRAINSTORM_CONSTRAINTS_H3).toBe(
-      BRAINSTORM_CONSTRAINTS_KREA.replace('realistic skin texture', 'smooth, clear, even-toned skin'),
+      BRAINSTORM_CONSTRAINTS_KREA.replace(' and realistic skin texture', ''),
     );
     const photo = assembleBrainstormCharacterPrompt(record, 'h3image', 'single', 'photograph');
     expect(photo.text).toContain(BRAINSTORM_PHOTOGRAPH_CONSTRAINT);
@@ -694,8 +694,8 @@ describe('MiniMax H3 Image brainstorm target', () => {
     for (const assembled of [photo, diptych]) {
       const tail = assembled.text.slice(assembled.text.indexOf('Constraints:'));
       expect(tail).not.toMatch(/\bno\b|\bnot\b|\bwithout\b|\bnever\b/i);
-      // The writer cannot override spliced text, so no skin-texture cue may reach the model.
-      expect(assembled.text).not.toMatch(/skin texture|pores/i);
+      // The writer cannot override spliced text, so the tail steers skin neither way.
+      expect(assembled.text).not.toMatch(/skin/i);
     }
   });
 
@@ -706,9 +706,11 @@ describe('MiniMax H3 Image brainstorm target', () => {
     expect(sys).toContain('say which hand touches what');
     expect(sys).toContain('State her apparent age as a number or a decade');
     expect(sys).toContain('state her build plainly');
-    expect(sys).toContain('Never add skin-realism cues');
-    // The shared goal and exposure sections must not contradict the hint.
-    expect(sys).toContain('realistic proportions, smooth, clear, even-toned skin');
+    // Skin wording is the user's call on this model: the hint and the shared
+    // goal name no skin finish.
+    expect(sys).not.toContain('skin-realism');
+    expect(sys).not.toContain('smooth, clear, even-toned skin');
+    expect(sys).toContain('extreme anatomical detail and realistic proportions.');
     expect(sys).not.toContain('detailed skin texture');
     expect(sys).not.toContain('in plain anatomical words, once');
     expect(buildBrainstormSystemPrompt({ count: 3, modelId: 'krea-2-gonzalomo' })).toContain('detailed skin texture');

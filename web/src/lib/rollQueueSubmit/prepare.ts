@@ -10,13 +10,15 @@ import { resolveAiFill, resolveAiFillBatch } from '../../api/aiFill';
 import { formatPromptForModel } from '../../api/formatPrompt';
 import { QueueFullError } from '../../api/queueFullRetry';
 import { QuotaExhaustedError } from '../../api/sse';
-import { quotaToastMessage, useAtelierStore, type QueuedRoll } from '../../store/atelier';
+import { quotaToastMessage, useAtelierStore, type QueuedRoll, type RollSubmissionRequest } from '../../store/atelier';
 import { isAbortError } from '../abort';
+import { describeError } from '../errorCopy';
 import { buildAiFillRequest } from '../resolveAiFillItem';
 import { nextSeed } from '../seed';
 import type {
   AiFillGroupEntry,
   BatchReadyItem,
+  EnhanceFields,
   FillOutcome,
   FireItem,
   PassItem,
@@ -80,7 +82,15 @@ export function itemModelId(ctx: Pick<PrepareContext, 'effectiveModelId'>, item:
   return item.submission?.request.modelId ?? ctx.effectiveModelId;
 }
 
-/** Preparation settings for one item: its own press's model and motion settings when it carries them. */
+/** The Enhance rewrite context a press's request carries: its references and ratio. */
+export function enhanceFieldsOf(request: Pick<RollSubmissionRequest, 'refImageIds' | 'ratio'>): EnhanceFields {
+  return {
+    ...(request.refImageIds !== undefined && request.refImageIds.length > 0 ? { refImageIds: request.refImageIds } : {}),
+    ratio: request.ratio,
+  };
+}
+
+/** Preparation settings for one item: its own press's model, motion and enhance settings when it carries them. */
 export function itemContext(ctx: PrepareContext, item: FireItem): PrepareContext {
   const { submission } = item;
   if (!submission) return ctx;
@@ -89,6 +99,8 @@ export function itemContext(ctx: PrepareContext, item: FireItem): PrepareContext
     effectiveModelId: submission.request.modelId,
     wantsMotion: submission.wantsMotion,
     motionFields: submission.motionFields,
+    wantsEnhance: submission.wantsEnhance === true,
+    enhanceFields: enhanceFieldsOf(submission.request),
   };
 }
 
@@ -177,7 +189,69 @@ export async function formatItem(pressCtx: PrepareContext, item: FireItem): Prom
   return item;
 }
 
-// The full per-item LLM pipeline: ai-fill blanks, then model-format.
+const ENHANCE_FAILED = "Couldn't enhance the prompt. Nothing was generated.";
+
+// An Enhance press: rewrite the resolved (post-ai-fill) text and fire the
+// rewrite. Never falls back to the raw text: the user asked for a rewrite,
+// and Generate is the raw path. The rewritten item no longer asks for
+// enhancement, so a capacity requeue, a later pass or a reload re-POSTs the
+// same rewrite instead of enhancing the roll again.
+async function enhanceItem(
+  pressCtx: PrepareContext,
+  item: FireItem,
+  sourceRoll: QueuedRoll | null,
+): Promise<SingleFillOutcome> {
+  const ctx = itemContext(pressCtx, item);
+  const fail = (message: string): null => {
+    // Only the head (sourceRoll === null) records its message; see recordHeadError.
+    if (sourceRoll === null) ctx.recordHeadError(message);
+    return null;
+  };
+  let enhanced: string;
+  try {
+    enhanced = await formatPromptForModel(
+      { prompt: item.text, modelId: ctx.effectiveModelId, ...ctx.enhanceFields },
+      'enhance',
+      ctx.signal,
+    );
+  } catch (err) {
+    // Stop or unmount: nothing is sent.
+    if (isAbortError(err)) throw err;
+    // QUEUE_FULL: no slot was taken. Keep the roll and retry the rewrite from
+    // the filled text, so the fill is not rolled again.
+    if (err instanceof QueueFullError) {
+      return { backpressure: true, roll: sourceRoll, retryAfterMs: err.retryAfterMs, advancedItem: item };
+    }
+    if (err instanceof QuotaExhaustedError) {
+      ctx.addToast(quotaToastMessage(err.retryAfterSeconds), 'soft');
+      return { preserve: true, roll: sourceRoll };
+    }
+    return fail(describeError(err, ENHANCE_FAILED));
+  }
+  if (enhanced.length > MAX_PROMPT_CHARS) return fail(ENHANCE_FAILED);
+  const rewritten: FireItem = {
+    ...item,
+    text: enhanced,
+    ...(item.submission ? { submission: { ...item.submission, wantsEnhance: false } } : {}),
+  };
+  // Saved at once, like a paid fill: a Stop or reload while other items of the
+  // pass are still preparing must not send this roll through a second rewrite.
+  ctx.onFilled?.(rewritten);
+  return rewritten;
+}
+
+// The stage after ai-fill: an Enhance press's rewrite, else the model's
+// motion format. The two never co-occur (Enhance is image-only).
+export async function finishItem(
+  ctx: PrepareContext,
+  item: FireItem,
+  sourceRoll: QueuedRoll | null = null,
+): Promise<SingleFillOutcome> {
+  if (itemContext(ctx, item).wantsEnhance) return enhanceItem(ctx, item, sourceRoll);
+  return formatItem(ctx, item);
+}
+
+// The full per-item LLM pipeline: ai-fill blanks, then enhance or model-format.
 export async function prepareItem(
   ctx: PrepareContext,
   item: FireItem,
@@ -187,7 +261,7 @@ export async function prepareItem(
   const filled = await fillItem(ctx, item, sourceRoll);
   if (filled === null || 'preserve' in filled || 'backpressure' in filled) return filled;
   if (filled !== item) ctx.onFilled?.(filled);
-  return formatItem(ctx, filled);
+  return finishItem(ctx, filled, sourceRoll);
 }
 
 // A queued roll whose batch fill missed retries through a single fill on the
@@ -224,7 +298,7 @@ export async function prepareBatch(ctx: PrepareContext, entries: readonly BatchR
       if (!outcome.ok) return deferOrPrepareSingle(ctx, entry.passItem);
       const filled = { ...entry.passItem.item, text: outcome.prompt };
       ctx.onFilled?.(filled);
-      return formatItem(ctx, filled);
+      return finishItem(ctx, filled, entry.passItem.sourceRoll);
     }));
   } catch (error) {
     if (isAbortError(error)) throw error;

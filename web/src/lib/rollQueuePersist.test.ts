@@ -95,6 +95,25 @@ describe('rollQueuePersist', () => {
     expect(loadRollQueue()).toEqual([roll]);
   });
 
+  test("round-trips an Enhance press's wantsEnhance; absent stays absent", () => {
+    const base: RollSubmission = {
+      request: { modelId: 'model-a', ratio: '1:1', count: 2, refImageIds: ['ref-1'] },
+      lockedSeed: null,
+      wantsMotion: false,
+      motionFields: {},
+    };
+    const rolls: QueuedRoll[] = [
+      { id: 'wants', text: 'a {{var::Era}} scene', seed: 1, source: 'composer', submission: { ...base, wantsEnhance: true } },
+      { id: 'enhanced', text: 'a rewritten scene', seed: 2, source: 'composer', submission: { ...base, wantsEnhance: false } },
+      { id: 'plain', text: 'a plain scene', seed: 3, source: 'composer', submission: base },
+    ];
+    setRollQueueScope('alice');
+    persistRollQueue(rolls);
+    const loaded = loadRollQueue();
+    expect(loaded).toEqual(rolls);
+    expect(loaded[2]?.submission !== undefined && 'wantsEnhance' in loaded[2].submission).toBe(false);
+  });
+
   test('a roll saved before press settings existed loads unchanged', () => {
     setRollQueueScope('alice');
     sessionStorage.setItem(
@@ -120,6 +139,7 @@ describe('rollQueuePersist', () => {
       { ...valid, lockedSeed: -1 },
       { ...valid, lockedSeed: undefined },
       { ...valid, wantsMotion: 'yes' },
+      { ...valid, wantsEnhance: 'yes' },
       { ...valid, motionFields: { extendContext: { previousMotionPrompt: 'p' } } },
       'settings',
     ];

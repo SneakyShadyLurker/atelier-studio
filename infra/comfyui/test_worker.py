@@ -330,7 +330,9 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             graph = {'1': {'class_type': 'AtelierSaveImages', 'inputs': {'images': ['2', 0], 'job_id': identity}}}
             worker.validate_graph({'prompt_id': identity, 'prompt': graph})
             pixels = torch.stack([torch.full((2, 2, 3), color / 255) for color in (0, 64, 128, 255)])
-            worker.AtelierSaveImages().save(pixels, identity)
+            with patch.object(Image.Image, 'save', autospec=True, side_effect=Image.Image.save) as save:
+                worker.AtelierSaveImages().save(pixels, identity)
+            self.assertEqual([call.kwargs['compress_level'] for call in save.call_args_list], [4] * 4)
             outputs = store.status(identity)['outputs']
             self.assertEqual(len(outputs), 4)
             for output, color in zip(outputs, (0, 64, 128, 255)):
@@ -554,7 +556,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
                           disable_assets=True, disable_all_custom_nodes=True,
                           enable_manager=False, tls_keyfile='key', tls_certfile='cert',
                           database_url='sqlite:///:memory:')
-        with patch.object(worker, 'WRITE_GUARD', True), \
+        with patch.object(worker, 'WRITE_GUARD', True), patch.object(worker, 'AIOHTTP_INTERNALS', True), \
                 patch.object(worker.logging.root, 'manager', SimpleNamespace(disable=worker.logging.CRITICAL)), \
                 patch.dict(worker.os.environ, {'ATELIER_PRIVATE_WORKER': '1'}):
             for cache_flags, expected in (([], True), (['--cache-ram'], True),
@@ -578,8 +580,20 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             args = SimpleNamespace(**safe_flags, cache_classic=True)
             with patch.object(worker, 'args', args):
                 self.assertTrue(worker.host_ready())
+                with patch.object(worker, 'AIOHTTP_INTERNALS', False):
+                    self.assertFalse(worker.host_ready())
                 args.cache_classic = False
                 self.assertFalse(worker.host_ready())
+
+    async def test_aiohttp_internals_self_test_on_installed_aiohttp(self):
+        self.assertIsNone(await worker.aiohttp_internals_failure(server.app))
+        self.assertEqual(await worker.aiohttp_internals_failure(web.Application()), 'Application._client_max_size')
+
+        async def uncached_read(request):
+            return b''
+
+        with patch.object(web.BaseRequest, 'read', uncached_read):
+            self.assertEqual(await worker.aiohttp_internals_failure(server.app), 'BaseRequest._read_bytes')
 
     async def test_routes_and_native_media(self):
         client = TestClient(TestServer(server.app))

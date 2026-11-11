@@ -5,6 +5,7 @@ import { findTileInCache } from '../../../hooks/historyCache';
 import { liveActiveScopeKey } from '../../../hooks/scopedHistoryMutation';
 import { useAtelierStore, type TileProgress, type TileProgressSteps } from '../../../store/atelier';
 import { useNowTick } from '../../../hooks/useNowTick';
+import { useCachedMedia } from '../../../hooks/useCachedMedia';
 import { formatClock } from '../../../lib/clock';
 import { I2V_ESTIMATED_RENDER_MS } from '../../../lib/i2v';
 import { describeEta, formatEta, isFinishing, remainingMs, stepDurationMs } from '../../../lib/stepEta';
@@ -126,7 +127,10 @@ function LoadingTileBody({ tileId, batchId, modelName, startedAt, isVideo = fals
   // A live partial preview (cloud image gen) wins; otherwise, for a video
   // render, veil the uploaded source still so the user watches the frame being
   // animated through the multi-minute wait instead of the bare plate.
-  const sourceBackdrop = preview === undefined && isVideo ? sourceStillUrl : undefined;
+  // The source still is an authenticated no-store thumbnail: read it through
+  // the session media cache so a virtualized remount does not download again.
+  const sourceStill = useCachedMedia(isVideo ? sourceStillUrl : undefined);
+  const sourceBackdrop = preview === undefined && isVideo ? sourceStill.src : undefined;
   const backdrop = preview ?? sourceBackdrop;
 
   return (

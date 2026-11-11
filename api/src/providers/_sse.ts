@@ -1,4 +1,4 @@
-import { nextSseFrame, parseSseFrame, SSE_TERMINATOR_REWIND } from '@atelier/shared/sse';
+import { createSseFrameAssembler, parseSseFrame } from '@atelier/shared/sse';
 import type { SseFrame } from '@atelier/shared/sse';
 import { tryParseJson } from './_http';
 
@@ -26,11 +26,27 @@ export type OnSseOversize = (limit: number, total: number) => never;
 // while the spec-parsed data does not. Every readSseFrames consumer should
 // read payloads through this accessor rather than frame.data directly.
 export function frameDataText(frame: ParsedSseFrame): string {
-  if (typeof tryParseJson(frame.data) !== 'string') return frame.data;
+  return frameData(frame).text;
+}
+
+/** A frame's payload text and its JSON parse (the text itself when it is not JSON). */
+export interface FrameData {
+  readonly text: string;
+  readonly parsed: unknown;
+}
+
+// frameDataText plus the parse it already did, for callers that need the
+// JSON: an image frame carries megabytes of base64, so parsing it again per
+// consumer cost a full JSON.parse each time. `parsed` is always
+// `tryParseJson(text)`.
+export function frameData(frame: ParsedSseFrame): FrameData {
+  const parsed = tryParseJson(frame.data);
+  if (typeof parsed !== 'string') return { text: frame.data, parsed };
   const match = /^data:[ ]?/m.exec(frame.raw);
-  if (!match) return frame.data;
+  if (!match) return { text: frame.data, parsed };
   const candidate = frame.raw.slice(match.index + match[0].length);
-  return typeof tryParseJson(candidate) !== 'string' ? candidate : frame.data;
+  const recovered = tryParseJson(candidate);
+  return typeof recovered !== 'string' ? { text: candidate, parsed: recovered } : { text: frame.data, parsed };
 }
 
 export async function* readSseFrames(
@@ -45,8 +61,7 @@ export async function* readSseFrames(
   if (signal?.aborted) throw signal.reason;
   const reader = body.getReader();
   const decoder = new TextDecoder();
-  let buffer = '';
-  let searchFrom = 0;
+  const assembler = createSseFrameAssembler();
   let total = 0;
   // Bridge external abort onto the underlying body so a stalled chunk
   // read returns promptly. `cancel(reason)` propagates the typed reason
@@ -71,19 +86,9 @@ export async function* readSseFrames(
       const chunk: Uint8Array = result.value;
       total += chunk.byteLength;
       if (total > byteLimit) onOversize(byteLimit, total);
-      buffer += decoder.decode(chunk, { stream: true });
-      for (;;) {
-        const next = nextSseFrame(buffer, searchFrom);
-        if (!next) {
-          // No full frame yet; the next chunk resumes scanning near the end,
-          // rewound so a terminator straddling the chunk boundary still matches.
-          searchFrom = Math.max(0, buffer.length - SSE_TERMINATOR_REWIND);
-          break;
-        }
-        buffer = next.rest;
-        searchFrom = 0;
-        const parsed = parseSseFrame(next.raw);
-        if (parsed) yield { ...parsed, raw: next.raw };
+      for (const raw of assembler.push(decoder.decode(chunk, { stream: true }))) {
+        const parsed = parseSseFrame(raw);
+        if (parsed) yield { ...parsed, raw };
       }
     }
   } finally {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { maxUtf16Length } from '../validation/stringLength';
-import { sliceJsonObject } from './lenientJson';
+import { parseModelJsonObject } from './lenientJson';
 
 const Label = z.string().trim().min(1).check(maxUtf16Length(64));
 const TagList = z.array(Label).min(1).max(50);
@@ -40,12 +40,7 @@ export const RESCUE_RESPONSE_FORMAT = {
 } as const;
 
 export function parseInferPayload(raw: string): RawInferOp[] | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(sliceJsonObject(raw));
-  } catch {
-    return null;
-  }
+  const parsed = parseModelJsonObject(raw);
   // Schemas strip harmless extra keys and normalize digit-string indices.
   // Operations may depend on one another. Validate the complete proposal:
   // silently removing malformed operations can manufacture partial success

@@ -10,9 +10,12 @@ import * as queue from './queue';
 import { acquireTiles, releaseTiles, resetConcurrencyForTests, tilesInFlight } from './concurrency';
 import {
   configureUpstreamGate,
+  isPaused,
   noteBreakerState,
   resetUpstreamGateForTests,
+  setUpstreamGateTimersForTests,
 } from './upstreamGate';
+import { configureLocalHostGate, resetLocalHostGateForTests } from './localHostGate';
 
 let db: Database;
 
@@ -1084,6 +1087,7 @@ test('open breaker on shared pool blocks dequeue without claiming or starting', 
 
 afterEach(() => {
   resetUpstreamGateForTests();
+  resetLocalHostGateForTests();
   resetShutdownDrainForTests();
 });
 
@@ -1111,4 +1115,67 @@ test('shutdown drain gate leaves queued batches unclaimed when a slot release ki
   expect(started).toEqual([]);
   expect(queue.__queueTest.peekHead('shared')?.batchId).toBe('b-shutdown');
   expect(db.query<{ status: string }, []>("SELECT status FROM batches WHERE id='b-shutdown'").get()?.status).toBe('queued');
+});
+
+test('host-level local outage holds the queue unclaimed and opens the local gate, even on a probe token', () => {
+  seedQueued('l1', 'alice', 'moss-image-sft', 'local');
+  seedQueued('l2', 'bob', 'moss-image-sft', 'local');
+  const kicks: string[] = [];
+  configureUpstreamGate({
+    kickPool: (pool) => { kicks.push(pool); },
+    failQueued: () => undefined,
+    halfOpenAfterMs: 1_000,
+    maxPauseMs: 600_000,
+    threshold: 5,
+  });
+  let now = 0;
+  const pending: { at: number; fn: () => void }[] = [];
+  setUpstreamGateTimersForTests({
+    now: () => now,
+    setTimer: (fn, ms) => { const timer = { at: now + ms, fn }; pending.push(timer); return timer; },
+    clearTimer: (handle) => { pending.splice(pending.indexOf(handle as { at: number; fn: () => void }), 1); },
+  });
+  configureLocalHostGate({ hostUnavailable: () => true, probeNow: () => Promise.resolve(undefined) });
+  const acquired: string[] = [];
+  const started: string[] = [];
+  const runtime = ctx({
+    registry: {
+      findModel: () => ({ model: { id: 'moss-image-sft', pool: 'local', maxCountPerBatch: 8 } }),
+      healthSnapshot: () => new Map([['moss-image-sft', { ok: false, reason: 'unavailable' as const }]]),
+    },
+    acquireFor: (_pool, userId) => { acquired.push(userId); return { ok: true }; },
+    startOrchestratorDetached: (entry) => { started.push(entry.batchId); return Promise.resolve(); },
+  });
+
+  tryDequeueNext('local', runtime);
+  expect(isPaused('local')).toBe(true);
+
+  // The probe timer hands out a token; the held head must not be spent on it.
+  now += 1_000;
+  for (const timer of pending.splice(0)) timer.fn();
+  expect(kicks).toEqual(['local']);
+  tryDequeueNext('local', runtime);
+
+  expect(acquired).toEqual([]);
+  expect(started).toEqual([]);
+  expect(queue.entries('local').map((entry) => entry.batchId)).toEqual(['l1', 'l2']);
+  expect(db.query<{ status: string }, []>("SELECT status FROM batches WHERE id='l1'").get()?.status).toBe('queued');
+  expect(isPaused('local')).toBe(true);
+});
+
+test('row-level local offline still fails the batch at dequeue and does not pause the pool', () => {
+  seedQueued('row-1', 'alice', 'moss-image-sft', 'local');
+  configureLocalHostGate({ hostUnavailable: () => false, probeNow: () => Promise.resolve(undefined) });
+
+  tryDequeueNext('local', ctx({
+    registry: {
+      findModel: () => ({ model: { id: 'moss-image-sft', pool: 'local', maxCountPerBatch: 8 } }),
+      healthSnapshot: () => new Map([['moss-image-sft', { ok: false, reason: 'unavailable' as const }]]),
+    },
+  }));
+
+  expect(db.query<{ status: string; error: string | null }, []>("SELECT status, error FROM tiles WHERE id='t-row-1-0'").get())
+    .toEqual({ status: 'failed', error: 'upstream rejected' });
+  expect(queue.__queueTest.lengthOf('local')).toBe(0);
+  expect(isPaused('local')).toBe(false);
 });

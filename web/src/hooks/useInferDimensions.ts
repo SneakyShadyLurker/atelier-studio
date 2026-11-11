@@ -3,7 +3,6 @@ import type {
   CoverageWarning,
   DimensionProposal,
   InferDimensionsResponse,
-  LibraryDiagnosisResponse,
   RejectedOp,
   TemplateConflict,
 } from '@atelier/shared';
@@ -27,12 +26,8 @@ interface ApplyVars {
   readonly acceptUnsatisfiableTemplates: readonly string[];
 }
 
-interface AnalyzeOpts {
-  readonly priorDiagnosis?: LibraryDiagnosisResponse;
-}
-
 interface UseInferDimensionsResult {
-  analyze: (opts?: AnalyzeOpts) => void;
+  analyze: () => void;
   apply: (keys: readonly string[], acceptUnsatisfiableTemplates?: readonly string[]) => void;
   status: InferStatus;
   proposal: DimensionProposal | null;
@@ -84,16 +79,18 @@ export function useInferDimensions(): UseInferDimensionsResult {
   const [applyCoherenceFailures, setApplyCoherenceFailures] = useState<readonly string[]>([]);
   const abortable = useAbortableMutation();
 
-  const analyzeMutation = useMutation<InferDimensionsResponse, Error, AnalyzeOpts | undefined>({
-    mutationFn: async (opts) => {
+  const analyzeMutation = useMutation<InferDimensionsResponse>({
+    mutationFn: async () => {
       // Abort any prior in-flight stream before installing the fresh
       // controller, so a superseding run can never strand an un-abortable one.
       const signal = abortable.supersede();
       setProgress(null);
       setStatus('analyzing');
-      return await inferDimensions(signal, (notification) => {
-        setProgress(notification);
-      }, { ...imageContext, ...(opts?.priorDiagnosis ? { priorDiagnosis: opts.priorDiagnosis } : {}) });
+      return await inferDimensions({
+        ...imageContext,
+        signal,
+        onProgress: (notification) => { setProgress(notification); },
+      });
     },
     onSuccess: (payload) => {
       // Empty proposal: no bundles to review. Return to idle and surface a
@@ -187,9 +184,9 @@ export function useInferDimensions(): UseInferDimensionsResult {
   });
 
   return {
-    analyze: (opts?: AnalyzeOpts) => {
+    analyze: () => {
       if (analyzeMutation.isPending) return;
-      analyzeMutation.mutate(opts);
+      analyzeMutation.mutate();
     },
     apply: (keys, acceptUnsatisfiableTemplates) => {
       if (applyMutation.isPending) return;

@@ -5,8 +5,11 @@ import { toGenerateRequest, useAtelierStore } from '../store/atelier';
 
 // Mock the network + blob deps before the hook module loads (mock.module is not
 // auto-hoisted in bun).
-const uploadMock = mock(() => Promise.resolve({ id: 'upload-1' }));
-void mock.module('../api/uploads', () => ({ uploadRefImage: uploadMock }));
+// The server copies the tile (POST /tiles/:id/source-upload); the browser
+// never downloads the original or re-uploads it.
+const uploadMock = mock((_tileId: string) => Promise.resolve({ id: 'upload-1' }));
+const browserUploadMock = mock(() => Promise.resolve({ id: 'browser-upload' }));
+void mock.module('../api/uploads', () => ({ copyTileToUpload: uploadMock, uploadRefImage: browserUploadMock }));
 
 const fetchBlobMock = mock(() => Promise.resolve(new Blob(['x'], { type: 'image/png' })));
 const realImages = await import('../api/images');
@@ -27,6 +30,23 @@ const doneTile = { id: 'tile-1', ext: 'png', mime: 'image/png', status: 'done' }
   { status: 'done' }
 >;
 const videoModel = { id: 'minimax-h3-i2v' } as unknown as Model;
+
+describe('useAnimateFromTile server-side source copy', () => {
+  test('copies the tile on the server without downloading the image', async () => {
+    fetchBlobMock.mockClear();
+    browserUploadMock.mockClear();
+    uploadMock.mockClear();
+    const { result } = renderHook(() => useAnimateFromTile());
+    await act(async () => {
+      expect(await result.current(doneTile, videoModel)).toBe(true);
+    });
+    expect(uploadMock).toHaveBeenCalledTimes(1);
+    expect(uploadMock.mock.calls[0]?.[0]).toBe('tile-1');
+    expect(fetchBlobMock).not.toHaveBeenCalled();
+    expect(browserUploadMock).not.toHaveBeenCalled();
+    expect(useAtelierStore.getState().draft.i2vSourceUploadId).toBe('upload-1');
+  });
+});
 
 describe('useAnimateFromTile source-prompt plumbing', () => {
   test('captures sourcePrompt into the draft when provided', async () => {

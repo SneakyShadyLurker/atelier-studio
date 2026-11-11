@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach } from 'bun:test';
 import type { Database } from 'bun:sqlite';
-import pino from 'pino';
 import { loadConfig, type Config } from '../config';
 import type { ModelAvailability, TextReasoningEffort, TextTask } from '@atelier/shared';
 import { createApp, createKeyStoreForConfig } from '../server';
 import { openDb } from '../db/client';
+import { createLogger } from '../observability/logger';
 import { migrate, seedLegacyTextProvider } from '../db/migrate';
 import { bumpTextConfigRevision } from '../db/textProviders';
 import { legacyTextSeed, type LegacyTextKey } from '../db/textSeed';
@@ -145,7 +145,8 @@ export function testRuntime(overrides: Record<string, unknown> = {}) {
   migrate(db, config.DATA_DIR);
   if (seedLegacyText === true) seedLegacyTextConfig(db, config);
   const logs: string[] = [];
-  const logger = pino({ level: config.LOG_LEVEL }, { write: (line) => logs.push(line) });
+  // The production logger, so tests see the same content-free redaction.
+  const logger = createLogger(config, { write: (line) => logs.push(line) });
   const keyStore = createKeyStoreForConfig(config, db);
   // Tests inject a pre-populated availability snapshot to exercise the offline
   // guard without standing up a real probe + listening host.

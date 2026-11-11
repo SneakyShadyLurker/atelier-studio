@@ -1,3 +1,5 @@
+import { MAX_STREAM_RESERVATION_BYTES } from '../storage/ffmpeg';
+
 export interface BoundedReadOptions {
   // Called when the cumulative byte count exceeds `limit`. The callback MUST
   // throw — the `: never` return type makes this a compile-time error to
@@ -17,6 +19,10 @@ export interface BoundedReadOptions {
   // future version). On abort the reader is cancelled in the finally and the
   // function throws an AbortError.
   signal?: AbortSignal;
+  // Exact body length when the caller already knows it (for example from an
+  // authoritative status read). The read then allocates once and fails on a
+  // body that runs past it (through `onOversize`) or ends short of it.
+  expectedBytes?: number;
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -28,13 +34,35 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw err;
 }
 
+// Thrown when a body ends before the length the caller expected. Overflow
+// past that length goes through `onOversize` like any other byte cap.
+export class ResponseLengthMismatchError extends Error {
+  readonly expected: number;
+  readonly received: number;
+  constructor(expected: number, received: number) {
+    super(`response ended after ${received} of ${expected} expected bytes`);
+    this.name = 'ResponseLengthMismatchError';
+    this.expected = expected;
+    this.received = received;
+  }
+}
+
+// Reads the body into one buffer so a large output never sits in the heap
+// twice as a chunk list plus its concatenated copy. With `expectedBytes` the
+// buffer is allocated once at `min(expectedBytes, limit)`, so an untrusted
+// length never sizes an allocation past the cap. Without it the buffer is a
+// resizable reservation grown geometrically, as `readStreamWithCap` does.
 export async function readBytesBounded(
   body: ReadableStream<Uint8Array>,
   limit: number,
   opts: BoundedReadOptions,
 ): Promise<Uint8Array> {
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
+  const expected = opts.expectedBytes;
+  const cap = expected === undefined ? limit : Math.min(expected, limit);
+  const buffer = expected === undefined
+    ? new ArrayBuffer(0, { maxByteLength: Math.min(limit, MAX_STREAM_RESERVATION_BYTES) })
+    : new ArrayBuffer(cap);
   let total = 0;
   // Audit T2-003: a between-chunks throwIfAborted is invisible during a
   // pending reader.read() — a stalled upstream could pin the call past the
@@ -56,9 +84,13 @@ export async function readBytesBounded(
       // fetch (e.g., a composed AbortSignal.any([...])).
       throwIfAborted(signal);
       const chunk: Uint8Array = result.value;
-      total += chunk.byteLength;
-      if (total > limit) opts.onOversize(limit, total, boundedPrefix(chunks, chunk, limit));
-      chunks.push(chunk);
+      const next = total + chunk.byteLength;
+      if (next > cap || next > buffer.maxByteLength) {
+        opts.onOversize(cap, next, boundedPrefix(new Uint8Array(buffer, 0, total), chunk, cap));
+      }
+      if (next > buffer.byteLength) buffer.resize(Math.min(buffer.maxByteLength, Math.max(next, buffer.byteLength * 2)));
+      new Uint8Array(buffer, total, chunk.byteLength).set(chunk);
+      total = next;
     }
     // The reader returned done — if abort fired during the final read, the
     // cancel() short-circuits the stream but a normal-looking done can mask
@@ -71,25 +103,17 @@ export async function readBytesBounded(
     // on success.
     try { await reader.cancel(); } catch { /* best-effort */ }
   }
+  if (expected !== undefined && total !== expected) throw new ResponseLengthMismatchError(expected, total);
   if (total === 0) return new Uint8Array(0);
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return merged;
+  // Hand back a fixed-length buffer: WebCrypto and some native consumers
+  // reject a view over a resizable one.
+  return new Uint8Array(buffer.resizable ? buffer.transferToFixedLength(total) : buffer, 0, total);
 }
 
-function boundedPrefix(chunks: readonly Uint8Array[], finalChunk: Uint8Array, limit: number): Uint8Array {
-  const prefix = new Uint8Array(limit);
-  let offset = 0;
-  for (const chunk of [...chunks, finalChunk]) {
-    if (offset >= limit) break;
-    const length = Math.min(chunk.byteLength, limit - offset);
-    prefix.set(chunk.subarray(0, length), offset);
-    offset += length;
-  }
+function boundedPrefix(stored: Uint8Array, finalChunk: Uint8Array, limit: number): Uint8Array {
+  const prefix = new Uint8Array(Math.min(limit, stored.byteLength + finalChunk.byteLength));
+  prefix.set(stored.subarray(0, prefix.byteLength));
+  if (stored.byteLength < prefix.byteLength) prefix.set(finalChunk.subarray(0, prefix.byteLength - stored.byteLength), stored.byteLength);
   return prefix;
 }
 

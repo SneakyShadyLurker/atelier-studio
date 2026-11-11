@@ -290,7 +290,7 @@ export const textProvidersRoutes = new Hono<AppEnv>()
       } catch (err) {
         if (!(err instanceof TextListError)) throw err;
         const message = redactFor(provider.credential, err.message);
-        c.var.logger.warn({ providerId: provider.id, reason: err.reason, status: err.status, message }, 'text_provider_list_failed');
+        c.var.logger.warn({ providerId: provider.id, listFailureReason: err.reason, status: err.status, message }, 'text_provider_list_failed');
         return c.json({ error: message }, 502);
       }
     });

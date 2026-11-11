@@ -5,7 +5,7 @@ import {
   BRAINSTORM_FIELD_SEPARATOR,
   BRAINSTORM_CONSTRAINTS_GPT,
 } from '../../prompts/brainstormCharactersSystemPrompt';
-import { brainstormDefaults } from './textBudgets';
+import { brainstormMaxOutputTokens } from './textBudgets';
 import { restoreFetch } from '../../test/helpers';
 import { seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
 import { hostPortProbeResponse, isHostPortProbe } from '../../test/hostProbe';
@@ -97,7 +97,7 @@ describe('brainstormCharacters', () => {
       { count: 1, modelId: 'gpt-image-2.6-sunburst' }, new AbortController().signal,
     )) chunks.push(chunk);
     expect(body.reasoning_effort).toBe('high');
-    expect(body.max_completion_tokens).toBe(brainstormDefaults(1, 'high').max_completion_tokens);
+    expect(body.max_completion_tokens).toBe(brainstormMaxOutputTokens(1, 'high'));
     expect(chunks.at(-1)).toEqual({ type: 'done', count: 1 });
   });
 

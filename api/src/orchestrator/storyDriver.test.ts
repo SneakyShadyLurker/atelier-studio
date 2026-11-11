@@ -754,3 +754,81 @@ describe('story driver', () => {
     expect(currentSegment(runtime.db, storyId, 0).batch_id).not.toBeNull();
   });
 });
+
+describe('story segment writing on the shared rewrite core', () => {
+  afterEach(() => {
+    setTextModelProviderForTests(null);
+    resetLlmAdmissionForTests();
+  });
+
+  function enhanceFailures(runtime: ReturnType<typeof testRuntime>): Record<string, unknown>[] {
+    return runtime.logs
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((entry) => entry.event === 'story_motion_enhance_failed');
+  }
+
+  function expectOneFailure(runtime: ReturnType<typeof testRuntime>, fields: Record<string, unknown>): void {
+    const failures = enhanceFailures(runtime);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject(fields);
+  }
+
+  async function submittedPrompt(runtime: ReturnType<typeof testRuntime>, beat: string): Promise<string | undefined> {
+    configure(runtime);
+    const storyId = seedStory(runtime.db, [beat]);
+    kickStory(storyId);
+    await waitForStoryDriverIdle();
+    const batchId = currentSegment(runtime.db, storyId, 0).batch_id;
+    return runtime.db.query<{ prompt: string }, [string]>('SELECT prompt FROM batches WHERE id = ?')
+      .get(batchId ?? '')?.prompt;
+  }
+
+  for (const [label, text, skipReason] of [
+    ['refusal prose', 'I can’t fulfill this request. It describes a sexualized depiction of a 15-year-old.', 'refusal'],
+    ['an over-length answer', 'word '.repeat(2_000), 'over-char-limit'],
+  ] as const) {
+    test(`${label} falls back to the raw beat`, async () => {
+      setTextModelProviderForTests(successfulProvider(text));
+      const runtime = testRuntime({ ...VIDEO_ON, LOG_LEVEL: 'info' });
+      expect(await submittedPrompt(runtime, 'raw opening beat')).toBe('raw opening beat');
+      expectOneFailure(runtime, { skipReason });
+    });
+  }
+
+  test('a refused admission is logged', async () => {
+    setTextModelProviderForTests(successfulProvider());
+    const runtime = testRuntime({ ...VIDEO_ON, LOG_LEVEL: 'info', MAX_CONCURRENT_LLM_ENHANCE_PER_USER: '1' });
+    const held = enhancePool.acquire('alice');
+    if (!held.ok) throw new Error('expected admission');
+    try {
+      expect(await submittedPrompt(runtime, 'raw beat')).toBe('raw beat');
+    } finally {
+      held.release();
+    }
+    expectOneFailure(runtime, { skipReason: 'admission-per-user' });
+  });
+
+  test('a provider failure keeps its kind and status for the log, never its detail', async () => {
+    setTextModelProviderForTests({
+      ...successfulProvider(),
+      rewrite: () => Promise.resolve({ type: 'failed', kind: 'quota', status: 429, detail: 'SECRET UPSTREAM BODY' }),
+    });
+    const runtime = testRuntime({ ...VIDEO_ON, LOG_LEVEL: 'info' });
+    expect(await submittedPrompt(runtime, 'raw beat')).toBe('raw beat');
+    expectOneFailure(runtime, { skipReason: 'provider-failed', failureKind: 'quota', status: 429 });
+    expect(runtime.logs.join('\n')).not.toContain('SECRET');
+  });
+
+  test('the beat writer gets its own deadline from the resolved model and falls back on it', async () => {
+    setTextModelProviderForTests(providerWith(async function* (_prompt, _images, signal) {
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener('abort', () => { resolve(); }, { once: true });
+      });
+      if (!signal.aborted) yield { type: 'done' } satisfies EnhanceChunk;
+    }));
+    const runtime = testRuntime({ ...VIDEO_ON, LOG_LEVEL: 'info', CLOUD_TIMEOUT_MS: '100' });
+    expect(await submittedPrompt(runtime, 'raw beat')).toBe('raw beat');
+    expectOneFailure(runtime, { skipReason: 'timeout' });
+  });
+});

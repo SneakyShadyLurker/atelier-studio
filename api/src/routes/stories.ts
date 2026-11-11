@@ -13,13 +13,14 @@ import {
 import type { AppEnv } from '../server-env';
 import { reportIfCorruption } from '../db/integrity';
 import { countInflightVideoForUser } from '../db/queueOps';
+import { textFailureToSseError } from '../lifecycle/llm-error';
 import { withLlmSlot } from '../lifecycle/withLlmSlot';
 import { enhancePool } from '../orchestrator/llmAdmission';
 import { loadRefImages } from '../orchestrator/refImages';
 import { validateExtension } from '../orchestrator/extendValidation';
 import { abortStoryPreparation, kickStory } from '../orchestrator/storyDriver';
 import { estimateStoryEtaMs } from '../orchestrator/videoEta';
-import { parseJsonLenient } from '../prompts/lenientJson';
+import { parseModelJsonObject } from '../prompts/lenientJson';
 import {
   snapPlannedDuration,
   StoryPlanParseSchema,
@@ -28,7 +29,7 @@ import {
   storyPlannerUserContent,
   type StorySourceMode,
 } from '../prompts/storyPlannerSystemPrompt';
-import { STORY_PLANNER_DEFAULTS, textStreamDrainMs } from '../providers/text/textBudgets';
+import { STORY_PLANNER_MAX_OUTPUT_TOKENS, textStreamDrainMs } from '../providers/text/textBudgets';
 import type { EnhanceImageInput } from '../providers/text/featureHelpers';
 import {
   findModel,
@@ -221,36 +222,26 @@ export const storiesRoutes = new Hono<AppEnv>()
             }
             images = [await downscaleForVision(image.bytes, signal)];
           }
-          let text = '';
-          let done = false;
-          for await (const chunk of provider.enhance(
-            storyPlannerUserContent(parsed.value.outline, source.sourcePrompt ?? undefined),
+          // The plan reaches the client only once complete, so it is
+          // accumulated inside the provider's policy: a transient mid-stream
+          // fault is retried instead of failing the plan.
+          const result = await provider.rewrite({
+            prompt: storyPlannerUserContent(parsed.value.outline, source.sourcePrompt ?? undefined),
             images,
-            signal,
-            storyPlannerSystemPrompt(source.mode, effectiveMax),
-            {
-              defaults: STORY_PLANNER_DEFAULTS,
-              responseFormat: STORY_PLAN_RESPONSE_FORMAT,
-              ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-            },
-          )) {
-            if (chunk.type === 'delta') text += chunk.text;
-            else if (chunk.type === 'reasoning') continue;
-            else if (chunk.type === 'done') done = true;
-            else {
-              c.var.logger.warn(
-                { event: 'story_plan_upstream_error', status: chunk.status, detail: chunk.detail, userId: c.var.userId },
-                'story planning failed',
-              );
-              emit({ event: 'error', data: { message: SAFE_ERROR_MESSAGE } });
-              return;
-            }
-          }
-          if (!done || signal.aborted) {
-            if (!clientDisconnected()) emit({ event: 'error', data: { message: SAFE_ERROR_MESSAGE } });
+            systemPrompt: storyPlannerSystemPrompt(source.mode, effectiveMax),
+            maxOutputTokens: STORY_PLANNER_MAX_OUTPUT_TOKENS,
+            responseFormat: STORY_PLAN_RESPONSE_FORMAT,
+            ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+          }, signal);
+          if (result.type === 'failed') {
+            c.var.logger.warn(
+              { event: 'story_plan_upstream_error', textModelId: resolved.model.id, failureKind: result.kind, status: result.status, userId: c.var.userId },
+              'story planning failed',
+            );
+            emit({ event: 'error', data: textFailureToSseError(result, SAFE_ERROR_MESSAGE) });
             return;
           }
-          const decoded = StoryPlanParseSchema.safeParse(parseJsonLenient(text));
+          const decoded = StoryPlanParseSchema.safeParse(parseModelJsonObject(result.text));
           if (!decoded.success) {
             c.var.logger.warn(
               { event: 'story_plan_invalid', issues: decoded.error.issues, userId: c.var.userId },
@@ -341,7 +332,7 @@ export const storiesRoutes = new Hono<AppEnv>()
                 'story planning failed',
               );
             }
-            emit({ event: 'error', data: { message: SAFE_ERROR_MESSAGE } });
+            emit({ event: 'error', data: textFailureToSseError(null, SAFE_ERROR_MESSAGE) });
           }
         }
       },

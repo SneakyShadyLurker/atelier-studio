@@ -3,8 +3,8 @@ import type { TextStructuredOutputMode } from '@atelier/shared';
 import { RESCUE_RESPONSE_FORMAT } from '../../prompts/inferParse';
 import { STORY_PLAN_RESPONSE_FORMAT } from '../../prompts/storyPlannerSystemPrompt';
 import { genericTextModel, testTextModelProvider } from '../../test/textModelProvider';
-import type { EnhanceChunk } from './featureHelpers';
-import { STORY_PLANNER_DEFAULTS } from './textBudgets';
+import type { BrainstormChunk, EnhanceChunk } from './featureHelpers';
+import { STORY_PLANNER_MAX_OUTPUT_TOKENS } from './textBudgets';
 
 // Anthropic structured output end to end through the feature provider: the
 // rescue call (strict schema, accumulated inside the policy) and the story
@@ -23,6 +23,8 @@ let server: ReturnType<typeof Bun.serve>;
 let origin = '';
 const captured: Captured[] = [];
 let reply: { sse?: readonly unknown[]; json?: unknown } = {};
+/** Per-request stream replies, consumed in order before `reply`. */
+let replyQueue: (readonly unknown[])[] = [];
 
 function sse(events: readonly unknown[]): string {
   return events
@@ -38,7 +40,7 @@ beforeAll(() => {
       const body = await req.json() as Record<string, unknown>;
       captured.push({ path: new URL(req.url).pathname, headers: req.headers, body });
       if (body.stream === true) {
-        return new Response(sse(reply.sse ?? []), { headers: { 'content-type': 'text/event-stream' } });
+        return new Response(sse(replyQueue.shift() ?? reply.sse ?? []), { headers: { 'content-type': 'text/event-stream' } });
       }
       return Response.json(reply.json);
     },
@@ -52,6 +54,7 @@ afterAll(() => {
 
 afterEach(() => {
   reply = {};
+  replyQueue = [];
 });
 
 const usage = { input_tokens: 3, output_tokens: 2 };
@@ -89,6 +92,16 @@ function jsonToolStream(json: string): unknown[] {
     { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: json.slice(cut) } },
     { type: 'content_block_stop', index: 0 },
   ], 'tool_use');
+}
+
+/** Some text, then Anthropic's mid-stream overload error event (no message_stop). */
+function overloadedAfterContent(): unknown[] {
+  return [
+    { type: 'message_start', message: message([], null) },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '{"kind":' } },
+    { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } },
+  ];
 }
 
 function answerStream(mode: TextStructuredOutputMode, json: string): unknown[] {
@@ -157,13 +170,13 @@ describe('Anthropic structured output through textModel', () => {
       const chunks: EnhanceChunk[] = [];
       for await (const chunk of claude(mode).enhance('outline a story', [], new AbortController().signal, 'plan system', {
         responseFormat: STORY_PLAN_RESPONSE_FORMAT,
-        defaults: STORY_PLANNER_DEFAULTS,
+        maxOutputTokens: STORY_PLANNER_MAX_OUTPUT_TOKENS,
       })) chunks.push(chunk);
       expect(chunks.at(-1)).toEqual({ type: 'done' });
       const text = chunks.flatMap((c) => (c.type === 'delta' ? [c.text] : [])).join('');
       expect(text).toBe(STORY_PLAN);
       const body = lastRequest().body;
-      expect(body.max_tokens).toBe(STORY_PLANNER_DEFAULTS.max_completion_tokens);
+      expect(body.max_tokens).toBe(STORY_PLANNER_MAX_OUTPUT_TOKENS);
       expectMode(body, mode, STORY_PLAN_RESPONSE_FORMAT.json_schema.schema);
     });
   }
@@ -179,13 +192,48 @@ describe('Anthropic structured output through textModel', () => {
     expect(chunks.at(-1)).toMatchObject({ type: 'failed', kind: 'permanent', detail: 'refusal' });
   });
 
-  test('template draft (non-streaming) parses the answer', async () => {
-    reply = { json: message([{ type: 'text', text: JSON.stringify({ kind: 'body', body: 'a portrait' }) }], 'end_turn') };
+  test('an overloaded_error after the first content chunk is retried by an accumulating call', async () => {
+    const DRAFT = JSON.stringify({ kind: 'entries', entries: ['teal'] });
+    replyQueue = [overloadedAfterContent(), textStream(DRAFT)];
+    const requestsBefore = captured.length;
+    const result = await claude('json_schema').draftList(
+      { name: 'colours', existing: [], target: 1 },
+      new AbortController().signal,
+    );
+    expect(result).toEqual({ type: 'ok', payload: { kind: 'entries', entries: ['teal'] } });
+    expect(captured.length - requestsBefore).toBe(2);
+  });
+
+  test('brainstorm reports an overloaded_error after the first content chunk as transient', async () => {
+    replyQueue = [overloadedAfterContent()];
+    const chunks: BrainstormChunk[] = [];
+    for await (const chunk of claude('json_schema').brainstormCharacters(
+      { count: 2, modelId: 'gpt-image-2.6-sunburst' },
+      new AbortController().signal,
+    )) chunks.push(chunk);
+    expect(chunks.at(-1)).toMatchObject({ type: 'failed', kind: 'transient' });
+  });
+
+  test('template draft streams and parses the answer', async () => {
+    reply = { sse: textStream(JSON.stringify({ kind: 'body', body: 'a portrait' })) };
     const result = await claude('json_schema').draftTemplate(
       { name: 'T', existingBody: '', library: { lists: [] } },
       new AbortController().signal,
     );
     expect(result).toEqual({ type: 'ok', payload: { kind: 'body', body: 'a portrait', warnings: [] } });
-    expect(lastRequest().body).not.toHaveProperty('stream', true);
+    expect(lastRequest().body).toHaveProperty('stream', true);
+  });
+
+  test('the system prompt block carries an ephemeral cache_control', async () => {
+    reply = { sse: textStream(JSON.stringify(RESCUE_OPS)) };
+    await claude('json_schema').rescueDimension({
+      previewSnapshot: { dimensions: [], lists: [] },
+      templateLists: [],
+      targetListName: 'colours',
+      conflictReason: 'test',
+    }, new AbortController().signal);
+    expect(lastRequest().body.system).toEqual([
+      expect.objectContaining({ type: 'text', cache_control: { type: 'ephemeral' } }),
+    ]);
   });
 });

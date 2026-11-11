@@ -74,51 +74,6 @@ describe('useInferDimensions', () => {
     expect(result.current.proposal).toBeNull();
   });
 
-  test('analyze({ priorDiagnosis }) does NOT send priorDiagnosis in POST body (server recomputes)', async () => {
-    // The server now unconditionally recomputes the prior diagnosis from its own DB.
-    // The client must NOT send priorDiagnosis even when analyze() is called with it,
-    // to avoid the prompt-injection + stale-snapshot vector.
-    let capturedInit: RequestInit | undefined;
-    globalThis.fetch = mock((_url: unknown, init?: RequestInit) => {
-      capturedInit = init;
-      return Promise.resolve(sseDone({
-        proposalId: 'p',
-        baseSnapshotHash: 'h',
-        warnings: [],
-        coverage: [],
-        rejected: [],
-        conflicts: [],
-        proposal: {
-          bundles: [{
-            key: 'create:F',
-            kind: 'create',
-            title: 't',
-            dimensionName: 'F',
-            detail: 'd',
-            impact: '',
-            destructive: false,
-            defaultChecked: true,
-            dependsOn: [],
-            optionCount: 1,
-            listCount: 1,
-          }],
-        },
-      }));
-    }) as unknown as typeof fetch;
-    const diagnosis = {
-      templates: [{ templateName: 'Broken', satisfiable: false, reason: 'conflict' }],
-      librarySnapshotHash: 'snap-h',
-      templatesDigest: 'tmpl-h',
-    };
-    const { result } = renderHook(() => useInferDimensions(), { wrapper: wrap() });
-    act(() => {
-      result.current.analyze({ priorDiagnosis: diagnosis });
-    });
-    await waitFor(() => { expect(result.current.status).toBe('review'); });
-    // Body must be absent — server owns diagnosis recomputation.
-    expect(capturedInit?.body).toBeUndefined();
-  });
-
   test('exposes progress state during analysis', async () => {
     const encoder = new TextEncoder();
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;

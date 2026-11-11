@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { DraftVariableListResponse, VariableList } from '@atelier/shared';
 import { parseSseText, pickLegacyTextModel, restoreFetch, testRuntime } from '../test/helpers';
+import { setTextModelProviderForTests } from '../providers/text/registry';
+import type { TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 
 type RT = ReturnType<typeof testRuntime>;
@@ -286,7 +288,7 @@ describe('POST /api/prompts/lists/:id/draft', () => {
     expect(error ?? '').not.toContain('still vague');
   });
 
-  test('upstream failure -> sanitized error frame, detail logged not leaked', async () => {
+  test('upstream failure -> sanitized error frame; the log carries kind and status, never the upstream detail', async () => {
     const up = serve(() => new Response(JSON.stringify({ error: { message: 'leaky detail' } }), { status: 500 }));
     const { app, logs } = testRuntime({
       seedLegacyText: true,
@@ -298,7 +300,11 @@ describe('POST /api/prompts/lists/:id/draft', () => {
     const { done, error } = await readDraft(res);
     expect(done).toBeUndefined();
     expect(error ?? '').not.toContain('leaky detail');
-    expect(logs.join('\n')).toContain('leaky detail');
+    expect(logs.join('\n')).not.toContain('leaky detail');
+    const failure = logs.map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((entry) => entry.event === 'draft_list_upstream_error');
+    expect(failure).toMatchObject({ failureKind: 'transient', status: 500 });
+    expect(typeof failure?.textModelId).toBe('string');
   });
 
   test('stalled upstream is bounded by CLOUD_TIMEOUT_MS', async () => {
@@ -315,5 +321,37 @@ describe('POST /api/prompts/lists/:id/draft', () => {
     expect(error).toBeDefined();
     expect(logs.join('\n')).toContain('draft_list_timeout');
     expect(logs.join('\n')).not.toContain('draft_list_crash');
+  });
+});
+
+describe('list draft terminal errors', () => {
+  afterEach(() => { setTextModelProviderForTests(null); });
+  const fake = (draftList: TestTextFeatureProvider['draftList']): TestTextFeatureProvider => ({
+    async *enhance() { await Promise.resolve(); yield { type: 'done' } as const; },
+    draftList,
+    draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
+    inferDimensions: () => Promise.resolve({ type: 'ok', ops: [] }),
+    inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: [] }),
+    rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
+  });
+
+  test('an exhausted quota reaches the client as quota-exhausted with its retry hint', async () => {
+    setTextModelProviderForTests(fake(() => Promise.resolve({
+      type: 'failed', kind: 'quota', status: 429, detail: 'upstream says no', retryAfterSeconds: 120,
+    })));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    const list = await createList(app, 'Colours');
+    const frames = parseSseText(await (await draft(app, list.id, { name: 'Colours', existing: [] })).text());
+    expect(frames.find((frame) => frame.event === 'error')?.data)
+      .toEqual({ message: 'Codex quota exhausted', code: 'quota-exhausted', retryAfterSeconds: 120 });
+  });
+
+  test('a crash carries provider-error with the route message', async () => {
+    setTextModelProviderForTests(fake(() => Promise.reject(new Error('boom'))));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    const list = await createList(app, 'Colours');
+    const frames = parseSseText(await (await draft(app, list.id, { name: 'Colours', existing: [] })).text());
+    expect(frames.find((frame) => frame.event === 'error')?.data)
+      .toMatchObject({ code: 'provider-error' });
   });
 });

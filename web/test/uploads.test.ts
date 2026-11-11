@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import {
+  copyTileToUpload,
   deleteRefImage,
   refImageUrl,
   uploadRefImage,
@@ -29,6 +30,28 @@ async function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('uploads API client', () => {
+  test('copies a tile into an upload with a bodyless POST and maps a full queue to UploadFailedError', async () => {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    let status = 201;
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url, init });
+      if (status !== 201) return new Response(null, { status });
+      return Response.json({
+        id: 'copied-upload', mime: 'image/png', ext: 'png', sizeBytes: 12, width: 1, height: 1, createdAt: 123,
+      }, { status });
+    }) as unknown as typeof fetch;
+
+    expect(await copyTileToUpload('tile/1')).toMatchObject({ id: 'copied-upload', mime: 'image/png' });
+    expect(calls[0]?.url).toBe('/api/tiles/tile%2F1/source-upload');
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(calls[0]?.init?.body ?? null).toBeNull();
+
+    status = 503;
+    const error = await rejectedValue(copyTileToUpload('tile-2'));
+    expect(error).toBeInstanceOf(UploadFailedError);
+    expect((error as UploadFailedError).status).toBe(503);
+  });
+
   test('uploads a file as multipart/form-data and validates the response shape', async () => {
     globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string'

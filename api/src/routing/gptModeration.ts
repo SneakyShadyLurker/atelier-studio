@@ -1,4 +1,5 @@
-import { askSystemOne, type SystemOneQuestions } from '../providers/jevSystemOne';
+import { askSystemOne, type SystemOneFailureCause, type SystemOneQuestions } from '../providers/jevSystemOne';
+import { NOOP_PROVIDER_LOGGER, type ProviderLogger } from '../providers/types';
 import type { GptModerationCategory, GptModerationNotice } from '@atelier/shared';
 
 export type GptModerationFailureKind = 'moderation-blocked' | 'moderation-unavailable';
@@ -82,7 +83,15 @@ export interface GptModerationEvidence {
 export interface GptModerationOptions {
   /** Display name of the screened text model; text-target notices carry it. Never sent to JEV. */
   readonly modelLabel?: string;
+  /** Receives the content-free `jev_unavailable` warn. */
+  readonly logger?: ProviderLogger;
 }
+
+/**
+ * Why the screen had no decision. JEV's own causes, plus `timeout` (our JEV
+ * deadline fired) and `evidence-too-large` (never sent). Enum and status only.
+ */
+type JevUnavailableCause = SystemOneFailureCause | 'timeout' | 'evidence-too-large';
 
 /** Called at the screened transports, after assembly and before any upstream fetch. */
 export async function moderateGptInput(
@@ -94,18 +103,24 @@ export async function moderateGptInput(
   signal.throwIfAborted();
   const target = evidence.task === 'image-generation' ? 'image' : 'text';
   const label = target === 'text' && options.modelLabel !== undefined ? { modelLabel: options.modelLabel } : {};
-  const unavailable = () => new GptModerationError('moderation-unavailable', { reason: 'unavailable', target, ...label });
+  const logger = options.logger ?? NOOP_PROVIDER_LOGGER;
+  // The request still fails closed; the log only says why JEV had no decision.
+  const unavailable = (cause: JevUnavailableCause, status?: number) => {
+    logger.warn({ event: 'jev_unavailable', cause, ...(status === undefined ? {} : { status }) }, 'moderation screen unavailable');
+    return new GptModerationError('moderation-unavailable', { reason: 'unavailable', target, ...label });
+  };
   // Never truncate evidence: an unchecked suffix could contain the violation.
   if (Buffer.byteLength(JSON.stringify(evidence), 'utf8') > MAX_EVIDENCE_BYTES) {
-    throw unavailable();
+    throw unavailable('evidence-too-large');
   }
   const controller = new AbortController();
   const timer = setTimeout(() => { controller.abort(); }, TIMEOUT_MS);
   const combined = AbortSignal.any([signal, controller.signal]);
   try {
-    const scores = await askSystemOne(apiKey, evidence, QUESTIONS, combined);
+    const answer = await askSystemOne(apiKey, evidence, QUESTIONS, combined);
     combined.throwIfAborted();
-    if (scores === null) throw unavailable();
+    if (!answer.ok) throw unavailable(answer.cause, answer.status);
+    const { scores } = answer;
     const nudity = (scores.explicit_nudity ?? 0) >= BLOCK_THRESHOLD;
     const age = (scores.sexual_minor_or_unknown_age ?? 0) >= BLOCK_THRESHOLD;
     const violence = (scores.graphic_violence ?? 0) >= BLOCK_THRESHOLD;
@@ -126,8 +141,123 @@ export async function moderateGptInput(
   } catch (error) {
     signal.throwIfAborted();
     if (error instanceof GptModerationError) throw error;
-    throw unavailable();
+    throw unavailable(controller.signal.aborted ? 'timeout' : 'transport');
   } finally {
     clearTimeout(timer);
   }
+}
+
+// A verdict for the exact same evidence is reused this long. A gpt-image
+// batch calls the provider once per tile and again per retry, all with the
+// same prompt, so this collapses those screens into one JEV request.
+const VERDICT_TTL_MS = 60_000;
+const MAX_MEMO_ENTRIES = 256;
+
+type MemoVerdict =
+  | { readonly kind: 'pass' }
+  | { readonly kind: 'blocked'; readonly moderation: GptModerationNotice };
+
+interface MemoEntry {
+  readonly verdict: Promise<MemoVerdict>;
+  settledAt: number | null;
+}
+
+export interface GptModerationMemo {
+  /** `moderateGptInput` with concurrent identical screens shared and verdicts reused. */
+  moderate(
+    apiKey: string | undefined,
+    evidence: GptModerationEvidence,
+    signal: AbortSignal,
+    options?: GptModerationOptions,
+  ): Promise<void>;
+}
+
+/**
+ * Shares one screen between identical requests: concurrent calls with the
+ * same evidence wait on one upstream request, and a `pass` or
+ * `moderation-blocked` verdict is reused for VERDICT_TTL_MS. A
+ * `moderation-unavailable` result is never kept, so the next request screens
+ * again. The shared request is not tied to any caller's signal (it runs under
+ * moderateGptInput's own timeout); each caller stops waiting when its own
+ * signal aborts. The key is a hash, so no prompt text is held as a key.
+ */
+export function createGptModerationMemo(opts: { readonly now?: () => number } = {}): GptModerationMemo {
+  const now = opts.now ?? Date.now;
+  const entries = new Map<string, MemoEntry>();
+
+  const keyOf = (evidence: GptModerationEvidence, options: GptModerationOptions): string =>
+    new Bun.CryptoHasher('sha256').update(JSON.stringify([
+      evidence.task,
+      evidence.instructions ?? null,
+      evidence.input,
+      options.modelLabel ?? null,
+    ])).digest('hex');
+
+  const evictForInsert = (at: number): void => {
+    for (const [key, entry] of entries) {
+      if (entry.settledAt !== null && at - entry.settledAt >= VERDICT_TTL_MS) entries.delete(key);
+    }
+    // Map order is insertion order: drop the oldest past the bound.
+    for (const key of entries.keys()) {
+      if (entries.size < MAX_MEMO_ENTRIES) break;
+      entries.delete(key);
+    }
+  };
+
+  const start = (key: string, apiKey: string | undefined, evidence: GptModerationEvidence, options: GptModerationOptions): MemoEntry => {
+    const shared = new AbortController().signal;
+    const verdict = moderateGptInput(apiKey, evidence, shared, options).then(
+      (): MemoVerdict => ({ kind: 'pass' }),
+      (error: unknown): MemoVerdict => {
+        if (error instanceof GptModerationError && error.kind === 'moderation-blocked') {
+          return { kind: 'blocked', moderation: error.moderation };
+        }
+        throw error;
+      },
+    );
+    const entry: MemoEntry = { verdict, settledAt: null };
+    verdict.then(
+      () => { entry.settledAt = now(); },
+      () => { if (entries.get(key) === entry) entries.delete(key); },
+    );
+    return entry;
+  };
+
+  return {
+    async moderate(apiKey, evidence, signal, options = {}) {
+      signal.throwIfAborted();
+      const key = keyOf(evidence, options);
+      const at = now();
+      let entry = entries.get(key);
+      if (entry?.settledAt != null && at - entry.settledAt >= VERDICT_TTL_MS) {
+        entries.delete(key);
+        entry = undefined;
+      }
+      if (!entry) {
+        evictForInsert(at);
+        entry = start(key, apiKey, evidence, options);
+        entries.set(key, entry);
+      }
+      let onAbort: (() => void) | undefined;
+      const aborted = new Promise<never>((_resolve, reject) => {
+        onAbort = () => {
+          reject(signal.reason instanceof Error ? signal.reason : new DOMException('aborted', 'AbortError'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+      });
+      try {
+        const verdict = await Promise.race([entry.verdict, aborted]);
+        if (verdict.kind === 'blocked') {
+          // A fresh error and notice per caller: each tile owns what it reports.
+          const moderation: GptModerationNotice = {
+            ...verdict.moderation,
+            ...(verdict.moderation.categories ? { categories: [...verdict.moderation.categories] } : {}),
+          };
+          throw new GptModerationError('moderation-blocked', moderation);
+        }
+      } finally {
+        if (onAbort) signal.removeEventListener('abort', onAbort);
+      }
+    },
+  };
 }

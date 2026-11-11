@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { rejects } from 'node:assert/strict';
-import { createPrivacyTransport, drainPrivacyLeases } from './privacy';
+import { PrivacyInvalidResponseError, createPrivacyTransport, drainPrivacyLeases } from './privacy';
 import { TEST_EXECUTION_TIMEOUT_MS, currentWorkerPrivacy } from '../../test/private-worker-fixture';
 import { abortReason } from '../../lifecycle/abort';
 
@@ -22,6 +22,23 @@ test('requires active privacy controls and rejects incompatible workers', async 
   const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ready: false, protocol: 1 }));
   restore = () => { fetch.mockRestore(); };
   await rejects(createPrivacyTransport(BASE, config).handshake(signal()), /not ready/);
+});
+
+test('handshake accepts workers with and without a boot id and ignores a malformed one', async () => {
+  const bootId = '0123456789abcdef0123456789abcdef';
+  for (const [body, expected] of [
+    [currentWorkerPrivacy, undefined],
+    [{ ...currentWorkerPrivacy, boot_id: bootId }, bootId],
+    [{ ...currentWorkerPrivacy, boot_id: 'not-hex' }, undefined],
+    [{ ...currentWorkerPrivacy, boot_id: 42 }, undefined],
+  ] as const) {
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(body));
+    try {
+      const metadata = await createPrivacyTransport(BASE, config).handshake(signal());
+      expect(metadata.bootId).toBe(expected);
+      expect(metadata.allowedNodes).toEqual(currentWorkerPrivacy.allowed_nodes);
+    } finally { fetch.mockRestore(); }
+  }
 });
 
 test('uses raw input, owned memory outputs and explicit storage acknowledgment', async () => {
@@ -112,15 +129,20 @@ test('scoped status rejects duplicate identities and invalid media/byte handles'
 
 test('download checks the advertised media type and exact byte count', async () => {
   let contentType = 'image/png';
+  let reads = 0;
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(Object.assign((input: string | URL | Request) => {
     const path = new URL(input instanceof Request ? input.url : input).pathname;
+    if (path.includes('/outputs/')) reads += 1;
     return Promise.resolve(path.includes('/outputs/') ? new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': contentType } })
       : Response.json({ ...currentWorkerPrivacy, previous_prompt_id: null }));
   }, { preconnect: globalThis.fetch.preconnect }));
   restore = () => { fetch.mockRestore(); };
   const job = await createPrivacyTransport(BASE, config).createJob(signal(), TEST_EXECUTION_TIMEOUT_MS);
   const ref = { filename: crypto.randomUUID(), subfolder: job.id, type: 'atelier-memory', mediaType: 'image/png', bytes: 4 };
+  // A short and a long body both fail definitively, without a retry read.
   await rejects(job.download(ref, 20, signal()), /byte count mismatch/);
+  expect(await job.download({ ...ref, bytes: 2 }, 20, signal()).catch((error: unknown) => error)).toBeInstanceOf(PrivacyInvalidResponseError);
+  expect(reads).toBe(2);
   contentType = 'video/mp4';
   await rejects(job.download({ ...ref, bytes: 3 }, 20, signal()), /media type mismatch/);
   await job.release();

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { canSubmitDraft, toGenerateRequest, useAtelierStore, type QueuedRoll } from '../src/store/atelier';
 import { composerPrefsFromDraft } from '../src/lib/composerPrefs';
+import { refImageThumbUrl } from '../src/api/uploads';
 
 afterEach(() => {
   mock.restore();
@@ -135,6 +136,53 @@ describe('atelier UI store', () => {
 
     useAtelierStore.getState().removeRefImage(clientId);
     expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  test('markRefImageReady keeps the local preview unless the server converted the image', () => {
+    let created = 0;
+    URL.createObjectURL = mock(() => `blob:ref-${String(created++)}`);
+    const revokeObjectURL = mock();
+    URL.revokeObjectURL = revokeObjectURL;
+    const upload = (id: string, mime: 'image/png' | 'image/jpeg') => ({
+      id, mime, ext: mime === 'image/png' ? 'png' as const : 'jpg' as const, sizeBytes: 1, width: 1, height: 1, createdAt: 1,
+    });
+
+    const same = useAtelierStore.getState().addRefImage(new File(['x'], 'ref.png', { type: 'image/png' }));
+    useAtelierStore.getState().markRefImageReady(same, upload('upload-same', 'image/png'));
+    expect(useAtelierStore.getState().draft.refImages.find((ref) => ref.clientId === same))
+      .toMatchObject({ status: 'ready', serverId: 'upload-same', previewUrl: 'blob:ref-0' });
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    // A HEIC the browser may not display: show the server's thumbnail instead.
+    const converted = useAtelierStore.getState().addRefImage(new File(['x'], 'IMG.HEIC', { type: 'image/heic' }));
+    useAtelierStore.getState().markRefImageReady(converted, upload('upload-heic', 'image/jpeg'));
+    expect(useAtelierStore.getState().draft.refImages.find((ref) => ref.clientId === converted))
+      .toMatchObject({ status: 'ready', serverId: 'upload-heic', previewUrl: refImageThumbUrl('upload-heic') });
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:ref-1');
+
+    useAtelierStore.getState().removeRefImage(same);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:ref-0');
+  });
+
+  test('a ready chip restored after a failed replacement shows its server thumbnail, not the revoked blob', () => {
+    let created = 0;
+    URL.createObjectURL = mock(() => `blob:ref-${String(created++)}`);
+    const revokeObjectURL = mock();
+    URL.revokeObjectURL = revokeObjectURL;
+
+    const kept = useAtelierStore.getState().addRefImage(new File(['x'], 'ref.png', { type: 'image/png' }));
+    useAtelierStore.getState().markRefImageReady(kept, {
+      id: 'upload-kept', mime: 'image/png', ext: 'png', sizeBytes: 1, width: 1, height: 1, createdAt: 1,
+    });
+    // Replacing evicts the ready chip and revokes its local preview.
+    const { clientId, evicted } = useAtelierStore.getState().replaceRefImagesFrom(0, new File(['y'], 'new.png', { type: 'image/png' }));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:ref-0');
+
+    // The replacement upload failed: the evicted chip comes back.
+    useAtelierStore.getState().restoreRefImages(clientId, evicted);
+    expect(useAtelierStore.getState().draft.refImages).toHaveLength(1);
+    expect(useAtelierStore.getState().draft.refImages[0])
+      .toMatchObject({ clientId: kept, status: 'ready', serverId: 'upload-kept', previewUrl: refImageThumbUrl('upload-kept') });
   });
 
   test('replaceRefImagesFrom evicts the requested chip and every later chip', () => {

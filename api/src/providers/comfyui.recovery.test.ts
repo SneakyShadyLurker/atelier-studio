@@ -175,9 +175,15 @@ test('terminal hints cannot bypass transient status backoff before recovery and 
         backoffs[statusReads - 1]?.resolve({ ms, advance });
       });
     }
-    if (statusReads === 3) { now += ms; return Promise.resolve(); }
     return nativeDelay(ms, signal);
   });
+  // After a successful read the status wait is a plain timer; the terminal
+  // fast path advances the virtual clock by its 100 ms.
+  const nativeTimeout = globalThis.setTimeout;
+  const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    if (statusReads === 3 && ms === 100) { now += ms; return nativeTimeout(fn, 0, ...args); }
+    return nativeTimeout(fn, ms, ...args);
+  }) as typeof setTimeout);
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async (input: string | URL | Request, init?: RequestInit) => {
     const path = new URL(input instanceof Request ? input.url : input).pathname;
     if ((init?.method ?? 'GET') === 'GET' && path === `/atelier/v1/jobs/${worker.lease}`) {
@@ -218,6 +224,7 @@ test('terminal hints cannot bypass transient status backoff before recovery and 
     await generation.catch(() => undefined);
     fetch.mockRestore();
     delay.mockRestore();
+    timer.mockRestore();
   }
 });
 
@@ -308,8 +315,10 @@ for (const scenario of [
   test(scenario.name, async () => {
     const worker = fixture();
     const nativeFetch = globalThis.fetch;
-    const nativeDelay = abort.abortableDelay;
-    const delay = spyOn(abort, 'abortableDelay').mockImplementation((ms, signal) => nativeDelay(ms === 1_000 ? 5 : ms, signal));
+    // Both the status wait and the transient-failure backoff are one-second timers.
+    const nativeTimeout = globalThis.setTimeout;
+    const delay = spyOn(globalThis, 'setTimeout').mockImplementation(((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) =>
+      nativeTimeout(fn, ms === 1_000 ? 5 : ms, ...args)) as typeof setTimeout);
     let statusReads = 0;
     const fetch = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async (input: string | URL | Request, init?: RequestInit) => {
       const path = new URL(input instanceof Request ? input.url : input).pathname;

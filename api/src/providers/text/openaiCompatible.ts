@@ -4,7 +4,7 @@ import type { TextReasoningEffort, TextTokenField } from '@atelier/shared';
 import type { TextModelRecord } from '../../db/textProviders';
 import { listModels } from './listModels';
 import { runConnectionProbe } from './probe';
-import type { ReasoningOptions, ResolvedProvider, TextProtocolAdapter } from './protocol';
+import type { LanguageModelOptions, ReasoningOptions, ResolvedProvider, TextProtocolAdapter } from './protocol';
 
 // OpenAI-compatible chat adapter over `@ai-sdk/openai-compatible`.
 //
@@ -89,12 +89,16 @@ function languageModel(
   provider: ResolvedProvider,
   model: TextModelRecord,
   fetch: typeof globalThis.fetch,
+  options?: LanguageModelOptions,
 ): LanguageModelV4 {
   return createOpenAICompatible({
     name: `p-${provider.id}`,
     baseURL: provider.baseUrl,
     ...(provider.credential === null ? {} : { apiKey: provider.credential }),
     fetch,
+    // Some servers reject `stream_options`, so the operator can switch it off
+    // (TEXT_STREAM_INCLUDE_USAGE).
+    ...(options?.includeUsage === undefined ? {} : { includeUsage: options.includeUsage }),
     supportsStructuredOutputs: model.structuredOutput === 'json_schema',
     transformRequestBody: normaliseRequestBody(provider.tokenField),
   }).chatModel(model.modelId);

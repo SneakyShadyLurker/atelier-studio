@@ -3,6 +3,7 @@ import type { Database } from 'bun:sqlite';
 import type { TileExt } from '@atelier/shared';
 import { type ArtifactFile, deleteArtifact, findOrphans, namedArtifactRoot } from '../storage/files';
 import { releaseUploads, SQL_UPLOAD_UNREFERENCED } from '../storage/uploadStore';
+import { deleteUploadThumbnail, uploadThumbnailKey } from '../storage/thumbnail';
 import type { AppLogger } from '../observability/logger';
 import * as queue from '../orchestrator/queue';
 import { finalizeBatch } from '../orchestrator/finalize';
@@ -371,14 +372,22 @@ export function startupReconcile(
     }
   }
 
-  const knownThumbs = new Set(
-    db
+  // Tile thumbnails and upload thumbnails share this root; an upload's key
+  // carries the `u-` prefix (`uploadThumbnailKey`). Leaving uploads out would
+  // delete every upload thumbnail at each boot and count them toward the
+  // orphan-ratio guard.
+  const knownThumbs = new Set([
+    ...db
       .query<{ name: string }, []>(
         "SELECT user_id || '/' || id || '.webp' AS name FROM tiles WHERE status = 'done'",
       )
       .all()
       .map((row) => row.name),
-  );
+    ...db
+      .query<{ id: string; user_id: string }, []>('SELECT id, user_id FROM uploads')
+      .all()
+      .map((row) => `${row.user_id}/${uploadThumbnailKey(row.id)}.webp`),
+  ]);
   for (const file of gateOrphans(findOrphans(dataDir, 'thumbs', knownThumbs), knownThumbs.size, logger, 'thumbs', options)) {
     try {
       unlinkSync(file.path);
@@ -526,6 +535,7 @@ export function startupReconcile(
       } catch (error) {
         logger.warn({ err: error, uploadId: row.id, ext: row.ext }, 'upload TTL reaper: artifact unlink failed');
       }
+      deleteUploadThumbnail(dataDir, row.user_id, row.id, logger);
     }
     logger.info({ count: expiredUploads.length }, 'reaped expired unreferenced uploads');
   }

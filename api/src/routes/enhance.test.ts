@@ -155,14 +155,18 @@ describe('POST /api/enhance-prompt', () => {
     expect(retryEvents.at(-1)?.event).toBe('done');
   });
 
-  test('upstream non-200 emits a single safe error event and logs detail', async () => {
+  test('upstream non-200 emits a single safe error event and logs kind and status, never the detail', async () => {
     const upstream = serve(() => new Response(JSON.stringify({ error: { message: 'leaky upstream detail' } }), { status: 500 }));
     const { app, logs } = testRuntime({ seedLegacyText: true, CLIPROXY_BASE_URL: upstream, CLIPROXY_TOKEN: 'sk-x', LOG_LEVEL: 'info' });
     const events = await parseSse(await post(app, 'cat'));
     expect(events).toHaveLength(1);
     expect(events[0]?.event).toBe('error');
     expect((events[0]?.data as { message: string }).message).not.toContain('leaky upstream detail');
-    expect(logs.join('\n')).toContain('leaky upstream detail');
+    expect(logs.join('\n')).not.toContain('leaky upstream detail');
+    const failure = logs.map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((entry) => entry.event === 'enhance_upstream_error');
+    expect(failure).toMatchObject({ failureKind: 'transient', status: 500 });
+    expect(typeof failure?.textModelId).toBe('string');
   });
 
   test('route-level oversize maps to a single safe error event', async () => {
@@ -774,5 +778,53 @@ describe('enhance text model routing failures', () => {
     const res = await postEnhance(runtime.app, { prompt: 'a cat', modelId: 'gpt-image-2.6-sunburst' });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('TEXT_MODEL_UNAVAILABLE');
+  });
+});
+
+describe('enhance terminal errors', () => {
+  afterEach(() => { setTextModelProviderForTests(null); });
+  const fake = (enhance: TestTextFeatureProvider['enhance']): TestTextFeatureProvider => ({
+    enhance,
+    draftList: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
+    draftTemplate: () => Promise.resolve({ type: 'failed', status: null, detail: 'not implemented' }),
+    inferDimensions: () => Promise.resolve({ type: 'ok', ops: [] }),
+    inferDimensionsSingleAttempt: () => Promise.resolve({ type: 'ok', ops: [] }),
+    rescueDimension: () => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' }),
+  });
+
+  test('a finished rewrite that is refusal prose ends with a refusal error, not done; its deltas still stream', async () => {
+    setTextModelProviderForTests(fake(async function* () {
+      await Promise.resolve();
+      yield { type: 'delta', text: 'I can’t fulfill this request. ' } satisfies EnhanceChunk;
+      yield { type: 'delta', text: 'It describes a sexualized depiction of a minor.' } satisfies EnhanceChunk;
+      yield { type: 'done' } satisfies EnhanceChunk;
+    }));
+    const { app } = testRuntime({ seedLegacyText: true });
+    const events = await parseSse(await post(app, 'cat'));
+    expect(events.filter((e) => e.event === 'delta')).toHaveLength(2);
+    expect(events.some((e) => e.event === 'done')).toBe(false);
+    expect(events.at(-1)).toMatchObject({ event: 'error', data: { code: 'refusal' } });
+  });
+
+  test('an ordinary rewrite still ends with done', async () => {
+    setTextModelProviderForTests(fake(async function* () {
+      await Promise.resolve();
+      yield { type: 'delta', text: 'A tabby cat on a sunlit windowsill.' } satisfies EnhanceChunk;
+      yield { type: 'done' } satisfies EnhanceChunk;
+    }));
+    const { app } = testRuntime({ seedLegacyText: true });
+    const events = await parseSse(await post(app, 'cat'));
+    expect(events.at(-1)?.event).toBe('done');
+  });
+
+  test('a crash carries provider-error with the route message', async () => {
+    setTextModelProviderForTests(fake(async function* () {
+      await Promise.resolve();
+      if (Date.now() > 0) throw new Error('boom');
+      yield { type: 'done' } satisfies EnhanceChunk;
+    }));
+    const { app } = testRuntime({ seedLegacyText: true });
+    const events = await parseSse(await post(app, 'cat'));
+    expect(events.at(-1)).toEqual({ event: 'error', data: { message: 'Couldn’t enhance the prompt. Please try again.', code: 'provider-error' } });
   });
 });

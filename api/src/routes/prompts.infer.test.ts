@@ -198,6 +198,8 @@ test('a non-abort taxonomy error still reaches the crash handler even if its dea
     expect(calls).toBe(1);
     expect(frames.some((frame) => frame.event === 'done')).toBe(false);
     expect(runtime.logs.some((line) => line.includes('infer_dimensions_crash'))).toBe(true);
+    expect(frames.find((frame) => frame.event === 'error')?.data)
+      .toEqual({ message: "Couldn't analyse the library. Please try again.", code: 'provider-error' });
     expect(runtime.logs.some((line) => line.includes('infer_dimensions_taxonomy_timeout'))).toBe(false);
   } finally { timeoutSpy.mockRestore(); }
 });
@@ -226,7 +228,7 @@ for (const kind of ['quota', 'permanent', 'moderation-blocked'] as const) {
       if (kind === 'quota') expect(frames.find((frame) => frame.event === 'error')?.data).toMatchObject({ code: 'quota-exhausted' });
       expect(runtime.logs.some((line) => line.includes('infer_dimensions_taxonomy_timeout'))).toBe(false);
       expect(runtime.logs.some((line) => line.includes('infer_dimensions_crash'))).toBe(false);
-      expect(runtime.logs.some((line) => line.includes(`"kind":"${kind}"`))).toBe(true);
+      expect(runtime.logs.some((line) => line.includes(`"failureKind":"${kind}"`))).toBe(true);
     } finally { timeoutSpy.mockRestore(); }
   });
 }

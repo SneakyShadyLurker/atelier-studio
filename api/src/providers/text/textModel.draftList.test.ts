@@ -78,6 +78,15 @@ describe('textModel.draftList', () => {
     expect(r.type).toBe('failed');
   });
 
+  test('quota 429 -> failed with kind quota and retry-after', async () => {
+    const up = serve(() => new Response(JSON.stringify({ error: { message: 'usage limit reached' } }), {
+      status: 429,
+      headers: { 'Retry-After': '900' },
+    }));
+    const r = await provider(up).draftList({ name: 'L', existing: [], target: 20 }, new AbortController().signal);
+    expect(r).toMatchObject({ type: 'failed', kind: 'quota', status: 429, retryAfterSeconds: 900 });
+  });
+
   test('upstream non-200 -> failed with status', async () => {
     const up = serve(() => new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 500 }));
     const r = await provider(up).draftList({ name: 'L', existing: [], target: 20 }, new AbortController().signal);

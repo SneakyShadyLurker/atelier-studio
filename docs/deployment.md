@@ -774,7 +774,7 @@ The text-call resilience layer wraps every upstream call in Cockatiel retry, cir
 | Var | Default | Range | What it does |
 |---|---:|---|---|
 | `INFER_TOTAL_BUDGET_MS` | 500000 | 120000-580000 | Hard cap for the whole `/infer` SSE call. Must leave at least 60 s under `SWAG_PROXY_READ_TIMEOUT_MS`. |
-| `RESILIENT_PER_ATTEMPT_TIMEOUT_MS` | 70000 | 15000-180000 | Per-attempt timeout for draft-list and infer calls. |
+| `RESILIENT_PER_ATTEMPT_TIMEOUT_MS` | 70000 | 15000-180000 | Per-attempt timeout for list-draft, template-draft and infer calls. |
 | `RESILIENT_MAX_ATTEMPTS` | 2 | 1-5 | Total provider invocations per policy call, including the first. |
 | `RESILIENT_INITIAL_BACKOFF_MS` | 800 | 100-10000 | Backoff base, with decorrelated jitter. |
 | `RESILIENT_MAX_BACKOFF_MS` | 8000 | 500-60000 | Backoff ceiling. |
@@ -786,6 +786,8 @@ The text-call resilience layer wraps every upstream call in Cockatiel retry, cir
 | `KREA_CONDENSE_TIMEOUT_MS` | 150000 | 1000-300000 | Per-call Krea condensation cap; condensation fails open. Models marked Slow model use at least 420000. |
 | `H3_IMAGE_EXPAND_TIMEOUT_MS` | 120000 | 1000-300000 | Per-call cap on expanding a MiniMax H3 Image prompt under 60 words; expansion fails open and renders the original. Models marked Slow model use at least 420000. |
 | `H3_IMAGE_AUTO_EXPAND` | true | true/false | Kill-switch for that expansion. Off: short MiniMax H3 Image prompts are not prepared at all and render as submitted. |
+| `TEXT_STREAM_IDLE_TIMEOUT_MS` | 120000 | positive | Silence on the upstream body before a streamed text call is cut as a transient failure. Models marked Slow model use at least 600000. |
+| `TEXT_STREAM_INCLUDE_USAGE` | true | true/false | Asks OpenAI-compatible streams for token usage (`stream_options.include_usage`), which the `text_call` log event reports. Set false for a server that rejects `stream_options`. |
 | `QUOTA_MIN_RETRY_AFTER_MS` | 300000 | 30000-3600000 | A `429` counts as budget exhaustion (non-retriable, breaker-exempt) only when its `Retry-After` is at least this floor or the body names a token budget. |
 | `SWAG_PROXY_READ_TIMEOUT_MS` | 600000 | 60000-3600000 | Mirrors the proxy's `proxy_read_timeout`. |
 | `INFER_DIMENSIONS_BATCH_CONCURRENCY` | 12 | 1-16 | Concurrent per-list calls during two-pass infer. |

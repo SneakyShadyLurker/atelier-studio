@@ -70,8 +70,7 @@ describe('PromptManager diagnosis badges', () => {
     };
 
     // Capture the fetch call that the infer hook will make when Fix with AI is clicked.
-    // The server now owns the prior-diagnosis recomputation — the client must NOT
-    // send priorDiagnosis in the body.
+    // The server owns the prior-diagnosis recomputation; the request has no body.
     let capturedInit: RequestInit | undefined;
     const fetchSpy = mock((input: unknown, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
@@ -113,7 +112,7 @@ describe('PromptManager diagnosis badges', () => {
     // 3. Click "✦ Fix Library" — triggers infer.analyze() with no client-supplied diagnosis
     fireEvent.click(fixBtn);
 
-    // 4. Assert the LLM call was made and the body does NOT contain priorDiagnosis.
+    // 4. Assert the LLM call was made without a client-supplied diagnosis.
     await waitFor(() => {
       expect(capturedInit).toBeDefined();
     });

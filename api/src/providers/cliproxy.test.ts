@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { allowJevForProviderTests, resetJevForProviderTests } from '../test/jev-fixture';
-import { createCliproxyProvider } from './cliproxy';
+import { buildReferenceImagePayloads, createCliproxyProvider } from './cliproxy';
 import type { ProviderRequest, ProviderResult } from './types';
 
 const originalFetch = globalThis.fetch;
@@ -297,6 +297,31 @@ describe('cliproxy pretty-printed SSE frame payloads', () => {
     expect(result).toMatchObject({ status: 'ready', ext: 'png' });
   });
 
+  test.each([
+    ['event-named frames', 'event: image_generation.partial_image\n', 'event: image_generation.completed\n', false],
+    ['data-only frames (event inferred from the payload)', '', '', false],
+    ['pretty-printed data-only frames', '', '', true],
+  ] as const)('parses each image frame payload once: %s', async (_label, partialEvent, completedEvent, pretty) => {
+    const payload = (type: string, field: string): string => pretty
+      ? `{\n  "type": "${type}",\n  "${field}": "${PNG_B64}"\n}`
+      : JSON.stringify({ type, [field]: PNG_B64 });
+    const body = `${partialEvent}data: ${payload('image_generation.partial_image', 'partial_image_b64')}\n\n`
+      + `${completedEvent}data: ${payload('image_generation.completed', 'b64_json')}\n\n`;
+    globalThis.fetch = mock(() => Promise.resolve(new Response(
+      body,
+      { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    ))) as unknown as typeof fetch;
+    const parse = spyOn(JSON, 'parse');
+    try {
+      const results = await consume();
+      expect(results).toMatchObject([{ status: 'partial' }, { status: 'ready', ext: 'png' }]);
+      const imageParses = parse.mock.calls.filter(([text]) => typeof text === 'string' && text.includes(PNG_B64));
+      expect(imageParses).toHaveLength(2);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   test('pretty-printed frames split across chunk boundaries still recover', async () => {
     const body = 'event: error\ndata: {\n  "error": {\n    "message": "upstream did not return image output",\n    "type": "server_error"\n  }\n}\n\n';
     const stream = new ReadableStream<Uint8Array>({
@@ -316,5 +341,18 @@ describe('cliproxy pretty-printed SSE frame payloads', () => {
       status: 'failed',
       error: { status: 400, reason: { kind: 'no-image' } },
     });
+  });
+});
+
+describe('reference image payloads', () => {
+  test('encode exactly the reference view, byte-identical to the Buffer encoding', () => {
+    const backing = new Uint8Array(4_099);
+    for (let i = 0; i < backing.length; i += 1) backing[i] = (i * 31) & 0xff;
+    // Odd offsets and lengths cover every base64 padding form.
+    const refs = [backing.subarray(7, 1_030), backing.subarray(1_031, 2_054), backing.subarray(2_055, 4_076)]
+      .map((bytes) => ({ bytes, mime: 'image/png' }));
+    expect(buildReferenceImagePayloads(refs)).toEqual(refs.map((ref) => ({
+      image_url: `data:image/png;base64,${Buffer.from(ref.bytes).toString('base64')}`,
+    })));
   });
 });

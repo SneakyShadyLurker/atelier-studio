@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { type EnhanceCallOptions } from './featureHelpers';
+import { FINISH_GRACE_MS } from './textModel';
 import { restoreFetch } from '../../test/helpers';
 import { genericTextModel, seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
 import { hostPortProbeResponse, isHostPortProbe } from '../../test/hostProbe';
@@ -172,15 +173,17 @@ describe('textModel provider', () => {
   });
 
   // The SDK only finishes when the body closes; the stream must end at the
-  // terminal frame even when the upstream holds the connection open.
-  for (const [name, frames] of [
+  // terminal frame even when the upstream holds the connection open. After a
+  // bare finish_reason frame the tap waits up to FINISH_GRACE_MS for a usage
+  // frame or [DONE] first.
+  for (const [name, frames, boundMs] of [
     ['[DONE]', [
       JSON.stringify({ choices: [{ index: 0, delta: { content: 'held open' }, finish_reason: null }] }),
       '[DONE]',
-    ]],
+    ], 1500],
     ['a finish_reason frame', [
       JSON.stringify({ choices: [{ index: 0, delta: { content: 'held open' }, finish_reason: 'stop' }] }),
-    ]],
+    ], FINISH_GRACE_MS + 1500],
   ] as const) {
     test(`ends at ${name} while the upstream keeps the connection open, and releases it`, async () => {
       let released!: () => void;
@@ -192,7 +195,7 @@ describe('textModel provider', () => {
         },
         cancel() { released(); },
       }), { headers: { 'Content-Type': 'text/event-stream' } }));
-      const hung = new Promise<'hung'>((resolve) => { setTimeout(() => { resolve('hung'); }, 1500); });
+      const hung = new Promise<'hung'>((resolve) => { setTimeout(() => { resolve('hung'); }, boundMs); });
       expect(await Promise.race([collect(baseUrl), hung])).toEqual([{ type: 'delta', text: 'held open' }, { type: 'done' }]);
       expect(await Promise.race([upstreamReleased.then(() => 'released' as const), hung])).toBe('released');
     });
@@ -272,16 +275,21 @@ describe('textModel provider', () => {
   });
 
   test('draftTemplate preserves known padded var tokens and strips @N from unknown warnings', async () => {
-    const baseUrl = serve(() => new Response(JSON.stringify({
-      choices: [{
-        message: {
-          content: JSON.stringify({
-            kind: 'body',
-            body: 'Known {{var:: face @1 }} unknown {{var:: mood @2 }}',
-          }),
-        },
-      }],
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const baseUrl = serve(() => chatSse([
+      JSON.stringify({
+        choices: [{
+          index: 0,
+          delta: {
+            content: JSON.stringify({
+              kind: 'body',
+              body: 'Known {{var:: face @1 }} unknown {{var:: mood @2 }}',
+            }),
+          },
+          finish_reason: 'stop',
+        }],
+      }),
+      '[DONE]',
+    ]));
     const provider = testTextModelProvider({ origin: baseUrl, token: 'sk-test', model: genericTextModel('kimi-latest'), maxResponseBytes: 1024 * 1024 });
 
     const result = await provider.draftTemplate({

@@ -52,3 +52,47 @@ describe('startup reconciliation of orphan thumbs', () => {
     expect(existsSync(archivedThumb)).toBe(true);
   });
 });
+
+describe('startup reconciliation of upload thumbs', () => {
+  function seedUpload(runtime: ReturnType<typeof testRuntime>, userId: string, uploadId: string): void {
+    const now = Date.now();
+    runtime.db.query('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)').run(userId, now);
+    runtime.db
+      .query("INSERT INTO uploads (id, user_id, ext, mime, size_bytes, width, height, sha256, created_at) VALUES (?, ?, 'png', 'image/png', 3, 1, 1, 'sha', ?)")
+      .run(uploadId, userId, now);
+    const uploadDir = join(runtime.config.DATA_DIR, 'uploads', userId);
+    mkdirSync(uploadDir, { recursive: true });
+    writeFileSync(join(uploadDir, `${uploadId}.png`), 'source');
+  }
+
+  const reconcile = (runtime: ReturnType<typeof testRuntime>): void => {
+    startupReconcile(runtime.db, runtime.config.DATA_DIR, runtime.logger, { uploadTtlMs: runtime.config.UPLOAD_TTL_MS, orphanThreshold: runtime.config.RECONCILE_ORPHAN_THRESHOLD, force: runtime.config.RECONCILE_FORCE, dbIntegrityOk: true });
+  };
+
+  test('preserves the thumbnail of a live upload', () => {
+    const runtime = testRuntime();
+    const uploadId = crypto.randomUUID();
+    seedUpload(runtime, 'u', uploadId);
+    const thumbDir = join(runtime.config.DATA_DIR, 'thumbs', 'u');
+    mkdirSync(thumbDir, { recursive: true });
+    const uploadThumb = join(thumbDir, `u-${uploadId}.webp`);
+    writeFileSync(uploadThumb, 'thumb');
+
+    reconcile(runtime);
+
+    expect(existsSync(uploadThumb)).toBe(true);
+  });
+
+  test('removes an upload thumbnail whose upload row is gone', () => {
+    const runtime = testRuntime();
+    seedUpload(runtime, 'u', crypto.randomUUID());
+    const thumbDir = join(runtime.config.DATA_DIR, 'thumbs', 'u');
+    mkdirSync(thumbDir, { recursive: true });
+    const orphanThumb = join(thumbDir, `u-${crypto.randomUUID()}.webp`);
+    writeFileSync(orphanThumb, 'thumb');
+
+    reconcile(runtime);
+
+    expect(existsSync(orphanThumb)).toBe(false);
+  });
+});

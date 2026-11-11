@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildSequenceStitchArgs,
   sequenceMasterFrames,
@@ -161,5 +164,56 @@ describe('stitchSequence', () => {
     controller.abort(new DOMException('stop', 'AbortError'));
     const error = await captureError(() => pending);
     expect(error).toHaveProperty('name', 'AbortError');
+  });
+});
+
+/** Top-level ISO BMFF box types in file order (size 1 = 64-bit size, 0 = to end). */
+function topLevelBoxes(bytes: Uint8Array): string[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const types: string[] = [];
+  for (let offset = 0; offset + 8 <= bytes.byteLength;) {
+    let size = view.getUint32(offset);
+    types.push(new TextDecoder().decode(bytes.subarray(offset + 4, offset + 8)));
+    if (size === 1) size = Number(view.getBigUint64(offset + 8));
+    else if (size === 0) size = bytes.byteLength - offset;
+    if (size < 8) throw new Error(`malformed box at ${offset}`);
+    offset += size;
+  }
+  return types;
+}
+
+describe('stitchSequence master file (real ffmpeg)', () => {
+  test('writes a regular faststart MP4: moov before mdat, no fragments, temp file removed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atelier-stitch-'));
+    try {
+      const clips = ['a', 'b'].map((name, index) => {
+        const path = join(dir, `${name}.mp4`);
+        const make = Bun.spawnSync([
+          'ffmpeg', '-nostdin', '-f', 'lavfi', '-i', `testsrc2=duration=1:size=64x64:rate=24`,
+          '-f', 'lavfi', '-i', `sine=frequency=${440 + index * 220}:duration=1`,
+          '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', '-y', path,
+        ]);
+        expect(make.exitCode).toBe(0);
+        return still(path, 24);
+      });
+      const master = await stitchSequence(clips, { timeoutBaselineMs: 60_000, maxOutputBytes: 64 * 1024 * 1024 });
+      const boxes = topLevelBoxes(master);
+      expect(boxes).toContain('moov');
+      expect(boxes).toContain('mdat');
+      expect(boxes.indexOf('moov')).toBeLessThan(boxes.indexOf('mdat'));
+      expect(boxes).not.toContain('moof');
+      expect(boxes).not.toContain('mfra');
+      // Only the decrypted inputs remain; the master never outlives the call.
+      expect(readdirSync(dir).sort()).toEqual(['a.mp4', 'b.mp4']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test('the master is written into the private directory of the inputs, never to a pipe', () => {
+    const args = buildSequenceStitchArgs([still('/private/x/0.mp4', 24), still('/private/x/1.mp4', 24)]);
+    expect(args).not.toContain('pipe:1');
+    expect(args.at(-1)).toMatch(/^\/private\/x\/[^/]+\.mp4$/);
+    expect(args[args.indexOf('-movflags') + 1]).toBe('+faststart');
   });
 });

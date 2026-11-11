@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createLogger } from './logger';
+import { createLogger, errorTypeOf, OPERATIONAL_LOG_FIELDS } from './logger';
 
 describe('logger redaction', () => {
   const byokKey = 'a'.repeat(64);
@@ -85,5 +85,35 @@ describe('logger redaction', () => {
     const rendered = lines.join('');
     expect(rendered).not.toContain(googleKey);
     expect(rendered.match(/\[redacted\]/g)?.length).toBe(2);
+  });
+
+  test('operational allowlisted keys survive at the top level and nested', () => {
+    const lines: string[] = [];
+    const logger = createLogger({ LOG_LEVEL: 'info' }, { write: (line) => lines.push(line) });
+    const fields = { textModelId: 'row-1', skipReason: 'timeout', retryReason: 'mismatch', failureKind: 'transient', availabilityReason: 'unreachable', listFailureReason: 'http_status' };
+    for (const key of OPERATIONAL_LOG_FIELDS) expect(Object.keys(fields)).toContain(key);
+    logger.info({ ...fields, nested: { ...fields } }, 'operational');
+    const [line] = lines;
+    if (line === undefined) throw new Error('missing log line');
+    expect(JSON.parse(line)).toMatchObject({ ...fields, nested: fields });
+  });
+
+  test('content keys stay redacted at the top level and nested', () => {
+    const lines: string[] = [];
+    const logger = createLogger({ LOG_LEVEL: 'info' }, { write: (line) => lines.push(line) });
+    const marker = 'PRIVATE_CONTENT_CANARY_8812';
+    const content = { reason: marker, detail: marker, prompt: marker, text: marker };
+    logger.info({ ...content, nested: { ...content, deeper: { ...content } } }, 'content');
+    expect(lines.join('')).not.toContain(marker);
+    const [line] = lines;
+    if (line === undefined) throw new Error('missing log line');
+    const redacted = { reason: '[redacted]', detail: '[redacted]', prompt: '[redacted]', text: '[redacted]' };
+    expect(JSON.parse(line)).toMatchObject({ ...redacted, nested: { ...redacted, deeper: redacted } });
+  });
+
+  test('errorTypeOf keeps allowlisted error classes only', () => {
+    expect(errorTypeOf(new TypeError('x'))).toBe('TypeError');
+    expect(errorTypeOf(Object.assign(new Error('x'), { name: 'PRIVATE' }))).toBe('Error');
+    expect(errorTypeOf('not an error')).toBe('Error');
   });
 });

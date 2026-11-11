@@ -91,8 +91,11 @@ export function buildVideoTailArgs(
     'aac',
     '-b:a',
     '192k',
+    // Output goes to a pipe, so the MP4 must be fragmented to be muxable at
+    // all; `+faststart` needs a seekable output and would be a no-op here.
+    // ComfyUI reads this clip as an input, where the fragmented layout is fine.
     '-movflags',
-    '+faststart+frag_keyframe+empty_moov',
+    '+frag_keyframe+empty_moov',
     '-f',
     'mp4',
     'pipe:1',

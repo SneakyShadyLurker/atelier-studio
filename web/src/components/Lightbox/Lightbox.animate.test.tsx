@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 describe('Lightbox Animate action', () => {
-  test('uploads the active image tile and switches the composer to H3 video mode', async () => {
+  test('copies the active image tile on the server and switches the composer to H3 video mode', async () => {
     const uploadResponse = {
       id: 'upload-source-from-tile',
       mime: 'image/png',
@@ -98,15 +98,12 @@ describe('Lightbox Animate action', () => {
       height: 64,
       createdAt: 1_700_000_000_000,
     };
-    const uploadedBodies: BodyInit[] = [];
+    const copyRequests: (RequestInit | undefined)[] = [];
     const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
       const url = fetchInputUrl(input);
-      if (url === '/api/img/done-01') {
-        return Promise.resolve(new Response(new Blob(['tile-bytes'], { type: 'image/png' })));
-      }
-      if (url === '/api/uploads') {
-        if (init?.body != null) uploadedBodies.push(init.body);
-        return Promise.resolve(Response.json(uploadResponse));
+      if (url === '/api/tiles/done-01/source-upload') {
+        copyRequests.push(init);
+        return Promise.resolve(Response.json(uploadResponse, { status: 201 }));
       }
       return Promise.resolve(new Response('not found', { status: 404 }));
     });
@@ -124,20 +121,13 @@ describe('Lightbox Animate action', () => {
       expect(useAtelierStore.getState().draft.i2vSourceUploadId).toBe('upload-source-from-tile');
     });
     expect(useAtelierStore.getState().draft.refImages).toHaveLength(0);
-    const imageCall = fetchMock.mock.calls.find(([input]) => fetchInputUrl(input) === '/api/img/done-01');
-    expect(imageCall).toBeDefined();
-    const imageHeaders = new Headers(imageCall?.[1]?.headers);
-    expect(imageHeaders.get('Accept')).toBe('image/png');
-    expect(uploadedBodies).toHaveLength(1);
-    const uploadBody = uploadedBodies[0];
-    expect(uploadBody).toBeInstanceOf(FormData);
-    if (!(uploadBody instanceof FormData)) throw new Error('expected upload body to be FormData');
-    const file = uploadBody.get('file');
-    expect(file).toBeInstanceOf(File);
-    if (!(file instanceof File)) throw new Error('expected upload file');
-    expect(file.name).toBe('done-01.png');
-    expect(file.type).toBe('image/png');
-    expect(await file.text()).toBe('tile-bytes');
+    expect(copyRequests).toHaveLength(1);
+    expect(copyRequests[0]?.method).toBe('POST');
+    expect(copyRequests[0]?.body ?? null).toBeNull();
+    // The original never travels to the browser and back.
+    const urls = fetchMock.mock.calls.map(([input]) => fetchInputUrl(input));
+    expect(urls).not.toContain('/api/img/done-01');
+    expect(urls).not.toContain('/api/uploads');
     // Dismissal rides the shared exit transition (useExitTransition).
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(onClose).toHaveBeenCalled();

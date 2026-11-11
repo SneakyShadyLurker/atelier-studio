@@ -245,6 +245,27 @@ describe('MiniMax H3 Image workflow', () => {
     expect(workflowText).not.toMatch(/\{\{(?!prompt|seed|width|height|steps|outputScale)[^}]*\}\}/);
   });
 
+  test('at output scale 1 the identity downscale is left out and the save node reads the decode', () => {
+    for (const [text, placeholders, extra] of [
+      [workflowText, h3.requiredPlaceholders, {}],
+      [referenceText, referencePlaceholders, { referenceImages: ['job:a'] }],
+    ] as const) {
+      const graph = buildWorkflow(text, { ...params, ...extra, outputScale: 1 }, placeholders) as Record<string, Node>;
+      expect(Object.values(graph).some((n) => n.class_type === 'ImageScaleBy')).toBe(false);
+      const save = nodeOf(graph, h3.saveImageNodeId);
+      expect(save.inputs.images).toEqual(['8', 0]);
+      expect(linked(graph, save, 'images').class_type).toBe('VAEDecode');
+    }
+  });
+
+  test('any other output scale keeps the downscale node unchanged', () => {
+    const graph = buildWorkflow(workflowText, { ...params, outputScale: 0.5 }, h3.requiredPlaceholders) as Record<string, Node>;
+    expect(nodeOf(graph, '12')).toEqual({ class_type: 'ImageScaleBy', inputs: { image: ['8', 0], upscale_method: 'lanczos', scale_by: 0.5 } });
+    expect(nodeOf(graph, h3.saveImageNodeId).inputs.images).toEqual(['12', 0]);
+    const template = JSON.parse(workflowText) as Record<string, Node>;
+    expect(Object.keys(graph).toSorted()).toEqual(Object.keys(template).toSorted());
+  });
+
   test('the reference graph is the base graph plus one loader per <Picture N> slot', () => {
     const base = build();
     for (const count of [1, 2, 3]) {

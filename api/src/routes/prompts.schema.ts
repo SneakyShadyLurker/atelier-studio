@@ -83,6 +83,8 @@ export const ApplyDimensions = z.object({
   proposalId: z.uuid(),
   acceptedBundleKeys: z.array(z.string().min(1).check(maxUtf16Length(200))).max(2_000),
   acceptUnsatisfiableTemplates: z.array(z.string().min(1).check(maxUtf16Length(PROMPT_LIBRARY_NAME_MAX_CHARS))).max(2_000).optional(),
+  // Accepted and ignored: a tab built before the per-template contract may
+  // still send it, and this strict schema would otherwise answer it 400.
   overrideCoherence: z.boolean().optional(),
 }).strict();
 
@@ -114,4 +116,4 @@ type _DraftVariableListRequestWire = AssertWire<MatchesWire<typeof DraftListBody
 type _DraftTemplateRequestWire = AssertWire<MatchesWire<typeof DraftTemplateRequestSchema, DraftTemplateRequest>>;
 type _RescueDimensionsRequestWire = AssertWire<MatchesWire<typeof RescueDimensions, RescueDimensionsRequest>>;
 type _DiagnoseSelectionRequestWire = AssertWire<MatchesWire<typeof DiagnoseSelection, DiagnoseSelectionRequest>>;
-type _ApplyDimensionsRequestWire = AssertWire<MatchesWire<typeof ApplyDimensions, ApplyDimensionsRequest>>;
+type _ApplyDimensionsRequestWire = AssertWire<MatchesWire<typeof ApplyDimensions, ApplyDimensionsRequest & { readonly overrideCoherence?: boolean }>>;

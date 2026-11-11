@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { createCliproxyProvider } from '../providers/cliproxy';
 import { setJevSystemOneProviderForTests } from '../providers/jevSystemOne';
-import { moderateGptInput } from './gptModeration';
+import { createGptModerationMemo, moderateGptInput } from './gptModeration';
 import type { LegacyTextKey } from '../db/textSeed';
 import { rejectionOf } from '../test/helpers';
 import { genericTextModel, seededTextModel, testTextModelProvider } from '../test/textModelProvider';
@@ -71,6 +71,34 @@ describe('GPT moderation gate', () => {
     });
   });
 
+  test.each([
+    ['http 429', () => new Response('secret upstream detail', { status: 429 }), { cause: 'http', status: 429 }],
+    ['http 500', () => new Response('secret upstream detail', { status: 500 }), { cause: 'http', status: 500 }],
+    ['invalid JSON', () => new Response('not JSON'), { cause: 'malformed' }],
+    ['missing answers', () => Response.json({ answers: {} }), { cause: 'malformed' }],
+    ['out-of-range score', () => decision(1.1), { cause: 'malformed' }],
+    ['oversize body', () => new Response('x'.repeat(17_000)), { cause: 'oversize' }],
+  ] as const)('logs one content-free jev_unavailable warn with the cause (%s)', async (_label, response, fields) => {
+    setJevSystemOneProviderForTests(() => Promise.resolve(response()));
+    const warns: Record<string, unknown>[] = [];
+    const logger = { info: () => undefined, warn: (f: Record<string, unknown>) => { warns.push(f); } };
+    expect(await rejectionOf(moderateGptInput(undefined, evidence, signal(), { logger })))
+      .toMatchObject({ kind: 'moderation-unavailable' });
+    expect(warns).toEqual([{ event: 'jev_unavailable', ...fields }]);
+    expect(JSON.stringify(warns)).not.toContain('secret');
+  });
+
+  test('a transport error and a missing key each log their cause', async () => {
+    const warns: Record<string, unknown>[] = [];
+    const logger = { info: () => undefined, warn: (f: Record<string, unknown>) => { warns.push(f); } };
+    setJevSystemOneProviderForTests(() => Promise.reject(new Error('secret socket detail')));
+    await rejectionOf(moderateGptInput(undefined, evidence, signal(), { logger }));
+    setJevSystemOneProviderForTests(null);
+    globalThis.fetch = mock(() => { throw new Error('unexpected network request'); }) as unknown as typeof fetch;
+    await rejectionOf(moderateGptInput(undefined, evidence, signal(), { logger }));
+    expect(warns).toEqual([{ event: 'jev_unavailable', cause: 'transport' }, { event: 'jev_unavailable', cause: 'no-key' }]);
+  });
+
   test('missing key never attempts either provider', async () => {
     const network = mock(() => { throw new Error('unexpected network request'); });
     globalThis.fetch = network as unknown as typeof fetch;
@@ -97,7 +125,10 @@ describe('GPT moderation gate', () => {
 
   test('JEV timeout is unavailable, not an uncertain decision', async () => {
     setJevSystemOneProviderForTests(() => Promise.resolve(new Response(new ReadableStream())));
-    expect(await rejectionOf(moderateGptInput(undefined, evidence, signal()))).toMatchObject({ kind: 'moderation-unavailable' });
+    const warns: Record<string, unknown>[] = [];
+    const logger = { info: () => undefined, warn: (f: Record<string, unknown>) => { warns.push(f); } };
+    expect(await rejectionOf(moderateGptInput(undefined, evidence, signal(), { logger }))).toMatchObject({ kind: 'moderation-unavailable' });
+    expect(warns).toEqual([{ event: 'jev_unavailable', cause: 'timeout' }]);
   }, 15_000);
 
   test('checks the exact request instructions and text before GPT, excluding image bytes', async () => {
@@ -260,5 +291,121 @@ describe('per-model screening (screenRequests)', () => {
     expect((await collect(provider.enhance('input', [], signal()))).at(-1)).toEqual({ type: 'done' });
     expect(jev).not.toHaveBeenCalled();
     expect(upstream).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('one screen per request', () => {
+  const image = () => createCliproxyProvider({ baseUrl: 'https://gpt.test', token: 'test', maxResponseBytes: 10_000 });
+  const tile = (provider: ReturnType<typeof image>, tileIndex: number, abort?: AbortSignal) =>
+    collect(provider.generate({ prompt: 'four tiles', modelId: provider.id, ratio: '1:1', tileIndex, seed: tileIndex }, abort ?? signal()));
+  // A GPT answer that fails fast after the screen; only the screen count matters here.
+  const gptRefuses = () => mock(() => Promise.resolve(new Response('{"error":{"message":"nope"}}', { status: 400 })));
+
+  test('four tiles of one gpt-image batch make one moderation request', async () => {
+    const jev = mock(async () => { await Bun.sleep(5); return decision(); });
+    setJevSystemOneProviderForTests(jev);
+    const gpt = gptRefuses();
+    globalThis.fetch = gpt as unknown as typeof fetch;
+    const provider = image();
+    await Promise.all([0, 1, 2, 3].map((index) => tile(provider, index)));
+    expect(jev).toHaveBeenCalledTimes(1);
+    expect(gpt).toHaveBeenCalledTimes(4);
+  });
+
+  test('a blocked verdict fails all four tiles exactly as a single unshared screen does', async () => {
+    setJevSystemOneProviderForTests(() => Promise.resolve(decision(0.95)));
+    const network = mock(() => { throw new Error('GPT must not receive blocked input'); });
+    globalThis.fetch = network as unknown as typeof fetch;
+    const alone = await tile(image(), 0);
+    const jev = mock(async () => { await Bun.sleep(5); return decision(0.95); });
+    setJevSystemOneProviderForTests(jev);
+    const provider = image();
+    const results = await Promise.all([0, 1, 2, 3].map((index) => tile(provider, index)));
+    expect(jev).toHaveBeenCalledTimes(1);
+    for (const [index, result] of results.entries()) {
+      expect(result).toEqual([{ ...alone[0], seed: index } as (typeof alone)[number]]);
+    }
+    expect(results[0]).toMatchObject([{ status: 'failed', error: { reason: { kind: 'policy' }, moderation: { reason: 'sexual-age' } } }]);
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  test('an unavailable result is not reused: the next request screens again', async () => {
+    let calls = 0;
+    setJevSystemOneProviderForTests(() => {
+      calls += 1;
+      return Promise.resolve(calls === 1 ? new Response('', { status: 500 }) : decision());
+    });
+    globalThis.fetch = gptRefuses() as unknown as typeof fetch;
+    const provider = image();
+    expect(await tile(provider, 0)).toMatchObject([{ status: 'failed', error: { reason: { kind: 'service-unavailable' }, moderation: { reason: 'unavailable' } } }]);
+    expect(await tile(provider, 1)).not.toMatchObject([{ error: { moderation: {} } }]);
+    expect(calls).toBe(2);
+  });
+
+  test('one tile aborting does not cancel the shared screen for its siblings', async () => {
+    let releaseJev: (() => void) | undefined;
+    const jev = mock(async () => {
+      await new Promise<void>((resolve) => { releaseJev = resolve; });
+      return decision();
+    });
+    setJevSystemOneProviderForTests(jev);
+    const gpt = gptRefuses();
+    globalThis.fetch = gpt as unknown as typeof fetch;
+    const provider = image();
+    const leaving = new AbortController();
+    const first = tile(provider, 0, leaving.signal);
+    const second = tile(provider, 1);
+    await Bun.sleep(1);
+    const reason = new DOMException('tile canceled', 'AbortError');
+    leaving.abort(reason);
+    expect(await rejectionOf(first)).toBe(reason);
+    releaseJev?.();
+    await second;
+    expect(jev).toHaveBeenCalledTimes(1);
+    expect(gpt).toHaveBeenCalledTimes(1);
+  });
+
+  test('a verdict is reused for 60 seconds, then screened again', async () => {
+    let now = 1_000_000;
+    const memo = createGptModerationMemo({ now: () => now });
+    const jev = mock(() => Promise.resolve(decision()));
+    setJevSystemOneProviderForTests(jev);
+    await memo.moderate(undefined, evidence, signal());
+    now += 59_000;
+    await memo.moderate(undefined, evidence, signal());
+    expect(jev).toHaveBeenCalledTimes(1);
+    await memo.moderate(undefined, { ...evidence, input: 'another prompt' }, signal());
+    expect(jev).toHaveBeenCalledTimes(2);
+    now += 2_000;
+    await memo.moderate(undefined, evidence, signal());
+    expect(jev).toHaveBeenCalledTimes(3);
+  });
+
+  test('a text call that retries its open screens once', async () => {
+    const jev = mock(() => Promise.resolve(decision()));
+    setJevSystemOneProviderForTests(jev);
+    let upstreamCalls = 0;
+    globalThis.fetch = Object.assign(mock(() => {
+      upstreamCalls += 1;
+      return Promise.resolve(upstreamCalls === 1 ? new Response('busy', { status: 503 }) : okStream());
+    }), { preconnect: originalFetch.preconnect });
+    const provider = seededText('gpt');
+    expect((await collect(provider.enhance('input', [], signal()))).at(-1)).toEqual({ type: 'done' });
+    expect(upstreamCalls).toBe(2);
+    expect(jev).toHaveBeenCalledTimes(1);
+    upstreamCalls = 0;
+    expect(await provider.rewrite({ prompt: 'input' }, signal())).toEqual({ type: 'ok', text: 'ok' });
+    expect(upstreamCalls).toBe(2);
+    expect(jev).toHaveBeenCalledTimes(2);
+  });
+
+  test('the enhance open deadline does not include the screen', async () => {
+    setJevSystemOneProviderForTests(async () => { await Bun.sleep(80); return decision(); });
+    globalThis.fetch = Object.assign(mock(() => Promise.resolve(okStream())), { preconnect: originalFetch.preconnect });
+    const provider = testTextModelProvider({
+      origin: 'https://gpt.test', model: seededTextModel('gpt'), moderation: { openrouterApiKey: 'or-key' },
+      enhanceOpenTimeoutMs: 40, brainstormOpenTimeoutMs: 40,
+    });
+    expect((await collect(provider.enhance('input', [], signal()))).at(-1)).toEqual({ type: 'done' });
   });
 });

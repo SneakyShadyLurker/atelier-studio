@@ -1,12 +1,12 @@
 import type { ModelAvailability, ModelAvailabilityReason } from '@atelier/shared';
 import type { AppLogger } from '../observability/logger';
 import type { RegistryEntry } from '../providers/registry';
-import type { HealthProbeCode } from '../providers/types';
+import { isHostLevelProbeCode, type HealthCheckOptions, type HealthProbeCode } from '../providers/types';
 
 const PROBE_CODES = new Set<HealthProbeCode>([
   'privacy_transport', 'privacy_not_ready', 'host_transport',
   'inventory_transport', 'inventory_invalid', 'missing_file',
-  'missing_clip_type', 'missing_node_class',
+  'missing_clip_type', 'missing_node_class', 'privacy_row_incompatible',
 ]);
 
 function safeProbeCode(code: unknown): HealthProbeCode | 'unknown' {
@@ -19,6 +19,12 @@ export interface HealthProbeDeps {
   logger: AppLogger;
   intervalMs: number;
   probeTimeoutMs: number;
+  /**
+   * Called when the probed host turns unreachable at host level (`false`) or
+   * every probed row is reachable again (`true`). Fires on transitions only,
+   * never once per round, so the local queue gate is not kicked every 15 s.
+   */
+  onHostAvailabilityChange?: (available: boolean) => void;
 }
 
 /**
@@ -52,6 +58,20 @@ export interface HealthProbeHandle {
   drain(): Promise<void>;
 }
 
+/** The production probe, which also knows why a probed row is offline. */
+export interface LocalHostProbeHandle extends HealthProbeHandle {
+  /**
+   * True when this model's latest committed probe could not reach, trust or
+   * read the host. False for ok, row-level offline and the seed state.
+   */
+  hostUnavailable(modelId: string): boolean;
+}
+
+interface ProbeOutcome {
+  readonly availability: ModelAvailability;
+  readonly hostLevel: boolean;
+}
+
 // Only entries the server actually probes show up in the snapshot. Cloud and
 // mock providers are treated as always-available (their `healthCheck` is
 // undefined); the wire shape omits `availability` for those, so the Composer
@@ -69,8 +89,8 @@ function probableEntries(registry: readonly RegistryEntry[]): readonly RegistryE
   });
 }
 
-export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
-  const { registry, logger, intervalMs, probeTimeoutMs } = deps;
+export function startHealthProbe(deps: HealthProbeDeps): LocalHostProbeHandle {
+  const { registry, logger, intervalMs, probeTimeoutMs, onHostAvailabilityChange } = deps;
   const targets = probableEntries(registry);
   const targetsById = new Map(targets.map((entry) => [entry.model.id, entry]));
   const snapshot = new Map<string, ModelAvailability>();
@@ -105,6 +125,18 @@ export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
   const probeGenerationById = new Map<string, number>();
   const committedGenerationById = new Map<string, number>();
   const isStopped = (): boolean => stopped;
+  // Rows whose latest committed probe failed at host level. Kept beside the
+  // wire snapshot, not in it: probe codes never reach /api/models.
+  const hostDown = new Set<string>();
+  let reportedHostDown = false;
+
+  function reportHostTransition(): void {
+    const down = hostDown.size > 0;
+    if (down === reportedHostDown) return;
+    reportedHostDown = down;
+    try { onHostAvailabilityChange?.(!down); }
+    catch (err) { logger.error({ err }, 'host availability listener failed'); }
+  }
 
   function beginProbe(id: string): number {
     const generation = (probeGenerationById.get(id) ?? 0) + 1;
@@ -112,7 +144,7 @@ export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
     return generation;
   }
 
-  async function probeOne(entry: RegistryEntry): Promise<ModelAvailability> {
+  async function probeOne(entry: RegistryEntry, options?: HealthCheckOptions): Promise<ProbeOutcome> {
     const controller = new AbortController();
     const startedAt = performance.now();
     inFlight.add(controller);
@@ -132,24 +164,23 @@ export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
       if (typeof provider.healthCheck !== 'function') {
         // Defensive: targets list is filtered to entries that have a probe,
         // but this guards against a future regression where the filter drifts.
-        return { ok: true, checkedAt: Date.now() };
+        return { availability: { ok: true, checkedAt: Date.now() }, hostLevel: false };
       }
       // Keep tracking the actual adapter work through shutdown drain. Some
       // adapters catch fetch aborts and return ok:false or even resolve late;
       // the owned deadline still wins when they settle.
-      const result = await provider.healthCheck(controller.signal);
+      const result = await provider.healthCheck(controller.signal, options);
       const now = Date.now();
       if (controller.signal.aborted) throw controller.signal.reason;
-      if (result.ok) return { ok: true, checkedAt: now };
+      if (result.ok) return { availability: { ok: true, checkedAt: now }, hostLevel: false };
       logger.warn(
         { modelId: entry.model.id, probeCode: safeProbeCode(result.probeCode),
           durationMs: Math.round(performance.now() - startedAt), timedOut: false },
         'model probe reported offline',
       );
       return {
-        ok: false,
-        checkedAt: now,
-        reason: sanitizeProbeReason(undefined),
+        availability: { ok: false, checkedAt: now, reason: sanitizeProbeReason(undefined) },
+        hostLevel: isHostLevelProbeCode(result.probeCode),
       };
     } catch (err) {
       logger.warn(
@@ -157,10 +188,11 @@ export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
           durationMs: Math.round(performance.now() - startedAt), timedOut: timedOutByBudget },
         'model probe failed',
       );
+      // A probe that threw or ran out of budget never got an answer from the
+      // host, which is the host-level case by definition.
       return {
-        ok: false,
-        checkedAt: Date.now(),
-        reason: sanitizeProbeReason(err, { timedOut: timedOutByBudget }),
+        availability: { ok: false, checkedAt: Date.now(), reason: sanitizeProbeReason(err, { timedOut: timedOutByBudget }) },
+        hostLevel: true,
       };
     } finally {
       clearTimeout(timeout);
@@ -170,14 +202,17 @@ export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
 
   function storeAvailability(
     id: string,
-    availability: ModelAvailability,
+    outcome: ProbeOutcome,
     generation: number,
   ): ModelAvailability {
+    const { availability } = outcome;
     const committedGeneration = committedGenerationById.get(id);
     if (committedGeneration !== undefined && committedGeneration > generation) {
       return snapshot.get(id) ?? availability;
     }
     committedGenerationById.set(id, generation);
+    if (outcome.hostLevel) hostDown.add(id);
+    else hostDown.delete(id);
     const previous = snapshot.get(id);
     snapshot.set(id, availability);
     // Only log on an actual ok ↔ offline transition. The seed (pre-first-
@@ -200,7 +235,8 @@ export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
 
   async function probeRound(): Promise<void> {
     // Per-model validation stays parallel. Registry-owned ComfyUI transports
-    // coalesce concurrent host reads without retaining readiness between rounds.
+    // coalesce concurrent host reads and never retain readiness between rounds;
+    // only a same-boot inventory may serve a later round, briefly.
     const results = await Promise.all(
       targets.map(async (entry) => {
         const id = entry.model.id;
@@ -209,9 +245,11 @@ export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
       }),
     );
     if (stopped) return;
-    for (const [id, generation, availability] of results) {
-      storeAvailability(id, availability, generation);
+    for (const [id, generation, outcome] of results) {
+      storeAvailability(id, outcome, generation);
     }
+    // One transition per round, after every row of the shared host landed.
+    reportHostTransition();
   }
 
   function probeNow(modelId: string): Promise<ModelAvailability | undefined> {
@@ -223,9 +261,12 @@ export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
     const generation = beginProbe(modelId);
 
     const forced = (async (): Promise<ModelAvailability | undefined> => {
-      const availability = await probeOne(entry);
+      // A user asked for this answer, so it must not rest on reused host metadata.
+      const outcome = await probeOne(entry, { fresh: true });
       if (isStopped()) return snapshot.get(modelId);
-      return storeAvailability(modelId, availability, generation);
+      const stored = storeAvailability(modelId, outcome, generation);
+      reportHostTransition();
+      return stored;
     })();
     inFlightForced.set(modelId, forced);
     inFlightRounds.add(forced);
@@ -259,6 +300,7 @@ export function startHealthProbe(deps: HealthProbeDeps): HealthProbeHandle {
   return {
     snapshot: () => snapshot,
     probeNow,
+    hostUnavailable: (modelId) => hostDown.has(modelId),
     stop: () => {
       stopped = true;
       if (timer) {

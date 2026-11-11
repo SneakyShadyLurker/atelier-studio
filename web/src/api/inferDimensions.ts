@@ -5,7 +5,6 @@ import type {
   InferDimensionsResponse,
   InferPhaseEvent,
   InferProgressEvent,
-  LibraryDiagnosisResponse,
   PromptLibraryResponse,
   RescueBundle,
 } from '@atelier/shared';
@@ -101,7 +100,6 @@ function isInferProgressEvent(value: unknown): value is InferProgressEvent {
 
 export interface InferDimensionsOpts {
   readonly modelId?: string;
-  readonly priorDiagnosis?: LibraryDiagnosisResponse;
   readonly signal?: AbortSignal;
   readonly onProgress?: (notification: InferProgressNotification) => void;
 }
@@ -111,31 +109,25 @@ export interface InferDimensionsOpts {
 // emits 15s :keepalive frames and ONE terminal `done` (with the
 // InferDimensionsResponse payload) or `error` (with a safe message).
 // The fetch resolves when the server closes the stream.
-export async function inferDimensions(
-  signal?: AbortSignal,
-  onProgress?: (notification: InferProgressNotification) => void,
-  opts?: InferDimensionsOpts,
-): Promise<InferDimensionsResponse> {
-  const effectiveSignal = opts?.signal ?? signal;
-  const effectiveOnProgress = opts?.onProgress ?? onProgress;
+export async function inferDimensions(opts: InferDimensionsOpts = {}): Promise<InferDimensionsResponse> {
+  const { signal, onProgress } = opts;
   // Do not auto-reconnect /infer streams: the server only creates proposalId
   // on the terminal done frame, so a retry after a drop would start a new LLM
   // call with no resume token and could bill again without clear user intent.
-  // priorDiagnosis is accepted in opts for API compat but no longer sent —
-  // the server unconditionally recomputes from its own DB (prompt-injection
-  // vector closed). Only the optional image context
-  // is sent. Calls without that context retain the empty-body contract.
+  // The server recomputes the prior diagnosis from its own DB, so only the
+  // optional image context is sent. Calls without that context retain the
+  // empty-body contract.
   const init: RequestInit = {
     method: 'POST',
     headers: {
       Accept: 'text/event-stream',
     },
   };
-  if (opts?.modelId) {
+  if (opts.modelId) {
     init.headers = { Accept: 'text/event-stream', 'Content-Type': 'application/json' };
     init.body = JSON.stringify({ modelId: opts.modelId });
   }
-  if (effectiveSignal) init.signal = effectiveSignal;
+  if (signal) init.signal = signal;
   const res = await apiFetch('/prompts/dimensions/infer', init);
   const reqId = responseRequestId(res);
   if (!res.ok) {
@@ -157,7 +149,7 @@ export async function inferDimensions(
       }
       if (isInferPhaseEvent(payload)) {
         currentPhase = payload.phase;
-        effectiveOnProgress?.({ phase: currentPhase });
+        onProgress?.({ phase: currentPhase });
       }
       continue;
     }
@@ -170,7 +162,7 @@ export async function inferDimensions(
         continue;
       }
       if (isInferProgressEvent(payload)) {
-        effectiveOnProgress?.({ phase: currentPhase, progress: payload });
+        onProgress?.({ phase: currentPhase, progress: payload });
       }
       continue;
     }
@@ -186,9 +178,6 @@ export async function inferDimensions(
   throw new ApiError(res.status, 'infer stream ended without a terminal event', undefined, reqId);
 }
 
-// `overrideCoherence` is intentionally stripped at the client boundary even
-// if a caller still threads it through — the server compat shim accepts it
-// for one deploy but the client owns the new contract per Task 15.
 export async function applyDimensions(
   req: ApplyDimensionsRequest,
   signal?: AbortSignal,

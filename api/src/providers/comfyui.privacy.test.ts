@@ -150,7 +150,7 @@ test('running cancellation delivers DELETE after request abort and retries refus
 
 test('fresh allowlist fails readiness and generation before uploads or GPU preparation', async () => {
   const worker = fixture({ metadata: { ...currentWorkerPrivacy, allowed_nodes: ['CLIPTextEncode'] } });
-  expect(await worker.provider.healthCheck?.(AbortSignal.timeout(2_000))).toMatchObject({ ok: false, probeCode: 'privacy_not_ready' });
+  expect(await worker.provider.healthCheck?.(AbortSignal.timeout(2_000))).toMatchObject({ ok: false, probeCode: 'privacy_row_incompatible' });
   const results = await Array.fromAsync(worker.provider.generate(REQUEST, AbortSignal.timeout(2_000), { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
   expect(results).toMatchObject([{ status: 'failed' }]);
   expect(worker.calls.some((call) => /\/inputs\/|\/free|\/prompt|\/object_info/.test(call))).toBe(false);

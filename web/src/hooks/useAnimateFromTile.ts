@@ -1,11 +1,10 @@
 import type { DoneTile, Model, Ratio } from '@atelier/shared';
 import { useCallback } from 'react';
-import { uploadRefImage } from '../api/uploads';
+import { copyTileToUpload } from '../api/uploads';
 import { beginSourceHandoff } from '../lib/composerSourceHandoff';
 import { describeError } from '../lib/errorCopy';
 import { runWhenReachable } from '../lib/focus';
 import { useAtelierStore } from '../store/atelier';
-import { fetchImageBlob } from '../api/images';
 
 // Single source of truth for the motion-prompt textarea so the grid handoff
 // (no focus trap) and the Lightbox handoff (focus-on-unmount) target the same
@@ -37,13 +36,12 @@ export interface AnimateFromTileOptions {
 }
 
 async function uploadTileSource(tile: DoneTile): Promise<string> {
-  const blob = await fetchImageBlob(tile);
-  const file = new File([blob], `${tile.id}.${tile.ext}`, { type: tile.mime });
-  return (await uploadRefImage(file)).id;
+  return (await copyTileToUpload(tile.id)).id;
 }
 
 /**
- * Fetch and upload a completed still for any feature that needs an upload id.
+ * Copy a completed still into an upload for any feature that needs an upload
+ * id. The server copies it, so the original never round-trips the browser.
  * One module-level function, so every caller holds the same identity: the
  * handlers built on it (Animate, Tell Story) thread through the feed's
  * memoized rows, and a fresh closure per render re-rendered every mounted
@@ -54,8 +52,8 @@ export function useUploadTileSource(): (tile: DoneTile) => Promise<string> {
 }
 
 /**
- * Hand a still tile off into the composer as an image-to-video source: fetch
- * the artifact, upload it as a source still, then flip the composer into video
+ * Hand a still tile off into the composer as an image-to-video source: copy
+ * the artifact into a source-still upload, then flip the composer into video
  * mode for the supplied I2V model. Shared by the grid tile action and the
  * Lightbox so the flow (and its failure copy) stays identical. Resolves `true`
  * on success, `false` if anything failed (the toast is already shown) — callers

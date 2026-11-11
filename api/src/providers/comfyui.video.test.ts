@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import { __resetComfyuiResidentModels, createComfyuiProvider, drainComfyUi } from './comfyui';
 import { TEST_EXECUTION_TIMEOUT_MS, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestTls } from '../test/private-worker-fixture';
@@ -331,6 +331,31 @@ describe('ComfyUI video output', () => {
     const lastStatsIdx = mock.requestLog.lastIndexOf('system_stats');
     expect(promptIdx).toBeGreaterThan(lastStatsIdx);
     expect(results[0]?.status).toBe('ready');
+  });
+
+  test('polls VRAM at a doubling interval from 100 ms up to one second', async () => {
+    // Six reads still report the card occupied; the seventh confirms it clear.
+    const mock = startVideoMock({ statsFreeSequence: [40, 40, 40, 40, 40, 40, 90] });
+    const provider = createVideoProvider(mock.baseUrl);
+    const delays: number[] = [];
+    const nativeTimeout = globalThis.setTimeout;
+    const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+      // Only the eviction phase: it ends with the seventh /system_stats read.
+      if (mock.requestLog.filter((r) => r === 'system_stats').length < 7 && ms !== undefined && [100, 200, 400, 800, 1_000].includes(ms)) {
+        delays.push(ms);
+        return nativeTimeout(fn, 1, ...args);
+      }
+      return nativeTimeout(fn, ms, ...args);
+    }) as typeof setTimeout);
+    try {
+      const results = await Array.fromAsync(provider.generate({
+        prompt: 'hold the original composition', motionPrompt: 'slow camera push-in', modelId: 'minimax-h3-i2v',
+        ratio: '1:1', tileIndex: 0, seed: 77, count: 1, i2vSource: { bytes: sourceBytes, ext: 'png' },
+      }, new AbortController().signal, { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
+      expect(results[0]?.status).toBe('ready');
+    } finally { timer.mockRestore(); }
+    expect(mock.requestLog.filter((r) => r === 'system_stats')).toHaveLength(7);
+    expect(delays).toEqual([100, 200, 400, 800, 1_000, 1_000]);
   });
 
   test('proceeds (best-effort) when /free is unavailable on the host', async () => {

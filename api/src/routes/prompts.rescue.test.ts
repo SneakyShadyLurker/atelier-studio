@@ -23,7 +23,7 @@ async function* emptyEnhance(): AsyncGenerator<never, void, unknown> {
 interface RescueProviderShape {
   readonly infer: readonly RawInferOp[];
   readonly rescueOp?: RawInferOp;
-  readonly rescueFailed?: { kind: 'transient' | 'permanent'; detail: string };
+  readonly rescueFailed?: { kind: 'transient' | 'permanent' | 'quota'; detail: string; retryAfterSeconds?: number };
   readonly captured?: RescueDimensionArgs[];
   readonly rescueCallCount?: { n: number };
 }
@@ -40,7 +40,10 @@ function fakeProvider(shape: RescueProviderShape): TestTextFeatureProvider {
       if (shape.captured) shape.captured.push(args);
       if (shape.rescueCallCount) shape.rescueCallCount.n += 1;
       if (shape.rescueFailed) {
-        return Promise.resolve({ type: 'failed', kind: shape.rescueFailed.kind, status: null, detail: shape.rescueFailed.detail });
+        return Promise.resolve({
+          type: 'failed', kind: shape.rescueFailed.kind, status: null, detail: shape.rescueFailed.detail,
+          ...(shape.rescueFailed.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: shape.rescueFailed.retryAfterSeconds }),
+        });
       }
       return Promise.resolve({ type: 'ok', ops: shape.rescueOp ? [shape.rescueOp] : [] });
     },
@@ -733,10 +736,38 @@ describe('POST /api/prompts/dimensions/rescue', () => {
     const frames = await parseSse(res);
     const failed = frames.find((f) => f.event === 'rescue-failed');
     expect(failed).toBeTruthy();
-    const failedData = failed?.data as { reason: string; conflicts: { templateName: string; rescueAttempted: boolean }[] };
+    const failedData = failed?.data as { reason: string; code?: string; conflicts: { templateName: string; rescueAttempted: boolean }[] };
     expect(failedData.reason).toBe('upstream-error');
+    expect(failedData.code).toBe('provider-error');
     // Fix 3: payload carries updated conflicts with rescueAttempted flipped.
     expect(failedData.conflicts.find((c) => c.templateName === 'Scene')?.rescueAttempted).toBe(true);
+  });
+
+  test('rescue-failed carries quota-exhausted and its retry hint for an exhausted quota', async () => {
+    setTextModelProviderForTests(fakeProvider({
+      infer: [
+        { op: 'createDimension', name: 'Genre', tags: ['Fantasy', 'Modern'] },
+        { op: 'assignOptionTags', listIdx: 0, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Fantasy' }] },
+        { op: 'assignOptionTags', listIdx: 1, optionIdx: 0, tags: [{ dimName: 'Genre', label: 'Modern' }] },
+      ],
+      rescueFailed: { kind: 'quota', detail: 'quota', retryAfterSeconds: 600 },
+    }));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    await seedPromptUser(app, 'alice', {
+      lists: [
+        { name: 'Roles', options: ['paladin'] },
+        { name: 'Outfits', options: ['bikini'] },
+      ],
+    });
+    await createTemplate(app, 'alice', 'Scene', 'a {{var::Roles}} wears {{var::Outfits}}');
+    const prop = await infer(app, 'alice');
+    const frames = await parseSse(await app.fetch(new Request('http://local/api/prompts/dimensions/rescue', {
+      method: 'POST',
+      headers: { 'Remote-User': 'alice', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proposalId: prop.proposalId, templateName: 'Scene' }),
+    })));
+    expect(frames.find((f) => f.event === 'rescue-failed')?.data)
+      .toMatchObject({ reason: 'upstream-error', code: 'quota-exhausted', retryAfterSeconds: 600 });
   });
 
   test('404 on unknown templateName for a valid proposal', async () => {

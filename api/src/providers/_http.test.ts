@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readBytesBounded } from './_http';
+import { ResponseLengthMismatchError, readBytesBounded } from './_http';
 
 function neverOversize(): never {
   throw new Error('oversize should not fire in this test');
@@ -190,4 +190,87 @@ describe('readBytesBounded', () => {
     expect(captured.args).not.toBeNull();
     expect(captured.args?.lim).toBe(100);
   });
+
+  test('passes the oversize callback at most limit bytes of the body prefix', async () => {
+    const captured: { args: { lim: number; total: number; prefix: number[] } | null } = { args: null };
+    await readBytesBounded(streamOf([1, 2, 3], [4, 5, 6]), 4, {
+      onOversize: (lim, total, prefix) => {
+        captured.args = { lim, total, prefix: [...prefix] };
+        throw new Error('oversize');
+      },
+    }).catch(() => undefined);
+    expect(captured.args).toEqual({ lim: 4, total: 6, prefix: [1, 2, 3, 4] });
+  });
+
+  test('without an expected length, joins any number of chunks in order', async () => {
+    const chunks = Array.from({ length: 40 }, (_, i) => Array.from({ length: i + 1 }, () => i));
+    const out = await readBytesBounded(streamOf(...chunks), 10_000, { onOversize: neverOversize });
+    expect([...out]).toEqual(chunks.flat());
+  });
+
+  test('with an expected length, fills one allocation of exactly that size', async () => {
+    const out = await readBytesBounded(streamOf([1, 2], [3], [4, 5, 6]), 1024, { onOversize: neverOversize, expectedBytes: 6 });
+    expect([...out]).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(out.buffer.byteLength).toBe(6);
+  });
+
+  test('a body longer than the expected length fails through the oversize callback', async () => {
+    const captured: { args: { lim: number; total: number; prefix: number[] } | null } = { args: null };
+    const error = await readBytesBounded(streamOf([1, 2, 3], [4, 5]), 1024, {
+      onOversize: (lim, total, prefix) => {
+        captured.args = { lim, total, prefix: [...prefix] };
+        throw new Error('oversize');
+      },
+      expectedBytes: 4,
+    }).catch((caught: unknown) => caught);
+    expect(error).toEqual(new Error('oversize'));
+    expect(captured.args).toEqual({ lim: 4, total: 5, prefix: [1, 2, 3, 4] });
+  });
+
+  test('a body shorter than the expected length fails', async () => {
+    const error = await readBytesBounded(streamOf([1, 2], [3]), 1024, { onOversize: neverOversize, expectedBytes: 4 })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ResponseLengthMismatchError);
+  });
+
+  test('an expected length above the limit allocates only the limit and still enforces it', async () => {
+    const short = await readBytesBounded(streamOf([1, 2]), 8, { onOversize: neverOversize, expectedBytes: Number.MAX_SAFE_INTEGER })
+      .catch((caught: unknown) => caught);
+    expect(short).toBeInstanceOf(ResponseLengthMismatchError);
+    let lim = 0;
+    await readBytesBounded(streamOf(Array.from({ length: 9 }, () => 0)), 8, {
+      onOversize: (limit) => { lim = limit; throw new Error('oversize'); },
+      expectedBytes: Number.MAX_SAFE_INTEGER,
+    }).catch(() => undefined);
+    expect(lim).toBe(8);
+  });
+
+  test('an expected length keeps aborting a pending read promptly', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array([1, 2, 3])); },
+    });
+    const controller = new AbortController();
+    const promise = readBytesBounded(stream, 1024, { onOversize: neverOversize, signal: controller.signal, expectedBytes: 8 });
+    await Bun.sleep(5);
+    controller.abort();
+    const error = await promise.catch((caught: unknown) => caught);
+    expect((error as { name?: string }).name).toBe('AbortError');
+  });
+});
+
+function streamOf(...chunks: number[][]): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(Uint8Array.from(chunk));
+      controller.close();
+    },
+  });
+}
+
+test('a read without expectedBytes returns a fixed-length buffer', async () => {
+  const bytes = await readBytesBounded(streamOf([1, 2, 3], [4, 5]), 1024, { onOversize: neverOversize });
+  expect(Array.from(bytes)).toEqual([1, 2, 3, 4, 5]);
+  // WebCrypto and some native consumers reject a view over a resizable buffer.
+  expect((bytes.buffer as ArrayBuffer).resizable).toBe(false);
+  expect(bytes.buffer.byteLength).toBe(5);
 });

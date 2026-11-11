@@ -67,7 +67,7 @@ function logRecords(lines: readonly string[]): Record<string, unknown>[] {
 }
 
 function skipReason(runtime: ReturnType<typeof testRuntime>): unknown {
-  return logRecords(runtime.logs).find((entry) => entry.event === 'h3_image_prompt_expand_skipped')?.reason;
+  return logRecords(runtime.logs).find((entry) => entry.event === 'h3_image_prompt_expand_skipped')?.skipReason;
 }
 
 function expand(
@@ -218,7 +218,7 @@ test('fails open on a provider failure or a thrown provider', async () => {
   expect(await expand(runtime, SHORT)).toBe(SHORT);
   const reasons = logRecords(runtime.logs)
     .filter((entry) => entry.event === 'h3_image_prompt_expand_skipped')
-    .map((entry) => entry.reason);
+    .map((entry) => entry.skipReason);
   expect(reasons).toEqual(['provider-failed', 'error']);
 });
 
@@ -254,7 +254,8 @@ test('a stream that ends without completing cannot replace the prompt', async ()
   const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
 
   expect(await expand(runtime, SHORT)).toBe(SHORT);
-  expect(skipReason(runtime)).toBe('truncated');
+  // The accumulating rewrite reports a stream without its terminal as a failure.
+  expect(skipReason(runtime)).toBe('provider-failed');
 });
 
 for (const [label, text, reason] of [

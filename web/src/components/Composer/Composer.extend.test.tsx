@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Model } from '@atelier/shared';
 import type { ReactNode } from 'react';
 import Composer from './index';
+import { refImageThumbUrl } from '../../api/uploads';
+import { resetMediaCacheForTests } from '../../lib/mediaCache';
 import { modelSelectionPatch } from '../../lib/modelSelection';
 import { initialAtelierState, toGenerateRequest, useAtelierStore } from '../../store/atelier';
 
@@ -61,15 +63,31 @@ afterEach(() => {
 });
 
 describe('Composer extend mode', () => {
-  test('labels the action Extend, locks ratio, keeps duration live, and shows the handoff frame', () => {
+  test('labels the action Extend, locks ratio, keeps duration live, and shows the handoff frame', async () => {
+    // The handoff frame reads the upload's thumbnail through the session media
+    // cache, never the full original.
+    const realFetch = globalThis.fetch;
+    const realCreateObjectURL = URL.createObjectURL.bind(URL);
+    const requested: string[] = [];
+    resetMediaCacheForTests();
+    URL.createObjectURL = () => 'blob:handoff-thumb';
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      requested.push(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url);
+      return Promise.resolve(new Response(new Blob(['thumb'], { type: 'image/webp' })));
+    }) as unknown as typeof fetch;
     renderExtendComposer();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(screen.getByRole('button', { name: 'Extend' })).toBeTruthy();
     const ratio = screen.getByRole('button', { name: 'Ratio' });
     expect(ratio.hasAttribute('disabled')).toBe(true);
     expect(ratio.getAttribute('data-tip')).toBe('Ratio is locked to the sequence');
     expect(screen.getByRole('button', { name: 'Clip length' }).hasAttribute('disabled')).toBe(false);
     expect(screen.getByText('Handoff frame')).toBeTruthy();
-    expect(screen.getByRole('img', { name: 'Source still' }).getAttribute('src')).toContain('handoff-1');
+    expect(screen.getByRole('img', { name: 'Source still' }).getAttribute('src')).toBe('blob:handoff-thumb');
+    expect(requested).toContain(refImageThumbUrl('handoff-1'));
+    globalThis.fetch = realFetch;
+    URL.createObjectURL = realCreateObjectURL;
+    resetMediaCacheForTests();
     expect(screen.getByText(/Sequence handoff ready/)).toBeTruthy();
 
     const request = toGenerateRequest(useAtelierStore.getState().draft, videoModel.id, '16:9', videoModel, 124);

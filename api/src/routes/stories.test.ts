@@ -338,6 +338,28 @@ describe('story routes', () => {
     expect(plan?.segments?.map((segment) => segment.durationFrames)).toEqual([124, 362]);
   });
 
+  test('the planner runs on rewrite() and an exhausted quota reaches the client with its retry hint', async () => {
+    let enhanceCalls = 0;
+    setTextModelProviderForTests({
+      ...fakeProvider(validPlan()),
+      // eslint-disable-next-line require-yield -- the planner must not stream
+      async *enhance() {
+        await Promise.resolve();
+        enhanceCalls += 1;
+        throw new Error('the planner must use rewrite()');
+      },
+      rewrite: () => Promise.resolve({ type: 'failed', kind: 'quota', status: 429, detail: 'x', retryAfterSeconds: 45 }),
+    });
+    const runtime = testRuntime({ ...VIDEO_ON, availability });
+    configureIdleDriver(runtime);
+    const frames = await parseSse(await postStory(runtime, { outline: 'Arc', ratio: '16:9' }));
+    expect(enhanceCalls).toBe(0);
+    expect(frames.at(-1)).toEqual({
+      event: 'error',
+      data: { message: 'Codex quota exhausted', code: 'quota-exhausted', retryAfterSeconds: 45 },
+    });
+  });
+
   test('returns an error frame and inserts nothing when too few beats remain', async () => {
     setTextModelProviderForTests(fakeProvider(validPlan([124])));
     const runtime = testRuntime({ ...VIDEO_ON, availability });

@@ -127,9 +127,15 @@ describe('App prompt-library gate', () => {
       promptResponse: new Response(JSON.stringify({ error: 'not found' }), { status: 404 }),
     });
 
-    await waitFor(() => { expect(useAtelierStore.getState().view.kind).toBe('unsorted'); });
-
-    expect(screen.queryByRole('heading', { name: 'Prompt Library' })).toBeNull();
+    // Until the 404 arrives the eligibility is unknown, so ?view=prompts
+    // starts loading the lazy Manager chunk, and the fallback to Unsorted
+    // commits after it. Await that chunk and the committed DOM, not a
+    // wall-clock margin: a cold chunk under load outlasts waitFor's timeout.
+    await act(async () => { await import('./components/PromptManager'); });
+    await waitFor(() => {
+      expect(useAtelierStore.getState().view.kind).toBe('unsorted');
+      expect(screen.queryByRole('heading', { name: 'Prompt Library' })).toBeNull();
+    });
     expect(screen.queryByRole('button', { name: 'Prompt Library' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Templates' })).toBeNull();
     expect(window.location.search).not.toContain('view=prompts');
@@ -147,9 +153,11 @@ describe('App prompt-library gate', () => {
       expect(useAtelierStore.getState().view.kind).toBe('unsorted');
     });
 
+    // The Manager is a lazy chunk: await the chunk itself so the assertion
+    // does not race its load time.
     await act(async () => {
       useAtelierStore.getState().setView(APP_VIEW_PROMPTS);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await import('./components/PromptManager');
     });
 
     expect(await screen.findByRole('heading', { name: 'Prompt Library' })).toBeTruthy();
@@ -204,6 +212,7 @@ describe('App prompt-library gate', () => {
       search: '?view=prompts',
       promptResponse: Response.json({ error: 'upstream unavailable' }, { status: 500 }),
     });
+    await act(async () => { await import('./components/PromptManager'); });
 
     expect(await screen.findByRole('heading', { name: 'Prompt Library' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Back to Unsorted' })).toBeTruthy();

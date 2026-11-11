@@ -87,7 +87,7 @@ export function createGoogleProvider(cfg: GoogleProviderConfig): Provider {
       out.push({
         inlineData: {
           mimeType: shrunk.mime,
-          data: Buffer.from(shrunk.bytes).toString('base64'),
+          data: shrunk.bytes.toBase64(),
         },
       });
     }

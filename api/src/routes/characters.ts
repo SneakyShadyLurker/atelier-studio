@@ -6,7 +6,7 @@ import { textModelFailureBody, textProviderForResolved } from '../providers/text
 import { findModel } from '../providers/registry';
 import { parseBody } from './_http';
 import { BrainstormCharactersRequestSchema } from './characters.schema';
-import { failedToSseError } from '../lifecycle/llm-error';
+import { textFailureToSseError } from '../lifecycle/llm-error';
 import type { ResolveTextModelInput } from '../routing/textModelResolver';
 import type { TextModelRecord } from '../db/textProviders';
 import { brainstormRouteTimeoutMs, textStreamDrainMs } from '../providers/text/textBudgets';
@@ -96,16 +96,16 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
               return true;
             } else if (fallback !== null && emitted === 0 && chunk.kind === 'transient') {
               logger.warn(
-                { event: 'brainstorm_backend_fallback', from: current.id, to: fallback.id, status: chunk.status, detail: chunk.detail, userId },
+                { event: 'brainstorm_backend_fallback', from: current.id, to: fallback.id, failureKind: chunk.kind, status: chunk.status, userId },
                 'brainstorm failing over to the partner model',
               );
               return run(fallback, null);
             } else {
               logger.warn(
-                { event: 'brainstorm_upstream_error', textModelId: current.id, status: chunk.status, detail: chunk.detail, userId },
+                { event: 'brainstorm_upstream_error', textModelId: current.id, failureKind: chunk.kind, status: chunk.status, userId },
                 'brainstorm characters failed',
               );
-              send('error', failedToSseError(chunk));
+              send('error', textFailureToSseError(chunk, SAFE_ERROR_MESSAGE));
               return true;
             }
           }
@@ -118,7 +118,7 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
               { event: timedOut() ? 'brainstorm_timeout' : 'brainstorm_truncated', timeoutMs, userId },
               'brainstorm characters did not complete',
             );
-            send('error', { message: SAFE_ERROR_MESSAGE });
+            send('error', textFailureToSseError(null, SAFE_ERROR_MESSAGE));
           }
         } catch (error) {
           if (!clientDisconnected()) {
@@ -126,7 +126,7 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
               { err: error, event: timedOut() ? 'brainstorm_timeout' : 'brainstorm_stream_error', timeoutMs, userId },
               timedOut() ? 'brainstorm timed out' : 'brainstorm stream crashed',
             );
-            send('error', { message: SAFE_ERROR_MESSAGE });
+            send('error', textFailureToSseError(null, SAFE_ERROR_MESSAGE));
           }
         }
     },

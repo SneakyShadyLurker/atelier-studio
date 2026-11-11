@@ -314,8 +314,22 @@ describe('loadConfig', () => {
     expect(cfg.RESILIENT_BREAKER_THRESHOLD).toBe(8);
     expect(cfg.RESILIENT_HALF_OPEN_AFTER_MS).toBe(30_000);
     expect(cfg.ENHANCE_OPEN_TIMEOUT_MS).toBe(15_000);
+    expect(cfg.TEXT_STREAM_IDLE_TIMEOUT_MS).toBe(120_000);
     expect(cfg.SWAG_PROXY_READ_TIMEOUT_MS).toBe(600_000);
     expect(cfg.INFER_DIMENSIONS_BATCH_CONCURRENCY).toBe(12);
+  });
+
+  test('TEXT_STREAM_INCLUDE_USAGE defaults on and uses the boolish env convention', () => {
+    expect(loadConfig(validEnv()).TEXT_STREAM_INCLUDE_USAGE).toBe(true);
+    expect(loadConfig({ ...validEnv(), TEXT_STREAM_INCLUDE_USAGE: 'false' }).TEXT_STREAM_INCLUDE_USAGE).toBe(false);
+    expect(loadConfig({ ...validEnv(), TEXT_STREAM_INCLUDE_USAGE: '0' }).TEXT_STREAM_INCLUDE_USAGE).toBe(false);
+    expect(loadConfig({ ...validEnv(), TEXT_STREAM_INCLUDE_USAGE: 'on' }).TEXT_STREAM_INCLUDE_USAGE).toBe(true);
+  });
+
+  test('TEXT_STREAM_IDLE_TIMEOUT_MS accepts a positive integer and rejects zero or fractions', () => {
+    expect(loadConfig({ ...validEnv(), TEXT_STREAM_IDLE_TIMEOUT_MS: '90000' }).TEXT_STREAM_IDLE_TIMEOUT_MS).toBe(90_000);
+    expect(() => loadConfig({ ...validEnv(), TEXT_STREAM_IDLE_TIMEOUT_MS: '0' })).toThrow(ConfigError);
+    expect(() => loadConfig({ ...validEnv(), TEXT_STREAM_IDLE_TIMEOUT_MS: '1.5' })).toThrow(ConfigError);
   });
 
   test('resilience budget rejects per-attempt attempts without total headroom', () => {

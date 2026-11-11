@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { buildResilientPolicy } from '../../lifecycle/resilient-call';
 import {
-  AI_FILL_BATCH_MAX_COMPLETION_TOKENS,
+  AI_FILL_BATCH_MAX_OUTPUT_TOKENS,
   AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS,
   AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
   GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS,
@@ -193,10 +193,10 @@ describe('aiFill retry policy', () => {
       expect(sent[0]?.max_completion_tokens).toBe(36_000);
       expect(sent[1]?.max_completion_tokens).toBe(108_000);
       expect(sent[2]?.max_completion_tokens).toBe(36_000);
-      expect(sent[3]?.max_completion_tokens).toBe(AI_FILL_BATCH_MAX_COMPLETION_TOKENS);
+      expect(sent[3]?.max_completion_tokens).toBe(AI_FILL_BATCH_MAX_OUTPUT_TOKENS);
       expect(sent[0]?.reasoning_effort).toBe('low');
       expect(sent[1]?.reasoning_effort).toBe('low');
-      // MiMo's own default, never AI_FILL_DEFAULTS' 'low'.
+      // MiMo's own default, never the old shared 'low'.
       expect(sent[2]?.reasoning_effort).toBe('none');
       expect(sent[3]?.reasoning_effort).toBe('none');
       for (const body of sent) {

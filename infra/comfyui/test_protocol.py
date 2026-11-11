@@ -4,6 +4,7 @@ No media libraries or ComfyUI install are needed. test_worker.py also runs these
 scenarios through aiohttp and the native PromptQueue on staging.
 """
 import importlib.util
+import io
 import json
 import logging
 from pathlib import Path
@@ -144,6 +145,59 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status, 200)
         self.assertEqual(len(worker.STORE.jobs), 4)
         self.assertEqual(queue.history, {})
+
+    async def test_privacy_reports_a_per_process_boot_id(self):
+        first = json.loads((await self.worker.privacy(None)).body)['boot_id']
+        self.assertRegex(first, r'^[a-f0-9]{32}$')
+        self.assertEqual(json.loads((await self.worker.privacy(None)).body)['boot_id'], first)
+        restarted, _ = load_worker()
+        self.assertNotEqual(json.loads((await restarted.privacy(None)).body)['boot_id'], first)
+
+    async def test_png_outputs_use_native_save_image_compression(self):
+        worker, identity = self.worker, str(uuid.uuid4())
+        worker.STORE.create(identity, image_outputs=True, execution_timeout_seconds=TEST_EXECUTION_SECONDS)
+        saved = []
+
+        class Encoded:
+            def save(self, buffer, **options):
+                saved.append(options)
+                buffer.write(b'png')
+
+        pixels = SimpleNamespace(astype=lambda kind: 'pixels')
+        image = SimpleNamespace(cpu=lambda: SimpleNamespace(numpy=lambda: 1.0))
+        with patch.multiple(worker, np=SimpleNamespace(clip=lambda value, low, high: pixels, uint8='uint8'),
+                            Image=SimpleNamespace(fromarray=lambda value: Encoded())):
+            batch = type('Batch', (), {'shape': (2, 2, 2, 3), '__iter__': lambda self: iter([image, image])})()
+            worker.AtelierSaveImages().save(batch, identity)
+        self.assertEqual(saved, [{'format': 'PNG', 'compress_level': 4}] * 2)
+        self.assertEqual(len(worker.STORE.status(identity)['outputs']), 2)
+
+    async def test_startup_self_test_failure_keeps_worker_not_ready_and_names_the_check(self):
+        worker = self.worker
+        for failed in ('BaseRequest._read_bytes', None):
+            stderr, hooks = io.StringIO(), []
+
+            async def self_test(app):
+                return failed
+
+            async def reaper():
+                pass
+
+            with self.subTest(failed=failed), patch.multiple(
+                    worker, aiohttp_internals_failure=self_test, reaper=reaper, HOST_READY=False,
+                    sys=SimpleNamespace(addaudithook=hooks.append, stderr=stderr)):
+                app = {}
+                await worker.start(app)
+                await app['atelier_reaper']
+                self.assertEqual(worker.AIOHTTP_INTERNALS, failed is None)
+                self.assertFalse(worker.HOST_READY)
+                self.assertEqual(hooks, [worker.deny_persistent_writes])
+                lines = stderr.getvalue().splitlines()
+                if failed:
+                    self.assertEqual(len(lines), 1)
+                    self.assertIn(failed, lines[0])
+                else:
+                    self.assertEqual(lines, [])
 
     async def test_execution_budget_is_required_and_negotiated(self):
         metadata = json.loads((await self.worker.privacy(None)).body)

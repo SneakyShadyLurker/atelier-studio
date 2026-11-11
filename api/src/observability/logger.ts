@@ -43,22 +43,45 @@ const ERROR_CODES = new Set(['ENOENT', 'EACCES', 'EPERM', 'ENOSPC', 'EIO', 'EMFI
   'SQLITE_NOTADB', 'SQLITE_IOERR', 'SQLITE_IOERR_READ', 'SQLITE_IOERR_WRITE', 'SQLITE_FULL',
   'SQLITE_CANTOPEN', 'SQLITE_READONLY', 'SQLITE_CONSTRAINT', 'SQLITE_ERROR', 'SQLITE_MISMATCH']);
 
+/**
+ * The error's class name when it is one of the known types, else `Error`: an
+ * error's `name` is caller-controlled and may carry upstream text.
+ */
+export function errorTypeOf(error: unknown): string {
+  const name = error !== null && typeof error === 'object'
+    ? 'name' in error ? error.name : 'type' in error ? error.type : undefined
+    : undefined;
+  return typeof name === 'string' && ERROR_TYPES.has(name) ? name : 'Error';
+}
+
 function redactingErrorSerializer(error: unknown): unknown {
   // Upstream errors can echo prompts in messages, stacks AND enumerable body
   // properties. Project operational fields; never serialize the original error.
   const status = error !== null && typeof error === 'object' && 'status' in error ? error.status : undefined;
-  const name = error !== null && typeof error === 'object'
-    ? 'name' in error ? error.name : 'type' in error ? error.type : undefined
-    : undefined;
   const code = error !== null && typeof error === 'object' && 'code' in error ? error.code : undefined;
   return {
-    type: typeof name === 'string' && ERROR_TYPES.has(name) ? name : 'Error',
+    type: errorTypeOf(error),
     ...(typeof status === 'number' ? { status } : {}),
     ...(typeof code === 'string' && ERROR_CODES.has(code) ? { code } : {}),
   };
 }
 
 const CONTENT_FIELD = /prompt|skeleton|instruction|refusal|detail|raw|body|content|text|payload|response|stack|template|names$|^dropped$|^issues$|^message$|^reason$/i;
+
+/**
+ * Operational keys checked before `CONTENT_FIELD`, whose broad patterns would
+ * otherwise erase them (`textModelId` contains `text`). Every call site puts
+ * only an id or an enum string under these keys, never prompt text, model
+ * output or an upstream body; keep it that way when adding a name here.
+ */
+export const OPERATIONAL_LOG_FIELDS: ReadonlySet<string> = new Set([
+  'textModelId',
+  'skipReason',
+  'retryReason',
+  'failureKind',
+  'availabilityReason',
+  'listFailureReason',
+]);
 
 function contentFreeFields(value: unknown, depth = 0): unknown {
   if (value instanceof Error) return redactingErrorSerializer(value);
@@ -67,7 +90,9 @@ function contentFreeFields(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) return value.map((item) => contentFreeFields(item, depth + 1));
   if (value === null || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [
-    key, CONTENT_FIELD.test(key) && typeof item !== 'number' ? '[redacted]' : contentFreeFields(item, depth + 1),
+    key, !OPERATIONAL_LOG_FIELDS.has(key) && CONTENT_FIELD.test(key) && typeof item !== 'number'
+      ? '[redacted]'
+      : contentFreeFields(item, depth + 1),
   ]));
 }
 

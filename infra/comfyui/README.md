@@ -193,6 +193,16 @@ Python file writes are denied after
 startup; native codecs use BytesIO. This Python audit hook is defense in depth,
 not an OS sandbox for arbitrary native code. Keep the approved node allowlist
 and pinned install; review native writers when changing dependencies.
+PNG outputs are deflated at zlib level 4, as native `SaveImage` does.
+
+The worker relies on two private aiohttp internals: `BaseRequest._read_bytes`,
+which carries the rewritten `/prompt` body to the native handler, and
+`Application._client_max_size`, which sets the 2 MiB request body cap. Anyone
+upgrading ComfyUI or its aiohttp must rerun `test_worker.py` on the host. At
+every start the worker also self-tests both; if either broke, it stays
+`ready: false` and writes one content-free line to stderr naming the internal.
+The supervisor discards stderr, so under it the only symptom is a worker that
+never reports ready; `test_worker.py` names the failed internal.
 
 The worker reads `atelier_private/allowed_nodes.json` once at import and checks
 it only at `/prompt`; `/object_info` is unfiltered. The worker advertises the
@@ -234,11 +244,12 @@ The worker and all producers must use this current contract together:
 `execution_budget` requires `limits.max_execution_seconds`, and
 `residency_tracking` requires `previous_prompt_id` on successful lease admission.
 
-The privacy response also includes these required top-level fields:
+The privacy response also includes these top-level fields; all but `boot_id` are required:
 
 | Field | Meaning |
 | --- | --- |
 | `worker_build` | SHA-256 hex of worker.py, store.py and allowed_nodes.json bytes, concatenated in that order at import; excludes secrets and runtime state |
+| `boot_id` | 32 random hex characters (128 bits) drawn once per worker process start; carries no host state. Optional for consumers: Atelier reuses a health inventory read only while it is unchanged, and treats a missing value as an unknown boot |
 | `allowed_nodes` | Sorted submission class allowlist, after private node transforms |
 | `limits` | Positive integer bounds listed below, in snake_case |
 

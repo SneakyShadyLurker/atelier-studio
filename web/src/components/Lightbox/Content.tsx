@@ -1,9 +1,10 @@
-import { isVideoMime } from '@atelier/shared';
+import { isVideoMime, type DoneTile } from '@atelier/shared';
 import type { CSSProperties } from 'react';
 import { useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, ViewTransition } from 'react';
 import { createPortal } from 'react-dom';
 import type { LightboxContentProps } from './types';
-import { refImageUrl } from '../../api/uploads';
+import { refImageThumbUrl, refImageUrl } from '../../api/uploads';
+import { useCachedThumb } from '../../hooks/useCachedMedia';
 import { MOTION_PROMPT_SELECTOR, useAnimateFromTile } from '../../hooks/useAnimateFromTile';
 import { useExtendFromTile } from '../../hooks/useExtendFromTile';
 import { useEditFromTile } from '../../hooks/useEditFromTile';
@@ -28,6 +29,22 @@ interface SwipeGesture {
 }
 
 const HIGH_PRIORITY_IMAGE_PROPS = { fetchPriority: 'high' } as const;
+
+// Strip tiles read through the session media cache: thumbnails answer
+// no-store, so a direct <img> would download again on every Lightbox mount.
+function StripTileThumb({ tile }: { tile: DoneTile }) {
+  const isVideo = isVideoMime(tile.mime);
+  const src = useCachedThumb(tile.thumbUrl, isVideo ? undefined : tile.url);
+  if (isVideo && !tile.thumbUrl) return <I.film aria-hidden="true" />;
+  return <img src={src} alt="" loading="lazy" decoding="async" />;
+}
+
+// A reference strip tile shows the upload's thumbnail, not the full original;
+// selecting it still opens the original in the main view.
+function ReferenceThumb({ uploadId }: { uploadId: string }) {
+  const src = useCachedThumb(refImageThumbUrl(uploadId), refImageUrl(uploadId));
+  return <img src={src} alt="" loading="lazy" decoding="async" />;
+}
 
 /** Arrow-key nudge while zoomed — about a thumb-swipe of travel per press. */
 const KEY_PAN_STEP_PX = 96;
@@ -318,9 +335,7 @@ export default function Content({ batch, modelById, deleteVariant, onDownload, o
             aria-pressed={!chrome.showingReference}
             onClick={() => { setActiveRefImageId(null); }}
           >
-            {isVideoMime(chrome.stripTile.mime)
-              ? chrome.stripTile.thumbUrl ? <img src={chrome.stripTile.thumbUrl} alt="" loading="lazy" decoding="async" /> : <I.film aria-hidden="true" />
-              : <img src={chrome.stripTile.thumbUrl ?? chrome.stripTile.url} alt="" loading="lazy" decoding="async" />}
+            <StripTileThumb tile={chrome.stripTile} />
           </button>
           {chrome.stripTile.refImageIds.map((uploadId, index, ids) => (
             <button
@@ -336,7 +351,7 @@ export default function Content({ batch, modelById, deleteVariant, onDownload, o
                 if (tile.refImageIds?.includes(uploadId)) setActiveRefImageId(uploadId);
               }}
             >
-              <img src={refImageUrl(uploadId)} alt="" loading="lazy" decoding="async" />
+              <ReferenceThumb uploadId={uploadId} />
             </button>
           ))}
         </div>

@@ -32,7 +32,7 @@ import { inferPool } from '../../orchestrator/llmAdmission';
 import { withLlmSlot } from '../../lifecycle/withLlmSlot';
 import { promptLibrary } from './_shared';
 import type { InferResult } from '../../providers/text/featureHelpers';
-import { failedToSseError } from '../../lifecycle/llm-error';
+import { textFailureToSseError } from '../../lifecycle/llm-error';
 import { isAbortError } from '../../lifecycle/abort';
 
 export const inferRoutes = new Hono<AppEnv>()
@@ -97,7 +97,7 @@ export const inferRoutes = new Hono<AppEnv>()
               signal.throwIfAborted();
               if (result.type === 'ok') return result.ops;
               logger.warn(
-                { event: 'infer_dimensions_upstream', kind: result.kind, detail: result.detail, userId },
+                { event: 'infer_dimensions_upstream', textModelId: resolved.model.id, failureKind: result.kind, status: result.status, userId },
                 'infer dimensions upstream error',
               );
               recordFailure(result);
@@ -134,7 +134,7 @@ export const inferRoutes = new Hono<AppEnv>()
           }
         };
         const providerError = (): void => {
-          send('error', lastProviderFailure !== null ? failedToSseError(lastProviderFailure) : { message: SAFE });
+          send('error', textFailureToSseError(lastProviderFailure, SAFE));
         };
 
         try {
@@ -192,7 +192,7 @@ export const inferRoutes = new Hono<AppEnv>()
             if (result.type === 'failed') {
               failureKind.set(index, result.kind);
               logger.warn(
-                { event: 'infer_dimensions_upstream', kind: result.kind, detail: result.detail, userId },
+                { event: 'infer_dimensions_upstream', textModelId: resolved.model.id, failureKind: result.kind, status: result.status, userId },
                 'infer dimensions upstream error',
               );
               recordFailure(result);
@@ -344,7 +344,7 @@ export const inferRoutes = new Hono<AppEnv>()
           if (clientDisconnected()) return;
           if (timedOut()) {
             logger.warn({ event: 'infer_dimensions_timeout', userId }, 'infer dimensions total budget expired before finalize');
-            send('error', { message: SAFE });
+            send('error', textFailureToSseError(null, SAFE));
             return;
           }
 
@@ -426,7 +426,7 @@ export const inferRoutes = new Hono<AppEnv>()
             { err: error, event, userId },
             'infer dimensions failed',
           );
-          send('error', { message: SAFE });
+          send('error', textFailureToSseError(null, SAFE));
         }
       },
     };
@@ -449,16 +449,6 @@ export const inferRoutes = new Hono<AppEnv>()
     const chosen = bundleClosure(stored.rawBundles, parsed.value.acceptedBundleKeys);
 
     const accept = [...(parsed.value.acceptUnsatisfiableTemplates ?? [])];
-    const legacyOverride = parsed.value.overrideCoherence === true;
-    if (legacyOverride) {
-      c.var.logger.warn(
-        { event: 'apply_dimensions_legacy_override', proposalId: parsed.value.proposalId, userId: c.var.userId },
-        'legacy overrideCoherence used — expand to per-template list',
-      );
-      for (const conflict of stored.conflicts) {
-        if (!accept.includes(conflict.templateName)) accept.push(conflict.templateName);
-      }
-    }
 
     const tmpl = liveLib.templates.map((t) => ({ name: t.name, body: t.body, lists: extractDistinctListNames(t.body) }));
     // Same SAT/budget as infer + /diagnose-selection — eliminates the
@@ -483,13 +473,13 @@ export const inferRoutes = new Hono<AppEnv>()
     for (const conflict of liveConflicts) knownFailing.add(conflict.templateName);
     const filteredAccept = accept.filter((name) => knownFailing.has(name));
     if (filteredAccept.length !== accept.length) {
-      const dropped = accept.filter((name) => !knownFailing.has(name));
+      // A count: template names are library content and stay out of logs.
       c.var.logger.warn(
         {
           event: 'apply_dimensions_unknown_template_in_accept',
           proposalId: parsed.value.proposalId,
           userId: c.var.userId,
-          dropped,
+          droppedCount: accept.length - filteredAccept.length,
         },
         'acceptUnsatisfiableTemplates contained names not matching any known conflict — dropped',
       );
@@ -514,7 +504,6 @@ export const inferRoutes = new Hono<AppEnv>()
           rawBundleCount: stored.rawBundles.length,
           storedConflictTemplates: stored.conflicts.map((c2) => c2.templateName),
           acceptUnsatisfiableTemplates: filteredAccept,
-          legacy: legacyOverride,
         },
         'apply 422 — per-template coherence gate',
       );

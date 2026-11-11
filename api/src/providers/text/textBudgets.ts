@@ -1,4 +1,5 @@
 import type { TextLatencyProfile, TextReasoningEffort } from '@atelier/shared';
+import type { Config } from '../../config';
 
 // Token budgets, deadlines and byte caps of the text feature calls, keyed by a
 // model row's latency profile where slow models need longer ones.
@@ -25,16 +26,65 @@ export const GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS = 420_000;
 export const GLM_ABLITERATED_STREAM_DRAIN_MS = 2_700_000;
 export const GLM_ABLITERATED_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
-/** Per-attempt ai-fill timeout; the provider's policy and the route envelope both read it. */
-export function aiFillPerAttemptTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
+/**
+ * Per-attempt timeout of a policy-wrapped text call: the configured knob on a
+ * standard row, at least the slow floor on a slow one. The provider's policy
+ * and the route deadline both read it.
+ */
+export function textPerAttemptTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
   return profile === 'slow'
     ? Math.max(configuredMs, GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS)
     : configuredMs;
 }
 
+/** Per-attempt ai-fill timeout; the provider's policy and the route envelope both read it. */
+export function aiFillPerAttemptTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
+  return textPerAttemptTimeoutMs(profile, configuredMs);
+}
+
+// Lifecycle margin a route deadline keeps beyond its policy envelope, for SSE
+// teardown and scheduling jitter.
+export const TEXT_ROUTE_TIMEOUT_MARGIN_MS = 30_000;
+
+// Rescue's route deadline on a standard row. Rescue is one single-attempt call.
+export const RESCUE_ROUTE_TIMEOUT_MS = 90_000;
+
+export interface TextPolicyShape {
+  /** The configured per-attempt knob, before the slow floor. */
+  readonly perAttemptTimeoutMs: number;
+  readonly maxAttempts: number;
+  readonly maxBackoffMs: number;
+}
+
+/**
+ * Route deadline of one policy-wrapped call (list draft, template draft,
+ * rescue). A standard row keeps `standardMs`. A slow row's attempts run on
+ * the slow floor, so its deadline covers every attempt plus the backoff
+ * between them, and never drops below `standardMs`.
+ */
+export function textPolicyRouteTimeoutMs(
+  profile: TextLatencyProfile,
+  standardMs: number,
+  policy: TextPolicyShape,
+): number {
+  if (profile !== 'slow') return standardMs;
+  const envelope = textPerAttemptTimeoutMs(profile, policy.perAttemptTimeoutMs) * policy.maxAttempts
+    + policy.maxBackoffMs * Math.max(0, policy.maxAttempts - 1);
+  return Math.max(standardMs, envelope + TEXT_ROUTE_TIMEOUT_MARGIN_MS);
+}
+
 /** Drain budget of one enhance, storytelling-planner or brainstorm stream. */
 export function textStreamDrainMs(profile: TextLatencyProfile, cloudTimeoutMs: number): number {
   return profile === 'slow' ? Math.max(cloudTimeoutMs, GLM_ABLITERATED_STREAM_DRAIN_MS) : cloudTimeoutMs;
+}
+
+// A slow row may think for minutes before its first byte when the upstream
+// streams no reasoning and sends no keepalives.
+export const SLOW_STREAM_IDLE_FLOOR_MS = 600_000;
+
+/** Longest upstream silence a streamed text call tolerates before failing as a stall. */
+export function textStreamIdleMs(profile: TextLatencyProfile, baseMs: number): number {
+  return profile === 'slow' ? Math.max(baseMs, SLOW_STREAM_IDLE_FLOOR_MS) : baseMs;
 }
 
 /** Deadline of a queued prompt rewrite (Krea condense, H3 Image expand); both fail open, so a short one silently skips them. */
@@ -65,71 +115,37 @@ export function textMaxResponseBytes(profile: TextLatencyProfile, configuredByte
   return profile === 'slow' ? Math.max(configuredBytes, GLM_ABLITERATED_MAX_RESPONSE_BYTES) : configuredBytes;
 }
 
-// Generic prompt enhancement runs on Kimi K3 with low reasoning.
-// Reasoning spends from the same completion budget, so the
-// ceiling is set well clear of any plausible reasoning+answer burn — a tight
-// bound starves the answer rather than capping it. `verbosity` is retained for
-// ChatDefaults shape parity but is never sent on the Kimi wire.
-export const CLIPROXY_TEXT_DEFAULTS = {
-  reasoning_effort: 'low',
-  verbosity: 'low',
-  max_completion_tokens: 36_000,
-} as const;
+// Output-token budgets of the text calls (`maxOutputTokens`; a row's
+// `fixedOutputTokens` replaces them). Reasoning spends from the same budget on
+// every backend measured, so each ceiling sits well clear of a plausible
+// reasoning-plus-answer burn: a tight bound starves the answer rather than
+// capping it. The effort sent comes from the model row, not from here.
 
-// MiniMax H3 motion-prompt enhancement on the routed Kimi K3
-// backend. Plain-text prose (no json_object), low-effort, with enough room for
-// model reasoning plus the roughly 60–120-word answer.
-export const MOTION_ENHANCE_DEFAULTS = {
-  reasoning_effort: 'low',
-  verbosity: 'low',
-  max_completion_tokens: 36_000,
-} as const;
+// Generic prompt enhancement (and the rewrite callers that share its request).
+export const ENHANCE_MAX_OUTPUT_TOKENS = 36_000;
 
-// AI Storytelling planning uses Kimi low reasoning with room for the full JSON beat sheet.
-export const STORY_PLANNER_DEFAULTS = {
-  reasoning_effort: 'low',
-  verbosity: 'low',
-  max_completion_tokens: 36_000,
-} as const;
+// MiniMax H3 motion-prompt enhancement: plain-text prose (no json_object) with
+// room for reasoning plus the roughly 60–120-word answer.
+export const MOTION_ENHANCE_MAX_OUTPUT_TOKENS = 36_000;
 
-// Draft-list generation uses Kimi low reasoning. Its reasoning tokens share the
-// completion budget with the JSON answer, so retain the 1200-token
-// answer allowance plus the shared low-reasoning overhead. `verbosity` is inert
-// on the Kimi wire and retained only for ChatDefaults shape parity.
-export const DRAFT_LIST_DEFAULTS = {
-  reasoning_effort: 'low',
-  verbosity: 'low',
-  max_completion_tokens: 1200 + KIMI_LOW_REASONING_OVERHEAD_TOKENS,
-} as const;
+// AI Storytelling planning, with room for the full JSON beat sheet.
+export const STORY_PLANNER_MAX_OUTPUT_TOKENS = 36_000;
 
-// Dimension inference uses Kimi low reasoning. The 32000-token answer allowance
-// handles large libraries; K3 reasoning spends from the same
-// completion ceiling, so add the shared low-reasoning overhead. `verbosity` is
-// inert on the Kimi wire and retained only for ChatDefaults shape parity.
-export const INFER_DIMENSIONS_DEFAULTS = {
-  reasoning_effort: 'low',
-  verbosity: 'low',
-  max_completion_tokens: 32000 + KIMI_LOW_REASONING_OVERHEAD_TOKENS,
-} as const;
+// Draft-list generation: the 1200-token JSON answer allowance plus the shared
+// low-reasoning overhead.
+export const DRAFT_LIST_MAX_OUTPUT_TOKENS = 1200 + KIMI_LOW_REASONING_OVERHEAD_TOKENS;
 
-// Draft-template generation uses Kimi low reasoning. The prose answer keeps its
-// 1500-token allowance plus shared low-reasoning overhead. `verbosity` is
-// inert on the Kimi wire and retained only for ChatDefaults shape parity.
-export const DRAFT_TEMPLATE_DEFAULTS = {
-  reasoning_effort: 'low',
-  verbosity: 'low',
-  max_completion_tokens: 1500 + KIMI_LOW_REASONING_OVERHEAD_TOKENS,
-} as const;
+// Dimension inference and rescue: the 32000-token answer allowance handles
+// large libraries, plus the shared low-reasoning overhead.
+export const INFER_DIMENSIONS_MAX_OUTPUT_TOKENS = 32000 + KIMI_LOW_REASONING_OVERHEAD_TOKENS;
+
+// Draft-template generation: the 1500-token answer allowance plus the shared
+// low-reasoning overhead.
+export const DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS = 1500 + KIMI_LOW_REASONING_OVERHEAD_TOKENS;
 
 // ai-fill writes at most AI_FILL_MAX_SLOTS short blanks, so it must not inherit
-// the 32k infer ceiling. Kimi uses low reasoning for this bounded compilation.
-// The ceiling is deliberately generous: reasoning spends from the same
-// completion budget, so a tight bound starves the answer rather than capping it.
-export const AI_FILL_DEFAULTS = {
-  reasoning_effort: 'low',
-  verbosity: 'low',
-  max_completion_tokens: 36_000,
-} as const;
+// the 32k infer ceiling.
+export const AI_FILL_MAX_OUTPUT_TOKENS = 36_000;
 
 // All ai-fill policies permit one transient retry. The route deadline is
 // derived from that complete policy envelope rather than the unrelated image
@@ -146,9 +162,9 @@ export function aiFillPolicyEnvelopeMs(
 }
 
 /**
- * Each entry represents one possible policy-wrapped provider.aiFill call. The
- * route can make a second call for format recovery, and a mixed batch processes
- * both backend groups sequentially, so their complete envelopes must be summed.
+ * Each entry represents one possible policy-wrapped provider.aiFill call on
+ * the one resolved model. The route can make a second call for format
+ * recovery, so the complete envelopes of both calls are summed.
  */
 export function aiFillRouteTimeoutMs(
   perAttemptTimeoutsMs: readonly number[],
@@ -162,11 +178,37 @@ export function aiFillRouteTimeoutMs(
   );
 }
 
+type DraftDeadlineKnobs = Pick<
+  Config,
+  'CLOUD_TIMEOUT_MS' | 'RESILIENT_PER_ATTEMPT_TIMEOUT_MS' | 'RESILIENT_MAX_ATTEMPTS' | 'RESILIENT_MAX_BACKOFF_MS'
+>;
+
+/** Route deadline of a list or template draft, which runs under the draft policy. */
+export function draftRouteTimeoutMs(profile: TextLatencyProfile, knobs: DraftDeadlineKnobs): number {
+  return textPolicyRouteTimeoutMs(profile, knobs.CLOUD_TIMEOUT_MS, {
+    perAttemptTimeoutMs: knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS,
+    maxAttempts: knobs.RESILIENT_MAX_ATTEMPTS,
+    maxBackoffMs: knobs.RESILIENT_MAX_BACKOFF_MS,
+  });
+}
+
+/** Route deadline of a rescue, one single-attempt call (`rescueDimension`). */
+export function rescueRouteTimeoutMs(
+  profile: TextLatencyProfile,
+  knobs: Pick<Config, 'RESILIENT_PER_ATTEMPT_TIMEOUT_MS' | 'RESILIENT_MAX_BACKOFF_MS'>,
+): number {
+  return textPolicyRouteTimeoutMs(profile, RESCUE_ROUTE_TIMEOUT_MS, {
+    perAttemptTimeoutMs: knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS,
+    maxAttempts: 1,
+    maxBackoffMs: knobs.RESILIENT_MAX_BACKOFF_MS,
+  });
+}
+
 // Historical thinking-on batch-4 trials reached 117.6s; adding 25% gives
 // 147s, rounded to 150s (32.4s / 27.6% above the observed worst). The route then
 // budgets every permitted policy call and adds a separate 30s lifecycle margin.
 export const AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS = 150_000;
-export const AI_FILL_BATCH_MAX_COMPLETION_TOKENS = 144_000;
+export const AI_FILL_BATCH_MAX_OUTPUT_TOKENS = 144_000;
 
 export function aiFillBatchPerAttemptTimeoutMs(profile: TextLatencyProfile): number {
   return aiFillPerAttemptTimeoutMs(profile, AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS);
@@ -184,7 +226,7 @@ export function aiFillBatchRouteTimeoutMs(
 
 // 600/prompt (was 400): measured, K3 writes ~350-500 content tokens
 // per character, so the old 2000-token floor at count=4 capped pure content in
-// 1 of 3 runs. Reasoning ALSO spends from max_completion_tokens, so low effort
+// 1 of 3 runs. Reasoning ALSO spends from the output budget, so low effort
 // adds a flat CoT overhead below.
 const BRAINSTORM_TOKENS_PER_PROMPT = 600;
 const BRAINSTORM_TOKENS_FLOOR = 2000;
@@ -212,17 +254,14 @@ function brainstormTokenBudget(count: number, effort: TextReasoningEffort): numb
   ) + BRAINSTORM_REASONING_OVERHEAD_TOKENS[effort] - KIMI_LOW_REASONING_OVERHEAD_TOKENS;
 }
 
-export function brainstormDefaults(count: number, effort: TextReasoningEffort = 'low'): {
-  reasoning_effort: string;
-  verbosity: string;
-  max_completion_tokens: number;
-} {
-  // 'low' (was 'none'): K3 reasoning tokens spend from max_completion_tokens.
+/** Brainstorm output budget for `count` prompts at the effort actually sent. */
+export function brainstormMaxOutputTokens(count: number, effort: TextReasoningEffort = 'low'): number {
+  // 'low' (was 'none'): K3 reasoning tokens spend from the output budget.
   // At 'high' a count-4 brainstorm burned 5.3-8.4k
-  // chars of CoT into the budget — 2/2 runs hit finish_reason 'length', one
+  // chars of CoT into the budget: 2/2 runs hit finish_reason 'length', one
   // with zero content. Low keeps a short think and the budget above adds a
   // CoT overhead, scaled up for a user-pinned effort, so content is not starved.
-  return { reasoning_effort: effort, verbosity: 'low', max_completion_tokens: brainstormTokenBudget(count, effort) };
+  return brainstormTokenBudget(count, effort);
 }
 
 /**

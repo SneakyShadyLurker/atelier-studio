@@ -16,9 +16,24 @@ function serve(handler: (req: Request) => Response | Promise<Response>): string 
   return `http://127.0.0.1:${server.port}`;
 }
 
-function chatJson(body: string): Response {
-  const payload = JSON.stringify({ choices: [{ message: { content: body } }] });
-  return new Response(payload, { status: 200, headers: { 'Content-Type': 'application/json' } });
+function streamed(body: string, finishReason = 'stop'): Response {
+  const frames = [
+    JSON.stringify({ choices: [{ index: 0, delta: { content: body }, finish_reason: null }] }),
+    JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: finishReason }] }),
+    '[DONE]',
+  ];
+  return new Response(frames.map((f) => `data: ${f}\n\n`).join(''), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+
+/** One delta, then the socket drops mid-stream. */
+function droppedAfterFirstDelta(): Response {
+  const frame = `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '{"kind":' }, finish_reason: null }] })}\n\n`;
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(frame));
+      controller.error(new TypeError('connection reset'));
+    },
+  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 const emptyLibrary: LibraryOverview = { lists: [] };
@@ -37,8 +52,8 @@ describe('textModel.draftTemplate — request body (model-family mapping)', () =
   const okPayload = JSON.stringify({ kind: 'body', body: 'ok', warnings: [] });
 
   for (const reason of ['length', 'content_filter', 'tool_calls', 'function_call', 'insufficient_system_resource', 'stop']) {
-    test(`nonstream draft classifies explicit finish_reason ${reason}`, async () => {
-      const up = serve(() => new Response(JSON.stringify({ choices: [{ message: { content: okPayload }, finish_reason: reason }] })));
+    test(`streamed draft classifies explicit finish_reason ${reason}`, async () => {
+      const up = serve(() => streamed(okPayload, reason));
       const result = await provider(up).draftTemplate(
         { name: 'T', existingBody: '', library: emptyLibrary }, new AbortController().signal,
       );
@@ -46,23 +61,76 @@ describe('textModel.draftTemplate — request body (model-family mapping)', () =
     });
   }
 
-  test('Kimi provider sends its low-reasoning prose shape without response_format', async () => {
+  test('Kimi provider streams with a strict JSON schema of the two answer shapes', async () => {
     let body: Record<string, unknown> = {};
-    const up = serve(async (req) => { body = (await req.json()) as Record<string, unknown>; return chatJson(okPayload); });
+    const up = serve(async (req) => { body = (await req.json()) as Record<string, unknown>; return streamed(okPayload); });
     await provider(up, 'kimi-latest').draftTemplate(
       { name: 'T', existingBody: '', library: emptyLibrary },
       new AbortController().signal,
     );
     expect(body).toMatchObject({
       model: 'kimi-latest',
-      stream: false,
+      stream: true,
       reasoning_effort: 'low',
       max_completion_tokens: 5500,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'template_draft',
+          strict: true,
+          schema: { type: 'object', properties: { kind: { enum: ['body', 'clarify'] } } },
+        },
+      },
     });
     expect(body).not.toHaveProperty('verbosity');
-    expect(body).not.toHaveProperty('response_format');
     expect(body).not.toHaveProperty('thinking');
     expect(body).not.toHaveProperty('max_tokens');
+  });
+
+  test('a row without structured output sends no response_format', async () => {
+    let body: Record<string, unknown> = {};
+    const up = serve(async (req) => { body = (await req.json()) as Record<string, unknown>; return streamed(okPayload); });
+    const p = testTextModelProvider({ origin: up, token: 'sk-x', model: seededTextModel('kimi', { structuredOutput: 'none' }) });
+    const result = await p.draftTemplate({ name: 'T', existingBody: '', library: emptyLibrary }, new AbortController().signal);
+    expect(result.type).toBe('ok');
+    expect(body).not.toHaveProperty('response_format');
+  });
+
+  test('a stream that drops mid-answer is retried through the draft policy', async () => {
+    let calls = 0;
+    const up = serve(() => (++calls === 1 ? droppedAfterFirstDelta() : streamed(okPayload)));
+    const result = await provider(up).draftTemplate({ name: 'T', existingBody: '', library: emptyLibrary }, new AbortController().signal);
+    expect(result).toEqual({ type: 'ok', payload: { kind: 'body', body: 'ok', warnings: [] } });
+    expect(calls).toBe(2);
+  });
+
+  test('a quota 429 returns kind quota with its retry-after', async () => {
+    const up = serve(() => new Response(JSON.stringify({ error: { message: 'usage limit reached' } }), {
+      status: 429,
+      headers: { 'Retry-After': '900' },
+    }));
+    const result = await provider(up).draftTemplate({ name: 'T', existingBody: '', library: emptyLibrary }, new AbortController().signal);
+    expect(result).toMatchObject({ type: 'failed', kind: 'quota', status: 429, retryAfterSeconds: 900 });
+  });
+
+  test('a caller abort rejects with the abort reason instead of returning a failure', async () => {
+    const up = serve(() => streamed(okPayload));
+    const controller = new AbortController();
+    const reason = new Error('route deadline');
+    controller.abort(reason);
+    let caught: unknown;
+    try {
+      await provider(up).draftTemplate({ name: 'T', existingBody: '', library: emptyLibrary }, controller.signal);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBe(reason);
+  });
+
+  test('unparseable content fails with a kind', async () => {
+    const up = serve(() => streamed('not json at all'));
+    const result = await provider(up).draftTemplate({ name: 'T', existingBody: '', library: emptyLibrary }, new AbortController().signal);
+    expect(result).toEqual({ type: 'failed', kind: 'transient', status: null, detail: 'unparseable draft response' });
   });
 });
 
@@ -71,7 +139,7 @@ describe('textModel.draftTemplate — truncation', () => {
     // 2001 code points → triggers the 2000 cap
     const longBody = 'A'.repeat(2001);
     const modelPayload = JSON.stringify({ kind: 'body', body: longBody, warnings: [] });
-    const up = serve(() => chatJson(modelPayload));
+    const up = serve(() => streamed(modelPayload));
     const r = await provider(up).draftTemplate(
       { name: 'T', existingBody: '', library: emptyLibrary },
       new AbortController().signal,
@@ -90,7 +158,7 @@ describe('textModel.draftTemplate — truncation', () => {
     const emoji = '\u{1F305}'; // 2 UTF-16 code units, 1 code point
     const longBody = prefix + emoji + 'TAIL';
     const modelPayload = JSON.stringify({ kind: 'body', body: longBody, warnings: [] });
-    const up = serve(() => chatJson(modelPayload));
+    const up = serve(() => streamed(modelPayload));
     const r = await provider(up).draftTemplate(
       { name: 'T', existingBody: '', library: emptyLibrary },
       new AbortController().signal,
@@ -116,7 +184,7 @@ describe('textModel.draftTemplate — truncation', () => {
     const partial = '{{var::ab'; // 9 code points; total with "TAIL" = 2008
     const longBody = prefix + partial + 'TAIL';
     const modelPayload = JSON.stringify({ kind: 'body', body: longBody, warnings: [] });
-    const up = serve(() => chatJson(modelPayload));
+    const up = serve(() => streamed(modelPayload));
     const r = await provider(up).draftTemplate(
       { name: 'T', existingBody: '', library: emptyLibrary },
       new AbortController().signal,
@@ -135,7 +203,7 @@ describe('textModel.draftTemplate — truncation', () => {
       body: '{{var::camera}} {{var::lens}}',
       warnings: [],
     });
-    const up = serve(() => chatJson(modelPayload));
+    const up = serve(() => streamed(modelPayload));
     const r = await provider(up).draftTemplate(
       { name: 'T', existingBody: '', library: knownLibrary(['lens']) },
       new AbortController().signal,
@@ -158,7 +226,7 @@ describe('textModel.draftTemplate — truncation', () => {
       body: '{{var::lens choice}}',
       warnings: [],
     });
-    const up = serve(() => chatJson(modelPayload));
+    const up = serve(() => streamed(modelPayload));
     const r = await provider(up).draftTemplate(
       { name: 'T', existingBody: '', library: knownLibrary(['lens choice']) },
       new AbortController().signal,

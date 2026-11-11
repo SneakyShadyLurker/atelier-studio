@@ -522,7 +522,7 @@ export type StoryPlanSseEvent =
         etaMs: number;
       };
     }
-  | { event: 'error'; data: { message: string; code?: string } };
+  | { event: 'error'; data: SseTerminalError };
 
 // ─── Ephemera character cards (public) ─────────────────────────────────
 
@@ -958,7 +958,8 @@ export interface EnhancePromptRequest {
 export type EnhanceSseEvent =
   | { event: 'delta'; data: { text: string } }
   | { event: 'done'; data: Record<string, never> }
-  | { event: 'error'; data: { message: string } };
+  // `code: 'refusal'` when the finished rewrite is refusal prose.
+  | { event: 'error'; data: SseTerminalError };
 
 // {{ai-fill}} resolution request. The client masks the ai-fill tokens, resolves
 // the surrounding {{var}}/{{random}} grammar, and sends the RESOLVED static
@@ -1424,6 +1425,20 @@ export interface RescueDimensionsRequest {
   readonly templateName: string;
 }
 
+/**
+ * `rescue-failed` terminal frame of POST /api/prompts/dimensions/rescue. A
+ * provider failure or crash also carries the shared terminal error's `code`
+ * and `retryAfterSeconds` (see SseTerminalError); older servers omit them and
+ * `conflicts`.
+ */
+export interface RescueFailedPayload {
+  readonly reason: string;
+  readonly conflicts?: readonly TemplateConflict[];
+  readonly code?: string;
+  readonly retryAfterSeconds?: number;
+  readonly moderation?: GptModerationNotice;
+}
+
 export interface RejectedOp {
   readonly reason: string;
   readonly count: number;
@@ -1520,9 +1535,6 @@ export interface ApplyDimensionsRequest {
   readonly proposalId: string;
   readonly acceptedBundleKeys: readonly string[];
   readonly acceptUnsatisfiableTemplates?: readonly string[];
-  // COMPAT — removed in follow-up commit ~1wk post-deploy. When `true`,
-  // server-side expands to every currently-failing template and warn-logs.
-  readonly overrideCoherence?: boolean;
 }
 
 // ─── Internal sanity barrier ────────────────────────────────────────────

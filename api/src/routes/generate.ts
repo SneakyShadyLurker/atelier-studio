@@ -159,7 +159,7 @@ export const generateRoutes = new Hono<AppEnv>().post('/generate', async (c) => 
     // architecture_invariants §3 — "NO file paths, NO appended hints" — even
     // though the upstream leak is already plugged at the source.
     c.var.logger.warn(
-      { modelId: entry.model.id, reason: availability.reason },
+      { modelId: entry.model.id, availabilityReason: availability.reason },
       'model offline at submission',
     );
     return c.json(

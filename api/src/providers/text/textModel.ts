@@ -10,7 +10,9 @@ import {
   type LanguageModelV4FinishReason,
   type LanguageModelV4StreamPart,
   type LanguageModelV4TextPart,
+  type LanguageModelV4Usage,
   type SharedV4ProviderOptions,
+  type SharedV4Warning,
 } from '@ai-sdk/provider';
 import type { TextReasoningEffort } from '@atelier/shared';
 import { nextSseFrame, parseSseFrame, SSE_TERMINATOR_REWIND } from '@atelier/shared/sse';
@@ -34,13 +36,13 @@ import { frameDataText } from '../_sse';
 import {
   createBrainstormRecordAssembler,
   draftBrief,
-  draftResultFromError,
+  DRAFT_TEMPLATE_RESPONSE_FORMAT,
   draftTemplateBrief,
   draftTemplateResultFromContent,
-  enhanceFailureChunk,
-  inferResultFromError,
   parseDraftPayload,
   safeTextDetail,
+  textFailureFromError,
+  unparseableFailure,
   type AiFillProviderInput,
   type AiFillResult,
   type BrainstormCharactersInput,
@@ -58,18 +60,21 @@ import {
   type InferCallOptions,
   type InferResult,
   type RescueDimensionArgs,
+  type RewriteRequest,
+  type RewriteResult,
 } from './featureHelpers';
 import {
-  AI_FILL_BATCH_MAX_COMPLETION_TOKENS,
-  AI_FILL_DEFAULTS,
-  brainstormDefaults,
-  CLIPROXY_TEXT_DEFAULTS,
-  DRAFT_LIST_DEFAULTS,
-  DRAFT_TEMPLATE_DEFAULTS,
-  INFER_DIMENSIONS_DEFAULTS,
+  AI_FILL_BATCH_MAX_OUTPUT_TOKENS,
+  AI_FILL_MAX_OUTPUT_TOKENS,
+  brainstormMaxOutputTokens,
+  DRAFT_LIST_MAX_OUTPUT_TOKENS,
+  DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS,
+  ENHANCE_MAX_OUTPUT_TOKENS,
+  INFER_DIMENSIONS_MAX_OUTPUT_TOKENS,
   pinnedEffortMaxResponseBytes,
 } from './textBudgets';
 import { NOOP_PROVIDER_LOGGER, type ProviderLogger } from '../types';
+import { ANTHROPIC_OPTIONS_KEY } from './anthropic';
 import { classifyApiError, classifyStreamError } from './classify';
 import { boundedFetch, TextResponseTooLargeError } from './fetch';
 import { classifyFinish, incompleteTextStream, TextFinishError } from './finish';
@@ -82,8 +87,9 @@ import type { ResolvedProvider, TextProtocolAdapter } from './protocol';
 //
 // - The cockatiel policy wraps the open (`doStream`) so a failed open is
 //   retried; streams whose deltas reach the client (enhance, brainstorm) drain
-//   outside the policy and are never replayed. Accumulating calls (drafts,
-//   infer, ai-fill, rescue) drain inside it, as before.
+//   outside the policy and are never replayed. Accumulating calls (rewrite,
+//   drafts, infer, ai-fill, rescue) drain inside it, so a mid-stream transient
+//   fault is retried before any text leaves the provider.
 // - The terminal rule (`finish.ts`) and error taxonomy (`classify.ts`).
 // - One reasoning signal per enhance stream.
 // - Body byte caps through the bounded fetch, sized per call.
@@ -103,8 +109,6 @@ import type { ResolvedProvider, TextProtocolAdapter } from './protocol';
 //   skipped here unless the tap saw an upstream error frame there (for
 //   example CLIProxyAPI's pretty-printed multi-line error JSON, which the
 //   SDK parser cannot read).
-// - A non-streaming answer without finish_reason maps to
-//   `{ unified: 'other', raw: undefined }`; the legacy body accepted it.
 
 /** One text call before it is shaped into SDK call options. */
 export interface TextCallRequest {
@@ -177,9 +181,14 @@ export function textCallOptions(
   const strict: SharedV4ProviderOptions = adapter.protocol === 'openai-compatible' && format?.strict !== undefined
     ? { [OPENAI_COMPATIBLE_OPTIONS_KEY]: { strictJsonSchema: format.strict } }
     : {};
+  // The system prompts are large and static per feature, so Anthropic rows
+  // mark the system block as a cache breakpoint (`cache_control` on the wire).
+  const systemCache: SharedV4ProviderOptions | undefined = adapter.protocol === 'anthropic'
+    ? { [ANTHROPIC_OPTIONS_KEY]: { cacheControl: { type: 'ephemeral' } } }
+    : undefined;
   return {
     prompt: [
-      { role: 'system', content: request.systemPrompt },
+      { role: 'system', content: request.systemPrompt, ...(systemCache === undefined ? {} : { providerOptions: systemCache }) },
       { role: 'user', content: userParts },
     ],
     maxOutputTokens: model.fixedOutputTokens ?? request.maxOutputTokens,
@@ -195,10 +204,23 @@ export function textCallOptions(
 
 interface WireTap {
   sawDone: boolean;
-  /** A `[DONE]` or a `finish_reason` frame went by; the tap ends the stream after it. */
+  /** A `[DONE]` or a `finish_reason` frame went by: the answer is complete. */
   ended: boolean;
+  /**
+   * `Date.now()` of the first `finish_reason` frame. From then on only a usage
+   * frame or `[DONE]` is forwarded, and the grace period runs.
+   */
+  finishedAt: number | null;
+  /** The tap forwards nothing more and closes the body. */
+  closed: boolean;
   /** Payloads of upstream error frames not yet matched to an SDK error part. */
   readonly errors: unknown[];
+  /**
+   * `Date.now()` of the last upstream body chunk (or of the response opening).
+   * The stall watchdog measures silence on raw bytes, so keepalive comments and
+   * reasoning the SDK turns into no text part still count as activity.
+   */
+  lastChunkAt: number;
 }
 
 function hasFinishReason(parsed: object): boolean {
@@ -208,27 +230,52 @@ function hasFinishReason(parsed: object): boolean {
     && typeof (choice as { finish_reason?: unknown }).finish_reason === 'string');
 }
 
+function hasUsage(parsed: object): boolean {
+  const usage = (parsed as { usage?: unknown }).usage;
+  return typeof usage === 'object' && usage !== null;
+}
+
+/** How long the tap waits after a `finish_reason` frame for the usage frame or `[DONE]`. */
+export const FINISH_GRACE_MS = 2_000;
+
 // Same decoding as the legacy `decodeChatFrame`: `[DONE]` ends the stream,
 // non-object data is skipped, an `{ error }` body or an `event: error` frame is
-// an upstream error, and the first `finish_reason` ends the stream as well.
-function observeFrame(tap: WireTap, frame: Parameters<typeof frameDataText>[0]): void {
-  if (tap.ended) return;
+// an upstream error. The first `finish_reason` completes the answer, but
+// OpenAI-style servers send usage in a later `choices: []` frame, so the
+// stream ends there only when that frame carries usage itself; otherwise at
+// the next usage frame or `[DONE]`. Returns whether to forward the frame:
+// after the finish frame, content is not part of the answer and is dropped.
+function observeFrame(tap: WireTap, frame: Parameters<typeof frameDataText>[0]): boolean {
+  if (tap.closed) return false;
   const data = frameDataText(frame).trim();
   if (data === '[DONE]') {
     tap.sawDone = true;
     tap.ended = true;
-    return;
+    tap.closed = true;
+    return true;
   }
   const parsed = tryParseJson(data);
-  if (typeof parsed !== 'object' || parsed === null) return;
+  const afterFinish = tap.finishedAt !== null;
+  if (typeof parsed !== 'object' || parsed === null) return !afterFinish;
+  if (afterFinish) {
+    if (!hasUsage(parsed)) return false;
+    tap.closed = true;
+    return true;
+  }
   const errObj = (parsed as { error?: unknown }).error;
   if (frame.event === 'error' || errObj != null) tap.errors.push(errObj ?? parsed);
-  if (hasFinishReason(parsed)) tap.ended = true;
+  if (hasFinishReason(parsed)) {
+    tap.ended = true;
+    tap.finishedAt = Date.now();
+    if (hasUsage(parsed)) tap.closed = true;
+  }
+  return true;
 }
 
 /**
- * Scans SSE frames and returns the text to forward: everything up to and
- * including the frame that ended the stream, nothing after it.
+ * Scans SSE frames and returns the text to forward. Up to the `finish_reason`
+ * frame the text passes through as it arrives; after it, only the whole
+ * frames `observeFrame` lets through (usage, `[DONE]`); nothing once closed.
  */
 function frameScanner(tap: WireTap): { push(chunk: Uint8Array): string; flush(): string } {
   const decoder = new TextDecoder();
@@ -236,18 +283,29 @@ function frameScanner(tap: WireTap): { push(chunk: Uint8Array): string; flush():
   let searchFrom = 0;
   const scan = (text: string): string => {
     buffer += text;
+    let passthrough = tap.finishedAt === null && !tap.closed;
+    let out = passthrough ? text : '';
     for (;;) {
       const next = nextSseFrame(buffer, searchFrom);
       if (!next) {
         searchFrom = Math.max(0, buffer.length - SSE_TERMINATOR_REWIND);
-        return text;
+        return out;
       }
       buffer = next.rest;
       searchFrom = 0;
       const parsed = parseSseFrame(next.raw);
-      if (parsed) observeFrame(tap, { ...parsed, raw: next.raw });
-      // The rest of the buffer (a suffix of `text`) is past the terminal frame.
-      if (tap.ended) return text.slice(0, Math.max(0, text.length - buffer.length));
+      const forward = parsed ? observeFrame(tap, { ...parsed, raw: next.raw }) : passthrough;
+      if (passthrough) {
+        if (tap.finishedAt !== null || tap.closed) {
+          // The rest of the buffer (a suffix of `text`) is past the frame
+          // that completed the answer.
+          out = text.slice(0, Math.max(0, text.length - buffer.length));
+          passthrough = false;
+        }
+      } else if (forward) {
+        out += `${next.raw}\n\n`;
+      }
+      if (tap.closed) return out;
     }
   };
   return {
@@ -256,24 +314,53 @@ function frameScanner(tap: WireTap): { push(chunk: Uint8Array): string; flush():
   };
 }
 
+/** One body read, or `grace-expired` once `deadline` (epoch ms) passes first. */
+async function readBefore<R>(read: Promise<R>, deadline: number): Promise<R | 'grace-expired'> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<'grace-expired'>((resolve) => {
+    timer = setTimeout(() => { resolve('grace-expired'); }, Math.max(0, deadline - Date.now()));
+  });
+  try {
+    return await Promise.race([read, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * The upstream body as the SDK reads it: frames are observed on the way, and
  * the stream closes (cancelling the upstream body) right after the terminal
- * frame. The SDK only emits `finish` when the body closes, so an upstream that
- * holds the connection open after `[DONE]` would otherwise hang the call.
+ * frame, or `graceMs` after the `finish_reason` frame when neither usage nor
+ * `[DONE]` follows. The SDK only emits `finish` when the body closes, so an
+ * upstream that holds the connection open after the answer would otherwise
+ * hang the call.
  */
-function tappedBody(body: ReadableStream<Uint8Array>, tap: WireTap): ReadableStream<Uint8Array> {
+function tappedBody(body: ReadableStream<Uint8Array>, tap: WireTap, graceMs: number): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   const scanner = frameScanner(tap);
   const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
-      const result = await reader.read();
+      let result: Awaited<ReturnType<typeof reader.read>> | 'grace-expired';
+      if (tap.finishedAt === null) {
+        result = await reader.read();
+      } else {
+        // The answer is already complete. A connection that breaks while the
+        // tap waits for the usage frame or `[DONE]` must not turn it into a
+        // failure, so a failed read ends the wait like an expired grace.
+        result = await readBefore(reader.read(), tap.finishedAt + graceMs).catch(() => 'grace-expired' as const);
+      }
+      if (result === 'grace-expired') {
+        controller.close();
+        await reader.cancel().catch(() => undefined);
+        return;
+      }
+      if (!result.done) tap.lastChunkAt = Date.now();
       const text = result.done ? scanner.flush() : scanner.push(result.value);
       if (text.length > 0) controller.enqueue(encoder.encode(text));
       if (result.done) {
         controller.close();
-      } else if (tap.ended) {
+      } else if (tap.closed) {
         controller.close();
         await reader.cancel().catch(() => undefined);
       }
@@ -284,11 +371,12 @@ function tappedBody(body: ReadableStream<Uint8Array>, tap: WireTap): ReadableStr
   });
 }
 
-function tappedFetch(fetch: typeof globalThis.fetch, tap: WireTap): typeof globalThis.fetch {
+function tappedFetch(fetch: typeof globalThis.fetch, tap: WireTap, graceMs: number): typeof globalThis.fetch {
   const tapped = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const response = await fetch(input, init);
     if (!response.ok || response.body === null) return response;
-    return new Response(tappedBody(response.body, tap), {
+    tap.lastChunkAt = Date.now();
+    return new Response(tappedBody(response.body, tap, graceMs), {
       status: response.status,
       statusText: response.statusText,
       headers: response.headers,
@@ -307,9 +395,15 @@ type WireEvent =
   | { readonly type: 'upstream-error'; readonly payload: unknown }
   /**
    * The stream ended. `finish` is null when the upstream sent no finish
-   * reason; `sawDone` then decides between complete and incomplete.
+   * reason; `sawDone` then decides between complete and incomplete. `usage`
+   * is the finish part's token usage, null without a finish part.
    */
-  | { readonly type: 'end'; readonly finish: LanguageModelV4FinishReason | null; readonly sawDone: boolean };
+  | {
+      readonly type: 'end';
+      readonly finish: LanguageModelV4FinishReason | null;
+      readonly sawDone: boolean;
+      readonly usage: LanguageModelV4Usage | null;
+    };
 
 /** Null when the SDK synthesised the finish because the upstream sent none. */
 function upstreamFinish(finish: LanguageModelV4FinishReason): LanguageModelV4FinishReason | null {
@@ -319,32 +413,85 @@ function upstreamFinish(finish: LanguageModelV4FinishReason): LanguageModelV4Fin
 function errorEvent(error: unknown, tap: WireTap): WireEvent | null {
   // The SDK's missing-finish error; the finish part that follows decides.
   if (InvalidResponseDataError.isInstance(error)) return null;
-  if (tap.errors.length > 0) return { type: 'upstream-error', payload: tap.errors.shift() };
+  if (tap.errors.length > 0) {
+    const tapped = tap.errors.shift();
+    // The SDK's provider stream error carries the status it derived from the
+    // frame (Anthropic maps the error type to it), which the raw frame may
+    // lack; its `data` keeps the frame itself.
+    const statusCode = (error as { readonly statusCode?: unknown } | null)?.statusCode;
+    return { type: 'upstream-error', payload: typeof statusCode === 'number' ? error : tapped };
+  }
   if (!(error instanceof Error)) return { type: 'upstream-error', payload: error };
   // A chunk the SDK could not parse and the legacy reader skipped.
   if (JSONParseError.isInstance(error) || TypeValidationError.isInstance(error)) return null;
   throw error;
 }
 
-async function* wireEvents(stream: ReadableStream<LanguageModelV4StreamPart>, tap: WireTap): AsyncGenerator<WireEvent> {
+/**
+ * One read of the SDK stream, failed as a transient in-stream timeout once the
+ * upstream body has been silent for `idleMs`. Silence counts from the later of
+ * the last body chunk and the start of this read, so time the consumer spent
+ * between reads (client backpressure) is never charged to the upstream.
+ */
+async function readBeforeStall<R>(read: Promise<R>, tap: WireTap, idleMs: number): Promise<R> {
+  const readStartedAt = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stalled = new Promise<never>((_, reject) => {
+    const arm = (): void => {
+      const silentMs = Date.now() - Math.max(tap.lastChunkAt, readStartedAt);
+      if (silentMs >= idleMs) {
+        reject(new TransientUpstreamError('in-stream-timeout', null, `upstream stream idle for ${idleMs}ms`));
+        return;
+      }
+      // Bytes arrived since the timer was set: wait out the remainder.
+      timer = setTimeout(arm, idleMs - silentMs);
+    };
+    arm();
+  });
+  try {
+    return await Promise.race([read, stalled]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Marks the first content or reasoning part of the current attempt. */
+function markFirstPart(call: CallRecord): void {
+  call.ttfbMs ??= Date.now() - call.attemptStartedAt;
+}
+
+/** The stream's parts as wire events; records timing, warnings and usage on `opened.call`. */
+async function* wireEvents(opened: OpenedStream, idleMs: number | undefined): AsyncGenerator<WireEvent> {
+  const { stream, tap, call } = opened;
   const reader = stream.getReader();
   try {
     for (;;) {
-      const result = await reader.read();
+      const result = idleMs === undefined ? await reader.read() : await readBeforeStall(reader.read(), tap, idleMs);
       if (result.done) {
-        yield { type: 'end', finish: null, sawDone: tap.sawDone };
+        yield { type: 'end', finish: null, sawDone: tap.sawDone, usage: null };
         return;
       }
       const part = result.value;
       if (part.type === 'text-delta') {
-        if (part.delta.length > 0) yield { type: 'text', text: part.delta };
+        if (part.delta.length > 0) {
+          markFirstPart(call);
+          yield { type: 'text', text: part.delta };
+        }
       } else if (part.type === 'reasoning-delta') {
-        if (part.delta.length > 0) yield { type: 'reasoning' };
+        if (part.delta.length > 0) {
+          markFirstPart(call);
+          yield { type: 'reasoning' };
+        }
+      } else if (part.type === 'stream-start') {
+        call.warnings = part.warnings;
       } else if (part.type === 'error') {
         const event = errorEvent(part.error, tap);
         if (event !== null) yield event;
       } else if (part.type === 'finish') {
-        yield { type: 'end', finish: upstreamFinish(part.finishReason), sawDone: tap.sawDone };
+        const finish = upstreamFinish(part.finishReason);
+        call.finish = finish;
+        call.usage = part.usage;
+        yield { type: 'end', finish, sawDone: tap.sawDone, usage: part.usage };
         return;
       }
     }
@@ -372,10 +519,39 @@ function endError(end: Extract<WireEvent, { type: 'end' }>): Error | null {
   return classifyFinish({ finishReason: end.finish });
 }
 
+/**
+ * The failed chunk for an upstream error frame on an open stream, shared by
+ * enhance and brainstorm: the in-stream classifier picks quota / transient /
+ * permanent, so routes can tell a cool-down or a retryable overload from a
+ * hard failure. The detail is the frame, redacted and capped.
+ */
+function streamFailureChunk(
+  payload: unknown,
+  quotaFloorMs: number,
+): Extract<EnhanceChunk, { type: 'failed' }> & { kind: 'quota' | 'transient' | 'permanent' } {
+  const inStream = classifyStreamError(payload, quotaFloorMs);
+  const detail = safeTextDetail(detailOf(payload));
+  if (inStream instanceof QuotaExhaustedError) {
+    return {
+      type: 'failed',
+      kind: 'quota',
+      status: null,
+      detail,
+      ...(inStream.retryAfterSeconds !== null ? { retryAfterSeconds: inStream.retryAfterSeconds } : {}),
+    };
+  }
+  return { type: 'failed', kind: inStream instanceof TransientUpstreamError ? 'transient' : 'permanent', status: null, detail };
+}
+
 // ---------------------------------------------------------------------------
 // The provider.
 
 export type TextModelProvider = TextFeatureProvider;
+
+/** The ai-fill task name: a call that fills several items at once is a batch. */
+function aiFillTask(input: AiFillProviderInput): string {
+  return (input.batchSize ?? 1) > 1 ? 'ai-fill-batch' : 'ai-fill';
+}
 
 export interface TextModelProviderInit extends TextCallPolicies {
   readonly adapter: TextProtocolAdapter;
@@ -393,14 +569,87 @@ export interface TextModelProviderInit extends TextCallPolicies {
   readonly quotaMinRetryAfterMs?: number;
   readonly enhanceOpenTimeoutMs?: number;
   readonly brainstormOpenTimeoutMs?: number;
+  /**
+   * Fail a streamed call as a transient in-stream timeout after this long with
+   * no upstream body bytes. Absent: no stall watchdog.
+   */
+  readonly streamIdleMs?: number;
   /** The JEV pre-screen key; used when the row has `screenRequests`. */
   readonly moderation?: { readonly openrouterApiKey: string | undefined };
   readonly logger?: ProviderLogger;
+  /**
+   * Ask OpenAI-compatible streams for a trailing usage frame
+   * (`stream_options.include_usage`). Absent: not asked.
+   */
+  readonly includeUsage?: boolean;
+  /** Wait for the usage frame or `[DONE]` after `finish_reason`. Default `FINISH_GRACE_MS`. */
+  readonly finishGraceMs?: number;
+}
+
+/**
+ * What one feature call observed across its attempts, for its `text_call`
+ * event. Timing, usage and finish describe the last attempt. Content-free by
+ * construction: no prompt, output or upstream text is ever stored here.
+ */
+interface CallRecord {
+  attempts: number;
+  attemptStartedAt: number;
+  ttfbMs: number | undefined;
+  usage: LanguageModelV4Usage | null;
+  finish: LanguageModelV4FinishReason | null;
+  warnings: readonly SharedV4Warning[];
+}
+
+function newCallRecord(): CallRecord {
+  return { attempts: 0, attemptStartedAt: Date.now(), ttfbMs: undefined, usage: null, finish: null, warnings: [] };
 }
 
 interface OpenedStream {
   readonly stream: ReadableStream<LanguageModelV4StreamPart>;
   readonly tap: WireTap;
+  readonly call: CallRecord;
+}
+
+/** Token counts the upstream reported; a count it did not send is omitted. */
+function tokenFields(usage: LanguageModelV4Usage | null): Record<string, number> {
+  if (usage === null) return {};
+  const fields: Record<string, number | undefined> = {
+    inputTokens: usage.inputTokens.total,
+    outputTokens: usage.outputTokens.total,
+    reasoningTokens: usage.outputTokens.reasoning,
+    cacheReadTokens: usage.inputTokens.cacheRead,
+  };
+  return Object.fromEntries(Object.entries(fields).filter((entry): entry is [string, number] => typeof entry[1] === 'number'));
+}
+
+/** A warning's identifiers only; its free-text `message` and `details` never reach a log. */
+function warningType(warning: SharedV4Warning): string {
+  switch (warning.type) {
+    case 'unsupported':
+    case 'compatibility':
+      return `${warning.type}:${warning.feature}`;
+    case 'deprecated':
+      return `deprecated:${warning.setting}`;
+    case 'other':
+      return warning.type;
+  }
+}
+
+/** Model rows whose SDK call warnings were logged in this process. */
+const warnedTextModelIds = new Set<string>();
+
+/** The feature result's outcome: `ok` or its failure kind. */
+interface TrackedResult {
+  readonly type: string;
+  readonly kind?: string;
+}
+
+function resultOutcome(result: TrackedResult): string {
+  return result.type === 'failed' ? (result.kind ?? 'failed') : 'ok';
+}
+
+function thrownOutcome(error: unknown): string {
+  return isAbortError(error) ? 'aborted' : 'error';
 }
 
 export function createTextModelProvider(init: TextModelProviderInit): TextModelProvider {
@@ -413,10 +662,12 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
     pinnedEffortMaxResponseBytes(configuredBytes, effectiveEffort(model, userEffort) ?? undefined);
   const {
     enhancePolicy,
+    rewritePolicy,
     draftListPolicy,
     inferPolicy,
     taxonomyPolicy,
     inferRetryGapsPolicy,
+    rescuePolicy,
     aiFillPolicy,
     aiFillBatchPolicy,
   } = init;
@@ -430,10 +681,80 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
     return { ...init.provider, credential: await credential };
   };
 
+  const finishGraceMs = init.finishGraceMs ?? FINISH_GRACE_MS;
+  const modelOptions = init.includeUsage === undefined ? undefined : { includeUsage: init.includeUsage };
+
   /** A language model whose fetch caps the body at `maxBytes` (and taps it when given a tap). */
   const languageModel = async (maxBytes: number, tap?: WireTap): Promise<LanguageModelV4> => {
     const bounded = boundedFetch({ maxBytes });
-    return adapter.languageModel(await resolved(), model, tap === undefined ? bounded : tappedFetch(bounded, tap));
+    const fetch = tap === undefined ? bounded : tappedFetch(bounded, tap, finishGraceMs);
+    return adapter.languageModel(await resolved(), model, fetch, modelOptions);
+  };
+
+  // The single place text calls are logged: one content-free `text_call` per
+  // feature call (retries included, counted in `attempts`), and the SDK's call
+  // warnings once per model row per process.
+  const logCall = (task: string, call: CallRecord, startedAt: number, outcome: string): void => {
+    if (call.warnings.length > 0 && !warnedTextModelIds.has(model.id)) {
+      warnedTextModelIds.add(model.id);
+      logger.warn(
+        { event: 'text_call_warnings', textModelId: model.id, warningTypes: call.warnings.map(warningType) },
+        'text call warnings',
+      );
+    }
+    logger.info({
+      event: 'text_call',
+      task,
+      textModelId: model.id,
+      protocol: adapter.protocol,
+      durationMs: Date.now() - startedAt,
+      ...(call.ttfbMs === undefined ? {} : { ttfbMs: call.ttfbMs }),
+      ...tokenFields(call.usage),
+      ...(call.finish === null ? {} : { finish: call.finish.unified }),
+      outcome,
+      attempts: call.attempts,
+    }, 'text call');
+  };
+
+  /** A whole-result feature method, logged once when it settles. */
+  const tracked = <A extends unknown[], R extends TrackedResult>(
+    task: string | ((...args: A) => string),
+    fn: (call: CallRecord, ...args: A) => Promise<R>,
+  ) => async (...args: A): Promise<R> => {
+    const call = newCallRecord();
+    const startedAt = Date.now();
+    const name = typeof task === 'string' ? task : task(...args);
+    try {
+      const result = await fn(call, ...args);
+      logCall(name, call, startedAt, resultOutcome(result));
+      return result;
+    } catch (error) {
+      logCall(name, call, startedAt, thrownOutcome(error));
+      throw error;
+    }
+  };
+
+  /** A streamed feature method, logged once when the stream ends or its reader stops. */
+  const trackedStream = <A extends unknown[], C extends TrackedResult>(
+    task: string,
+    fn: (call: CallRecord, ...args: A) => AsyncIterable<C>,
+  ) => async function* (...args: A): AsyncIterable<C> {
+    const call = newCallRecord();
+    const startedAt = Date.now();
+    // Ending before a terminal chunk means the reader stopped or the signal fired.
+    let outcome = 'aborted';
+    try {
+      for await (const chunk of fn(call, ...args)) {
+        if (chunk.type === 'done') outcome = 'ok';
+        else if (chunk.type === 'failed') outcome = resultOutcome(chunk);
+        yield chunk;
+      }
+    } catch (error) {
+      outcome = thrownOutcome(error);
+      throw error;
+    } finally {
+      logCall(task, call, startedAt, outcome);
+    }
   };
 
   const moderate = async (request: TextCallRequest, signal: AbortSignal): Promise<void> => {
@@ -443,17 +764,27 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       instructions: request.systemPrompt,
       // JEV is text-only. Never send reference-image bytes or data URLs to it.
       input: (request.images?.length ?? 0) === 0 ? request.user : [request.user],
-    }, signal, { modelLabel: model.displayName });
+    }, signal, { modelLabel: model.displayName, logger });
   };
 
-  /** Opens one stream: screen, then `doStream` (headers received). Typed errors for the policy. */
-  const open = async (request: TextCallRequest, maxBytes: number, signal: AbortSignal): Promise<OpenedStream> => {
-    await moderate(request, signal);
-    const tap: WireTap = { sawDone: false, ended: false, errors: [] };
+  /**
+   * Opens one stream (`doStream`, headers received). Typed errors for the
+   * policy. The screen runs once per call before the policy (see `moderate`
+   * call sites), so a retried open never screens again and an open deadline
+   * never includes it.
+   */
+  const open = async (request: TextCallRequest, maxBytes: number, signal: AbortSignal, call: CallRecord): Promise<OpenedStream> => {
+    const tap: WireTap = { sawDone: false, ended: false, finishedAt: null, closed: false, errors: [], lastChunkAt: Date.now() };
+    // A new attempt: timing, usage and finish describe the last one.
+    call.attempts += 1;
+    call.attemptStartedAt = Date.now();
+    call.ttfbMs = undefined;
+    call.usage = null;
+    call.finish = null;
     try {
       const lm = await languageModel(maxBytes, tap);
       const { stream } = await lm.doStream({ ...textCallOptions(adapter, model, request), abortSignal: signal });
-      return { stream, tap };
+      return { stream, tap, call };
     } catch (error) {
       if (signal.aborted) throw error;
       throw classifyApiError(error, quotaFloorMs);
@@ -467,13 +798,14 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
     maxBytes: number,
     signal: AbortSignal,
     openTimeoutMs: number,
+    call: CallRecord,
   ): Promise<OpenedStream> => {
     const openAc = new AbortController();
     const timeout = setTimeout(() => {
       openAc.abort(new DOMException('open timeout', 'TimeoutError'));
     }, openTimeoutMs);
     try {
-      return await open(request, maxBytes, AbortSignal.any([signal, openAc.signal]));
+      return await open(request, maxBytes, AbortSignal.any([signal, openAc.signal]), call);
     } catch (error) {
       if (!signal.aborted && openAc.signal.aborted) {
         throw new TransientUpstreamError('timeout', error, detailOf(error));
@@ -484,10 +816,10 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
     }
   };
 
-  const accumulate = async ({ stream, tap }: OpenedStream, signal: AbortSignal): Promise<string> => {
+  const accumulate = async (opened: OpenedStream, signal: AbortSignal): Promise<string> => {
     let acc = '';
     try {
-      for await (const event of wireEvents(stream, tap)) {
+      for await (const event of wireEvents(opened, init.streamIdleMs)) {
         if (signal.aborted) throw new DOMException('aborted', 'AbortError');
         if (event.type === 'text') acc += event.text;
         else if (event.type === 'upstream-error') throw classifyStreamError(event.payload, quotaFloorMs);
@@ -504,13 +836,22 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
   };
 
   /** Open and drain inside the policy: nothing reaches the caller before the text is complete. */
-  const callWithPolicy = (policy: IPolicy, outerSignal: AbortSignal, request: TextCallRequest, maxBytes: number): Promise<string> =>
-    policy.execute(async ({ signal }) => {
+  const callWithPolicy = async (
+    call: CallRecord,
+    policy: IPolicy,
+    outerSignal: AbortSignal,
+    request: TextCallRequest,
+    maxBytes: number,
+  ): Promise<string> => {
+    await moderate(request, outerSignal);
+    return policy.execute(async ({ signal }) => {
       if (signal.aborted) throw signal.reason ?? new DOMException('aborted', 'AbortError');
-      return accumulate(await open(request, maxBytes, signal), signal);
+      return accumulate(await open(request, maxBytes, signal, call), signal);
     }, outerSignal);
+  };
 
   const inferWithPolicy = async (
+    call: CallRecord,
     policy: IPolicy,
     snapshotJson: string,
     signal: AbortSignal,
@@ -518,8 +859,8 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
     userEffort?: TextReasoningEffort,
   ): Promise<InferResult> => {
     try {
-      const text = await callWithPolicy(policy, signal, {
-        maxOutputTokens: INFER_DIMENSIONS_DEFAULTS.max_completion_tokens,
+      const text = await callWithPolicy(call, policy, signal, {
+        maxOutputTokens: INFER_DIMENSIONS_MAX_OUTPUT_TOKENS,
         systemPrompt,
         user: snapshotJson,
         responseFormat: 'json_object',
@@ -528,44 +869,55 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       const ops = parseInferPayload(text);
       // Model output can vary on another attempt; let chunk retry-gaps recover
       // without accepting a proposal with silently discarded operations.
-      if (!ops) return { type: 'failed', kind: 'transient', status: null, detail: 'unparseable infer response' };
+      if (!ops) return unparseableFailure('unparseable infer response');
       return { type: 'ok', ops };
     } catch (err) {
       if (signal.aborted) throw err;
       if (isAbortError(err)) throw err;
-      return inferResultFromError(err);
+      return textFailureFromError(err);
     }
   };
 
+  /** The enhance request of one call, shared by `enhance` and `rewrite`. */
+  const enhanceRequest = (
+    prompt: string,
+    images: readonly EnhanceImageInput[],
+    systemPrompt: string | undefined,
+    opts: EnhanceCallOptions | undefined,
+  ): TextCallRequest => ({
+    maxOutputTokens: opts?.maxOutputTokens ?? ENHANCE_MAX_OUTPUT_TOKENS,
+    systemPrompt: systemPrompt ?? ENHANCE_SYSTEM_PROMPT,
+    user: prompt,
+    images,
+    ...(opts?.responseFormat ? { responseFormat: opts.responseFormat } : {}),
+    ...withUserEffort(opts?.reasoningEffort),
+  });
+
   return {
-    async *enhance(
+    enhance: trackedStream('enhance', async function* (
+      call: CallRecord,
       prompt: string,
       images: readonly EnhanceImageInput[],
       signal: AbortSignal,
       systemPrompt?: string,
       opts?: EnhanceCallOptions,
     ): AsyncIterable<EnhanceChunk> {
-      const request: TextCallRequest = {
-        maxOutputTokens: (opts?.defaults ?? CLIPROXY_TEXT_DEFAULTS).max_completion_tokens,
-        systemPrompt: systemPrompt ?? ENHANCE_SYSTEM_PROMPT,
-        user: prompt,
-        images,
-        ...(opts?.responseFormat ? { responseFormat: opts.responseFormat } : {}),
-        ...withUserEffort(opts?.reasoningEffort),
-      };
+      const request = enhanceRequest(prompt, images, systemPrompt, opts);
       let opened: OpenedStream;
       try {
+        await moderate(request, signal);
         opened = await enhancePolicy.execute(
           ({ signal: policySignal }) => openWithTimeout(
             request,
             responseCap(init.maxResponseBytes, opts?.reasoningEffort),
             AbortSignal.any([policySignal, signal]),
             init.enhanceOpenTimeoutMs ?? 15_000,
+            call,
           ),
           signal,
         );
       } catch (error) {
-        yield enhanceFailureChunk(error);
+        yield textFailureFromError(error);
         return;
       }
 
@@ -574,12 +926,12 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       let sawContent = false;
       let sawReasoning = false;
       try {
-        for await (const event of wireEvents(opened.stream, opened.tap)) {
+        for await (const event of wireEvents(opened, init.streamIdleMs)) {
           if (signal.aborted) return;
           if (event.type === 'upstream-error') {
             // Surface an in-stream failure with detail rather than letting it
             // degrade to a silent "ended without content".
-            yield { type: 'failed', status: null, detail: safeTextDetail(detailOf(event.payload)) };
+            yield streamFailureChunk(event.payload, quotaFloorMs);
             return;
           }
           if (event.type === 'reasoning') {
@@ -605,7 +957,7 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
         }
       } catch (error) {
         if (signal.aborted) throw error;
-        yield enhanceFailureChunk(bodyReadError(error));
+        yield textFailureFromError(bodyReadError(error));
         return;
       }
 
@@ -614,13 +966,38 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
         return;
       }
       yield { type: 'failed', status: null, detail: 'stream ended without content' };
-    },
+    }),
 
-    async *brainstormCharacters(input: BrainstormCharactersInput, signal: AbortSignal): AsyncIterable<BrainstormChunk> {
+    rewrite: tracked('rewrite', async (call: CallRecord, rewriteRequest: RewriteRequest, signal: AbortSignal): Promise<RewriteResult> => {
+      const { prompt, images, systemPrompt, ...opts } = rewriteRequest;
+      try {
+        const text = await callWithPolicy(
+          call,
+          rewritePolicy,
+          signal,
+          enhanceRequest(prompt, images ?? [], systemPrompt, opts),
+          responseCap(init.maxResponseBytes, opts.reasoningEffort),
+        );
+        // Like enhance, a clean finish with no text is a failure. Output
+        // varies between attempts, so it is transient.
+        if (text.length === 0) return unparseableFailure('stream ended without content');
+        return { type: 'ok', text };
+      } catch (err) {
+        if (signal.aborted) throw err;
+        if (isAbortError(err)) throw err;
+        return textFailureFromError(err);
+      }
+    }),
+
+    brainstormCharacters: trackedStream('brainstorm', async function* (
+      call: CallRecord,
+      input: BrainstormCharactersInput,
+      signal: AbortSignal,
+    ): AsyncIterable<BrainstormChunk> {
       // Budget and cap follow the effort actually sent, which can be the row default.
       const sentEffort = effectiveEffort(model, input.reasoningEffort) ?? undefined;
       const request: TextCallRequest = {
-        maxOutputTokens: brainstormDefaults(input.count, sentEffort).max_completion_tokens,
+        maxOutputTokens: brainstormMaxOutputTokens(input.count, sentEffort),
         systemPrompt: buildBrainstormSystemPrompt({
           count: input.count,
           modelId: input.modelId,
@@ -633,53 +1010,35 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       };
       let opened: OpenedStream;
       try {
+        // Screens for this model row only; a failover to another model
+        // calls that model's brainstormCharacters, which screens for its row.
+        await moderate(request, signal);
         opened = await enhancePolicy.execute(
           ({ signal: policySignal }) => openWithTimeout(
             request,
             pinnedEffortMaxResponseBytes(init.brainstormMaxResponseBytes ?? init.maxResponseBytes, sentEffort),
             AbortSignal.any([policySignal, signal]),
             init.brainstormOpenTimeoutMs ?? init.enhanceOpenTimeoutMs ?? 15_000,
+            call,
           ),
           signal,
         );
       } catch (error) {
-        const chunk = enhanceFailureChunk(error);
-        if (chunk.type === 'failed') {
-          const contentFilter = isLikelyContentFilterFailure(chunk.detail);
-          yield {
-            type: 'failed',
-            ...(contentFilter
-              ? { kind: 'content-filter' as const }
-              : chunk.kind !== undefined ? { kind: chunk.kind } : {}),
-            status: chunk.status,
-            detail: chunk.detail,
-            ...(chunk.moderation ? { moderation: chunk.moderation } : {}),
-            ...(chunk.retryAfterSeconds !== undefined ? { retryAfterSeconds: chunk.retryAfterSeconds } : {}),
-          };
-        } else {
-          yield { type: 'failed', kind: 'permanent' as const, status: null, detail: 'brainstorm open failed' };
-        }
+        const failure = textFailureFromError(error);
+        yield isLikelyContentFilterFailure(failure.detail) ? { ...failure, kind: 'content-filter' } : failure;
         return;
       }
 
       const records = createBrainstormRecordAssembler(input, logger);
       try {
-        for await (const event of wireEvents(opened.stream, opened.tap)) {
+        for await (const event of wireEvents(opened, init.streamIdleMs)) {
           if (signal.aborted) return;
           if (event.type === 'upstream-error') {
-            const detail = safeTextDetail(detailOf(event.payload));
             // Refusal wording wins, then the in-stream classifier decides
             // quota / transient / permanent so the route's failover sees a
             // mid-stream upstream timeout as transient.
-            const inStream = classifyStreamError(event.payload, quotaFloorMs);
-            const kind = isLikelyContentFilterFailure(detail)
-              ? 'content-filter' as const
-              : inStream instanceof QuotaExhaustedError
-                ? 'quota' as const
-                : inStream instanceof TransientUpstreamError
-                  ? 'transient' as const
-                  : 'permanent' as const;
-            yield { type: 'failed', kind, status: null, detail };
+            const failure = streamFailureChunk(event.payload, quotaFloorMs);
+            yield isLikelyContentFilterFailure(failure.detail) ? { ...failure, kind: 'content-filter' } : failure;
             return;
           }
           if (event.type === 'text') {
@@ -712,8 +1071,7 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
         } else if (error instanceof TextFinishError && error.reason === 'length') {
           yield { type: 'failed', status: null, detail: 'length' };
         } else if (error instanceof TextFinishError || error instanceof TransientUpstreamError) {
-          const failure = enhanceFailureChunk(error);
-          if (failure.type === 'failed') yield failure;
+          yield textFailureFromError(error);
         } else {
           const tooLarge = error instanceof TextResponseTooLargeError;
           yield {
@@ -727,62 +1085,58 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       }
 
       yield* records.finish();
-    },
+    }),
 
-    async draftList(input: DraftListProviderInput, signal: AbortSignal): Promise<DraftResult> {
+    draftList: tracked('draft-list', async (call: CallRecord, input: DraftListProviderInput, signal: AbortSignal): Promise<DraftResult> => {
       try {
-        const text = await callWithPolicy(draftListPolicy, signal, {
-          maxOutputTokens: DRAFT_LIST_DEFAULTS.max_completion_tokens,
+        const text = await callWithPolicy(call, draftListPolicy, signal, {
+          maxOutputTokens: DRAFT_LIST_MAX_OUTPUT_TOKENS,
           systemPrompt: imageAuthoringSystemPrompt(DRAFT_LIST_SYSTEM_PROMPT, input.modelId),
           user: draftBrief(input),
           responseFormat: 'json_object',
           ...withUserEffort(input.reasoningEffort),
         }, responseCap(init.maxResponseBytes, input.reasoningEffort));
         const payload = parseDraftPayload(text);
-        if (!payload) return { type: 'failed', status: null, detail: 'unparseable draft response' };
+        if (!payload) return unparseableFailure('unparseable draft response');
         return { type: 'ok', payload };
       } catch (err) {
         if (signal.aborted) throw err;
         if (isAbortError(err)) throw err;
-        return draftResultFromError(err);
+        return textFailureFromError(err);
       }
-    },
+    }),
 
-    // Non-streaming and outside any policy, as before.
-    async draftTemplate(input: DraftTemplateProviderInput, signal: AbortSignal): Promise<DraftTemplateResult> {
+    // The list draft's policy: an interactive draft the user is waiting on.
+    draftTemplate: tracked('draft-template', async (
+      call: CallRecord,
+      input: DraftTemplateProviderInput,
+      signal: AbortSignal,
+    ): Promise<DraftTemplateResult> => {
       const knownNames = new Set(input.library.lists.map((l) => l.name));
-      const request: TextCallRequest = {
-        maxOutputTokens: DRAFT_TEMPLATE_DEFAULTS.max_completion_tokens,
-        systemPrompt: imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, input.modelId),
-        user: draftTemplateBrief(input),
-        ...withUserEffort(input.reasoningEffort),
-      };
-      let result: Awaited<ReturnType<LanguageModelV4['doGenerate']>>;
       try {
-        await moderate(request, signal);
-        const lm = await languageModel(responseCap(init.maxResponseBytes, input.reasoningEffort));
-        result = await lm.doGenerate({ ...textCallOptions(adapter, model, request), abortSignal: signal });
+        const text = await callWithPolicy(call, draftListPolicy, signal, {
+          maxOutputTokens: DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS,
+          systemPrompt: imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, input.modelId),
+          user: draftTemplateBrief(input),
+          responseFormat: DRAFT_TEMPLATE_RESPONSE_FORMAT,
+          ...withUserEffort(input.reasoningEffort),
+        }, responseCap(init.maxResponseBytes, input.reasoningEffort));
+        return draftTemplateResultFromContent(text, knownNames);
       } catch (err) {
         if (signal.aborted) throw err;
         if (isAbortError(err)) throw err;
-        return draftTemplateFailure(err);
+        return textFailureFromError(err);
       }
-      const finish = upstreamFinish(result.finishReason);
-      const finishError = finish === null ? null : classifyFinish({ finishReason: finish });
-      if (finishError) return draftResultFromError(finishError);
-      const textParts = result.content.filter((part): part is { type: 'text'; text: string } => part.type === 'text');
-      if (textParts.length === 0) return { type: 'failed', status: null, detail: 'unparseable draft response' };
-      return draftTemplateResultFromContent(textParts.map((part) => part.text).join(''), knownNames, null);
-    },
+    }),
 
-    async aiFill(input: AiFillProviderInput, signal: AbortSignal): Promise<AiFillResult> {
+    aiFill: tracked<[AiFillProviderInput, AbortSignal], AiFillResult>(aiFillTask, async (call: CallRecord, input: AiFillProviderInput, signal: AbortSignal): Promise<AiFillResult> => {
       try {
         const batchSize = input.batchSize ?? 1;
         const isBatch = batchSize > 1;
         const maxOutputTokens = isBatch
-          ? Math.min(AI_FILL_DEFAULTS.max_completion_tokens * batchSize, AI_FILL_BATCH_MAX_COMPLETION_TOKENS)
-          : AI_FILL_DEFAULTS.max_completion_tokens;
-        const text = await callWithPolicy(isBatch ? aiFillBatchPolicy : aiFillPolicy, signal, {
+          ? Math.min(AI_FILL_MAX_OUTPUT_TOKENS * batchSize, AI_FILL_BATCH_MAX_OUTPUT_TOKENS)
+          : AI_FILL_MAX_OUTPUT_TOKENS;
+        const text = await callWithPolicy(call, isBatch ? aiFillBatchPolicy : aiFillPolicy, signal, {
           maxOutputTokens,
           systemPrompt: input.systemPrompt,
           user: input.userContent,
@@ -792,25 +1146,25 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       } catch (err) {
         if (signal.aborted) throw err;
         if (isAbortError(err)) throw err;
-        const failed = inferResultFromError(err);
-        if (failed.type === 'failed') return failed;
-        throw err;
+        return textFailureFromError(err);
       }
-    },
+    }),
 
-    inferDimensions(snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions): Promise<InferResult> {
-      return inferWithPolicy(inferPolicy, snapshotJson, signal, systemPrompt, opts?.reasoningEffort);
-    },
+    inferDimensions: tracked('infer', (call: CallRecord, snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions) =>
+      inferWithPolicy(call, inferPolicy, snapshotJson, signal, systemPrompt, opts?.reasoningEffort)),
 
-    inferTaxonomy(snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions): Promise<InferResult> {
-      return inferWithPolicy(taxonomyPolicy, snapshotJson, signal, systemPrompt, opts?.reasoningEffort);
-    },
+    inferTaxonomy: tracked('taxonomy', (call: CallRecord, snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions) =>
+      inferWithPolicy(call, taxonomyPolicy, snapshotJson, signal, systemPrompt, opts?.reasoningEffort)),
 
-    inferDimensionsSingleAttempt(snapshotJson: string, signal: AbortSignal, systemPrompt?: string, opts?: InferCallOptions): Promise<InferResult> {
-      return inferWithPolicy(inferRetryGapsPolicy, snapshotJson, signal, systemPrompt, opts?.reasoningEffort);
-    },
+    inferDimensionsSingleAttempt: tracked('infer-retry-gaps', (
+      call: CallRecord,
+      snapshotJson: string,
+      signal: AbortSignal,
+      systemPrompt?: string,
+      opts?: InferCallOptions,
+    ) => inferWithPolicy(call, inferRetryGapsPolicy, snapshotJson, signal, systemPrompt, opts?.reasoningEffort)),
 
-    async rescueDimension(args: RescueDimensionArgs, signal: AbortSignal): Promise<InferResult> {
+    rescueDimension: tracked('rescue', async (call: CallRecord, args: RescueDimensionArgs, signal: AbortSignal): Promise<InferResult> => {
       // Single-shot per rescue cap; the single-attempt retry-gaps policy keeps
       // a structural 4xx `permanent` and a flapping 5xx `transient`.
       const lists = args.previewSnapshot.lists;
@@ -824,8 +1178,8 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
         conflictReason: args.conflictReason,
       });
       try {
-        const text = await callWithPolicy(inferRetryGapsPolicy, signal, {
-          maxOutputTokens: INFER_DIMENSIONS_DEFAULTS.max_completion_tokens,
+        const text = await callWithPolicy(call, rescuePolicy, signal, {
+          maxOutputTokens: INFER_DIMENSIONS_MAX_OUTPUT_TOKENS,
           systemPrompt: imageAuthoringSystemPrompt(RESCUE_DIMENSION_SYSTEM_PROMPT, args.modelId),
           user,
           responseFormat: RESCUE_RESPONSE_FORMAT,
@@ -839,29 +1193,12 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       } catch (err) {
         if (signal.aborted) throw err;
         if (isAbortError(err)) throw err;
-        return inferResultFromError(err);
+        return textFailureFromError(err);
       }
-    },
+    }),
 
     inferBreakerState() {
       return policyBreakerState(inferPolicy);
     },
   };
-}
-
-// The legacy draft-template call read the body itself: an HTTP failure kept its
-// status and raw body, an oversized or unreadable 2xx answer was a plain
-// failure, a transport error went through the shared mapper.
-function draftTemplateFailure(err: unknown): Extract<DraftTemplateResult, { type: 'failed' }> {
-  const tooLarge = classifyApiError(err, Number.POSITIVE_INFINITY) instanceof TextResponseTooLargeError;
-  const status = APICallError.isInstance(err) ? err.statusCode ?? null : null;
-  if (tooLarge) return { type: 'failed', status, detail: 'response too large' };
-  if (APICallError.isInstance(err) && status !== null) {
-    if (status >= 400) return { type: 'failed', status, detail: safeTextDetail(err.responseBody ?? '').slice(0, 500) };
-    return { type: 'failed', status, detail: 'unparseable draft response' };
-  }
-  if (InvalidResponseDataError.isInstance(err) || TypeValidationError.isInstance(err) || JSONParseError.isInstance(err)) {
-    return { type: 'failed', status: null, detail: 'unparseable draft response' };
-  }
-  return draftResultFromError(err);
 }

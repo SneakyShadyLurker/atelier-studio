@@ -8,6 +8,7 @@ import { failBatchAtDequeue, revalidateAtDequeue, type DequeueContext } from './
 import * as queue from './queue';
 import type { QueueEntry } from './queue';
 import { consumePause } from './upstreamGate';
+import { localHostUnavailable, noteLocalHostAvailability } from './localHostGate';
 import { isStorageSealed } from '../storage/crypto';
 import { createReservationReleaser, type ReservationReleaser } from './concurrency';
 
@@ -353,6 +354,14 @@ function findNextAcquirable(pool: Pool, ctx: DequeueRuntimeContext, excludedUser
     if (entryExceedsCurrentCaps(pool, ctx, entry)) {
       settleOrPark(pool, ctx, entry, 'internal error');
       continue;
+    }
+    // A host-level outage of the single local host is a pause, not a verdict:
+    // hold the head before claiming it (a probe token included) and make sure
+    // the gate is open, so its timer and ceiling own the wait. Row-level
+    // offline still reaches revalidation and fails there.
+    if (pool === 'local' && localHostUnavailable(entry.modelId)) {
+      noteLocalHostAvailability(false);
+      return undefined;
     }
     const acquired = ctx.acquireFor(pool, entry.userId, entry.count);
     return acquired.ok ? entry : undefined;

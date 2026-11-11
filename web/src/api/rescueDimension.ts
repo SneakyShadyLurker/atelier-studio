@@ -1,6 +1,7 @@
 import type {
   RescueBundle,
   RescueDimensionsRequest,
+  RescueFailedPayload,
   TemplateConflict,
 } from '@atelier/shared';
 import { ApiError } from './client';
@@ -26,10 +27,9 @@ function isRescueDonePayload(value: unknown): value is {
     && value.conflicts.every(isTemplateConflict);
 }
 
-function isRescueFailedPayload(value: unknown): value is {
-  reason: string;
-  conflicts?: readonly TemplateConflict[];
-} {
+// Checks only the fields this client reads; the optional `code`,
+// `retryAfterSeconds` and `moderation` pass through unchecked.
+function isRescueFailedPayload(value: unknown): value is RescueFailedPayload {
   if (!isRecord(value) || typeof value.reason !== 'string') return false;
   if (value.conflicts === undefined) return true;
   return Array.isArray(value.conflicts) && value.conflicts.every(isTemplateConflict);

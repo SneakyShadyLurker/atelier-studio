@@ -5,11 +5,12 @@ import { withLlmSlot } from '../lifecycle/withLlmSlot';
 import { enhancePool } from '../orchestrator/llmAdmission';
 import type { EnhanceCallOptions, EnhanceImageInput } from '../providers/text/featureHelpers';
 import { textModelFailureBody, textProviderForResolved } from '../providers/textRouting';
-import { AI_FILL_DEFAULTS, MOTION_ENHANCE_DEFAULTS, textStreamDrainMs } from '../providers/text/textBudgets';
+import { ENHANCE_MAX_OUTPUT_TOKENS, MOTION_ENHANCE_MAX_OUTPUT_TOKENS, textStreamDrainMs } from '../providers/text/textBudgets';
 import { videoDurationSeconds } from '@atelier/shared';
 import { motionEnhanceSystemPrompt } from '../prompts/motionEnhanceSystemPrompt';
 import { motionExtendEnhanceSystemPrompt } from '../prompts/motionExtendEnhanceSystemPrompt';
-import { failedToSseError } from '../lifecycle/llm-error';
+import { textFailureToSseError } from '../lifecycle/llm-error';
+import { validateRewrite } from '../orchestrator/rewriteBatchPrompt';
 import { EnhancePromptRequestSchema } from './enhance.schema';
 import { parseBody } from './_http';
 import { loadRefImages, refImageByteTotal } from '../orchestrator/refImages';
@@ -26,6 +27,7 @@ import { classifyImageModelTarget, isLocalOpenWeightsTarget, type ImageModelTarg
 import { StorageSealedError } from '../storage/crypto';
 
 const SAFE_ERROR_MESSAGE = 'Couldn’t enhance the prompt. Please try again.';
+const REFUSAL_ERROR_MESSAGE = 'The writer refused this prompt. Nothing was sent to the image model.';
 
 const LOCAL_ENHANCE_SYSTEM_PROMPTS: Record<Extract<ImageModelTarget, 'krea' | 'moss' | 'h3image'>, string> = {
   krea: KREA_ENHANCE_SYSTEM_PROMPT,
@@ -82,7 +84,7 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
           previousMotionPrompt: extendContext.previousMotionPrompt,
         });
     systemPrompt = motionSystemPrompt;
-    enhanceOpts = { defaults: MOTION_ENHANCE_DEFAULTS };
+    enhanceOpts = { maxOutputTokens: MOTION_ENHANCE_MAX_OUTPUT_TOKENS };
     handoffUploadIdForVision = extendContext?.handoffUploadId;
     // The handoff frame is sent to the writer, so it needs a vision model.
     visionRequired = handoffUploadIdForVision !== undefined;
@@ -101,7 +103,7 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
       : isLocalOpenWeightsTarget(target)
       ? LOCAL_ENHANCE_SYSTEM_PROMPTS[target]
       : isSunburstModel(entry?.model.id) ? SUNBURST_ENHANCE_SYSTEM_PROMPT : undefined;
-    enhanceOpts = { defaults: AI_FILL_DEFAULTS };
+    enhanceOpts = { maxOutputTokens: ENHANCE_MAX_OUTPUT_TOKENS };
   }
   // The image model selects its prompt writer, if one is set.
   const resolved = c.var.text.resolve({
@@ -139,7 +141,7 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
       let settled = false;
       const fail = (event: string): void => {
         logger.error({ event, timeoutMs, userId }, 'prompt enhance did not complete');
-        send('error', { message: SAFE_ERROR_MESSAGE });
+        send('error', textFailureToSseError(null, SAFE_ERROR_MESSAGE));
       };
       try {
         let images: EnhanceImageInput[] = [];
@@ -191,24 +193,35 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
             );
           }
         }
+        // Deltas stream to the client as they arrive; the server keeps a copy
+        // so the finished rewrite gets the same refusal check as every other
+        // rewrite before `done` lets the client generate from it.
+        let rewritten = '';
         try {
           for await (const chunk of provider.enhance(prompt, images, signal, systemPrompt, enhanceOpts)) {
             if (signal.aborted) break;
             if (chunk.type === 'delta') {
+              rewritten += chunk.text;
               send('delta', { text: chunk.text });
             } else if (chunk.type === 'reasoning') {
               // The enhance stream carries text only; the client accumulates the
               // deltas and generates from the finished rewrite.
               continue;
             } else if (chunk.type === 'done') {
-              send('done', {});
+              const checked = validateRewrite(rewritten);
+              if (!checked.ok && checked.reason === 'refusal') {
+                logger.warn({ event: 'enhance_refusal', userId }, 'prompt enhance returned a refusal');
+                send('error', { message: REFUSAL_ERROR_MESSAGE, code: 'refusal' });
+              } else {
+                send('done', {});
+              }
               settled = true;
             } else {
               logger.warn(
-                { event: 'enhance_upstream_error', status: chunk.status, detail: chunk.detail, userId },
+                { event: 'enhance_upstream_error', textModelId: resolved.model.id, failureKind: chunk.kind, status: chunk.status, userId },
                 'prompt enhance failed',
               );
-              send('error', failedToSseError(chunk));
+              send('error', textFailureToSseError(chunk, SAFE_ERROR_MESSAGE));
               settled = true;
             }
           }
@@ -233,7 +246,7 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
             { err: error, event: timedOut() ? 'enhance_timeout' : 'enhance_stream_error', timeoutMs, userId },
             timedOut() ? 'prompt enhance timed out' : 'prompt enhance stream crashed',
           );
-          send('error', { message: SAFE_ERROR_MESSAGE });
+          send('error', textFailureToSseError(null, SAFE_ERROR_MESSAGE));
         }
       }
     },

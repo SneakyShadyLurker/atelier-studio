@@ -4,7 +4,8 @@ import { AI_FILL_MAX_SLOTS, hasAiFillTokens, parseAiFillTokens } from '@atelier/
 import { addTransitionType, memo, startTransition, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, ViewTransition, type RefObject } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { textModelsOpts } from '../../api/textModels';
-import { refImageUrl, uploadRefImage } from '../../api/uploads';
+import { refImageThumbUrl, uploadRefImage } from '../../api/uploads';
+import { useCachedMedia } from '../../hooks/useCachedMedia';
 import { useHistoryWorkRunning } from '../../hooks/useHistoryWorkRunning';
 import { COMPOSER_BODY_UPDATE, COMPOSER_PARTS_TRANSITION, composerPartsReshaped } from '../../lib/composerMotion';
 import { beginSourceHandoff, supersedeSourceHandoffs } from '../../lib/composerSourceHandoff';
@@ -67,6 +68,13 @@ function countLiveTokens(value: string): number {
     matches = remaining.match(leafMacroPattern);
   }
   return variables + macros;
+}
+
+// The source still is shown at chip size, so it reads the upload's thumbnail
+// through the session media cache instead of the full, no-store original.
+function SourceStillThumb({ uploadId }: { uploadId: string }) {
+  const { src } = useCachedMedia(refImageThumbUrl(uploadId));
+  return <img src={src} alt="Source still" draggable={false} />;
 }
 
 function formatCheckedAgo(checkedAt: number): string {
@@ -1018,7 +1026,7 @@ function Composer({
                   data-uploading={sourceUploading ? 'true' : undefined}
                   data-composing={resolving > 0 ? 'true' : undefined}
                 >
-                  <img src={refImageUrl(i2vSourceUploadId)} alt="Source still" draggable={false} />
+                  <SourceStillThumb uploadId={i2vSourceUploadId} />
                   {sourceUploading && <span className={styles.sourceThumbSpinner} aria-hidden="true" />}
                   <button
                     type="button"

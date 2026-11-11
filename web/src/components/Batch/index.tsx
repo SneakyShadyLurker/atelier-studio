@@ -1,7 +1,7 @@
 import type { Batch, Collection, DoneTile, Model, Tile } from '@atelier/shared';
 import { isVideoMime } from '@atelier/shared';
 import { memo, useCallback, useDeferredValue, useEffect, useRef, useState, ViewTransition } from 'react';
-import { refImageUrl } from '../../api/uploads';
+import { refImageThumbUrl } from '../../api/uploads';
 import { sequenceMasterUrl } from '../../api/sequences';
 import { findI2VModel } from '../../lib/i2v';
 import { queueLabel } from '../../lib/queueLabel';
@@ -155,7 +155,7 @@ function TileRowImpl({
         queueLengthAhead={batch.queueLengthAhead}
         seen={seen}
         isVideo={batchIsVideo}
-        sourceStillUrl={batchIsVideo && batch.i2vSourceUploadId ? refImageUrl(batch.i2vSourceUploadId) : undefined}
+        sourceStillUrl={batchIsVideo && batch.i2vSourceUploadId ? refImageThumbUrl(batch.i2vSourceUploadId) : undefined}
       />
     );
   }

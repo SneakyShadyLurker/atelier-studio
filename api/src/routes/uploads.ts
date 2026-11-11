@@ -1,11 +1,18 @@
-import { Hono } from 'hono';
+import type { Database } from 'bun:sqlite';
+import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { MAX_UPLOAD_FILE_BYTES as SHARED_MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_INPUT_BYTES } from '@atelier/shared';
-import type { TileExt, TileMime } from '@atelier/shared';
+import { TILE_EXTS, TILE_MIMES, type TileExt, type TileMime } from '@atelier/shared';
 import type { AppEnv } from '../server-env';
-import { deleteArtifact, streamArtifact } from '../storage/files';
+import { deleteArtifact, readArtifactBytes, streamArtifact } from '../storage/files';
 import { parseParams } from './_http';
 import { UploadParamSchema } from './uploads.schema';
+import { ImageParamSchema } from './images.schema';
+import { selectDoneTile } from '../db/doneTile';
+import { reportIfCorruption } from '../db/integrity';
+import { StorageSealedError } from '../storage/crypto';
+import { deleteUploadThumbnail, ensureUploadThumbnail, uploadThumbnailKey } from '../storage/thumbnail';
+import { ThumbQueueFullError } from '../storage/thumbRuntime';
 import { UploadQueueFullError, withUploadSlot } from './uploads-runtime';
 import { artifactResponseHeaders, artifactStreamResponse } from './_artifact-response';
 import { isAbortError } from '../lifecycle/abort';
@@ -28,6 +35,44 @@ interface UploadRow {
   ext: TileExt;
   mime: TileMime;
   user_id: string;
+}
+
+function selectUpload(db: Database, uploadId: string, userId: string): UploadRow | null {
+  return db
+    .query<UploadRow, [string, string]>('SELECT ext, mime, user_id FROM uploads WHERE id = ? AND user_id = ?')
+    .get(uploadId, userId);
+}
+
+const tileExts: ReadonlySet<string> = new Set(TILE_EXTS);
+const tileMimes: ReadonlySet<string> = new Set(TILE_MIMES);
+const isTileExt = (ext: string): ext is TileExt => tileExts.has(ext);
+const isTileMime = (mime: string): mime is TileMime => tileMimes.has(mime);
+
+// One owner for turning bytes into a stored upload and its response, so a
+// server-side copy (source-upload) answers exactly like a browser upload.
+async function storeUploadResponse(c: Context<AppEnv>, bytes: Uint8Array): Promise<Response> {
+  try {
+    const response = await storeUpload({
+      db: c.var.db,
+      dataDir: c.var.config.DATA_DIR,
+      logger: c.var.logger,
+      userId: c.var.userId,
+      bytes,
+      signal: c.req.raw.signal,
+    });
+    return c.json(response, 201);
+  } catch (error) {
+    if (error instanceof ImageTooLargeError) return c.json({ error: 'image too large' }, 400);
+    if (error instanceof UnsupportedImageError) return c.json({ error: 'unsupported image' }, 400);
+    if (error instanceof InvalidUploadSizeError) return c.json({ error: 'image too large' }, 400);
+    if (error instanceof TranscodeTimeoutError) {
+      c.var.logger.warn({ userId: c.var.userId }, 'upload transcode timed out');
+      return c.json({ error: 'image processing timed out' }, 400);
+    }
+    if (isAbortError(error)) return new Response(null, { status: 499 });
+    c.var.logger.error({ err: error }, 'upload normalize failed');
+    return c.json({ error: 'internal error' }, 500);
+  }
 }
 
 export const uploadsRoutes = new Hono<AppEnv>()
@@ -77,28 +122,7 @@ export const uploadsRoutes = new Hono<AppEnv>()
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (bytes.byteLength <= 0 || bytes.byteLength > MAX_UPLOAD_INPUT_BYTES) return c.json({ error: 'invalid file size' }, 400);
 
-      try {
-        const response = await storeUpload({
-          db: c.var.db,
-          dataDir: c.var.config.DATA_DIR,
-          logger: c.var.logger,
-          userId: c.var.userId,
-          bytes,
-          signal: c.req.raw.signal,
-        });
-        return c.json(response, 201);
-      } catch (error) {
-        if (error instanceof ImageTooLargeError) return c.json({ error: 'image too large' }, 400);
-        if (error instanceof UnsupportedImageError) return c.json({ error: 'unsupported image' }, 400);
-        if (error instanceof InvalidUploadSizeError) return c.json({ error: 'image too large' }, 400);
-        if (error instanceof TranscodeTimeoutError) {
-          c.var.logger.warn({ userId: c.var.userId }, 'upload transcode timed out');
-          return c.json({ error: 'image processing timed out' }, 400);
-        }
-        if (isAbortError(error)) return new Response(null, { status: 499 });
-        c.var.logger.error({ err: error }, 'upload normalize failed');
-        return c.json({ error: 'internal error' }, 500);
-      }
+      return storeUploadResponse(c, bytes);
     },
   )
   .get('/uploads/:uploadId', async (c) => {
@@ -115,6 +139,47 @@ export const uploadsRoutes = new Hono<AppEnv>()
     return artifactStreamResponse(artifact, artifactResponseHeaders(row.mime), (error) => {
       c.var.logger.error({ err: error, uploadId: params.value.uploadId }, 'artifact_decrypt_failed');
     });
+  })
+  // Small previews of a reference (Lightbox strip, Composer chips, the video
+  // loading backdrop) read this instead of the full original. Same queue,
+  // single flight and headers as /img/:tileId/thumb.
+  .get('/uploads/:uploadId/thumb', async (c) => {
+    const params = parseParams(c, UploadParamSchema);
+    if (!params.ok) return params.response;
+    const { uploadId } = params.value;
+    const row = selectUpload(c.var.db, uploadId, c.var.userId);
+    if (!row) return c.body(null, 404);
+
+    const cached = await streamArtifact(c.var.config.DATA_DIR, 'thumbs', c.var.userId, uploadThumbnailKey(uploadId), 'webp', {
+      signal: c.req.raw.signal,
+    });
+    if (cached) {
+      return artifactStreamResponse(cached, artifactResponseHeaders('image/webp'), (error) => {
+        c.var.logger.error({ err: error, uploadId }, 'artifact_decrypt_failed');
+      });
+    }
+
+    let thumbBytes: Uint8Array;
+    try {
+      thumbBytes = await ensureUploadThumbnail({
+        db: c.var.db, dataDir: c.var.config.DATA_DIR, userId: c.var.userId,
+        uploadId, ext: row.ext, mime: row.mime, logger: c.var.logger,
+      }, c.req.raw.signal);
+    } catch (error) {
+      if (error instanceof ThumbQueueFullError) {
+        c.var.logger.warn({ uploadId }, 'thumb queue full');
+        return c.body(null, 503, { 'Retry-After': '5' });
+      }
+      if (error instanceof StorageSealedError) {
+        c.var.logger.warn({ uploadId }, 'thumb source read while storage sealed');
+        return c.body(null, 503, { 'Retry-After': '5' });
+      }
+      c.var.logger.error({ err: error, uploadId }, 'thumb generation failed');
+      return c.body(null, 500);
+    }
+
+    if (!selectUpload(c.var.db, uploadId, c.var.userId)) return c.body(null, 404);
+    return new Response(thumbBytes, { headers: artifactResponseHeaders('image/webp') });
   })
   .delete('/uploads/:uploadId', (c) => {
     const params = parseParams(c, UploadParamSchema);
@@ -134,5 +199,45 @@ export const uploadsRoutes = new Hono<AppEnv>()
     } catch (error) {
       c.var.logger.warn({ err: error, uploadId: params.value.uploadId }, 'upload artifact delete failed');
     }
+    deleteUploadThumbnail(c.var.config.DATA_DIR, row.user_id, params.value.uploadId, c.var.logger);
     return c.body(null, 204);
+  })
+  // Animate and Tell Story need a finished still as an upload. Copying it here
+  // spares the browser a download and re-upload of the full original; the
+  // bytes go through the same admission, normalization and limits as
+  // POST /uploads, so the stored upload matches what that path would store.
+  // source_tile_id stays unset: it marks a video-extension predecessor, and
+  // an image tile is never one.
+  .post('/tiles/:tileId/source-upload', async (c) => {
+    if (c.req.raw.body) return c.json({ error: 'source upload requests must have no body' }, 400);
+    const params = parseParams(c, ImageParamSchema);
+    if (!params.ok) return params.response;
+    const { tileId } = params.value;
+    // Same visibility as GET /img/:tileId; clips are not reference stills.
+    const tile = selectDoneTile(c.var.db, tileId, c.var.userId);
+    if (!tile || !isTileMime(tile.mime) || !isTileExt(tile.ext)) return c.body(null, 404);
+    const { ext, mime } = tile;
+
+    try {
+      return await withUploadSlot(c.var.userId, async () => {
+        const artifact = await readArtifactBytes(c.var.config.DATA_DIR, 'images', c.var.userId, tileId, ext, mime, {
+          signal: c.req.raw.signal,
+        });
+        if (!artifact) return c.body(null, 404);
+        const { bytes } = artifact;
+        if (bytes.byteLength <= 0 || bytes.byteLength > MAX_UPLOAD_INPUT_BYTES) return c.json({ error: 'invalid file size' }, 400);
+        return storeUploadResponse(c, bytes);
+      }, c.req.raw.signal);
+    } catch (error) {
+      if (isAbortError(error) || c.req.raw.signal.aborted) return new Response(null, { status: 499 });
+      if (error instanceof UploadQueueFullError) {
+        c.var.logger.warn({ userId: c.var.userId }, 'upload queue full');
+        return c.body(null, 503, { 'Retry-After': '5' });
+      }
+      if (error instanceof StorageSealedError) return c.json({ error: 'storage sealed' }, 503, { 'Retry-After': '5' });
+      if (!reportIfCorruption(error, c.var.logger, { phase: 'source_upload', tileId })) {
+        c.var.logger.error({ err: error, tileId }, 'source upload failed');
+      }
+      return c.json({ error: 'internal error' }, 500);
+    }
   });

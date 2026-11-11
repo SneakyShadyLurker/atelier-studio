@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { resilientImageProvider, type GateHook } from './resilientImage';
 import { buildResilientPolicy } from '../lifecycle/resilient-call';
-import type { Provider, ProviderResult } from './types';
+import type { Provider, ProviderGenerateOptions, ProviderResult } from './types';
 
 const noopGate: GateHook = {
   // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -128,6 +128,25 @@ describe('resilientImageProvider', () => {
     const last = (await drain(dec)).at(-1);
     expect(last?.status).toBe('failed');
     expect((last as { error: { reason?: { kind?: string } } }).error.reason?.kind).toBe('service-unavailable');
+  });
+
+  test('forwards the generate options to the wrapped provider', async () => {
+    let seen: ProviderGenerateOptions | undefined;
+    const base: Provider = {
+      id: 'f',
+      backend: 'cloud',
+      async *generate(_request, _signal, options) {
+        await Promise.resolve();
+        seen = options;
+        yield ready;
+      },
+    };
+    const dec = resilientImageProvider(base, { modelId: 'm', pool: 'shared', policy: policy(), gate: noopGate });
+    const options: ProviderGenerateOptions = { executionTimeoutMs: 1234 };
+    const out: ProviderResult[] = [];
+    for await (const f of dec.generate(req, new AbortController().signal, options)) out.push(f);
+    expect(out.at(-1)?.status).toBe('ready');
+    expect(seen).toBe(options);
   });
 
   test('400 content-policy is not retried (single underlying call)', async () => {

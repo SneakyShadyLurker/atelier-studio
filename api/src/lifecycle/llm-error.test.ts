@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { failedToSseError } from './llm-error';
+import { failedToSseError, textFailureToSseError } from './llm-error';
 
 describe('failedToSseError', () => {
   test('quota failure → code quota-exhausted + retryAfterSeconds', () => {
@@ -28,5 +28,25 @@ describe('failedToSseError', () => {
     }).message;
     expect(blocked('text')).toBe('Atelier blocked this request under its content policy.');
     expect(blocked('image')).toBe('Atelier blocked this request under its GPT content policy.');
+  });
+});
+
+describe('textFailureToSseError', () => {
+  const FALLBACK = 'Could not do it. Please try again.';
+  test('a typed failure goes through failedToSseError, quota keeping its retry hint', () => {
+    const failure = { type: 'failed', kind: 'quota', status: 429, detail: 'x', retryAfterSeconds: 60 } as const;
+    expect(textFailureToSseError(failure, FALLBACK)).toEqual(failedToSseError(failure));
+    expect(textFailureToSseError(failure, FALLBACK)).toEqual({ message: 'Codex quota exhausted', code: 'quota-exhausted', retryAfterSeconds: 60 });
+  });
+  test('a moderation failure keeps its notice', () => {
+    const failure: Parameters<typeof failedToSseError>[0] = {
+      type: 'failed', kind: 'moderation-blocked', status: 422, detail: 'x',
+      moderation: { reason: 'graphic-violence', target: 'text', categories: ['graphic-violence'] },
+    };
+    expect(textFailureToSseError(failure, FALLBACK)).toEqual(failedToSseError(failure));
+  });
+  test('a crash or timeout without a typed failure carries the fallback message and provider-error', () => {
+    expect(textFailureToSseError(null, FALLBACK)).toEqual({ message: FALLBACK, code: 'provider-error' });
+    expect(textFailureToSseError(undefined, FALLBACK)).toEqual({ message: FALLBACK, code: 'provider-error' });
   });
 });

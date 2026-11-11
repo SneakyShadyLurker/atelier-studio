@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import { createComfyuiProvider, drainComfyUi } from './comfyui';
 import { TEST_EXECUTION_TIMEOUT_MS, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestTls } from '../test/private-worker-fixture';
@@ -76,7 +76,6 @@ function startMock(opts: {
   interrupted?: boolean;
   nonSamplerProgress?: boolean;
   completionDelayMs?: number;
-  socketOpenDelayMs?: number;
   /** Extra JSON frames sent before the save node executes. */
   frames?: (promptId: string) => unknown[];
 }): string {
@@ -91,9 +90,6 @@ function startMock(opts: {
       if (handled) return handled;
       const url = new URL(req.url);
       if (url.pathname === '/ws') {
-        if (opts.socketOpenDelayMs !== undefined) {
-          await new Promise<void>((resolve) => { setTimeout(resolve, opts.socketOpenDelayMs); });
-        }
         const clientId = url.searchParams.get('clientId') ?? '';
         return srv.upgrade(req, { data: { clientId } }) ? undefined : new Response('upgrade', { status: 426 });
       }
@@ -101,7 +97,8 @@ function startMock(opts: {
       if (url.pathname === '/system_stats') return Response.json({ devices: [{ vram_total: 100, vram_free: 95 }] });
       if (url.pathname === '/prompt' && req.method === 'POST') {
         return req.json().then((body) => {
-          expect((body as { extra_data?: unknown }).extra_data).toEqual({ preview_method: 'auto' });
+          // Preview mode is owned by the lease's `previews` control on the worker.
+          expect(Object.hasOwn(body as object, 'extra_data')).toBe(false);
           const promptId = (body as { prompt_id: string }).prompt_id;
           setTimeout(() => {
             const ws = sockets.get((body as { client_id: string }).client_id);
@@ -188,6 +185,95 @@ function startMock(opts: {
   return `https://127.0.0.1:${server.port}`;
 }
 
+type ScriptedSocket = ServerWebSocket<{ clientId: string }>;
+type Worker = ReturnType<typeof privateWorkerFixture>;
+
+/**
+ * A worker whose socket behaviour each test scripts: `onOpen` runs for every
+ * accepted socket (1-based connection number), `onPrompt` once /prompt is
+ * accepted. `refuseSockets` answers upgrades with 426; `holdSockets` leaves
+ * them pending until `releaseSockets()`.
+ */
+function startScripted(opts: {
+  refuseSockets?: boolean;
+  holdSockets?: boolean;
+  onOpen?: (ws: ScriptedSocket, connection: number, state: ScriptedState) => void;
+  onPrompt?: (promptId: string, worker: Worker, state: ScriptedState) => void;
+}) {
+  const worker = privateWorkerFixture();
+  const state: ScriptedState = { socketAttempts: 0, opens: 0, statusReads: 0, promptId: undefined, socket: undefined, worker };
+  let releaseSockets = () => { /* Replaced below. */ };
+  const socketsReleased = new Promise<void>((resolve) => { releaseSockets = resolve; });
+  const server = Bun.serve<{ clientId: string }>({
+    port: 0,
+    tls: privateWorkerTestTls,
+    idleTimeout: 0,
+    async fetch(req, srv) {
+      const url = new URL(req.url);
+      if (req.method === 'GET' && /^\/atelier\/v1\/jobs\/[^/]+$/.test(url.pathname)) state.statusReads += 1;
+      const handled = worker.handle(req);
+      if (handled) return handled;
+      if (url.pathname === '/ws') {
+        state.socketAttempts += 1;
+        if (opts.holdSockets) await socketsReleased;
+        if (opts.refuseSockets || opts.holdSockets) return new Response('upgrade', { status: 426 });
+        return srv.upgrade(req, { data: { clientId: url.searchParams.get('clientId') ?? '' } }) ? undefined : new Response('upgrade', { status: 426 });
+      }
+      if (url.pathname === '/free') return new Response(null, { status: 200 });
+      if (url.pathname === '/system_stats') return Response.json({ devices: [{ vram_total: 100, vram_free: 95 }] });
+      if (url.pathname === '/prompt' && req.method === 'POST') {
+        const body = await req.json() as { prompt_id: string };
+        state.promptId = body.prompt_id;
+        opts.onPrompt?.(body.prompt_id, worker, state);
+        return Response.json({ prompt_id: body.prompt_id, number: 0, node_errors: {} });
+      }
+      return new Response('not found', { status: 404 });
+    },
+    websocket: {
+      open(ws) {
+        state.opens += 1;
+        state.socket = ws;
+        opts.onOpen?.(ws, state.opens, state);
+      },
+      message() { /* The adapter's feature_flags message needs no answer. */ },
+    },
+  });
+  servers.push({ stop: async () => {
+    releaseSockets();
+    await Promise.race([server.stop(true), new Promise<void>((r) => setTimeout(r, 500))]);
+  } });
+  return { baseUrl: `https://127.0.0.1:${server.port}`, state, releaseSockets };
+}
+
+interface ScriptedState {
+  socketAttempts: number;
+  opens: number;
+  statusReads: number;
+  promptId: string | undefined;
+  socket: ScriptedSocket | undefined;
+  worker: Worker;
+}
+
+/** Records setTimeout delays and shortens the listed ones, leaving the rest real. */
+function recordTimers(shorten: Record<number, number>) {
+  const delays: number[] = [];
+  const nativeTimeout = globalThis.setTimeout;
+  const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    if (ms !== undefined) delays.push(ms);
+    return nativeTimeout(fn, ms !== undefined && Object.hasOwn(shorten, ms) ? shorten[ms] : ms, ...args);
+  }) as typeof setTimeout);
+  return { delays, restore: () => { timer.mockRestore(); } };
+}
+
+/** Waits for a condition; throws after `ms` so a test fails instead of hanging with its spies installed. */
+async function until(condition: () => boolean, ms = 3_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error('condition not reached');
+    await Bun.sleep(2);
+  }
+}
+
 function imageProvider(baseUrl: string, maxResponseBytes = 50 * 1024 * 1024, samplerClass = 'KSampler',
   graph: Record<string, unknown> = { ...IMG_GRAPH, '8': { class_type: samplerClass, inputs: {} } }) {
   return createComfyuiProvider({
@@ -241,15 +327,19 @@ for (const samplerClass of ['KSampler', 'KSamplerAdvanced', 'SamplerCustom', 'Sa
 }
 
 test('socket connection timeout does not prevent authoritative recovery', async () => {
-  const provider = imageProvider(startMock({ saveNode: '9', count: 3, socketOpenDelayMs: 40 }));
+  // The upgrade is held for the whole job, so every open attempt reaches the
+  // (shortened) four-second cap and recovery runs on lease status alone. No
+  // job deadline races the status-poll cadence; the test timeout bounds a hang.
+  const mock = startScripted({ holdSockets: true, onPrompt: (promptId, worker) => { worker.complete(promptId, [PNG_1x1, PNG_1x1, PNG_1x1]); } });
   const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
   const timeout = spyOn(AbortSignal, 'timeout').mockImplementation((ms) => nativeTimeout(ms === 4_000 ? 10 : ms));
   try {
-    const signal = AbortSignal.timeout(2_000);
-    const results = await Array.fromAsync(provider.generate(REQ, signal, { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
+    const signal = new AbortController().signal;
+    const results = await Array.fromAsync(imageProvider(mock.baseUrl).generate(REQ, signal, { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
     expect(results.map((event) => event.status)).toEqual(['ready', 'ready', 'ready']);
-    expect(signal.aborted).toBe(false);
-  } finally { timeout.mockRestore(); }
+    expect(mock.state.socketAttempts).toBeGreaterThanOrEqual(1);
+    expect(mock.state.opens).toBe(0);
+  } finally { timeout.mockRestore(); mock.releaseSockets(); }
 });
 
 for (const delayed of ['headers', 'body'] as const) {
@@ -639,4 +729,149 @@ test('preview buckets follow overall progress across passes', async () => {
   // 25/33 ≈ 0.76 → pass 1 can reach bucket 3 at most; bucket 4 belongs to pass 2.
   const refineUrl = `data:image/png;base64,${Buffer.from(refinePng).toString('base64')}`;
   expect(partials.map((r) => r.preview === refineUrl)).toEqual([false, false, false, false, true]);
+});
+
+test('previews resume after a reconnect from the replayed executing frame', async () => {
+  // ComfyUI replays the running node to a reconnecting client without a
+  // prompt_id; previews on the new socket must keep flowing.
+  const mock = startScripted({
+    onPrompt: (promptId, _worker, state) => {
+      const ws = state.socket;
+      if (!ws) throw new Error('socket not open');
+      ws.send(JSON.stringify({ type: 'executing', data: { node: '8', prompt_id: promptId } }));
+      ws.send(JSON.stringify({ type: 'progress', data: { node: '8', prompt_id: promptId, value: 1, max: 5 } }));
+      ws.send(frameWithHeader(PNG_1x1));
+      ws.close();
+    },
+    onOpen: (ws, connection, state) => {
+      const promptId = state.promptId;
+      if (connection !== 2 || promptId === undefined) return;
+      ws.send(JSON.stringify({ type: 'executing', data: { node: '8' } }));
+      ws.send(JSON.stringify({ type: 'progress', data: { node: '8', prompt_id: promptId, value: 3, max: 5 } }));
+      ws.send(frameWithHeader(PNG_1x1));
+      state.worker.complete(promptId, [PNG_1x1]);
+      ws.send(JSON.stringify({ type: 'executing', data: { node: null, prompt_id: promptId } }));
+    },
+  });
+  const results = await Array.fromAsync(imageProvider(mock.baseUrl).generate({ ...REQ, count: 1 }, new AbortController().signal,
+    { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
+  expect(mock.state.opens).toBe(2);
+  expect(results.map((r) => r.status)).toEqual(['partial', 'partial', 'ready']);
+});
+
+test('reconnect attempts back off from 250 ms, doubling, and stop after three failures', async () => {
+  const timers = recordTimers({ 250: 1, 500: 1 });
+  const mock = startScripted({ refuseSockets: true });
+  try {
+    const run = Array.fromAsync(imageProvider(mock.baseUrl).generate({ ...REQ, count: 1 }, new AbortController().signal,
+      { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
+    await until(() => mock.state.socketAttempts >= 4 && mock.state.promptId !== undefined);
+    const promptId = mock.state.promptId;
+    if (promptId !== undefined) mock.state.worker.complete(promptId, [PNG_1x1]);
+    expect((await run).map((r) => r.status)).toEqual(['ready']);
+  } finally { timers.restore(); }
+  expect(mock.state.socketAttempts).toBe(4);
+  expect(timers.delays.filter((ms) => ms === 250 || ms === 500 || ms === 2_000)).toEqual([250, 500]);
+});
+
+test('a reopened socket that delivers a frame restores the reconnect budget', async () => {
+  // Four drops in a row, each after the server's greeting frame: with the
+  // budget reset per delivered frame the fifth socket still opens.
+  const timers = recordTimers({ 250: 1 });
+  const mock = startScripted({
+    onOpen: (ws, connection) => {
+      ws.send(JSON.stringify({ type: 'status', data: { status: { exec_info: { queue_remaining: 1 } } } }));
+      if (connection < 5) setTimeout(() => { ws.close(); }, 5);
+    },
+  });
+  try {
+    const run = Array.fromAsync(imageProvider(mock.baseUrl).generate({ ...REQ, count: 1 }, new AbortController().signal,
+      { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
+    await until(() => mock.state.promptId !== undefined);
+    // A spent budget never opens the fifth socket; stop waiting after a second.
+    await until(() => mock.state.opens >= 5, 1_000).catch(() => undefined);
+    const promptId = mock.state.promptId;
+    if (promptId !== undefined) mock.state.worker.complete(promptId, [PNG_1x1]);
+    expect((await run).map((r) => r.status)).toEqual(['ready']);
+  } finally { timers.restore(); }
+  expect(mock.state.opens).toBe(5);
+});
+
+describe('lease status cadence', () => {
+  let restoreClock = () => { /* Replaced per test. */ };
+  afterEach(() => { restoreClock(); });
+
+  /** Shifts performance.now() forward by `skew.ms` to stand in for elapsed job time. */
+  function skewClock() {
+    const skew = { ms: 0 };
+    const realNow = performance.now.bind(performance);
+    const clock = spyOn(performance, 'now').mockImplementation(() => realNow() + skew.ms);
+    restoreClock = () => { clock.mockRestore(); };
+    return skew;
+  }
+
+  test('an open socket polls every second for the first 30 s of a running job, then every 5 s', async () => {
+    const skew = skewClock();
+    const timers = recordTimers({ 1_000: 10, 5_000: 10 });
+    const mock = startScripted({ onPrompt: (promptId, worker) => { worker.running(promptId); } });
+    try {
+      const run = Array.fromAsync(imageProvider(mock.baseUrl).generate({ ...REQ, count: 1 }, new AbortController().signal,
+        { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
+      await until(() => mock.state.statusReads >= 3);
+      expect(timers.delays).not.toContain(5_000);
+      skew.ms = 31_000;
+      await until(() => timers.delays.includes(5_000));
+      const promptId = mock.state.promptId;
+      if (promptId === undefined) throw new Error('prompt not submitted');
+      mock.state.worker.complete(promptId, [PNG_1x1]);
+      mock.state.socket?.send(JSON.stringify({ type: 'executing', data: { node: null, prompt_id: promptId } }));
+      expect((await run).map((r) => r.status)).toEqual(['ready']);
+    } finally { timers.restore(); }
+  });
+
+  test('a closed socket keeps one-second polling however long the job runs', async () => {
+    const skew = skewClock();
+    const timers = recordTimers({ 1_000: 10, 250: 1, 500: 1 });
+    const mock = startScripted({ refuseSockets: true, onPrompt: (promptId, worker) => { worker.running(promptId); } });
+    try {
+      const run = Array.fromAsync(imageProvider(mock.baseUrl).generate({ ...REQ, count: 1 }, new AbortController().signal,
+        { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
+      await until(() => mock.state.statusReads >= 2);
+      skew.ms = 31_000;
+      const reads = mock.state.statusReads;
+      await until(() => mock.state.statusReads >= reads + 3);
+      const promptId = mock.state.promptId;
+      if (promptId === undefined) throw new Error('prompt not submitted');
+      mock.state.worker.complete(promptId, [PNG_1x1]);
+      expect((await run).map((r) => r.status)).toEqual(['ready']);
+    } finally { timers.restore(); }
+    expect(timers.delays).not.toContain(5_000);
+  });
+
+  test('a socket close cuts a slow status wait back to one second at once', async () => {
+    const skew = skewClock();
+    // A slow wait that is not cut short would outlast the test timeout.
+    const timers = recordTimers({ 1_000: 10, 5_000: 60_000, 250: 1, 500: 1 });
+    let refuse = false;
+    const mock = startScripted({
+      onOpen: (ws) => { if (refuse) ws.close(); },
+      onPrompt: (promptId, worker) => { worker.running(promptId); },
+    });
+    try {
+      const run = Array.fromAsync(imageProvider(mock.baseUrl).generate({ ...REQ, count: 1 }, new AbortController().signal,
+        { executionTimeoutMs: TEST_EXECUTION_TIMEOUT_MS }));
+      await until(() => mock.state.statusReads >= 2);
+      skew.ms = 31_000;
+      await until(() => timers.delays.includes(5_000));
+      const promptId = mock.state.promptId;
+      if (promptId === undefined) throw new Error('prompt not submitted');
+      mock.state.worker.complete(promptId, [PNG_1x1]);
+      refuse = true;
+      mock.state.socket?.close();
+      let settled = false;
+      void run.finally(() => { settled = true; });
+      await until(() => settled);
+      expect((await run).map((r) => r.status)).toEqual(['ready']);
+    } finally { timers.restore(); }
+  });
 });

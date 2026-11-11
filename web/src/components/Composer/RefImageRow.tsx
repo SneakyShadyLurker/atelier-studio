@@ -1,5 +1,6 @@
 import { ViewTransition } from 'react';
 import type { RefImageDraft } from '../../store/atelier';
+import { useCachedMedia } from '../../hooks/useCachedMedia';
 import { I } from '../icons/I';
 import styles from './index.module.css';
 
@@ -13,6 +14,13 @@ interface RefImageRowProps {
 }
 
 export const ACCEPTED_REF_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,image/tiff,image/avif,.heic,.heif,.avif,.tif,.tiff';
+
+// A local blob preview renders as is; a server thumbnail is authenticated and
+// no-store, so it reads through the session media cache.
+function RefChipImage({ previewUrl, alt, describedBy }: { previewUrl: string; alt: string; describedBy: string | undefined }) {
+  const { src } = useCachedMedia(previewUrl);
+  return <img src={src} alt={alt} aria-describedby={describedBy} />;
+}
 
 export function RefImageRow({
   files,
@@ -65,10 +73,10 @@ export function RefImageRow({
             className={`${styles.refChip} ${ref.status === 'uploading' ? styles.refChipUploading : ''} ${ref.status === 'error' ? styles.refChipError : ''}`}
             data-tip={ref.error}
           >
-            <img
-              src={ref.previewUrl}
+            <RefChipImage
+              previewUrl={ref.previewUrl}
               alt={`Reference image ${index + 1}`}
-              aria-describedby={hasError ? errorId : undefined}
+              describedBy={hasError ? errorId : undefined}
             />
             {hasError ? <span className="srOnly" id={errorId}>{ref.error}</span> : null}
             <button

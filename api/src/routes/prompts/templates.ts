@@ -4,7 +4,8 @@ import { ensureUser } from '../../db/users';
 import { reorderOwned } from '../../db/reorder';
 import type { DraftTemplateResult } from '../../providers/text/featureHelpers';
 import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
-import { failedToSseError } from '../../lifecycle/llm-error';
+import { draftRouteTimeoutMs } from '../../providers/text/textBudgets';
+import { textFailureToSseError } from '../../lifecycle/llm-error';
 import { libraryOverviewForUser } from './libraryOverviewDb';
 import { draftPool } from '../../orchestrator/llmAdmission';
 import { withLlmSlot } from '../../lifecycle/withLlmSlot';
@@ -134,9 +135,10 @@ export const templatesRoutes = new Hono<AppEnv>()
     // Cloudflare edge's ~100s idle cutoff, which would sever a plain-JSON
     // response with a silent 502. The shared helper emits a 15s :keepalive
     // and exactly one terminal `done`/`error` frame. Mirrors enhance.ts /
-    // infer.ts. The provider call is non-streaming; we relay its single
-    // result as one terminal frame.
-    const timeoutMs = c.var.config.CLOUD_TIMEOUT_MS;
+    // infer.ts. The provider accumulates the whole answer; we relay its
+    // single result as one terminal frame.
+    // Covers every attempt of the draft policy, which is longer on a slow row.
+    const timeoutMs = draftRouteTimeoutMs(resolved.model.latencyProfile, c.var.config);
     return withLlmSlot(c, draftPool, userId, 30, () => ({
       timeoutMs,
       disconnect: c.req.raw.signal,
@@ -162,25 +164,16 @@ export const templatesRoutes = new Hono<AppEnv>()
           } else {
             logger.error({ err: error, event: 'draft_template_crash', userId }, 'draft template crashed');
           }
-          send('error', { message: SAFE });
+          send('error', textFailureToSseError(null, SAFE));
           return;
         }
 
         if (result.type === 'failed') {
-          // The non-streaming provider swallows AbortErrors thrown by fetch() with a
-          // plain Error reason (Bun throws the reason object itself, not a DOMException,
-          // so provider.catch's `err.name === 'AbortError'` check is false). Detect the
-          // timeout case here too before logging it as an upstream error.
-          if (timedOut()) {
-            logger.warn({ event: 'draft_template_timeout', timeoutMs, userId }, 'draft template timed out');
-            send('error', { message: SAFE });
-            return;
-          }
           logger.warn(
-            { event: 'draft_template_upstream_error', status: result.status, userId },
+            { event: 'draft_template_upstream_error', textModelId: resolved.model.id, failureKind: result.kind, status: result.status, userId },
             'draft template failed',
           );
-          send('error', result.moderation ? failedToSseError(result) : { message: SAFE });
+          send('error', textFailureToSseError(result, SAFE));
           return;
         }
 

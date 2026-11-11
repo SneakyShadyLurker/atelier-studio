@@ -209,6 +209,23 @@
   clip-path: inset(0 0 var(--composer-top, 0px) 0);
 }
 
+/* This group exists only to clip its animated rows and tiles. Everything in
+   the scroller that is not a captured row (an entering batch, the start
+   marker, a row React left unnamed) is painted by the group's own image
+   pair, and the browser's default cross-fade would dissolve all of it, the
+   old feed ghosting over the new one, whenever a batch enters or the feed
+   follows it. The old image is hidden and the new one, which is live, stays
+   opaque; the scroller has no background, so a held old image would show
+   through. */
+::view-transition-old(atelier-feed) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(atelier-feed) {
+  animation: none;
+}
+
 ::view-transition-group(atelier-feed-head),
 ::view-transition-group(atelier-dock) {
   z-index: 1;

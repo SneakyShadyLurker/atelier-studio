@@ -27,6 +27,7 @@
   "ModelAttentionBackend",
   "RandomNoise",
   "SamplerCustomAdvanced",
+  "SamplerLCM",
   "SkipLayerGuidanceDiTSimple",
   "StringConcatenate",
   "TextEncodeKrea2OstrisEdit",

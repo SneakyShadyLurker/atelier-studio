@@ -201,7 +201,7 @@ test('fails open on a result that is not strictly shorter', async () => {
   expect(await condense(runtime, original)).toBe(original);
   const log = logRecords(runtime.logs)
     .find((entry) => entry.event === 'krea_prompt_condense_skipped');
-  expect(log).toMatchObject({ reason: 'not-shorter' });
+  expect(log).toMatchObject({ skipReason: 'not-shorter' });
 });
 
 test('gives up on its own timeout knob and keeps the original prompt', async () => {
@@ -220,7 +220,7 @@ test('gives up on its own timeout knob and keeps the original prompt', async () 
   expect(await condense(runtime, original)).toBe(original);
   const log = logRecords(runtime.logs)
     .find((entry) => entry.event === 'krea_prompt_condense_skipped');
-  expect(log).toMatchObject({ reason: 'timeout' });
+  expect(log).toMatchObject({ skipReason: 'timeout' });
 });
 
 // Batch cancellation (DELETE /history, user cancel, SIGTERM drain) reaches the
@@ -242,7 +242,7 @@ test('gives up when the batch is canceled underneath it', async () => {
   expect(await condense(runtime, original, 'krea-2-gonzalomo', canceled.signal)).toBe(original);
   const log = logRecords(runtime.logs)
     .find((entry) => entry.event === 'krea_prompt_condense_skipped');
-  expect(log).toMatchObject({ reason: 'batch-canceled' });
+  expect(log).toMatchObject({ skipReason: 'batch-canceled' });
 });
 
 test('an actual enhancer incomplete EOF cannot replace the prompt with partial condensation', async () => {
@@ -255,7 +255,8 @@ test('an actual enhancer incomplete EOF cannot replace the prompt with partial c
   const runtime = testRuntime({ seedLegacyText: true });
   const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
   expect(await condense(runtime, original)).toBe(original);
-  expect(calls).toBe(1);
+  // The accumulating rewrite retries a truncated stream once, then fails open.
+  expect(calls).toBe(2);
 });
 
 test('fails open when the provider reports a failure or throws', async () => {
@@ -276,7 +277,7 @@ test('fails open when the provider reports a failure or throws', async () => {
   expect(await condense(runtime, original)).toBe(original);
   const reasons = logRecords(runtime.logs)
     .filter((entry) => entry.event === 'krea_prompt_condense_skipped')
-    .map((entry) => entry.reason);
+    .map((entry) => entry.skipReason);
   expect(reasons).toEqual(['provider-failed', 'error']);
 });
 
@@ -295,7 +296,7 @@ test('fails open when the model returns refusal prose as successful content', as
   expect(await condense(runtime, original)).toBe(original);
   const log = logRecords(runtime.logs)
     .find((entry) => entry.event === 'krea_prompt_condense_skipped');
-  expect(log).toMatchObject({ reason: 'refusal' });
+  expect(log).toMatchObject({ skipReason: 'refusal' });
 });
 
 test('fails open when the enhance admission pool is full', async () => {
@@ -320,7 +321,7 @@ test('fails open when the enhance admission pool is full', async () => {
     expect(calls).toBe(0);
     const log = logRecords(runtime.logs)
       .find((entry) => entry.event === 'krea_prompt_condense_skipped');
-    expect(log).toMatchObject({ reason: 'admission-per-user' });
+    expect(log).toMatchObject({ skipReason: 'admission-per-user' });
   } finally {
     held.release();
   }
@@ -341,5 +342,55 @@ test('fails open, logging the reason, when no text model can serve the condense 
   expect(calls).toBe(0);
   const log = logRecords(runtime.logs)
     .find((entry) => entry.event === 'krea_prompt_condense_skipped');
-  expect(log).toMatchObject({ reason: 'text-model-not-configured' });
+  expect(log).toMatchObject({ skipReason: 'text-model-not-configured' });
+});
+
+test('runs on the accumulating rewrite() call, not the streaming enhance()', async () => {
+  const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
+  const condensed = `An adult woman ${wordPrompt(120, 'short')}`;
+  let enhanceCalls = 0;
+  setTextModelProviderForTests({
+    ...fakeCondenseProvider(async function* () {
+      await Promise.resolve();
+      enhanceCalls += 1;
+      yield { type: 'done' } satisfies EnhanceChunk;
+    }),
+    rewrite: () => Promise.resolve({ type: 'ok', text: condensed }),
+  });
+  const runtime = testRuntime({ seedLegacyText: true });
+
+  expect(await condense(runtime, original)).toBe(condensed);
+  expect(enhanceCalls).toBe(0);
+});
+
+test('a provider failure or crash logs at warn with content-free fields; an expected skip stays at info', async () => {
+  const original = `An adult woman ${wordPrompt(OVER_TRIGGER_WORDS)}`;
+  let attempt = 0;
+  setTextModelProviderForTests({
+    ...fakeCondenseProvider(async function* () {
+      await Promise.resolve();
+      yield { type: 'done' } satisfies EnhanceChunk;
+    }),
+    rewrite: () => {
+      attempt += 1;
+      if (attempt === 1) {
+        return Promise.resolve({ type: 'failed', kind: 'permanent', status: 401, detail: 'SECRET UPSTREAM BODY' });
+      }
+      if (attempt === 2) return Promise.reject(new TypeError('SECRET THROWN TEXT'));
+      return Promise.resolve({ type: 'ok', text: `${original} longer` });
+    },
+  });
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
+
+  for (let call = 0; call < 3; call += 1) expect(await condense(runtime, original)).toBe(original);
+  const skips = logRecords(runtime.logs).filter((entry) => entry.event === 'krea_prompt_condense_skipped');
+  expect(skips).toHaveLength(3);
+  // pino levels: warn 40, info 30.
+  expect(skips[0]).toMatchObject({ level: 40, skipReason: 'provider-failed', failureKind: 'permanent', status: 401 });
+  expect(typeof skips[0]?.textModelId).toBe('string');
+  expect(skips[1]).toMatchObject({ level: 40, skipReason: 'error', errorType: 'TypeError' });
+  expect(typeof skips[1]?.textModelId).toBe('string');
+  expect(skips[2]).toMatchObject({ level: 30, skipReason: 'not-shorter' });
+  expect(skips.every((entry) => !('reason' in entry))).toBe(true);
+  expect(runtime.logs.join('\n')).not.toContain('SECRET');
 });

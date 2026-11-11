@@ -8,7 +8,7 @@ import type {
 } from '@atelier/shared';
 import { BRAINSTORM_DEFAULT_COUNT, MAX_HISTORY_Q_LEN, MAX_TILE_COUNT } from '@atelier/shared';
 import { create, type StateCreator } from 'zustand';
-import { refImageUrl } from '../api/uploads';
+import { refImageThumbUrl } from '../api/uploads';
 import { pinAt, withoutPin } from '../lib/promptPins';
 import type { ComposerPrefs } from '../lib/composerPrefs';
 import { MAX_ROLL_QUEUE_ENTRIES, persistRollQueue, unsettledInFlightCount } from '../lib/rollQueuePersist';
@@ -539,14 +539,19 @@ const createComposerSlice: StateCreator<AtelierState, [], [], ComposerSlice> = (
         ...state.draft,
         refImages: state.draft.refImages.map((ref) => {
           if (ref.clientId !== clientId) return ref;
-          revokePreviewUrl(ref);
+          // The local blob already shows the picked bytes, so keep it rather
+          // than download the stored copy. A server conversion (HEIC, TIFF,
+          // an oversize re-encode) changes the mime and may be something the
+          // browser cannot display, so that chip shows the server thumbnail.
+          const keepLocal = ref.previewUrl.startsWith('blob:') && ref.mime === upload.mime;
+          if (!keepLocal) revokePreviewUrl(ref);
           return {
             clientId,
             serverId: upload.id,
             status: 'ready',
             mime: upload.mime,
             sizeBytes: upload.sizeBytes,
-            previewUrl: refImageUrl(upload.id),
+            previewUrl: keepLocal ? ref.previewUrl : refImageThumbUrl(upload.id),
           };
         }),
       },
@@ -599,7 +604,14 @@ const createComposerSlice: StateCreator<AtelierState, [], [], ComposerSlice> = (
       if (index === -1) return state;
       const current = refs[index];
       if (current) revokePreviewUrl(current);
-      refs.splice(index, 1, ...restored);
+      // Eviction revoked each restored chip's local blob preview, so a chip
+      // that has a stored upload comes back on its server thumbnail.
+      const revived = restored.map((ref) => (
+        ref.serverId !== undefined && ref.previewUrl.startsWith('blob:')
+          ? { ...ref, previewUrl: refImageThumbUrl(ref.serverId) }
+          : ref
+      ));
+      refs.splice(index, 1, ...revived);
       return { draft: { ...state.draft, refImages: refs } };
     });
   },

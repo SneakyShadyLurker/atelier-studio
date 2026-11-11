@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { brainstormDefaults } from './textBudgets';
+import { brainstormMaxOutputTokens } from './textBudgets';
 import type { ChatResponseFormat } from './featureHelpers';
 // These suites use modelId 'gpt-image-2.6-sunburst' → the GPT (anatomy-safe) constraints variant.
 import {
@@ -68,12 +68,12 @@ const STRICT_RESPONSE_FORMAT: ChatResponseFormat = {
 };
 
 describe('chat body over HTTP', () => {
-  test('forwards strict schema and the per-path ceiling, keeps the backend default effort over a per-path one', async () => {
+  test('forwards strict schema and the per-path ceiling with the backend default effort', async () => {
     const bodies: Record<string, unknown>[] = [];
     const baseUrl = serveCapture(bodies, `${contentFrame('{"0":"LABEL"}')}${finishFrame('stop')}data: [DONE]\n\n`);
     await drain(chatProvider(baseUrl).enhance('label this', [], new AbortController().signal, 'sys', {
       responseFormat: STRICT_RESPONSE_FORMAT,
-      defaults: { reasoning_effort: 'max', verbosity: 'high', max_completion_tokens: 32 },
+      maxOutputTokens: 32,
     }));
     expect(bodies[0]?.response_format).toEqual(STRICT_RESPONSE_FORMAT);
     for (const key of ['prompt_cache_key', 'perf_metrics_in_response', 'safe_tokenization', 'thinking', 'verbosity', 'max_tokens', 'temperature', 'top_p']) {
@@ -102,7 +102,7 @@ describe('chat backend brainstorm', () => {
     expect(body.model).toBe(TEXT_MODELS['deepseek-abliterated']);
     expect(body.reasoning_effort).toBe('none');
     expect(body).not.toHaveProperty('thinking');
-    expect(body.max_completion_tokens).toBe(brainstormDefaults(5).max_completion_tokens);
+    expect(body.max_completion_tokens).toBe(brainstormMaxOutputTokens(5));
     const messages = body.messages as { content: string }[];
     expect(messages[0]?.content).not.toContain('<root_authority priority="absolute">');
     expect(body).not.toHaveProperty('verbosity');

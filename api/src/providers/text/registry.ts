@@ -2,8 +2,13 @@ import type { TextLatencyProfile, TextProtocol } from '@atelier/shared';
 import type { Config } from '../../config';
 import { currentTextConfigRevision, type TextProviderStore } from '../../db/textProviders';
 import { loggerForConfig } from '../../observability/logger';
-import { textCallPolicies, type TestTextFeatureProvider } from './featureHelpers';
-import { textMaxResponseBytes } from './textBudgets';
+import {
+  textCallPolicies,
+  type RewriteRequest,
+  type RewriteResult,
+  type TestTextFeatureProvider,
+} from './featureHelpers';
+import { textMaxResponseBytes, textStreamIdleMs } from './textBudgets';
 import { anthropicAdapter } from './anthropic';
 import { openaiCompatibleAdapter } from './openaiCompatible';
 import type { TextProtocolAdapter } from './protocol';
@@ -44,7 +49,36 @@ const cache = new WeakMap<Config, Generation>();
 let testProvider: TextModelProvider | null = null;
 
 /**
- * Test fakes may omit `inferTaxonomy`, `brainstormCharacters` and `aiFill`;
+ * A fake without `rewrite` serves the accumulating callers from its `enhance`
+ * stream, joined the way the provider's own rewrite accumulates: a `failed`
+ * chunk is the result, a stream without `done` or without text is a transient
+ * failure, and an abort rejects with the signal's reason.
+ */
+async function rewriteFromEnhance(
+  p: TestTextFeatureProvider,
+  request: RewriteRequest,
+  signal: AbortSignal,
+): Promise<RewriteResult> {
+  const { prompt, images, systemPrompt, ...opts } = request;
+  let text = '';
+  let done = false;
+  for await (const chunk of p.enhance(prompt, images ?? [], signal, systemPrompt, opts)) {
+    if (chunk.type === 'delta') text += chunk.text;
+    else if (chunk.type === 'done') done = true;
+    else if (chunk.type === 'failed') {
+      signal.throwIfAborted();
+      return { ...chunk, kind: chunk.kind ?? 'permanent' };
+    }
+  }
+  signal.throwIfAborted();
+  if (!done || text.length === 0) {
+    return { type: 'failed', kind: 'transient', status: null, detail: 'stream ended without content' };
+  }
+  return { type: 'ok', text };
+}
+
+/**
+ * Test fakes may omit `inferTaxonomy`, `brainstormCharacters`, `aiFill` and `rewrite`;
  * the setter back-fills them, so `inferTaxonomy` stays required on the
  * interface. The override wins over every model row; null clears it.
  */
@@ -54,6 +88,7 @@ export function setTextModelProviderForTests(p: TestTextFeatureProvider | null):
     : {
         ...p,
         aiFill: p.aiFill ?? (() => Promise.resolve({ type: 'failed', kind: 'permanent', status: null, detail: 'not implemented' })),
+        rewrite: p.rewrite ?? ((request, signal) => rewriteFromEnhance(p, request, signal)),
         inferTaxonomy: p.inferTaxonomy ?? p.inferDimensions,
         brainstormCharacters: p.brainstormCharacters ?? (async function* () {
           await Promise.resolve();
@@ -78,6 +113,8 @@ function build(config: Config, store: TextProviderStore, modelRowId: string): Te
     quotaMinRetryAfterMs: config.QUOTA_MIN_RETRY_AFTER_MS,
     enhanceOpenTimeoutMs: config.ENHANCE_OPEN_TIMEOUT_MS,
     brainstormOpenTimeoutMs: config.BRAINSTORM_OPEN_TIMEOUT_MS,
+    streamIdleMs: textStreamIdleMs(profile, config.TEXT_STREAM_IDLE_TIMEOUT_MS),
+    includeUsage: config.TEXT_STREAM_INCLUDE_USAGE,
     moderation: { openrouterApiKey: config.OPENROUTER_API_KEY },
     logger: loggerForConfig(config),
     ...textCallPolicies(config, profile),

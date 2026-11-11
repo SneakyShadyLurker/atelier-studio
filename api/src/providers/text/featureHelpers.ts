@@ -9,11 +9,11 @@ import {
 } from '@atelier/shared';
 import { findTokens, VAR_TOKEN_ANCHORED } from '@atelier/shared/template-tokens';
 import { BrokenCircuitError, TaskCancelledError, type IPolicy } from 'cockatiel';
+import { z } from 'zod';
 import type { Config } from '../../config';
 import {
   buildResilientPolicy,
   PermanentUpstreamError,
-  Parse4xxError,
   QuotaExhaustedError,
   TransientUpstreamError,
 } from '../../lifecycle/resilient-call';
@@ -25,22 +25,23 @@ import {
 } from '../../prompts/brainstormCharactersSystemPrompt';
 import { classifyImageModelTarget } from '../../prompts/gptImagePhrasing';
 import type { LibrarySnapshot, RawInferOp } from '../../prompts/inferTypes';
-import { sliceJsonObject } from '../../prompts/lenientJson';
+import { parseModelJsonObject } from '../../prompts/lenientJson';
 import type { LibraryOverview } from '../../prompts/libraryOverview';
 import { isLikelyModelRefusal } from '../../prompts/modelOutput';
 import { GptModerationError, type GptModerationFailureKind } from '../../routing/gptModeration';
-import { errorToRawString as detailOf, tryParseJson } from '../_http';
+import { errorToRawString as detailOf } from '../_http';
 import type { ProviderLogger } from '../types';
 import {
   AI_FILL_MAX_ATTEMPTS,
   aiFillBatchPerAttemptTimeoutMs,
   aiFillPerAttemptTimeoutMs,
   MAX_DRAFT_RAW_BODY_CHARS,
+  textPerAttemptTimeoutMs,
 } from './textBudgets';
 
 // The text feature interface (types the routes and fakes share), its
 // resilience policies and the provider-independent helpers: error-to-result
-// mappers, draft briefs and parsers, and the brainstorm record assembler.
+// mapper, draft briefs and parsers, and the brainstorm record assembler.
 // `textModel.ts` implements the interface over the AI SDK adapters.
 
 /**
@@ -49,15 +50,17 @@ import {
  */
 export interface TextCallPolicies {
   enhancePolicy: IPolicy;
+  rewritePolicy: IPolicy;
   draftListPolicy: IPolicy;
   inferPolicy: IPolicy;
   taxonomyPolicy: IPolicy;
   inferRetryGapsPolicy: IPolicy;
+  rescuePolicy: IPolicy;
   aiFillPolicy: IPolicy;
   aiFillBatchPolicy: IPolicy;
 }
 
-export type CliproxyTextPolicyKnobs = Pick<
+export type TextPolicyKnobs = Pick<
   Config,
   | 'RESILIENT_PER_ATTEMPT_TIMEOUT_MS'
   | 'RESILIENT_MAX_ATTEMPTS'
@@ -71,11 +74,11 @@ export type CliproxyTextPolicyKnobs = Pick<
 
 /**
  * The single source of the text resilience policies. A 'slow' latency profile
- * keys the longer ai-fill attempts. Every policy shares the RESILIENT_*
+ * keys the longer ai-fill and draft attempts. Every policy shares the RESILIENT_*
  * backoff and breaker knobs; each gets its own breaker instance.
  */
 export function textCallPolicies(
-  knobs: CliproxyTextPolicyKnobs,
+  knobs: TextPolicyKnobs,
   latencyProfile: TextLatencyProfile,
 ): TextCallPolicies {
   const policy = (timeoutPerAttemptMs: number, maxAttempts: number, noTimeout = false): IPolicy => buildResilientPolicy({
@@ -91,18 +94,44 @@ export function textCallPolicies(
     // Enhance streams own their deadlines (open timeout + drain), so the
     // policy adds no per-attempt timeout.
     enhancePolicy: policy(0, knobs.RESILIENT_MAX_ATTEMPTS, true),
-    draftListPolicy: policy(knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS, knobs.RESILIENT_MAX_ATTEMPTS),
+    // A rewrite drains inside its policy. The caller's signal bounds the
+    // total and the stall watchdog bounds silence, so there is no per-attempt
+    // timeout; a transient mid-stream fault gets one retry.
+    rewritePolicy: policy(0, 2, true),
+    // List and template drafts; a slow row's attempts get the slow floor, and
+    // the draft routes size their deadlines from the same numbers.
+    draftListPolicy: policy(
+      textPerAttemptTimeoutMs(latencyProfile, knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS),
+      knobs.RESILIENT_MAX_ATTEMPTS,
+    ),
     inferPolicy: policy(knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS, knobs.RESILIENT_MAX_ATTEMPTS),
     // One attempt per provider call. The route may recover one transient result
     // under a single shared INFER_TAXONOMY_TIMEOUT_MS signal, so totalEnvelope
     // still budgets one taxonomy wall-time envelope, not two full timeouts.
     taxonomyPolicy: policy(knobs.INFER_TAXONOMY_TIMEOUT_MS, 1),
     inferRetryGapsPolicy: policy(knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS, 1),
+    // One attempt, like retry-gaps, but with the slow floor: the rescue route
+    // sizes its deadline from the same number (`rescueRouteTimeoutMs`), and
+    // infer's wave timing must not change with it.
+    rescuePolicy: policy(textPerAttemptTimeoutMs(latencyProfile, knobs.RESILIENT_PER_ATTEMPT_TIMEOUT_MS), 1),
     // ai-fill: one retry on transient errors, retaining the historical
     // per-attempt ceiling as latency headroom.
     aiFillPolicy: policy(aiFillPerAttemptTimeoutMs(latencyProfile, knobs.AI_FILL_PER_ATTEMPT_TIMEOUT_MS), AI_FILL_MAX_ATTEMPTS),
     aiFillBatchPolicy: policy(aiFillBatchPerAttemptTimeoutMs(latencyProfile), AI_FILL_MAX_ATTEMPTS),
   };
+}
+
+/**
+ * The failed result every text call returns or yields, from
+ * `textFailureFromError` or a parse/content check at the call site.
+ */
+export interface TextCallFailure {
+  type: 'failed';
+  kind: 'transient' | 'permanent' | 'quota' | GptModerationFailureKind;
+  status: number | null;
+  detail: string;
+  retryAfterSeconds?: number;
+  moderation?: GptModerationNotice;
 }
 
 export type EnhanceChunk =
@@ -146,13 +175,20 @@ export interface DraftListProviderInput {
   readonly reasoningEffort?: TextReasoningEffort;
 }
 
+/**
+ * A draft failure. The provider always sets `kind`; it stays optional because
+ * test fakes model a failure without one, which the routes' terminal mapping
+ * reports as a provider error.
+ */
+export type DraftFailure = Omit<TextCallFailure, 'kind'> & { kind?: TextCallFailure['kind'] };
+
 export type DraftResult =
   | { type: 'ok'; payload: DraftVariableListResponse }
-  | { type: 'failed'; kind?: GptModerationFailureKind; status: number | null; detail: string; retryAfterSeconds?: number; moderation?: GptModerationNotice };
+  | DraftFailure;
 
 export type InferResult =
   | { type: 'ok'; ops: RawInferOp[] }
-  | { type: 'failed'; kind: 'transient' | 'permanent' | 'quota' | GptModerationFailureKind; status: number | null; detail: string; retryAfterSeconds?: number; moderation?: GptModerationNotice };
+  | TextCallFailure;
 
 export interface AiFillProviderInput {
   readonly systemPrompt: string;
@@ -164,7 +200,7 @@ export interface AiFillProviderInput {
 
 export type AiFillResult =
   | { type: 'ok'; text: string }
-  | { type: 'failed'; kind: 'transient' | 'permanent' | 'quota' | GptModerationFailureKind; status: number | null; detail: string; retryAfterSeconds?: number; moderation?: GptModerationNotice };
+  | TextCallFailure;
 
 export type DraftTemplateProviderInput = DraftTemplateRequest & {
   readonly library: LibraryOverview;
@@ -174,7 +210,19 @@ export type DraftTemplateProviderInput = DraftTemplateRequest & {
 
 export type DraftTemplateResult =
   | { type: 'ok'; payload: DraftTemplateResponse }
-  | { type: 'failed'; kind?: GptModerationFailureKind; status: number | null; detail: string; retryAfterSeconds?: number; moderation?: GptModerationNotice };
+  | DraftFailure;
+
+/** One whole-answer rewrite: the inputs of `enhance`, accumulated instead of streamed. */
+export interface RewriteRequest extends EnhanceCallOptions {
+  readonly prompt: string;
+  readonly images?: readonly EnhanceImageInput[];
+  /** Defaults to the enhance system prompt. */
+  readonly systemPrompt?: string;
+}
+
+export type RewriteResult =
+  | { type: 'ok'; text: string }
+  | TextCallFailure;
 
 export interface RescueDimensionArgs {
   readonly modelId?: string;
@@ -194,6 +242,12 @@ export interface InferCallOptions {
 
 export interface TextFeatureProvider {
   enhance(prompt: string, images: readonly EnhanceImageInput[], signal: AbortSignal, systemPrompt?: string, opts?: EnhanceCallOptions): AsyncIterable<EnhanceChunk>;
+  /**
+   * The enhance request for a caller that forwards nothing until the text is
+   * complete: drained inside a policy, so a transient mid-stream fault is
+   * retried. Aborts reject with the signal's reason.
+   */
+  rewrite(request: RewriteRequest, signal: AbortSignal): Promise<RewriteResult>;
   brainstormCharacters(input: BrainstormCharactersInput, signal: AbortSignal): AsyncIterable<BrainstormChunk>;
   draftList(input: DraftListProviderInput, signal: AbortSignal): Promise<DraftResult>;
   draftTemplate(input: DraftTemplateProviderInput, signal: AbortSignal): Promise<DraftTemplateResult>;
@@ -209,12 +263,10 @@ export interface TextFeatureProvider {
   inferBreakerState?(): 'open' | 'half-open' | 'closed';
 }
 
-// Explicit long-budget wording, distinct from transient overload. Kept narrow:
-
 /** A test fake; `setTextModelProviderForTests` back-fills the optional methods. */
 export type TestTextFeatureProvider =
-  Omit<TextFeatureProvider, 'inferTaxonomy' | 'brainstormCharacters' | 'aiFill'>
-  & Partial<Pick<TextFeatureProvider, 'inferTaxonomy' | 'brainstormCharacters' | 'aiFill'>>;
+  Omit<TextFeatureProvider, 'inferTaxonomy' | 'brainstormCharacters' | 'aiFill' | 'rewrite'>
+  & Partial<Pick<TextFeatureProvider, 'inferTaxonomy' | 'brainstormCharacters' | 'aiFill' | 'rewrite'>>;
 
 const TEXT_DETAIL_LOG_CAP = 2048;
 
@@ -247,16 +299,14 @@ function detailFromTypedUpstreamError(err: TransientUpstreamError | PermanentUps
   return safeTextDetail(err.message);
 }
 
-// Shared error-to-result mappers for the policy-wrapped flows. The three
-// methods (`draftList`, `inferDimensions[SingleAttempt]`, `rescueDimension`)
-// each ran an identical catch ladder before extraction. Aborts and
-// DOMException-AbortError are still rethrown by the caller — they are
-// orchestrator signals, not failures.
-function moderationFailure(err: GptModerationError) {
-  return { type: 'failed' as const, kind: err.kind, status: err.status, detail: err.message, moderation: err.moderation };
+// The one error-to-result mapping of every text call. Aborts and
+// DOMException-AbortError never reach it: callers rethrow them, because they
+// are orchestrator signals, not failures.
+function moderationFailure(err: GptModerationError): TextCallFailure {
+  return { type: 'failed', kind: err.kind, status: err.status, detail: err.message, moderation: err.moderation };
 }
 
-export function inferResultFromError(err: unknown): InferResult {
+export function textFailureFromError(err: unknown): TextCallFailure {
   if (err instanceof GptModerationError) return moderationFailure(err);
   if (err instanceof QuotaExhaustedError) {
     return {
@@ -270,14 +320,13 @@ export function inferResultFromError(err: unknown): InferResult {
   if (err instanceof TransientUpstreamError) {
     return { type: 'failed', kind: 'transient', status: statusFromCause(err.cause), detail: detailFromTypedUpstreamError(err) };
   }
+  // An open breaker is transient: the other model, or a later call, is
+  // unaffected. Brainstorm's cross-model failover keys on this kind.
   if (err instanceof BrokenCircuitError) {
     return { type: 'failed', kind: 'transient', status: null, detail: safeTextDetail(detailOf(err)) };
   }
   if (err instanceof PermanentUpstreamError) {
     return { type: 'failed', kind: 'permanent', status: statusFromCause(err.cause), detail: detailFromTypedUpstreamError(err) };
-  }
-  if (err instanceof Parse4xxError) {
-    return { type: 'failed', kind: 'permanent', status: null, detail: safeTextDetail(detailOf(err)) };
   }
   // A per-attempt timeout (cockatiel raises TaskCancelledError, "Operation
   // timed out after Nms") is inherently transient — the upstream was slow under
@@ -287,56 +336,21 @@ export function inferResultFromError(err: unknown): InferResult {
   if (err instanceof TaskCancelledError) {
     return { type: 'failed', kind: 'transient', status: null, detail: safeTextDetail(detailOf(err)) };
   }
+  // Everything else, including a response over its byte cap, would recur.
   return { type: 'failed', kind: 'permanent', status: null, detail: safeTextDetail(detailOf(err)) };
 }
 
-export function draftResultFromError(err: unknown): Extract<DraftResult, { type: 'failed' }> {
-  if (err instanceof GptModerationError) return moderationFailure(err);
-  if (err instanceof QuotaExhaustedError) {
-    return {
-      type: 'failed',
-      status: statusFromCause(err.cause),
-      detail: safeTextDetail(detailOf(err)),
-      ...(err.retryAfterSeconds !== null ? { retryAfterSeconds: err.retryAfterSeconds } : {}),
-    };
-  }
-  if (err instanceof TransientUpstreamError) {
-    return { type: 'failed', status: statusFromCause(err.cause), detail: detailFromTypedUpstreamError(err) };
-  }
-  if (err instanceof PermanentUpstreamError) {
-    return { type: 'failed', status: statusFromCause(err.cause), detail: detailFromTypedUpstreamError(err) };
-  }
-  return { type: 'failed', status: null, detail: safeTextDetail(detailOf(err)) };
-}
-
-export function enhanceFailureChunk(err: unknown): EnhanceChunk {
-  if (err instanceof GptModerationError) return moderationFailure(err);
-  if (err instanceof QuotaExhaustedError) {
-    return {
-      type: 'failed',
-      kind: 'quota',
-      status: statusFromCause(err.cause),
-      detail: safeTextDetail(detailOf(err)),
-      ...(err.retryAfterSeconds !== null ? { retryAfterSeconds: err.retryAfterSeconds } : {}),
-    };
-  }
-  if (err instanceof TransientUpstreamError) {
-    return { type: 'failed', kind: 'transient', status: statusFromCause(err.cause), detail: detailFromTypedUpstreamError(err) };
-  }
-  if (err instanceof PermanentUpstreamError) {
-    return { type: 'failed', kind: 'permanent', status: statusFromCause(err.cause), detail: detailFromTypedUpstreamError(err) };
-  }
-  // An open breaker or a per-attempt timeout is transient by the same
-  // reasoning as inferResultFromError: the other model, or a later attempt,
-  // is unaffected. Brainstorm's cross-model failover keys on this kind.
-  if (err instanceof BrokenCircuitError || err instanceof TaskCancelledError) {
-    return { type: 'failed', kind: 'transient', status: null, detail: safeTextDetail(detailOf(err)) };
-  }
-  return { type: 'failed', kind: 'permanent', status: null, detail: safeTextDetail(detailOf(err)) };
+/**
+ * A model answer that does not parse into the expected shape. Transient: the
+ * output varies on another attempt, so the user's or the route's retry can
+ * succeed.
+ */
+export function unparseableFailure(detail: string): TextCallFailure {
+  return { type: 'failed', kind: 'transient', status: null, detail };
 }
 
 export function parseDraftPayload(raw: string): DraftVariableListResponse | null {
-  const parsed = tryParseJson(sliceJsonObject(raw));
+  const parsed = parseModelJsonObject(raw);
   if (typeof parsed !== 'object' || parsed === null) return null;
   const obj = parsed as { kind?: unknown; entries?: unknown; question?: unknown };
   if (obj.kind === 'entries' && Array.isArray(obj.entries)) {
@@ -419,38 +433,45 @@ function stripUnknownTokens(
   return { body: out, warnings };
 }
 
+// The two answers of a template draft as one object: OpenAI strict schemas
+// and Anthropic's forced json tool both need an object at the root, so the
+// union lives in `kind` and the field the other answer does not use is null.
+const DraftTemplateAnswerSchema = z.object({
+  kind: z.enum(['body', 'clarify']),
+  body: z.string().nullable(),
+  question: z.string().nullable(),
+  warnings: z.array(z.string()),
+}).strict();
+const { $schema: _draftTemplateDialect, ...draftTemplateSchema } = z.toJSONSchema(DraftTemplateAnswerSchema, { target: 'draft-7', io: 'output' });
+export const DRAFT_TEMPLATE_RESPONSE_FORMAT = {
+  type: 'json_schema',
+  json_schema: { name: 'template_draft', strict: true, schema: draftTemplateSchema },
+} as const;
+
+const UNPARSEABLE_DRAFT = 'unparseable draft response';
+
 /**
- * Turns a draft-template answer into the result: parses the JSON (fences and
- * prose tolerated), caps the body at MAX_DRAFT_RAW_BODY_CHARS and strips
- * unknown tokens. `status` is the HTTP status reported on parse failures.
+ * Turns a draft-template answer into the result: parses the JSON (fences,
+ * prose and the repairable defects tolerated), caps the body at
+ * MAX_DRAFT_RAW_BODY_CHARS and strips unknown tokens.
  */
 export function draftTemplateResultFromContent(
   content: string,
   knownNames: ReadonlySet<string>,
-  status: number | null,
 ): DraftTemplateResult {
-  const stripped = sliceJsonObject(content);
-  const parsed = tryParseJson(stripped);
-  if (!parsed || typeof parsed !== 'object') {
-    return { type: 'failed', status, detail: 'unparseable draft response' };
-  }
+  const parsed = parseModelJsonObject(content);
+  if (!parsed || typeof parsed !== 'object') return unparseableFailure(UNPARSEABLE_DRAFT);
 
   const kind = (parsed as { kind?: unknown }).kind;
   if (kind === 'clarify') {
     const q = (parsed as { question?: unknown }).question;
-    if (typeof q !== 'string' || !q.trim()) {
-      return { type: 'failed', status, detail: 'unparseable draft response' };
-    }
+    if (typeof q !== 'string' || !q.trim()) return unparseableFailure(UNPARSEABLE_DRAFT);
     return { type: 'ok', payload: { kind: 'clarify', question: q.trim() } };
   }
-  if (kind !== 'body') {
-    return { type: 'failed', status, detail: 'unparseable draft response' };
-  }
+  if (kind !== 'body') return unparseableFailure(UNPARSEABLE_DRAFT);
 
   const rawBodyText = (parsed as { body?: unknown }).body;
-  if (typeof rawBodyText !== 'string') {
-    return { type: 'failed', status, detail: 'unparseable draft response' };
-  }
+  if (typeof rawBodyText !== 'string') return unparseableFailure(UNPARSEABLE_DRAFT);
   let bodyText: string = rawBodyText.replace(/\s+$/, '');
 
   const truncationWarnings: string[] = [];
@@ -473,12 +494,6 @@ export function draftTemplateResultFromContent(
   };
 }
 
-export interface ChatDefaults {
-  reasoning_effort: string;
-  verbosity: string;
-  max_completion_tokens: number;
-}
-
 // Per-call overrides for enhance()/the caption-format path. Lets the route use
 // json_object with model-safe token bounds without disturbing the default path.
 /**
@@ -493,7 +508,8 @@ export type ChatResponseFormat =
 
 export interface EnhanceCallOptions {
   responseFormat?: ChatResponseFormat;
-  defaults?: ChatDefaults;
+  /** Output budget; defaults to ENHANCE_MAX_OUTPUT_TOKENS. */
+  maxOutputTokens?: number;
   /** User-pinned effort; replaces the model's default effort. */
   reasoningEffort?: TextReasoningEffort;
 }

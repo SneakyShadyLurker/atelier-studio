@@ -35,6 +35,7 @@ export function privateWorkerFixture() {
     calls, released, leases, complete,
     recordPrompt(id: string | null) { previousPromptId = id; },
     fail(job: string) { statuses.set(job, { state: 'failed', outputs: [] }); },
+    running(job: string) { statuses.set(job, { state: 'running', outputs: [] }); },
     handle(req: Request): Response | undefined {
       const path = new URL(req.url).pathname;
       calls.push(`${req.method} ${path}`);

@@ -952,3 +952,14 @@ describe('POST /api/prompts/ai-fill/batch', () => {
     expect(frameData(frames, 'result').items).toHaveLength(4);
   });
 });
+
+describe('ai-fill batch terminal errors', () => {
+  const item = { staticSegments: ['First ', '.'], instructions: ['wardrobe'] };
+  test('an exhausted quota reaches the client as quota-exhausted with its retry hint', async () => {
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({
+      type: 'failed', kind: 'quota', status: 429, detail: 'x', retryAfterSeconds: 300,
+    })));
+    const frames = parseSseText(await (await postAiFillBatch({ items: [item], modelId: 'gpt-image-2.6-sunburst' })).text());
+    expect(frameData(frames, 'error')).toEqual({ message: 'Codex quota exhausted', code: 'quota-exhausted', retryAfterSeconds: 300 });
+  });
+});

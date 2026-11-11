@@ -15,7 +15,6 @@ import type {
 import {
   DEFAULT_VIDEO_DURATION_FRAMES,
   VIDEO_CONTEXT_FRAMES,
-  isVideoMime,
   renderedVideoFrames,
 } from '@atelier/shared';
 import type { Config } from './config';
@@ -41,6 +40,7 @@ import {
   unregisterTile,
 } from './orchestrator/registry';
 import { sanitizedModerationNotice, sanitizeProviderError } from './orchestrator/sanitize';
+import { noteLocalGenerationFailure } from './orchestrator/localHostGate';
 import type { RegistryEntry } from './providers/registry';
 import {
   isAllowedArtifact,
@@ -56,13 +56,12 @@ import { extractVideoTail } from './storage/videoTail';
 import { withDecryptedArtifactFiles } from './storage/decryptedTemp';
 import { resolveExtendSource } from './orchestrator/extendSource';
 import { ensureThumbnail } from './storage/thumbnail';
+import { ThumbQueueFullError } from './storage/thumbRuntime';
 import * as bus from './orchestrator/bus';
 import { failBatchTerminally } from './orchestrator/failBatchTerminally';
 import { finalizeBatch } from './orchestrator/finalize';
 import { settleSequenceAfterBatchTerminal } from './orchestrator/sequenceLifecycle';
 import { RefImagesNotFoundError, resolveRefImagesAfterReservation } from './orchestrator/refImages';
-import { condenseBatchPrompt, persistCondensedPrompt } from './orchestrator/condenseBatchPrompt';
-import { expandBatchPrompt } from './orchestrator/expandBatchPrompt';
 import { doneTileEvent } from './orchestrator/tileEvents';
 import { readModelStepsOverride } from './routing/modelStepsPreference';
 import { readModelResolutionOverride } from './routing/modelResolutionPreference';
@@ -123,8 +122,6 @@ export interface GenerationContext {
    */
   onBatchSucceeded?: (() => Promise<void>) | undefined;
   closeBatchOnCleanup?: boolean | undefined;
-  /** The queue preparer already attempted condensation, including fail-open. */
-  promptPrepared?: boolean;
 }
 
 export interface PreparedBatch {
@@ -182,33 +179,11 @@ export async function runBatchPipeline(prepared: PreparedBatch, ctx: GenerationC
     request = await resolveI2vContextAfterReservation(ctx, prepared, request);
     request = resolveModelSteps(ctx, request);
     request = resolveModelResolution(ctx, request);
-    // Production queued requests were already prepared before GPU admission.
-    // Keep the fail-open fallback for direct/legacy pipeline callers only.
-    // Condensation (Krea) and expansion (MiniMax H3 Image) are exclusive by
-    // target; each returns the prompt untouched when it does not apply.
-    const rewriteDeps = {
-      config: ctx.config,
-      text: ctx.text,
-      logger,
-      userId: ctx.userId,
-      signal: activeBatchController.signal,
-    };
-    const condensed = ctx.promptPrepared
-      ? request.prompt
-      : await expandBatchPrompt(
-        await condenseBatchPrompt(request.prompt, request.modelId, rewriteDeps),
-        request.modelId,
-        rewriteDeps,
-        (request.refImages ?? []).map((ref) => ref.bytes),
-      );
-    if (condensed !== request.prompt) {
-      persistCondensedPrompt(ctx.db, prepared.batch.id, condensed);
-      // Keep the in-memory row in step with the write: later frames and
-      // finalize reads take the batch from `prepared`, not a re-SELECT.
-      prepared.batch.prompt = condensed;
-      request = { ...request, prompt: condensed };
-    }
-    // signal can be aborted during the await (DELETE while resolving refs or condensing); TS narrowing forgets this across the await.
+    // Krea condensation and MiniMax H3 Image expansion run before GPU
+    // admission in the queue preparer (queuedPromptPreparation.ts), which owns
+    // the guarded prompt write. /generate queues every batch that needs one,
+    // so the pipeline never rewrites a prompt.
+    // signal can be aborted during the await (DELETE while resolving refs); TS narrowing forgets this across the await.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (activeBatchController.signal.aborted) {
       abortBeforeStart();
@@ -642,21 +617,30 @@ function emitProgress(
   emitOptional(() => encodeSseFrame('tile', event));
 }
 
-async function prewarmVideoPoster(
+// The plaintext is in memory at commit, so the thumbnail (image) or poster
+// (video) is encoded from it now instead of decrypting the artifact again on
+// the first thumb GET; that GET joins this flight through the single-flight
+// key. Fire-and-forget: a full thumb queue only skips the prewarm and the
+// GET generates lazily as before.
+async function prewarmThumbnail(
   ctx: GenerationContext,
   tile: TileRow,
   bytes: Uint8Array,
-  mime: string,
+  ext: MediaExt,
+  mime: MediaMime,
   logger: AppLogger,
 ): Promise<void> {
-  if (!isVideoMime(mime)) return;
   try {
     await ensureThumbnail({
       db: ctx.db, dataDir: ctx.config.DATA_DIR, userId: tile.user_id,
-      tileId: tile.id, ext: 'mp4', mime, sourceBytes: bytes, logger,
+      tileId: tile.id, ext, mime, sourceBytes: bytes, logger,
     });
   } catch (error) {
-    logger.warn({ err: error }, 'video poster prewarm failed');
+    if (error instanceof ThumbQueueFullError) {
+      logger.warn({ tileId: tile.id }, 'thumbnail prewarm skipped: thumb queue full');
+      return;
+    }
+    logger.warn({ err: error }, 'thumbnail prewarm failed');
   }
 }
 
@@ -725,14 +709,23 @@ async function commitTerminalResult(scope: TileCommitScope, result: TerminalProv
   }
 
   if (result.status === 'failed') {
+    // An unreachable local host pauses the local queue before this tile's
+    // slot release kicks the next entry into the same failure.
+    if (ctx.registryEntry.model.pool === 'local') noteLocalGenerationFailure(ctx.request.modelId, result.error);
     emitFailed(
       ctx.db,
       emitTerminal,
       tile,
-      sanitizeProviderError(result.error ?? 'empty provider result', logger),
+      sanitizeProviderError(result.error ?? 'empty provider result', logger, ctx.request.modelId),
       sanitizedModerationNotice(result.error),
     );
     return;
+  }
+
+  // The upstream rewrote the prompt (gpt-image `revised_prompt`). A count
+  // only: the rewritten text is prompt content and never reaches a log line.
+  if (result.revisedPrompt !== undefined && result.revisedPrompt.length > 0) {
+    logger.info({ event: 'image_prompt_revised_upstream', revisedChars: result.revisedPrompt.length }, 'upstream revised the prompt');
   }
 
   if (!isAllowedArtifact(result.ext, result.mime)) {
@@ -799,7 +792,7 @@ async function commitTerminalResult(scope: TileCommitScope, result: TerminalProv
   }
   logger.info('tile done');
   emitTerminal(terminalFrame('tile', doneTileEvent(tile, ext, mime, completedAt)));
-  void prewarmVideoPoster(ctx, tile, result.bytes, mime, logger);
+  void prewarmThumbnail(ctx, tile, result.bytes, ext, mime, logger);
 }
 
 async function runTile(
@@ -873,7 +866,7 @@ async function runTile(
       cancelOrFail(ctx.db, emitTerminal, tile, parentSignal, tileController, abortCategory);
       return;
     }
-    emitFailed(ctx.db, emitTerminal, tile, sanitizeProviderError('empty provider result', logger));
+    emitFailed(ctx.db, emitTerminal, tile, sanitizeProviderError('empty provider result', logger, ctx.request.modelId));
   } catch (error) {
     if (isUserCancelOnComposite(parentSignal, tileController)) {
       emitCanceled(emitTerminal, tile);
@@ -887,7 +880,7 @@ async function runTile(
     // a slow provider's catch report a provider error where a SIGTERM-induced
     // parent abort was the real cause.
     const category = abortedCategory(tileSignal.signal, parentSignal)
-      ?? sanitizeProviderError(error, logger);
+      ?? sanitizeProviderError(error, logger, ctx.request.modelId);
     emitFailed(ctx.db, emitTerminal, tile, category);
   } finally {
     // Defensive: abort the per-tile controller so any provider iterator
@@ -1037,7 +1030,7 @@ async function runBatch(
       if (finalAbortCategory) {
         cancelOrFail(ctx.db, emitTerminal, tile, parentSignal, tileControllers[i], finalAbortCategory);
       } else {
-        emitFailed(ctx.db, emitTerminal, tile, sanitizeProviderError('empty provider result', logger));
+        emitFailed(ctx.db, emitTerminal, tile, sanitizeProviderError('empty provider result', logger, ctx.request.modelId));
       }
     }
   } catch (error) {
@@ -1060,7 +1053,7 @@ async function runBatch(
           continue;
         }
       }
-      emitFailed(ctx.db, emitTerminal, tile, abortCategory ?? sanitizeProviderError(error, logger));
+      emitFailed(ctx.db, emitTerminal, tile, abortCategory ?? sanitizeProviderError(error, logger, ctx.request.modelId));
     }
   } finally {
     for (const controller of tileControllers) {

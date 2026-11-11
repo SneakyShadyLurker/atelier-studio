@@ -9,10 +9,9 @@ import type { AppLogger } from '../observability/logger';
 import { motionEnhanceSystemPrompt } from '../prompts/motionEnhanceSystemPrompt';
 import { motionExtendEnhanceSystemPrompt } from '../prompts/motionExtendEnhanceSystemPrompt';
 import { storyT2vSystemPrompt } from '../prompts/storyT2vSystemPrompt';
-import { MOTION_ENHANCE_DEFAULTS } from '../providers/text/textBudgets';
+import { MOTION_ENHANCE_MAX_OUTPUT_TOKENS, textStreamDrainMs } from '../providers/text/textBudgets';
 import type { EnhanceImageInput } from '../providers/text/featureHelpers';
 import { findModel, isLocalModelGated } from '../providers/registry';
-import { textProviderForResolved } from '../providers/textRouting';
 import type { TextServices } from '../routing/textServices';
 import { downscaleForVision } from '../storage/downscaleForVision';
 import { storageKeyring } from '../storage/crypto';
@@ -22,7 +21,7 @@ import { releaseUploads, storeUpload } from '../storage/uploadStore';
 import { createBatch } from './createBatch';
 import { validateExtension } from './extendValidation';
 import * as queue from './queue';
-import { enhancePool } from './llmAdmission';
+import { runTextRewrite } from './rewriteBatchPrompt';
 
 export interface StoryDriverRuntime {
   readonly db: Database;
@@ -330,6 +329,8 @@ async function advanceStory(configured: StoryDriverRuntime, storyId: string, lif
   }
 
   const clipSeconds = videoDurationSeconds(segment.duration_frames);
+  // Bounds frame extraction, upload and downscale; the beat writer's text
+  // call gets its own deadline once its model is resolved.
   const signal = AbortSignal.any([lifetime, AbortSignal.timeout(configured.config.CLOUD_TIMEOUT_MS)]);
   let prompt = segment.beat;
   let motionPrompt: string | undefined;
@@ -372,7 +373,6 @@ async function advanceStory(configured: StoryDriverRuntime, storyId: string, lif
             sourcePrompt: story.continuity_bible,
             clipSeconds,
           }),
-          signal,
           lifetime,
         );
       } catch (error) {
@@ -389,7 +389,6 @@ async function advanceStory(configured: StoryDriverRuntime, storyId: string, lif
           sourcePrompt: [story.continuity_bible, story.source_prompt].filter(Boolean).join('\n\n'),
           clipSeconds,
         }),
-        signal,
         lifetime,
       );
     } else {
@@ -399,7 +398,6 @@ async function advanceStory(configured: StoryDriverRuntime, storyId: string, lif
         segment,
         [],
         storyT2vSystemPrompt({ bible: story.continuity_bible, clipSeconds }),
-        signal,
         lifetime,
       );
     }
@@ -539,58 +537,54 @@ function segmentMode(story: StoryRow, segment: StorySegmentRow): SegmentMode {
   return 'extension';
 }
 
+/**
+ * Write one segment's prompt on the shared rewrite core (resolve the
+ * `story-segments` model, admission, `rewrite()`, validation). Every way the
+ * writer can fall short, including a refusal or an over-length answer, leaves
+ * the raw beat and logs why. The text call has its own deadline from the
+ * resolved model's latency profile; the frame extraction, upload and
+ * downscale before it keep the caller's bound.
+ */
 async function enhanceSegment(
   configured: StoryDriverRuntime,
   story: StoryRow,
   segment: StorySegmentRow,
   images: readonly EnhanceImageInput[],
   systemPrompt: string,
-  signal: AbortSignal,
   lifetime: AbortSignal,
 ): Promise<string> {
-  let release: (() => void) | undefined;
-  try {
-    lifetime.throwIfAborted();
-    const slot = enhancePool.acquire(story.user_id);
-    if (!slot.ok) return segment.beat;
-    release = () => { slot.release(); };
-    // The beat writer runs on the `story-segments` task's model; a handoff
-    // frame requires one that accepts images. No model → the raw beat (below).
-    const resolved = configured.text.resolve({
+  lifetime.throwIfAborted();
+  const outcome = await runTextRewrite(
+    {
+      config: configured.config,
+      text: configured.text,
+      logger: configured.logger,
       userId: story.user_id,
+      signal: lifetime,
+    },
+    {
       task: 'story-segments',
-      visionRequired: images.length > 0,
-    });
-    if (!resolved.ok) throw new Error(`no text model for story segments: ${resolved.reason}`);
-    const provider = textProviderForResolved(configured.config, configured.text, resolved.model);
-    let text = '';
-    let done = false;
-    for await (const chunk of provider.enhance(
-      segment.beat,
-      images,
-      signal,
+      prompt: segment.beat,
       systemPrompt,
-      { defaults: MOTION_ENHANCE_DEFAULTS, ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }) },
-    )) {
-      lifetime.throwIfAborted();
-      if (chunk.type === 'delta') text += chunk.text;
-      else if (chunk.type === 'reasoning') continue;
-      else if (chunk.type === 'done') done = true;
-      else throw new Error('motion enhancement failed');
-    }
-    const trimmed = text.trim();
-    if (!done || trimmed.length === 0) throw new Error('motion enhancement returned no text');
-    return trimmed;
-  } catch (error) {
-    lifetime.throwIfAborted();
-    configured.logger.warn(
-      { err: error, event: 'story_motion_enhance_failed', storyId: story.id, segmentIndex: segment.idx },
-      'story motion enhancement failed; using raw beat',
-    );
-    return segment.beat;
-  } finally {
-    release?.();
-  }
+      images,
+      maxOutputTokens: MOTION_ENHANCE_MAX_OUTPUT_TOKENS,
+      timeoutMs: (profile) => textStreamDrainMs(profile, configured.config.CLOUD_TIMEOUT_MS),
+    },
+  );
+  lifetime.throwIfAborted();
+  if (outcome.type === 'ok') return outcome.text;
+  configured.logger.warn(
+    {
+      event: 'story_motion_enhance_failed',
+      storyId: story.id,
+      segmentIndex: segment.idx,
+      skipReason: outcome.skipReason,
+      ...(outcome.textModelId === undefined ? {} : { textModelId: outcome.textModelId }),
+      ...outcome.fault,
+    },
+    'story motion enhancement failed; using raw beat',
+  );
+  return segment.beat;
 }
 
 function loadPredecessorByTile(

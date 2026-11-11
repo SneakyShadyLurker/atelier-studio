@@ -763,13 +763,13 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
                   {...diagnosisCardOpen}
                   diagnosis={diagnosisQuery.data}
                   fixButtonRef={fixButtonRef}
-                  onFixWithAi={(diagnosis: LibraryDiagnosisResponse, actionLabel: string) => {
+                  onFixWithAi={(_diagnosis: LibraryDiagnosisResponse, actionLabel: string) => {
                     if (textModelGate.availability === 'none') {
                       setTextNote({ action: actionLabel, anchorRef: fixButtonRef });
                       return;
                     }
                     setDiagnosisCardOpen(null);
-                    infer.analyze({ priorDiagnosis: diagnosis });
+                    infer.analyze();
                   }}
                   onCancel={() => { setDiagnosisCardOpen(null); }}
                 />

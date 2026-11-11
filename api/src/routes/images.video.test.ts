@@ -3,7 +3,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { writeAtomic } from '../storage/files';
-import { setFfmpegRunnerForTests } from '../storage/posterFrame';
+import { FfmpegCommandError } from '../storage/ffmpeg';
+import { PosterFrameTimeoutError, setFfmpegRunnerForTests } from '../storage/posterFrame';
 import { testRuntime } from '../test/helpers';
 
 const MP4_BYTES = new Uint8Array([
@@ -83,13 +84,13 @@ describe('video thumbnail route', () => {
     expect(existsSync(join(runtime.config.DATA_DIR, 'thumbs', 'alice', `${tileId}.webp`))).toBe(true);
   });
 
-  test('serves and caches a neutral poster when poster extraction fails', async () => {
+  test('serves and caches a neutral poster when ffmpeg cannot decode the clip', async () => {
     const runtime = testRuntime();
     const tileId = await seedDoneVideoTile(runtime, 'alice');
     let attempts = 0;
     setFfmpegRunnerForTests(() => {
       attempts += 1;
-      return Promise.reject(new Error('ffmpeg failed'));
+      return Promise.reject(new FfmpegCommandError('ffmpeg failed: invalid data'));
     });
 
     const first = await runtime.fetch(`/api/img/${tileId}/thumb`, {
@@ -111,6 +112,35 @@ describe('video thumbnail route', () => {
     expect(second.headers.get('Cache-Control')).toBe('private, no-store');
     expect(Array.from(new Uint8Array(await second.arrayBuffer()))).toEqual(Array.from(firstBytes));
     expect(attempts).toBe(1);
+  });
+
+  test.each([
+    ['a timeout', () => new PosterFrameTimeoutError()],
+    ['a spawn failure', () => Object.assign(new Error('spawn ffmpeg ENOENT'), { code: 'ENOENT' })],
+  ])('serves the neutral poster without storing it after %s, so the next request retries', async (_label, failure) => {
+    const runtime = testRuntime();
+    const tileId = await seedDoneVideoTile(runtime, 'alice');
+    const png = await onePixelPng();
+    let attempts = 0;
+    setFfmpegRunnerForTests(() => {
+      attempts += 1;
+      return attempts === 1 ? Promise.reject(failure()) : Promise.resolve(png);
+    });
+    const thumbPath = join(runtime.config.DATA_DIR, 'thumbs', 'alice', `${tileId}.webp`);
+
+    const first = await runtime.fetch(`/api/img/${tileId}/thumb`, { headers: { 'Remote-User': 'alice' } });
+    expect(first.status).toBe(200);
+    const placeholder = new Uint8Array(await first.arrayBuffer());
+    expect(isWebp(placeholder)).toBe(true);
+    expect(existsSync(thumbPath)).toBe(false);
+
+    const second = await runtime.fetch(`/api/img/${tileId}/thumb`, { headers: { 'Remote-User': 'alice' } });
+    expect(second.status).toBe(200);
+    const poster = new Uint8Array(await second.arrayBuffer());
+    expect(isWebp(poster)).toBe(true);
+    expect(Array.from(poster)).not.toEqual(Array.from(placeholder));
+    expect(attempts).toBe(2);
+    expect(existsSync(thumbPath)).toBe(true);
   });
 
   test('video artifact reads always reach origin authorization', async () => {

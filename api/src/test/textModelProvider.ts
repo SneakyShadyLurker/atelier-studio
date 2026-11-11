@@ -92,6 +92,8 @@ export interface TestTextModelProviderOptions extends Partial<TextCallPolicies> 
   readonly brainstormOpenTimeoutMs?: number;
   readonly moderation?: TextModelProviderInit['moderation'];
   readonly logger?: ProviderLogger;
+  readonly includeUsage?: boolean;
+  readonly finishGraceMs?: number;
 }
 
 /** A feature provider with the production policies at millisecond backoff; any policy can be replaced. */
@@ -99,7 +101,7 @@ export function testTextModelProvider(opts: TestTextModelProviderOptions): TextM
   const {
     origin, token, credential, model, provider: providerOverrides, maxResponseBytes,
     inferMaxResponseBytes, brainstormMaxResponseBytes, quotaMinRetryAfterMs,
-    enhanceOpenTimeoutMs, brainstormOpenTimeoutMs, moderation, logger, ...policies
+    enhanceOpenTimeoutMs, brainstormOpenTimeoutMs, moderation, logger, includeUsage, finishGraceMs, ...policies
   } = opts;
   const provider = testTextProviderRow(origin, providerOverrides);
   return createTextModelProvider({
@@ -116,5 +118,7 @@ export function testTextModelProvider(opts: TestTextModelProviderOptions): TextM
     ...(brainstormOpenTimeoutMs === undefined ? {} : { brainstormOpenTimeoutMs }),
     ...(moderation === undefined ? {} : { moderation }),
     ...(logger === undefined ? {} : { logger }),
+    ...(includeUsage === undefined ? {} : { includeUsage }),
+    ...(finishGraceMs === undefined ? {} : { finishGraceMs }),
   });
 }

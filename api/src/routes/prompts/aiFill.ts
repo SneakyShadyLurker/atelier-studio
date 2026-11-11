@@ -33,7 +33,7 @@ import {
   buildKimiAiFillSystemPrompt,
 } from '../../prompts/aiFillSystemPrompt';
 import { isLikelyModelRefusal } from '../../prompts/modelOutput';
-import { failedToSseError } from '../../lifecycle/llm-error';
+import { textFailureToSseError } from '../../lifecycle/llm-error';
 import { promptCharBudgetForModel, promptMinPerSlotWordsForModel } from '../../prompts/promptBudget';
 import type { TextModelRecord } from '../../db/textProviders';
 
@@ -232,7 +232,8 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
             logger.info(
               {
                 event: simulate ? 'ai_fill_simulate_retry' : 'ai_fill_mismatch_retry',
-                reason: retryReason,
+                textModelId: textModel.id,
+                retryReason,
                 ...(fills.length !== instructions.length ? { got: fills.length } : {}),
                 want: instructions.length,
                 userId,
@@ -250,10 +251,10 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
 
           if (result.type === 'failed') {
             logger.warn(
-              { event: 'ai_fill_upstream', kind: result.kind, status: result.status, userId },
+              { event: 'ai_fill_upstream', textModelId: textModel.id, failureKind: result.kind, status: result.status, userId },
               'ai-fill upstream error',
             );
-            send('error', failedToSseError(result));
+            send('error', textFailureToSseError(result, SAFE_ERROR_MESSAGE));
             return;
           }
           // Before the mismatch return, mirroring the first pass: a refusal
@@ -283,7 +284,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
             { err: error, event: timedOut() ? 'ai_fill_timeout' : 'ai_fill_crash', userId },
             'ai-fill failed',
           );
-          send('error', { message: SAFE_ERROR_MESSAGE, code: 'provider-error' });
+          send('error', textFailureToSseError(null, SAFE_ERROR_MESSAGE));
         }
     },
   }));
@@ -359,7 +360,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
             {
               event: 'ai_fill_batch_mismatch_retry',
               textModelId: textModel.id,
-              reason: parsedResponse === null ? 'record-count-mismatch' : 'every-item-mismatch',
+              retryReason: parsedResponse === null ? 'record-count-mismatch' : 'every-item-mismatch',
               ...(parsedResponse === null
                 ? { got: result.text.split(AI_FILL_RECORD_SEPARATOR).length, want: prepared.length }
                 : {}),
@@ -379,16 +380,16 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
             {
               event: 'ai_fill_batch_upstream',
               textModelId: textModel.id,
-              kind: result.kind,
+              failureKind: result.kind,
               status: result.status,
               userId,
             },
             'ai-fill batch upstream error',
           );
-          if (result.moderation) {
-            send('error', failedToSseError(result));
-            return;
-          }
+          // No item can be salvaged from a failed call, so the typed failure
+          // is the terminal error (quota keeps its retry hint).
+          send('error', textFailureToSseError(result, SAFE_ERROR_MESSAGE));
+          return;
         }
         // A failed or unparseable response leaves every item `{ ok: false }`.
         parsedResponse?.forEach((batchItem, groupIndex) => {
@@ -435,7 +436,7 @@ export const aiFillRoutes = new Hono<AppEnv>().post('/prompts/ai-fill', async (c
           { err: error, event: timedOut() ? 'ai_fill_batch_timeout' : 'ai_fill_batch_crash', userId },
           'ai-fill batch failed',
         );
-        send('error', { message: SAFE_ERROR_MESSAGE, code: 'provider-error' });
+        send('error', textFailureToSseError(null, SAFE_ERROR_MESSAGE));
       }
     },
   }));

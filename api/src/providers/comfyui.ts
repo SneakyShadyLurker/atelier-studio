@@ -1,4 +1,4 @@
-import { NOOP_PROVIDER_LOGGER, type HealthResult, type Provider, type ProviderGenerateOptions, type ProviderLogger, type ProviderProgress, type ProviderRequest, type ProviderResult } from './types';
+import { NOOP_PROVIDER_LOGGER, type HealthCheckOptions, type HealthResult, type Provider, type ProviderGenerateOptions, type ProviderLogger, type ProviderProgress, type ProviderRequest, type ProviderResult } from './types';
 import {
   readBodyBounded as readBodyBoundedShared,
   tryParseJson,
@@ -162,8 +162,13 @@ export function __resetComfyuiResidentModels(): void {
 // ~0.99 free. 0.85 sits cleanly between the two, so it discriminates
 // "evicted" from "still resident" — do NOT lower it: ~0.4 free (a resident
 // video-sized model) would still pass with the t2i model resident → the OOM we
-// fix here.
+// fix here. The supervisor no longer passes --highvram, and the threshold has
+// not been re-measured since.
 const VRAM_CLEARED_FRACTION = 0.85;
+// /free only signals the prompt worker, so the first read usually still sees
+// the old model; an idle unload then lands well under a second. Short early
+// waits catch that without a fixed one-second floor on every switch.
+const VRAM_POLL_BACKOFF_MS = [100, 200, 400, 800] as const;
 const VRAM_POLL_INTERVAL_MS = 1_000;
 const VRAM_POLL_TIMEOUT_MS = 30_000;
 
@@ -205,14 +210,14 @@ async function evictResidentModels(
       return;
     }
     const deadline = Date.now() + VRAM_POLL_TIMEOUT_MS;
-    for (;;) {
+    for (let attempt = 0; ; attempt += 1) {
       if (evictionSignal.aborted) throw abortReason(evictionSignal);
       if (await vramCleared(baseUrl, maxResponseBytes, evictionSignal, request)) return;
       if (Date.now() >= deadline) {
         logEvictionTimeout(logger);
         return;
       }
-      await abortableDelay(VRAM_POLL_INTERVAL_MS, evictionSignal);
+      await abortableDelay(VRAM_POLL_BACKOFF_MS[attempt] ?? VRAM_POLL_INTERVAL_MS, evictionSignal);
     }
   } catch (error) {
     if (signal.aborted) throw error;
@@ -317,10 +322,10 @@ function extractTerminalNodeClass(workflowText: string, saveImageNodeId: string)
 // check above only ever covered the output node, which left MID-graph custom
 // nodes invisible to readiness: a graph that depends on a class the host does
 // not register still passed readiness and then failed every job at /prompt.
-// This was written when the attention patch was KJNodes' PathchSageAttentionKJ,
-// a third-party pack that can silently fail to import after a ComfyUI update.
-// Every graph is core-only now, but the check still earns its keep:
-// a core node newer than the host's ComfyUI build simply does not exist there.
+// Most graphs are core-only, but the Krea reference graph uses the whitelisted
+// ComfyUI-Krea2-Ostris-Edit pack, which can fail to import after a ComfyUI
+// update, and a core node newer than the host's ComfyUI build simply does not
+// exist there.
 // Derived from the graph rather than declared
 // per-binding so it cannot drift when a workflow is edited. Returns an empty set
 // for unparseable/stub graphs, which skips the check.
@@ -368,8 +373,10 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
   return {
     id: 'comfyui',
     backend: 'local',
-    async healthCheck(signal: AbortSignal): Promise<HealthResult> {
-      // Authenticated private readiness is an uncached host check.
+    async healthCheck(signal: AbortSignal, options?: HealthCheckOptions): Promise<HealthResult> {
+      // 1. Authenticated private readiness is an uncached host check every round.
+      //    Its boot id lets the shared transport reuse a recent same-boot
+      //    inventory for the checks below; a forced probe reads it fresh.
       // 2. Model-file presence — query /object_info and confirm each
       //    requiredModelFiles entry appears in any loader's registered enum.
       //    Skipped when requiredModelFiles is empty (test helpers).
@@ -379,13 +386,21 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
       //    a node-validation failure at /prompt, not at this health check.
       // 4. Node-class registration — every class_type the workflow references
       //    must be registered on the host, so a custom-node pack that failed to
-      //    import (for example, KJNodes) fails readiness instead of failing every
-      //    job at /prompt.
+      //    import (for example, ComfyUI-Krea2-Ostris-Edit) fails readiness
+      //    instead of failing every job at /prompt.
+      let bootId: string | undefined;
       try {
         const metadata = await health.handshake(signal);
-        if (outputKind === 'video' && !metadata.video) throw new PrivacyNotReadyError('comfyui protocol 2 video outputs required');
+        bootId = metadata.bootId;
+        // The host answered and is ready; its metadata rules out this row
+        // only. A row-level code keeps one incompatible row (a graph class
+        // the deployed worker does not allow yet, video on a worker without
+        // video outputs) from pausing the whole local queue.
+        if (outputKind === 'video' && !metadata.video) {
+          return { ok: false, reason: 'comfyui protocol 2 video outputs required', probeCode: 'privacy_row_incompatible' };
+        }
         if (requiredNodeClasses.some((kind) => !metadata.allowedNodes.includes(submissionNodeClass(kind, outputKind === 'image')))) {
-          return { ok: false, reason: 'comfyui workflow contains prohibited node classes', probeCode: 'privacy_not_ready' };
+          return { ok: false, reason: 'comfyui workflow contains prohibited node classes', probeCode: 'privacy_row_incompatible' };
         }
       }
       catch (err) {
@@ -401,7 +416,7 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
         return { ok: true };
       }
       try {
-        const info = await health.inventory(signal);
+        const info = await health.inventory(signal, { bootId, fresh: options?.fresh });
         if (typeof info !== 'object' || info === null) {
           return { ok: false, reason: 'comfyui /object_info returned non-object body', probeCode: 'inventory_invalid' };
         }
@@ -489,14 +504,18 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
         }
 
         let sourceImage: string | undefined;
-        const referenceImages: string[] = [];
+        let referenceImages: string[] = [];
         let contextVideo: string | undefined;
         // Only graphs that declare a {{sourceImage}} placeholder (I2V) need a
         // source still; the T2V graph conditions on {{prompt}} alone, and the
         // continuation graph on {{contextVideo}}.
         if (references.length > 0) {
           try {
-            for (const reference of references) referenceImages.push(await privateJob.upload(reference.bytes, signal));
+            // The worker reserves each input separately, so uploads overlap.
+            // Promise.all keeps slot order and observes every rejection; inputs
+            // already stored on a failure are freed with the lease release.
+            const job = privateJob;
+            referenceImages = await Promise.all(references.map((reference) => job.upload(reference.bytes, signal)));
           } catch (error) {
             if (signal.aborted) throw error;
             yield* failedTerminals(req, toErrorPayload(error));
@@ -692,15 +711,6 @@ export function createComfyuiProvider(config: ComfyuiProviderConfig): Provider {
             if (pendingStores.size === 0) await job.release();
           } };
         }
-
-        // Completeness: if the upstream delivered fewer images than requested,
-        // fail the missing indices explicitly rather than silently yielding a
-        // short batch (the orchestrator maps each index 1:1 onto a tile).
-        const expectedCount = req.count ?? 1;
-        for (let i = images.length; i < expectedCount; i += 1) {
-          terminalIndices.add(i);
-          yield { status: 'failed', error: 'comfyui returned fewer images than requested', seed: req.seed, index: i };
-        }
       } catch (error) {
         if (signal.aborted) throw error;
         for (const failed of failedTerminals(req, toErrorPayload(error))) {
@@ -792,6 +802,21 @@ function parseComfyBinaryImage(buf: Uint8Array, envelope = parseComfyBinaryEnvel
   return { bytes, mime: sniffed.mime };
 }
 
+// Lease status is authoritative, so the reconciliation loop always polls it.
+// While the socket is closed or reconnecting every frame is lost, so polling
+// stays at one second. On an open socket terminal frames wake the loop at
+// once, so after the first 30 s of a running job a slower cadence suffices;
+// the worker only needs an owner heartbeat within 120 s.
+const STATUS_POLL_MS = 1_000;
+const STATUS_POLL_SLOW_MS = 5_000;
+const STATUS_POLL_SLOW_AFTER_MS = 30_000;
+const STATUS_POLL_TERMINAL_MS = 100;
+// Consecutive failed reopen attempts; a reopened socket that delivers a frame
+// restores the budget. Waits double from the base so a refused connection
+// during a brief outage cannot spend every attempt within milliseconds.
+const SOCKET_RECONNECT_ATTEMPTS = 3;
+const SOCKET_RECONNECT_BASE_DELAY_MS = 250;
+
 // Output bytes and references come only from authoritative lease status.
 type JobResult =
   | { kind: 'video'; refs: ImageRef[] }
@@ -847,7 +872,7 @@ async function runJob(args: RunJobArgs): Promise<JobResult> {
       const index = previewIndex;
       previewIndex += 1;
       onPreview?.({
-        preview: `data:${image.mime};base64,${Buffer.from(image.bytes).toString('base64')}`,
+        preview: `data:${image.mime};base64,${image.bytes.toBase64()}`,
         index,
       });
       return;
@@ -869,23 +894,49 @@ async function runJob(args: RunJobArgs): Promise<JobResult> {
   let lastNonterminalAt = performance.now();
   let terminalHint = false;
   let wakeRequested = false;
-  let wakeStatus: (() => void) | undefined;
-  const reconcileNow = () => { terminalHint = true; wakeRequested = true; wakeStatus?.(); };
+  let socketOpen = false;
+  let runningSince: number | undefined;
+  // One reusable wake for the status wait: a terminal hint ends it, a socket
+  // close shortens it to the one-second cadence, and the work signal ends it
+  // for good. Nothing is allocated per iteration beyond the timer.
+  let statusTimer: ReturnType<typeof setTimeout> | undefined;
+  let statusDeadline = 0;
+  let resumeStatus: (() => void) | undefined;
+  const endStatusWait = () => {
+    clearTimeout(statusTimer);
+    const resume = resumeStatus;
+    resumeStatus = undefined;
+    resume?.();
+  };
+  const shortenStatusWait = (ms: number) => {
+    if (resumeStatus === undefined || statusDeadline - performance.now() <= ms) return;
+    clearTimeout(statusTimer);
+    statusDeadline = performance.now() + ms;
+    statusTimer = setTimeout(endStatusWait, ms);
+  };
+  workSignal.addEventListener('abort', endStatusWait, { once: true });
+  const reconcileNow = () => { terminalHint = true; wakeRequested = true; endStatusWait(); };
+  const statusInterval = () => {
+    if (terminalHint) return STATUS_POLL_TERMINAL_MS;
+    if (!socketOpen || runningSince === undefined || performance.now() - runningSince < STATUS_POLL_SLOW_AFTER_MS) return STATUS_POLL_MS;
+    return STATUS_POLL_SLOW_MS;
+  };
   const waitForStatus = async (retryingStatus: boolean) => {
     if (retryingStatus) {
       // Terminal hints cannot shorten transient-failure tolerance. Only a
       // successful status read can resume fast history-lag reconciliation.
       wakeRequested = false;
-      await abortableDelay(1_000, workSignal);
+      await abortableDelay(STATUS_POLL_MS, workSignal);
       wakeRequested = false;
       return;
     }
     if (wakeRequested) { wakeRequested = false; return; }
-    const wake = new AbortController();
-    wakeStatus = () => { wake.abort(); };
-    try { await abortableDelay(terminalHint ? 100 : 1_000, AbortSignal.any([workSignal, wake.signal])); }
-    catch (error) { if (workSignal.aborted) throw error; }
-    finally { wakeStatus = undefined; wakeRequested = false; }
+    if (workSignal.aborted) throw abortReason(workSignal);
+    const ms = statusInterval();
+    statusDeadline = performance.now() + ms;
+    await new Promise<void>((resolve) => { resumeStatus = resolve; statusTimer = setTimeout(endStatusWait, ms); });
+    wakeRequested = false;
+    if (isWorkAborted()) throw abortReason(workSignal);
   };
   try {
     // Defensive: in the microtask window between waitForOpen resolving and
@@ -937,6 +988,15 @@ async function runJob(args: RunJobArgs): Promise<JobResult> {
         }
         return;
       }
+      // On reconnect ComfyUI replays the running node to this client as
+      // {node} without a prompt_id. The socket's client id is unique to this
+      // job, so a node of this graph can only be ours; without it previews
+      // stay off until the next node starts.
+      if (frame.type === 'executing' && data.prompt_id === undefined
+        && typeof data.node === 'string' && knownNodes.has(data.node)) {
+        currentNode = data.node;
+        return;
+      }
       if (data.prompt_id !== promptId) return;
 
       if (frame.type === 'execution_error' || frame.type === 'execution_interrupted') {
@@ -983,7 +1043,11 @@ async function runJob(args: RunJobArgs): Promise<JobResult> {
       onProgress?.(progress);
     };
 
+    let reconnects = 0;
     const onMessage = (evt: MessageEvent) => {
+      // A socket that delivers frames has recovered, so later drops get the
+      // full reconnect budget again.
+      reconnects = 0;
       if (typeof evt.data !== 'string') {
         // Native preview frame. handleBinary checks prompt/node context and
         // never uses socket bytes as authoritative output sink delivery.
@@ -1005,22 +1069,25 @@ async function runJob(args: RunJobArgs): Promise<JobResult> {
       }
       processFrame(frame);
     };
-    let reconnects = 0;
     const onClose = () => {
       currentNode = null;
+      socketOpen = false;
       if (state.settled) return;
-      if (reconnecting || reconnects >= 3) return;
+      shortenStatusWait(STATUS_POLL_MS);
+      if (reconnecting || reconnects >= SOCKET_RECONNECT_ATTEMPTS) return;
       reconnecting = (async () => {
-        while (!workSignal.aborted && reconnects < 3) {
+        while (!workSignal.aborted && reconnects < SOCKET_RECONNECT_ATTEMPTS) {
           reconnects += 1;
           detachSocket();
           closeQuietly(ws);
+          await abortableDelay(SOCKET_RECONNECT_BASE_DELAY_MS * 2 ** (reconnects - 1), workSignal);
           ws = args.privacy.websocket(wsUrl);
           ws.binaryType = 'arraybuffer';
           attachSocket();
           try {
             await waitForOpen(ws, AbortSignal.any([workSignal, AbortSignal.timeout(4_000)]));
             ws.send(JSON.stringify({ type: 'feature_flags', data: { supports_preview_metadata: true } }));
+            socketOpen = true;
             return;
           } catch { /* Status remains authoritative; a reconnect never resubmits. */ }
         }
@@ -1054,6 +1121,7 @@ async function runJob(args: RunJobArgs): Promise<JobResult> {
     try {
       await waitForOpen(ws, AbortSignal.any([workSignal, AbortSignal.timeout(4_000)]));
       ws.send(JSON.stringify({ type: 'feature_flags', data: { supports_preview_metadata: true } }));
+      socketOpen = true;
     } catch (error) {
       if (isJobAborted()) throw error;
       onClose();
@@ -1081,7 +1149,11 @@ async function runJob(args: RunJobArgs): Promise<JobResult> {
             }
             consecutiveStatusFailures = 0;
             if (status.state === 'failed' || status.state === 'released') throw new Error('comfyui job failed or released');
-            if (status.state !== 'completed') { lastNonterminalAt = observedAt; continue; }
+            if (status.state !== 'completed') {
+              lastNonterminalAt = observedAt;
+              if (status.state === 'running') runningSince ??= observedAt;
+              continue;
+            }
             const expected = isImageMode ? args.expectedCount : 1;
             const mediaType = isImageMode ? 'image/png' : 'video/mp4';
             if (status.outputs.length !== expected || status.outputs.some((output) => output.mediaType !== mediaType
@@ -1127,10 +1199,9 @@ async function runJob(args: RunJobArgs): Promise<JobResult> {
         prompt: workflow,
         prompt_id: promptId,
         client_id: clientId,
-        // ComfyUI's global default is no latent previews. Current supported
-        // hosts accept this per-queue override, avoiding a host-wide launch
-        // flag and keeping video jobs on their existing no-preview path.
-        ...(isImageMode ? { extra_data: { preview_method: 'auto' } } : {}),
+        // No extra_data: the worker replaces it on every /prompt and sets the
+        // preview mode from the lease's `previews` control (on for image
+        // leases, off for video; see privacy.ts createJob).
       }),
       signal: submissionSignal,
       });

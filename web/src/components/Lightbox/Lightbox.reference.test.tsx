@@ -4,7 +4,8 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useLayoutEffect, type ReactNode } from 'react';
 import { allDoneBatch } from '../../../test/fixtures/batches';
-import { refImageUrl } from '../../api/uploads';
+import { refImageThumbUrl, refImageUrl } from '../../api/uploads';
+import { resetMediaCacheForTests } from '../../lib/mediaCache';
 import { initialAtelierState, useAtelierStore } from '../../store/atelier';
 import Lightbox from './index';
 
@@ -79,7 +80,6 @@ describe('Lightbox reference images', () => {
     fireEvent.click(firstRef);
     expect(generated.getAttribute('aria-pressed')).toBe('false');
     expect(firstRef.getAttribute('aria-pressed')).toBe('true');
-    expect(firstRef.querySelector('img')?.getAttribute('src')).toBe(refImageUrl('ref-one'));
     expect(screen.getByText('Reference image')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Download expanded image' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit from this image' })).toBeNull();
@@ -89,7 +89,6 @@ describe('Lightbox reference images', () => {
     fireEvent.click(secondRef);
     expect(firstRef.getAttribute('aria-pressed')).toBe('false');
     expect(secondRef.getAttribute('aria-pressed')).toBe('true');
-    expect(secondRef.querySelector('img')?.getAttribute('src')).toBe(refImageUrl('ref-two'));
 
     fireEvent.click(generated);
     expect(generated.getAttribute('aria-pressed')).toBe('true');
@@ -99,6 +98,40 @@ describe('Lightbox reference images', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Archive expanded image' }));
     expect(onDownload).toHaveBeenCalledWith(generatedTile);
     expect(onDelete).toHaveBeenCalledWith(generatedTile);
+  });
+
+  test('strip tiles read thumbnails through the session media cache, never the originals', async () => {
+    resetMediaCacheForTests();
+    const realFetch = globalThis.fetch;
+    const realCreate = URL.createObjectURL.bind(URL);
+    let objectUrls = 0;
+    URL.createObjectURL = () => `blob:strip-${String(objectUrls++)}`;
+    const requested: string[] = [];
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      requested.push(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url);
+      return Promise.resolve(new Response(new Blob(['thumb'], { type: 'image/webp' })));
+    }) as unknown as typeof fetch;
+    try {
+      await renderLightbox();
+      const stripImages = () => [
+        screen.getByRole('button', { name: 'View generated image' }),
+        screen.getByRole('button', { name: 'View reference image 1 of 2' }),
+        screen.getByRole('button', { name: 'View reference image 2 of 2' }),
+      ].map((button) => button.querySelector('img')?.getAttribute('src'));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(stripImages().every((src) => src?.startsWith('blob:strip-') === true)).toBe(true);
+      expect(requested).toContain(refImageThumbUrl('ref-one'));
+      expect(requested).toContain(refImageThumbUrl('ref-two'));
+      expect(requested).toContain('/api/img/generated-with-refs/thumb');
+      expect(requested).not.toContain(refImageUrl('ref-one'));
+      expect(requested).not.toContain(refImageUrl('ref-two'));
+
+    } finally {
+      cleanup();
+      globalThis.fetch = realFetch;
+      URL.createObjectURL = realCreate;
+      resetMediaCacheForTests();
+    }
   });
 
   test('a previous tile\'s strip, still shown from the deferred chrome, cannot select its reference on the new tile', async () => {

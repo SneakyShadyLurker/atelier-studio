@@ -6,6 +6,7 @@ import {
   DelegateBackoff,
   ExponentialBackoff,
   handleWhen,
+  NoopPolicy,
   retry,
   TaskCancelledError,
   timeout,
@@ -55,15 +56,21 @@ export class PermanentUpstreamError extends Error {
   }
 }
 
-export class Parse4xxError extends Error {
-  override readonly name = 'Parse4xxError';
+// The caller's own signal aborted while an attempt was in flight. Raised by the
+// guard layer inside the breaker in place of whatever the attempt rejected
+// with, so a client disconnect or route deadline is never mistaken for an
+// upstream failure. The signal's reason is kept as `cause` and not rethrown: a
+// reason from `AbortSignal.timeout` is a TimeoutError, which `isRetriable`
+// would treat as an upstream timeout.
+export class CallerAbortedError extends Error {
+  override readonly name = 'CallerAbortedError';
 
   constructor(
-    readonly category: 'parse',
     override readonly cause: unknown,
-    message?: string,
+    /** The aborted attempt was a breaker's half-open trial. */
+    readonly duringTrial = false,
   ) {
-    super(message ?? 'parse failure');
+    super('caller aborted');
   }
 }
 
@@ -79,6 +86,7 @@ export class QuotaExhaustedError extends Error {
 }
 
 export function isRetriable(err: unknown): boolean {
+  if (err instanceof CallerAbortedError) return false;
   if (isAbortError(err)) return false;
   if (isTimeoutErrorLike(err)) return true;
   if (err instanceof BrokenCircuitError) return false;
@@ -149,23 +157,79 @@ export function buildResilientPolicy(opts: ResilientPolicyOptions): IPolicy {
     });
   }
 
-  const breakerPolicy = circuitBreaker(handleWhen(isRetriable), {
-    halfOpenAfter: opts.halfOpenAfterMs,
-    breaker: new ConsecutiveBreaker(opts.breakerThreshold),
-  });
+  // A caller abort is not upstream evidence. An attempt that entered while
+  // the breaker was closed leaves it unhandled, so it never counts toward
+  // opening; an aborted half-open trial is handled, because cockatiel treats
+  // an unhandled trial error as success and would close the circuit with no
+  // proof the upstream recovered. The decision uses the state this breaker
+  // execution started in (`duringTrial`, set by `trialOwnership`), not the
+  // live state: an older call that aborts while a newer trial is running must
+  // not re-open the circuit under it.
+  const breakerPolicy = circuitBreaker(
+    handleWhen((err) => isRetriable(err) || (err instanceof CallerAbortedError && err.duringTrial)),
+    {
+      halfOpenAfter: opts.halfOpenAfterMs,
+      breaker: new ConsecutiveBreaker(opts.breakerThreshold),
+    },
+  );
 
-  let policy: IPolicy;
-  if (opts.breakerOutsideRetry) {
-    policy = opts.noTimeout
-      ? wrap(breakerPolicy, retryPolicy)
-      : wrap(breakerPolicy, retryPolicy, timeout(opts.timeoutPerAttemptMs, TimeoutStrategy.Aggressive));
-  } else {
-    policy = opts.noTimeout
-      ? wrap(retryPolicy, breakerPolicy)
-      : wrap(retryPolicy, breakerPolicy, timeout(opts.timeoutPerAttemptMs, TimeoutStrategy.Aggressive));
-  }
+  const attempt = callerAbortGuard(
+    opts.noTimeout ? new NoopPolicy() : timeout(opts.timeoutPerAttemptMs, TimeoutStrategy.Aggressive),
+  );
+  // Sits directly inside the breaker, so it samples the state once per breaker
+  // execution and before any inner retry. cockatiel moves to HalfOpen before
+  // it invokes the trial and admits no other execution while the trial is in
+  // flight, so an execution that enters in HalfOpen is the trial. Sampling per
+  // attempt would be wrong with the breaker outside retry: an older
+  // execution's retry can start while a newer trial is running.
+  const ownership = trialOwnership(() => breakerPolicy.state === CircuitState.HalfOpen);
+  const policy = opts.breakerOutsideRetry
+    ? wrap(breakerPolicy, ownership, retryPolicy, attempt)
+    : wrap(retryPolicy, breakerPolicy, ownership, attempt);
 
   return abortablePolicy(policy);
+}
+
+// Runs one attempt through `inner` (the per-attempt timeout, or a no-op) and
+// turns any rejection that happens while the execution signal is aborted into
+// a CallerAbortedError. Without it the Aggressive timeout reports a caller
+// abort as its own TaskCancelledError, which the breaker counts as a failure.
+// A genuine per-attempt timeout leaves the caller signal untouched and passes
+// through unchanged.
+function callerAbortGuard(inner: IPolicy): IPolicy {
+  return {
+    _altReturn: undefined,
+    onFailure: inner.onFailure,
+    onSuccess: inner.onSuccess,
+    async execute<T>(fn: (context: { signal: AbortSignal }) => PromiseLike<T> | T, signal?: AbortSignal) {
+      try {
+        return await inner.execute(fn, signal);
+      } catch (err) {
+        if (signal?.aborted) throw new CallerAbortedError(signal.reason);
+        throw err;
+      }
+    },
+  } as IPolicy;
+}
+
+// Marks a caller abort as belonging to the breaker's half-open trial when the
+// execution it wraps entered the breaker as that trial.
+function trialOwnership(isTrial: () => boolean): IPolicy {
+  const passthrough = new NoopPolicy();
+  return {
+    _altReturn: undefined,
+    onFailure: passthrough.onFailure,
+    onSuccess: passthrough.onSuccess,
+    async execute<T>(fn: (context: { signal: AbortSignal }) => PromiseLike<T> | T, signal?: AbortSignal) {
+      const ownsTrial = isTrial();
+      try {
+        return await passthrough.execute(fn, signal);
+      } catch (err) {
+        if (ownsTrial && err instanceof CallerAbortedError) throw new CallerAbortedError(err.cause, true);
+        throw err;
+      }
+    },
+  } as IPolicy;
 }
 
 function nextExponentialBackoff(

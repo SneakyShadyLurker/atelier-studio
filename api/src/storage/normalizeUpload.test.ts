@@ -184,3 +184,44 @@ describe('normalizeUpload Sharp path', () => {
     expect(error).toBeInstanceOf(ImageTooLargeError);
   });
 });
+
+describe('normalizeUpload output bytes', () => {
+  // A source embedded at an offset in a larger buffer, as a multipart body
+  // slice arrives: the encoder must read exactly the view, nothing around it.
+  function asView(bytes: Uint8Array): Uint8Array {
+    const backing = new Uint8Array(bytes.byteLength + 64).fill(0xab);
+    backing.set(bytes, 32);
+    return backing.subarray(32, 32 + bytes.byteLength);
+  }
+  async function noisyAvif(width: number, height: number, alpha: boolean): Promise<Uint8Array> {
+    const channels = alpha ? 4 : 3;
+    const raw = new Uint8Array(width * height * channels);
+    for (let i = 0; i < raw.length; i += 1) raw[i] = (i * 2_654_435_761) >>> 24;
+    return new Uint8Array(await sharp(raw, { raw: { width, height, channels } }).avif().toBuffer());
+  }
+  // The encode as it ran with Buffer copies of the input and output: first
+  // ladder step, no resize (the fixtures are far below every cap).
+  async function copyingReference(source: Uint8Array, alpha: boolean): Promise<Uint8Array> {
+    const [step] = buildLadder(alpha);
+    if (!step) throw new Error('empty ladder');
+    let pipeline = sharp(Buffer.from(source), { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' }).rotate();
+    pipeline = step.ext === 'png' ? pipeline.png() : pipeline.jpeg({ quality: step.quality ?? 90 });
+    return new Uint8Array(await pipeline.toBuffer());
+  }
+
+  it.each([
+    ['opaque AVIF to JPEG', false],
+    ['alpha AVIF to PNG', true],
+  ] as const)('%s output is byte-identical to the copying encode', async (_label, alpha) => {
+    const source = asView(await noisyAvif(96, 64, alpha));
+    const out = await normalizeUpload(source, new AbortController().signal);
+    expect(Array.from(out.bytes)).toEqual(Array.from(await copyingReference(source, alpha)));
+  });
+
+  it('a decoded HEIC output is byte-identical to the copying encode', async () => {
+    const png = asView(await makePng(40, 30));
+    setHeicDecoderForTests(() => Promise.resolve(png));
+    const out = await normalizeUpload(asView(ftyp('heic')), new AbortController().signal);
+    expect(Array.from(out.bytes)).toEqual(Array.from(await copyingReference(png, false)));
+  });
+});

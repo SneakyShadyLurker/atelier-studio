@@ -37,3 +37,16 @@ export function failedToSseError(failure: FailedLike): SseTerminalError {
   }
   return { message: 'The AI service returned an error — please try again.', code: 'provider-error' };
 }
+
+/**
+ * The terminal error of every text route. A typed provider failure maps
+ * through `failedToSseError`, so quota, moderation and provider errors carry
+ * the same codes everywhere; a crash or timeout has no typed failure and
+ * becomes the route's own message with `provider-error`.
+ */
+export function textFailureToSseError(
+  failure: FailedLike | null | undefined,
+  fallbackMessage: string,
+): SseTerminalError {
+  return failure ? failedToSseError(failure) : { message: fallbackMessage, code: 'provider-error' };
+}

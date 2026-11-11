@@ -42,6 +42,7 @@ import { batchesEventsRoutes } from './routes/batches.events';
 import { collectionsRoutes } from './routes/collections';
 import { generateRoutes } from './routes/generate';
 import { configureUpstreamGateWiring, kickQueues, type DispatchDeps } from './orchestrator/dispatch';
+import { configureLocalHostGate, noteLocalHostAvailability } from './orchestrator/localHostGate';
 import { configureLlmAdmissionPools } from './orchestrator/llmAdmission';
 import { healthRoutes, readyRoutes } from './routes/health';
 import { historyRoutes } from './routes/history';
@@ -348,6 +349,12 @@ export async function boot(): Promise<{
     logger,
     intervalMs: config.HEALTH_PROBE_INTERVAL_MS,
     probeTimeoutMs: config.HEALTH_PROBE_TIMEOUT_MS,
+    // A host-level outage pauses the local queue; recovery resumes it.
+    onHostAvailabilityChange: noteLocalHostAvailability,
+  });
+  configureLocalHostGate({
+    hostUnavailable: (modelId) => healthProbe.hostUnavailable(modelId),
+    probeNow: (modelId) => healthProbe.probeNow(modelId),
   });
   const textStore = textProviderStoreFor(config, db);
   const textAvailability = startTextAvailability({

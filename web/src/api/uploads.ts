@@ -102,6 +102,17 @@ export async function uploadRefImage(file: File): Promise<UploadRef> {
   return parseUploadRef(await response.json());
 }
 
+// Copies a finished still into a new upload on the server (Animate, Tell
+// Story), so the original never travels to the browser and back.
+export async function copyTileToUpload(tileId: string): Promise<UploadRef> {
+  const response = await apiFetch(`/tiles/${encodeURIComponent(tileId)}/source-upload`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return mapUploadError(response);
+  return parseUploadRef(await response.json());
+}
+
 export async function deleteRefImage(uploadId: string): Promise<void> {
   const response = await apiFetch(`/uploads/${encodeURIComponent(uploadId)}`, { method: 'DELETE' });
   if (response.status === 204 || response.status === 404) return;
@@ -112,4 +123,10 @@ export async function deleteRefImage(uploadId: string): Promise<void> {
 
 export function refImageUrl(uploadId: string): string {
   return mediaUrl(apiUrl(`/uploads/${encodeURIComponent(uploadId)}`));
+}
+
+// Small previews read this through the session media cache (useCachedMedia);
+// the full original stays for full-size viewing.
+export function refImageThumbUrl(uploadId: string): string {
+  return mediaUrl(apiUrl(`/uploads/${encodeURIComponent(uploadId)}/thumb`));
 }

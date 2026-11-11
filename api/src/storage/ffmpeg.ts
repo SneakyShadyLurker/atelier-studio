@@ -48,6 +48,26 @@ export async function runFfmpeg(
   }
 }
 
+/** Runs an ffmpeg argv that writes its output to a file named in `args`
+ * (a seekable output, which `-movflags +faststart` needs). Nothing is read
+ * from stdout; a non-zero exit is an FfmpegCommandError. */
+export async function runFfmpegToFile(args: readonly string[], signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  const proc = Bun.spawn([...args], { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' });
+  const onAbort = (): void => { proc.kill('SIGKILL'); };
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const [stderr, code] = await Promise.all([readStreamTail(proc.stderr, MAX_STDERR_TAIL_BYTES), proc.exited]);
+    if (signal.aborted) throw abortReason(signal);
+    if (code !== 0) throw new FfmpegCommandError(`ffmpeg failed: ${stderr.slice(-200)}`);
+  } catch (error) {
+    proc.kill('SIGKILL');
+    throw error;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 export function withTimeout(
   externalSignal: AbortSignal | undefined,
   durationMs: number,

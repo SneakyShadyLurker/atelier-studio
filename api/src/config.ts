@@ -321,6 +321,15 @@ const ConfigSchema = z.object({
   // Brainstorm is a draft-pool (minutes-long) workload; a historical
   // time-to-first-token tail of 30-40s gave it its own open cap.
   BRAINSTORM_OPEN_TIMEOUT_MS: numericString(45_000).pipe(z.number().int().min(5_000).max(120_000)),
+  // Stall watchdog on every streamed text call: after headers, an upstream
+  // that sends no body bytes (keepalive comments count) for this long fails
+  // the call as a transient in-stream timeout instead of holding its slot until
+  // the route deadline. Slow models get at least 10 min (textStreamIdleMs).
+  TEXT_STREAM_IDLE_TIMEOUT_MS: numericString(120_000).pipe(z.number().int().positive()),
+  // Ask OpenAI-compatible streams for a trailing usage frame
+  // (`stream_options.include_usage`) so every text call logs its tokens. Off
+  // for a server that rejects `stream_options`.
+  TEXT_STREAM_INCLUDE_USAGE: boolish(true),
   // Historical thinking-on fills reached 62.7s; 120s is retained as tail headroom.
   AI_FILL_PER_ATTEMPT_TIMEOUT_MS: numericString(120_000).pipe(z.number().int().min(30_000).max(180_000)),
   // Krea prompt condensation runs in the batch worker, so this bounds a

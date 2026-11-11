@@ -168,4 +168,57 @@ describe('classifyStreamError', () => {
     const tooLarge = new TextResponseTooLargeError(10, 20);
     expect(classifyStreamError(tooLarge, QUOTA_MS)).toBe(tooLarge);
   });
+
+  // A status, when the error carries one, decides before any wording.
+  describe('status-carrying in-stream errors', () => {
+    // The shape `createAnthropicStreamError` / `createProviderStreamError` emit.
+    const sdkStreamError = (statusCode: number, type: string, message: string) =>
+      ({ message, type, code: undefined, statusCode, isRetryable: statusCode >= 429, data: { type, message } });
+
+    test('an SDK stream error with a 5xx/529 statusCode is transient 5xx', () => {
+      for (const status of [500, 502, 529]) {
+        const e = classifyStreamError(sdkStreamError(status, 'overloaded_error', 'Overloaded'), QUOTA_MS);
+        expect(e).toBeInstanceOf(TransientUpstreamError);
+        expect(e).toMatchObject({ category: '5xx' });
+        expect(isRetriable(e)).toBe(true);
+      }
+    });
+
+    test('an SDK stream error with statusCode 429 is rate-limited, or quota by wording', () => {
+      expect(classifyStreamError(sdkStreamError(429, 'rate_limit_error', 'Slow down'), QUOTA_MS))
+        .toMatchObject({ category: '429' });
+      expect(classifyStreamError(sdkStreamError(429, 'rate_limit_error', 'weekly limit reached'), QUOTA_MS))
+        .toBeInstanceOf(QuotaExhaustedError);
+    });
+
+    test('Anthropic error types map to their status when no number is present', () => {
+      expect(classifyStreamError({ type: 'overloaded_error', message: 'Overloaded' }, QUOTA_MS))
+        .toMatchObject({ category: '5xx' });
+      expect(classifyStreamError({ type: 'api_error', message: 'Internal server error' }, QUOTA_MS))
+        .toMatchObject({ category: '5xx' });
+      expect(classifyStreamError({ type: 'rate_limit_error', message: 'Slow down' }, QUOTA_MS))
+        .toMatchObject({ category: '429' });
+    });
+
+    test('a raw tap payload with a numeric code or status is classified by it', () => {
+      expect(classifyStreamError({ code: 500, message: 'boom' }, QUOTA_MS)).toMatchObject({ category: '5xx' });
+      expect(classifyStreamError({ status: 503, message: 'boom' }, QUOTA_MS)).toMatchObject({ category: '5xx' });
+      expect(classifyStreamError({ code: 429, message: 'slow down' }, QUOTA_MS)).toMatchObject({ category: '429' });
+      expect(classifyStreamError({ code: 408, message: 'boom' }, QUOTA_MS)).toMatchObject({ category: '408' });
+    });
+
+    test('a 4xx status is permanent unless the wording says quota or timeout', () => {
+      const e = classifyStreamError({ code: 400, message: 'bad request' }, QUOTA_MS);
+      expect(e).toBeInstanceOf(PermanentUpstreamError);
+      expect(e).toMatchObject({ category: '4xx' });
+      expect(classifyStreamError({ code: 400, message: 'quota exhausted' }, QUOTA_MS)).toBeInstanceOf(QuotaExhaustedError);
+      expect(classifyStreamError({ code: 400, message: 'upstream timed out' }, QUOTA_MS))
+        .toMatchObject({ category: 'in-stream-timeout' });
+    });
+
+    test('a string code is not a status', () => {
+      expect(classifyStreamError({ code: 'usage_limit_reached', message: 'bad' }, QUOTA_MS))
+        .toMatchObject({ category: 'in-stream' });
+    });
+  });
 });

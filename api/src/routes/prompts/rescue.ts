@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
-import type { GptModerationNotice, RescueBundle } from '@atelier/shared';
+import type { RescueBundle, RescueFailedPayload, SseTerminalError } from '@atelier/shared';
+import { textFailureToSseError } from '../../lifecycle/llm-error';
 import type { AppEnv } from '../../server-env';
 import { parseBody } from '../_http';
 import { RescueDimensions } from '../prompts.schema';
 import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
+import { rescueRouteTimeoutMs } from '../../providers/text/textBudgets';
 import { snapshotHash, templatesDigest, toLibrarySnapshot } from '../../prompts/librarySnapshot';
 import { applyBundlesToSnapshot } from '../../prompts/dimensionResolver';
 import { dependenciesForTagReferences, tagReferenceDependencies } from '../../prompts/bundleOperations';
@@ -25,7 +27,9 @@ import type { RawBundle, RawInferOp } from '../../prompts/inferTypes';
 // remains spent on every SSE failure path (no-target / upstream-error /
 // option-already-exists / does-not-bridge / breaks-another / proposal-moved-on).
 
-const RESCUE_TIMEOUT_MS = 90_000;
+// `rescue-failed` carries no message on the wire; the helper's message slot
+// is filled for its type only.
+const RESCUE_FAILED_MESSAGE = 'rescue failed';
 
 export const rescueRoutes = new Hono<AppEnv>()
   .post('/prompts/dimensions/rescue', async (c) => {
@@ -119,7 +123,7 @@ export const rescueRoutes = new Hono<AppEnv>()
       );
 
       return {
-        timeoutMs: RESCUE_TIMEOUT_MS,
+        timeoutMs: rescueRouteTimeoutMs(textModel.latencyProfile, config),
         disconnect: c.req.raw.signal,
         run: async ({ send, signal, clientDisconnected }) => {
           type RescueFailReason =
@@ -135,9 +139,18 @@ export const rescueRoutes = new Hono<AppEnv>()
           // still spent on the deleted proposal, but there's nothing to update.
           // Either way we still emit the conflicts snapshot we built locally
           // so the client UI sees the matching rescueAttempted:true.
-          const failRescue = (reason: RescueFailReason, moderation?: GptModerationNotice): void => {
+          // A provider failure or crash also carries the shared terminal
+          // error's code, retry hint and moderation notice; the reason stays
+          // the rescue category the client already keys on.
+          const failRescue = (reason: RescueFailReason, terminal?: SseTerminalError): void => {
             commitRescueFailed(proposalId, version, updatedConflicts);
-            send('rescue-failed', { reason, conflicts: updatedConflicts, ...(moderation ? { moderation } : {}) });
+            send('rescue-failed', {
+              reason,
+              conflicts: updatedConflicts,
+              ...(terminal?.code === undefined ? {} : { code: terminal.code }),
+              ...(terminal?.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: terminal.retryAfterSeconds }),
+              ...(terminal?.moderation === undefined ? {} : { moderation: terminal.moderation }),
+            } satisfies RescueFailedPayload);
           };
           try {
             if (invalidPreview) {
@@ -164,10 +177,10 @@ export const rescueRoutes = new Hono<AppEnv>()
 
           if (result.type === 'failed') {
             logger.warn(
-              { event: 'rescue_upstream_failed', userId, templateName, kind: result.kind, detail: result.detail },
+              { event: 'rescue_upstream_failed', userId, templateName, textModelId: textModel.id, failureKind: result.kind, status: result.status },
               'rescue upstream error',
             );
-            failRescue('upstream-error', result.moderation);
+            failRescue('upstream-error', textFailureToSseError(result, RESCUE_FAILED_MESSAGE));
             return;
           }
 
@@ -279,7 +292,7 @@ export const rescueRoutes = new Hono<AppEnv>()
         } catch (error) {
           if (clientDisconnected()) return;
           logger.error({ err: error, event: 'rescue_dimension_crash', userId, templateName }, 'rescue failed');
-          failRescue('upstream-error');
+          failRescue('upstream-error', textFailureToSseError(null, RESCUE_FAILED_MESSAGE));
         }
       },
       };

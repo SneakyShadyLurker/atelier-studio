@@ -112,7 +112,8 @@ describe('POST /api/prompts/templates/draft', () => {
     const up = serve(async (req) => {
       efforts.push((await req.json() as { reasoning_effort?: unknown }).reasoning_effort);
       const content = JSON.stringify({ kind: 'body', body: 'a portrait' });
-      return Response.json({ choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
+      const frame = JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: 'stop' }] });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
     });
     const { app, db } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x' });
     pickLegacyTextModel(db, 'alice', 'template-draft', 'kimi', 'high');
@@ -332,5 +333,25 @@ describe('POST /api/prompts/templates/draft', () => {
     // Give abort propagation time to reach the provider signal.
     await Bun.sleep(200);
     expect(upstreamSignalAborted).toBe(true);
+  });
+});
+
+describe('template draft terminal errors', () => {
+  test('an exhausted quota reaches the client as quota-exhausted with its retry hint', async () => {
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({
+      type: 'failed', kind: 'quota', status: 429, detail: 'upstream says no', retryAfterSeconds: 120,
+    })));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    const frames = parseSseText(await (await draftTemplate(app, { name: 'Portrait', existingBody: '' })).text());
+    expect(frames.find((frame) => frame.event === 'error')?.data)
+      .toEqual({ message: 'Codex quota exhausted', code: 'quota-exhausted', retryAfterSeconds: 120 });
+  });
+
+  test('a crash carries provider-error with the route message', async () => {
+    setTextModelProviderForTests(fakeProvider(() => Promise.reject(new Error('boom'))));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    const frames = parseSseText(await (await draftTemplate(app, { name: 'Portrait', existingBody: '' })).text());
+    expect(frames.find((frame) => frame.event === 'error')?.data)
+      .toEqual({ message: "Couldn't draft the template. Please try again.", code: 'provider-error' });
   });
 });

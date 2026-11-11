@@ -36,15 +36,21 @@ afterEach(async () => {
   await Promise.all(stops.splice(0).map((stop) => stop()));
 });
 
-function startMock(metadata = currentWorkerPrivacy) {
+/** `holdUploads`: each input PUT waits (up to one second) until that many are in flight. */
+function startMock(metadata = currentWorkerPrivacy, uploadControl: { holdUploads?: number; rejectUpload?: number } = {}) {
   const worker = privateWorkerFixture();
+  let arrived = 0;
+  let releaseUploads = () => { /* Replaced when uploads are held. */ };
+  const uploadsReleased = new Promise<void>((resolve) => { releaseUploads = resolve; });
   const sockets = new Map<string, ServerWebSocket<{ clientId: string }>>();
   const state = {
     log: [] as string[],
     uploads: [] as { token: string; bytes: Uint8Array }[],
     prompt: undefined as Record<string, Node> | undefined,
     ostrisAvailable: true,
+    maxUploadsInFlight: 0,
   };
+  let uploadsInFlight = 0;
   const server = Bun.serve<{ clientId: string }>({
     port: 0,
     tls: privateWorkerTestTls,
@@ -70,7 +76,18 @@ function startMock(metadata = currentWorkerPrivacy) {
       if (url.pathname === '/free') return Response.json({});
       if (/^\/atelier\/v1\/jobs\/[^/]+\/inputs\/[^/]+$/.test(url.pathname) && req.method === 'PUT') {
         const parts = url.pathname.split('/');
-        state.uploads.push({ token: `${parts[4]}:${parts[6]}`, bytes: new Uint8Array(await req.arrayBuffer()) });
+        const bytes = new Uint8Array(await req.arrayBuffer());
+        arrived += 1;
+        const order = arrived;
+        uploadsInFlight += 1;
+        state.maxUploadsInFlight = Math.max(state.maxUploadsInFlight, uploadsInFlight);
+        if (uploadControl.holdUploads !== undefined) {
+          if (arrived >= uploadControl.holdUploads) releaseUploads();
+          await Promise.race([uploadsReleased, Bun.sleep(1_000)]);
+        }
+        uploadsInFlight -= 1;
+        if (order === uploadControl.rejectUpload) return Response.json({ error: 'invalid_input' }, { status: 400 });
+        state.uploads.push({ token: `${parts[4]}:${parts[6]}`, bytes });
         return Response.json({ ok: true });
       }
       if (url.pathname === '/prompt' && req.method === 'POST') {
@@ -155,17 +172,19 @@ test('image reference uploads first, uses a job-owned token and gates reference 
   expect(JSON.stringify(state.prompt)).not.toContain('{{');
 });
 
-test('a multi-slot graph uploads every reference in order and drops the slots left empty', async () => {
-  const { state, baseUrl } = startMock();
+test('a multi-slot graph uploads every reference concurrently, keeps slot order and drops the slots left empty', async () => {
+  const { state, baseUrl } = startMock(currentWorkerPrivacy, { holdUploads: 2 });
   const second = new Uint8Array([...PNG, 2]);
   const results = await collect(providerFor(baseUrl, true, 3), {
     ...REQUEST,
     refImages: [{ bytes: PNG, mime: 'image/png' }, { bytes: second, mime: 'image/png' }],
   });
   expect(results).toMatchObject([{ status: 'ready' }]);
-  expect(state.uploads.map((upload) => upload.bytes)).toEqual([PNG, second]);
-  expect(state.prompt?.['4']).toEqual({ class_type: 'AtelierLoadImage', inputs: { image: state.uploads[0]?.token } });
-  expect(state.prompt?.['12']).toEqual({ class_type: 'AtelierLoadImage', inputs: { image: state.uploads[1]?.token } });
+  expect(state.maxUploadsInFlight).toBe(2);
+  const tokenOf = (bytes: Uint8Array) => state.uploads.find((upload) => upload.bytes.length === bytes.length)?.token;
+  expect(state.uploads).toHaveLength(2);
+  expect(state.prompt?.['4']).toEqual({ class_type: 'AtelierLoadImage', inputs: { image: tokenOf(PNG) } });
+  expect(state.prompt?.['12']).toEqual({ class_type: 'AtelierLoadImage', inputs: { image: tokenOf(second) } });
   expect(state.prompt?.['13']).toBeUndefined();
   // The reference graph renders at its own size, not the base graph's.
   expect(state.prompt?.['2']?.inputs).toMatchObject({ width: 512, height: 768 });
@@ -176,6 +195,18 @@ test('a multi-slot graph uploads every reference in order and drops the slots le
     inputs: { text: 'portrait', 'images.image_1': ['4', 0], 'images.image_2': ['12', 0] },
   });
   expect(JSON.stringify(state.prompt)).not.toContain('{{');
+});
+
+test('one failed reference upload fails the request before posting, with no stray rejection', async () => {
+  const { state, baseUrl } = startMock(currentWorkerPrivacy, { holdUploads: 2, rejectUpload: 2 });
+  const results = await collect(providerFor(baseUrl, true, 3), {
+    ...REQUEST,
+    refImages: [{ bytes: PNG, mime: 'image/png' }, { bytes: new Uint8Array([...PNG, 2]), mime: 'image/png' }],
+  });
+  expect(results).toMatchObject([{ status: 'failed', index: 0 }]);
+  expect(state.maxUploadsInFlight).toBe(2);
+  expect(state.log).not.toContain('POST /prompt');
+  expect(state.prompt).toBeUndefined();
 });
 
 test('more references than the graph has slots fail before posting anything', async () => {
@@ -277,7 +308,8 @@ for (const withReferences of [false, true]) {
     expect(await collect(sizedProviderFor(baseUrl), { ...REQUEST, ...extra, resolution: '8mp', nativeOutput: true }))
       .toMatchObject([{ status: 'ready' }]);
     expect(state.prompt?.['2']?.inputs).toMatchObject({ width: 512, height: 640 });
-    expect(state.prompt?.['14']?.inputs.scale_by).toBe(1);
+    // Factor 1 is an identity resample, so the downscale node is left out.
+    expect(state.prompt?.['14']).toBeUndefined();
   });
 }
 

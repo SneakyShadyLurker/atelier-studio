@@ -110,3 +110,10 @@ test('strict rescue output schema stays canonical and numeric despite lenient in
   } } });
   expect(JSON.stringify(RESCUE_RESPONSE_FORMAT.json_schema.schema)).not.toContain('anyOf');
 });
+
+test('parseInferPayload repairs a stray bracket and a raw newline in a string', () => {
+  expect(parseInferPayload('{"ops":[{"op":"createDimension","name":"X","tags":["a"]}]]}'))
+    .toEqual([{ op: 'createDimension', name: 'X', tags: ['a'] }]);
+  expect(parseInferPayload('{"ops":[{"op":"renameDimension","dimIdx":0,"newName":"Two\nlines"}]}'))
+    .toEqual([{ op: 'renameDimension', dimIdx: 0, newName: 'Two\nlines' }]);
+});

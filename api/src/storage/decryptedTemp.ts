@@ -68,6 +68,13 @@ export class ByteBudget {
     return true;
   }
 
+  // For bytes already being written that cannot wait for room (an ffmpeg
+  // output file growing in tmpfs). It may overdraw the budget; later
+  // acquirers then wait until the bytes are released.
+  charge(bytes: number): void {
+    this.available -= bytes;
+  }
+
   release(bytes: number): void {
     this.available += bytes;
     this.drain();
@@ -89,6 +96,36 @@ export class ByteBudget {
 // Processing budget (ffmpeg inputs). Playback copies have their own budget
 // (decryptedVideoCache.ts) so they can never starve processing.
 const decryptedTempBudget = new ByteBudget(DECRYPTED_TEMP_BUDGET_BYTES);
+
+/** Tracks a plaintext file that grows inside a decrypted-temp directory. */
+export interface DecryptedTempCharge {
+  /** Counts the file's current size; only growth is charged. */
+  update(totalBytes: number): void;
+  release(): void;
+}
+
+// An output written next to the decrypted inputs (a sequence master) is
+// plaintext in the same tmpfs, so it counts against the same budget. Its size
+// is only known as it grows, so it is charged as observed rather than
+// reserved up front; the producer's own output cap bounds it.
+export function chargeDecryptedTemp(): DecryptedTempCharge {
+  let charged = 0;
+  let released = false;
+  return {
+    update(totalBytes: number): void {
+      // A size measured before release can land after it; never re-charge.
+      if (released || totalBytes <= charged) return;
+      decryptedTempBudget.charge(totalBytes - charged);
+      charged = totalBytes;
+    },
+    release(): void {
+      released = true;
+      if (charged === 0) return;
+      decryptedTempBudget.release(charged);
+      charged = 0;
+    },
+  };
+}
 
 export interface DecryptedTempInput {
   readonly root: 'images' | 'uploads';

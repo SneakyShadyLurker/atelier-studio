@@ -130,7 +130,7 @@ export async function normalizeUpload(input: Uint8Array, signal: AbortSignal): P
   let headerW = 0;
   let headerH = 0;
   try {
-    const headerMeta = await sharp(Buffer.from(input)).metadata();
+    const headerMeta = await sharp(input).metadata();
     headerW = headerMeta.width;
     headerH = headerMeta.height;
   } catch {
@@ -140,7 +140,9 @@ export async function normalizeUpload(input: Uint8Array, signal: AbortSignal): P
 
   signal.throwIfAborted();
 
-  const decoded = kind === 'heic' ? Buffer.from(await decodeHeicToPng(input, signal)) : Buffer.from(input);
+  // sharp reads a Uint8Array (view) directly; a Buffer copy of an up to
+  // 50 MB input bought nothing.
+  const decoded = kind === 'heic' ? await decodeHeicToPng(input, signal) : input;
 
   let meta: Metadata;
   try {
@@ -180,7 +182,7 @@ export async function normalizeUpload(input: Uint8Array, signal: AbortSignal): P
 
     let out: Uint8Array;
     try {
-      out = new Uint8Array(await pipeline.toBuffer());
+      ({ data: out } = await pipeline.toUint8Array());
     } catch (error) {
       if (error instanceof Error && /pixel|limit/i.test(error.message)) throw new ImageTooLargeError();
       throw new UnsupportedImageError('encode failed');

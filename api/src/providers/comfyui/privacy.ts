@@ -1,4 +1,4 @@
-import { readBodyBounded, readBytesBounded } from '../_http';
+import { ResponseLengthMismatchError, readBodyBounded, readBytesBounded } from '../_http';
 import { abortableDelay, abortReason } from '../../lifecycle/abort';
 import { NOOP_PROVIDER_LOGGER, type ProviderLogger } from '../types';
 
@@ -101,10 +101,15 @@ function capabilities(status: unknown) {
   for (const key of ['job_status', 'image_outputs', 'preview_control', 'lease_renewal', 'job_admission', 'execution_budget', 'residency_tracking']) {
     if (caps[key] !== true) throw new PrivacyNotReadyError('comfyui protocol 2 capabilities required');
   }
+  // Optional and additive: older workers send no boot_id. It only keys the
+  // health transport's inventory reuse, so a missing or malformed value means
+  // "unknown boot" and never fails readiness.
+  const bootId = typeof metadata.boot_id === 'string' && /^[a-f0-9]{32}$/.test(metadata.boot_id) ? metadata.boot_id : undefined;
   return {
     video: caps.video_outputs === true,
     allowedNodes,
     limits,
+    bootId,
   };
 }
 
@@ -458,8 +463,13 @@ export function createPrivacyTransport(baseUrl: string, config: PrivacyConfig, l
                 await response.body.cancel();
                 throw new PrivacyInvalidResponseError('comfyui output media type mismatch');
               }
-              const bytes = await readBytesBounded(response.body, limit, { onOversize: oversize, signal: readSignal });
-              if (ref.bytes !== undefined && bytes.byteLength !== ref.bytes) throw new PrivacyInvalidResponseError('comfyui output byte count mismatch');
+              // The status-reported length sizes one allocation; a body that
+              // runs past it fails through `oversize`, one that ends short here.
+              const bytes = await readBytesBounded(response.body, limit, {
+                onOversize: oversize, signal: readSignal, ...(ref.bytes !== undefined ? { expectedBytes: ref.bytes } : {}),
+              }).catch((error: unknown) => {
+                throw error instanceof ResponseLengthMismatchError ? new PrivacyInvalidResponseError('comfyui output byte count mismatch') : error;
+              });
               const renewalError = getOwnerError();
               if (renewalError) throw renewalError;
               return bytes;

@@ -1,15 +1,21 @@
+import { rm, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { VIDEO_DURATION_FRAMES, VIDEO_FPS } from '@atelier/shared';
+import { chargeDecryptedTemp } from './decryptedTemp';
 import {
   FfmpegCommandError,
   FfmpegOutputTooLargeError,
   rejectOnAbort,
-  runFfmpeg,
+  runFfmpegToFile,
   withTimeout,
 } from './ffmpeg';
 
 const BASELINE_FRAMES = VIDEO_DURATION_FRAMES[0];
 const SEAM_FRAMES = 1;
 const CROSSFADE_SECONDS = 0.06;
+// How often the growing master file is measured for the budget and the cap.
+const MASTER_SIZE_POLL_MS = 250;
+const MASTER_FILE_NAME = 'sequence-master.mp4';
 
 export class SequenceStitchTimeoutError extends Error {
   constructor() {
@@ -56,10 +62,60 @@ export type SequenceStitchRunner = (
   maxOutputBytes: number,
 ) => Promise<Uint8Array>;
 
-let currentRunner: SequenceStitchRunner = runFfmpeg;
+/**
+ * The master is written as a file next to the decrypted inputs: the inputs'
+ * private tmpfs directory (decryptedTemp.ts), so the plaintext stays where
+ * the inputs already are. `-movflags +faststart` needs a seekable output for
+ * its second pass; on `pipe:1` it was silently dropped and only a fragmented
+ * MP4 survived.
+ */
+function masterPath(segments: readonly SequenceStitchSegment[]): string {
+  const first = segments[0];
+  if (!first) throw new Error('sequence stitch requires at least two segments');
+  return join(dirname(first.path), MASTER_FILE_NAME);
+}
+
+// Runs the stitch into the master file, charging its size against the
+// decrypted-temp budget as it grows and killing ffmpeg past the cap, then
+// reads it back for publication and removes it. The directory itself is
+// removed by withDecryptedArtifactFiles on every exit path as well.
+async function runStitchToFile(
+  args: readonly string[],
+  signal: AbortSignal,
+  maxOutputBytes: number,
+): Promise<Uint8Array> {
+  const output = args.at(-1);
+  if (output === undefined) throw new Error('sequence stitch args name no output');
+  const charge = chargeDecryptedTemp();
+  const capped = new AbortController();
+  const measure = async (): Promise<number> => {
+    try {
+      const { size } = await stat(output);
+      charge.update(size);
+      if (size > maxOutputBytes) capped.abort(new SequenceStitchTooLargeError());
+      return size;
+    } catch (error) {
+      // Not created yet: ffmpeg opens the output after probing the inputs.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+      throw error;
+    }
+  };
+  const poll = setInterval(() => { void measure().catch(() => undefined); }, MASTER_SIZE_POLL_MS);
+  try {
+    await runFfmpegToFile(args, AbortSignal.any([signal, capped.signal]));
+    if (await measure() > maxOutputBytes) throw new SequenceStitchTooLargeError();
+    return await Bun.file(output).bytes();
+  } finally {
+    clearInterval(poll);
+    await rm(output, { force: true });
+    charge.release();
+  }
+}
+
+let currentRunner: SequenceStitchRunner = runStitchToFile;
 
 export function setSequenceStitchRunnerForTests(runner: SequenceStitchRunner | null): void {
-  currentRunner = runner ?? runFfmpeg;
+  currentRunner = runner ?? runStitchToFile;
 }
 
 /** Frames dropped from the front of segment `index`. */
@@ -172,12 +228,15 @@ export function buildSequenceStitchArgs(segments: readonly SequenceStitchSegment
     // generated alongside the video and is the half a seam is most audible in.
     '-b:a',
     '192k',
+    // A regular MP4 with the index in front (seekable file output, see
+    // masterPath), so players get a top-level duration and sample index.
     '-movflags',
-    '+faststart+frag_keyframe+empty_moov',
+    '+faststart',
     '-shortest',
     '-f',
     'mp4',
-    'pipe:1',
+    '-y',
+    masterPath(segments),
   ];
 }
 

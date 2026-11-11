@@ -519,6 +519,24 @@ describe('startHealthProbe', () => {
     handle.stop();
   });
 
+  test('only probeNow asks the adapter for fresh host metadata', async () => {
+    const seen: (boolean | undefined)[] = [];
+    const handle = startHealthProbe({
+      registry: [localEntry({
+        id: 'local-fresh',
+        healthCheck: (_signal, options) => { seen.push(options?.fresh); return Promise.resolve({ ok: true }); },
+      })],
+      logger: silentLogger,
+      intervalMs: 60_000,
+      probeTimeoutMs: 1_000,
+    });
+    await flush();
+    await flush();
+    await handle.probeNow('local-fresh');
+    expect(seen).toEqual([undefined, true]);
+    handle.stop();
+  });
+
   test('concurrent probeNow calls for one model share one upstream probe', async () => {
     let calls = 0;
     let resolveForced: (value: { ok: true }) => void = () => undefined;
@@ -689,6 +707,114 @@ describe('startHealthProbe', () => {
 
     expect(await handle.probeNow('missing')).toBeUndefined();
     expect(await handle.probeNow('cloud-row')).toBeUndefined();
+    handle.stop();
+  });
+});
+
+describe('host-level availability', () => {
+  test('the seed state is not host-level unavailable, so recovered work tries the host', () => {
+    const handle = startHealthProbe({
+      registry: [localEntry({ id: 'local-seed', healthCheck: () => new Promise<HealthResult>(() => undefined) })],
+      logger: silentLogger,
+      intervalMs: 60_000,
+      probeTimeoutMs: 60_000,
+    });
+    expect(handle.snapshot().get('local-seed')?.ok).toBe(false);
+    expect(handle.hostUnavailable('local-seed')).toBe(false);
+    handle.stop();
+  });
+
+  test('host-level failures report one transition down and one transition up', async () => {
+    let result: HealthResult = { ok: false, reason: 'refused', probeCode: 'privacy_transport' };
+    const transitions: boolean[] = [];
+    const handle = startHealthProbe({
+      registry: [
+        localEntry({ id: 'local-a', healthCheck: () => Promise.resolve(result) }),
+        localEntry({ id: 'local-b', healthCheck: () => Promise.resolve(result) }),
+      ],
+      logger: silentLogger,
+      intervalMs: 60_000,
+      probeTimeoutMs: 1_000,
+      onHostAvailabilityChange: (available) => { transitions.push(available); },
+    });
+    await flush();
+    await flush();
+    expect(handle.hostUnavailable('local-a')).toBe(true);
+    expect(transitions).toEqual([false]);
+
+    await handle.probeNow('local-a');
+    expect(transitions).toEqual([false]);
+
+    result = { ok: true };
+    await handle.probeNow('local-a');
+    // local-b is still host-level offline until its own probe lands.
+    expect(transitions).toEqual([false]);
+    await handle.probeNow('local-b');
+    expect(handle.hostUnavailable('local-a')).toBe(false);
+    expect(handle.hostUnavailable('local-b')).toBe(false);
+    expect(transitions).toEqual([false, true]);
+    handle.stop();
+  });
+
+  test('a thrown or timed-out probe counts as host-level', async () => {
+    const transitions: boolean[] = [];
+    const handle = startHealthProbe({
+      registry: [localEntry({ id: 'local-throw', healthCheck: () => Promise.reject(new Error('connect ECONNREFUSED')) })],
+      logger: silentLogger,
+      intervalMs: 60_000,
+      probeTimeoutMs: 1_000,
+      onHostAvailabilityChange: (available) => { transitions.push(available); },
+    });
+    await flush();
+    await flush();
+    expect(handle.hostUnavailable('local-throw')).toBe(true);
+    expect(transitions).toEqual([false]);
+    handle.stop();
+  });
+
+  test('a row-level failure (missing weight file) is offline but never pauses the host', async () => {
+    const transitions: boolean[] = [];
+    const handle = startHealthProbe({
+      registry: [localEntry({
+        id: 'local-missing',
+        healthCheck: () => Promise.resolve({ ok: false, reason: 'model files not loaded: x', probeCode: 'missing_file' }),
+      })],
+      logger: silentLogger,
+      intervalMs: 60_000,
+      probeTimeoutMs: 1_000,
+      onHostAvailabilityChange: (available) => { transitions.push(available); },
+    });
+    await flush();
+    await flush();
+    expect(handle.snapshot().get('local-missing')).toMatchObject({ ok: false, reason: 'unavailable' });
+    expect(handle.hostUnavailable('local-missing')).toBe(false);
+    expect(transitions).toEqual([]);
+    handle.stop();
+  });
+
+  test('a row the worker metadata rules out stays row-level beside a healthy sibling', async () => {
+    const transitions: boolean[] = [];
+    const handle = startHealthProbe({
+      registry: [
+        localEntry({
+          id: 'local-incompatible',
+          healthCheck: () => Promise.resolve({
+            ok: false, reason: 'comfyui workflow contains prohibited node classes', probeCode: 'privacy_row_incompatible',
+          }),
+        }),
+        localEntry({ id: 'local-healthy', healthCheck: () => Promise.resolve({ ok: true }) }),
+      ],
+      logger: silentLogger,
+      intervalMs: 60_000,
+      probeTimeoutMs: 1_000,
+      onHostAvailabilityChange: (available) => { transitions.push(available); },
+    });
+    await flush();
+    await flush();
+    expect(handle.snapshot().get('local-incompatible')).toMatchObject({ ok: false });
+    expect(handle.hostUnavailable('local-incompatible')).toBe(false);
+    expect(handle.hostUnavailable('local-healthy')).toBe(false);
+    expect(transitions).toEqual([]);
     handle.stop();
   });
 });

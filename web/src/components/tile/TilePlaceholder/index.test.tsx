@@ -4,6 +4,7 @@ import { act, cleanup, render } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import TilePlaceholder from './index';
 import { initialAtelierState, useAtelierStore, type TileProgress } from '../../../store/atelier';
+import { resetMediaCacheForTests } from '../../../lib/mediaCache';
 
 const originalMatchMedia = window.matchMedia.bind(window);
 const originalSetInterval = window.setInterval.bind(window);
@@ -75,14 +76,32 @@ describe('TilePlaceholder queued state', () => {
 });
 
 describe('TilePlaceholder video source backdrop', () => {
-  test('veils the source still behind a loading video tile', () => {
-    const { container } = render(
-      <TilePlaceholder tileId="t-vid" batchId="b" batchStatus="running" aspectRatio="16 / 9" modelName="MiniMax H3 I2V" startedAt={Date.now()} isVideo sourceStillUrl="/api/img/up-1" />,
-      { wrapper: wrapper() },
-    );
-    const backdrop = container.querySelector('img[data-source="true"]');
-    expect(backdrop).toBeTruthy();
-    expect(backdrop?.getAttribute('src')).toBe('/api/img/up-1');
+  test('veils the source still behind a loading video tile, read through the session media cache', async () => {
+    resetMediaCacheForTests();
+    const realFetch = globalThis.fetch;
+    const realCreate = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = () => 'blob:source-still';
+    const requested: string[] = [];
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      requested.push(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url);
+      return Promise.resolve(new Response(new Blob(['thumb'], { type: 'image/webp' })));
+    }) as unknown as typeof fetch;
+    try {
+      const { container } = render(
+        <TilePlaceholder tileId="t-vid" batchId="b" batchStatus="running" aspectRatio="16 / 9" modelName="MiniMax H3 I2V" startedAt={Date.now()} isVideo sourceStillUrl="/api/uploads/up-1/thumb" />,
+        { wrapper: wrapper() },
+      );
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      const backdrop = container.querySelector('img[data-source="true"]');
+      expect(backdrop).toBeTruthy();
+      expect(backdrop?.getAttribute('src')).toBe('blob:source-still');
+      expect(requested).toEqual(['/api/uploads/up-1/thumb']);
+    } finally {
+      cleanup();
+      globalThis.fetch = realFetch;
+      URL.createObjectURL = realCreate;
+      resetMediaCacheForTests();
+    }
   });
 
   test('image loading tiles render no source backdrop', () => {

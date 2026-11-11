@@ -1,4 +1,3 @@
-import type { Database } from 'bun:sqlite';
 import { buildCondensePromptSystemPrompt } from '../prompts/condensePromptSystemPrompt';
 import {
   countPromptWords,
@@ -50,16 +49,4 @@ export function condenseBatchPrompt(
     doneEvent: 'krea_prompt_condensed',
     doneMessage: 'Krea prompt condensed',
   });
-}
-
-/**
- * Persist the rendered prompt back onto the batch row.
- *
- * The row is created with the prompt as submitted, so between acceptance and
- * this write `/api/history` shows the raw text. That window is the price of
- * returning the batch id immediately; what the row settles on is still exactly
- * what the provider was handed.
- */
-export function persistCondensedPrompt(db: Database, batchId: string, prompt: string): void {
-  db.query('UPDATE batches SET prompt = ? WHERE id = ?').run(prompt, batchId);
 }

@@ -36,9 +36,22 @@ export async function expandBatchPrompt(
   let images: Awaited<ReturnType<typeof downscaleForVision>>[];
   try {
     images = await Promise.all(references.map((bytes) => downscaleForVision(bytes, deps.signal)));
-  } catch {
-    deps.logger.info(
-      { event: 'h3_image_prompt_expand_skipped', reason: 'reference-unreadable' },
+  } catch (error) {
+    if (deps.signal.aborted) {
+      deps.logger.info(
+        { event: 'h3_image_prompt_expand_skipped', skipReason: 'batch-canceled' },
+        'H3 Image prompt expansion skipped',
+      );
+      return prompt;
+    }
+    // An undecodable picture is a fault worth seeing; the error type is
+    // content-free, its message is not.
+    deps.logger.warn(
+      {
+        event: 'h3_image_prompt_expand_skipped',
+        skipReason: 'reference-unreadable',
+        errorType: error instanceof Error ? error.name : typeof error,
+      },
       'H3 Image prompt expansion skipped',
     );
     return prompt;

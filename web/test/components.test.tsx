@@ -371,10 +371,13 @@ describe('visual scaffold components', () => {
 
     expect(screen.getByRole('img', { name: 'Reference image 1' })).toBeTruthy();
     await waitFor(() => {
-      expect(screen.getByRole('img', { name: 'Reference image 1' }).getAttribute('src')).toBe('/api/uploads/upload-ready?media=2');
+      expect(useAtelierStore.getState().draft.refImages[0]?.status).toBe('ready');
     });
+    // The chip keeps the local preview of the bytes the user just picked: no
+    // download of the stored upload or its thumbnail, and the blob stays live.
+    expect(screen.getByRole('img', { name: 'Reference image 1' }).getAttribute('src')).toBe('blob:ref-preview');
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:ref-preview');
+    expect(revokeObjectURL).not.toHaveBeenCalled();
     expect(toGenerateRequest(useAtelierStore.getState().draft, 'gpt-image-2.6-sunburst-cloud', '1:1')).toMatchObject({
       refImageIds: ['upload-ready'],
     });
@@ -587,7 +590,7 @@ describe('visual scaffold components', () => {
           status: 'ready' as const,
           mime: 'image/png',
           sizeBytes: index,
-          previewUrl: `/api/uploads/upload-${index}`,
+          previewUrl: `blob:preview-${index}`,
         })),
         rollQueue: [],
       },

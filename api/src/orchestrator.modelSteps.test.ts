@@ -43,7 +43,6 @@ async function runOne(
     db, config, logger, text: testTextServices(db, config), userId: 'alice', request, registryEntry, boundProvider: provider,
     disconnectSignal: new AbortController().signal,
     onTileSettled: () => undefined, onSyncFailure: () => undefined,
-    promptPrepared: true,
   });
   return db.query<{ status: string }, [string]>('SELECT status FROM tiles WHERE batch_id = ?').get(prepared.batch.id)?.status ?? 'missing';
 }

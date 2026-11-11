@@ -4,7 +4,9 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import Composer from './index';
+import { refImageThumbUrl } from '../../api/uploads';
 import { useKeyboard } from '../../hooks/useKeyboard';
+import { resetMediaCacheForTests } from '../../lib/mediaCache';
 import { beginSourceHandoff } from '../../lib/composerSourceHandoff';
 import { canSubmitDraft, initialAtelierState, toGenerateRequest, useAtelierStore } from '../../store/atelier';
 
@@ -207,19 +209,37 @@ describe('Composer I2V mode', () => {
     } finally { window.matchMedia = matchMedia; }
   });
 
-  test('shows motion controls, locks count to one, and serializes i2v fields', () => {
+  test('shows motion controls, locks count to one, and serializes i2v fields', async () => {
     useAtelierStore.getState().setDraft({
       i2vSourceUploadId: 'upload-source-1',
       motionPrompt: 'slow camera push-in',
     });
 
-    renderComposer();
+    // The source still reads the upload's thumbnail through the session media
+    // cache, never the full original.
+    const realFetch = globalThis.fetch;
+    const realCreateObjectURL = URL.createObjectURL.bind(URL);
+    const requested: string[] = [];
+    resetMediaCacheForTests();
+    URL.createObjectURL = () => 'blob:source-still-thumb';
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      requested.push(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url);
+      return Promise.resolve(new Response(new Blob(['thumb'], { type: 'image/webp' })));
+    }) as unknown as typeof fetch;
+    try {
+      renderComposer();
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(screen.getByRole('img', { name: 'Source still' }).getAttribute('src')).toBe('blob:source-still-thumb');
+      expect(requested).toContain(refImageThumbUrl('upload-source-1'));
+      expect(requested.some((url) => /\/uploads\/upload-source-1(\?|$)/.test(url))).toBe(false);
+    } finally {
+      globalThis.fetch = realFetch;
+      URL.createObjectURL = realCreateObjectURL;
+      resetMediaCacheForTests();
+    }
 
     expect(screen.getByRole('textbox', { name: 'Motion prompt' })).toBeDefined();
     expect(screen.getByText('Source still')).toBeDefined();
-    // The source still is shown as the actual frame thumbnail, not its raw id.
-    const sourceImg = screen.getByRole('img', { name: 'Source still' });
-    expect(sourceImg.getAttribute('src')).toContain('upload-source-1');
     // In video mode the generic image prompt is hidden — the motion prompt is
     // the sole text input.
     expect(screen.queryByRole('textbox', { name: 'Prompt' })).toBeNull();

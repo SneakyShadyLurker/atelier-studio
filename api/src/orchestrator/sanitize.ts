@@ -1,6 +1,6 @@
 import { GptModerationNoticeSchema, type GptModerationNotice, type TileErrorCategory } from '@atelier/shared';
 import { BrokenCircuitError } from 'cockatiel';
-import type { AppLogger } from '../observability/logger';
+import { errorTypeOf, type AppLogger } from '../observability/logger';
 import {
   ERROR_PATTERN_DEADLINE_EXCEEDED,
   ERROR_PATTERN_DID_NOT_RETURN_IMAGE,
@@ -17,16 +17,27 @@ export function sanitizedModerationNotice(error: unknown): GptModerationNotice |
   return result.success && result.data.target === 'image' ? result.data : undefined;
 }
 
-export function sanitizeProviderError(error: unknown, logger: AppLogger): TileErrorCategory {
+/**
+ * Maps a provider failure to its tile category and logs it with content-free
+ * attribution: status, category, the typed reason kind, the error class (from
+ * the logger's allowlist) and the image model id when the caller has it.
+ */
+export function sanitizeProviderError(error: unknown, logger: AppLogger, modelId?: string): TileErrorCategory {
   if (error instanceof BrokenCircuitError) {
-    logger.error({ event: 'breaker_open' }, 'provider failure');
+    logger.error({ event: 'breaker_open', ...(modelId === undefined ? {} : { modelId }) }, 'provider failure');
     return 'service unavailable';
   }
   const raw = stringifyError(error);
   const reason = reasonOf(error);
   const status = statusOf(error);
   const category = reason ? categoryForProviderReason(reason) : categoryFromStatusAndText(status, raw.toLowerCase());
-  logger.error({ status, category }, 'provider failure');
+  logger.error({
+    status,
+    category,
+    ...(reason ? { reasonKind: reason.kind } : {}),
+    ...(error !== null && typeof error === 'object' ? { errorType: errorTypeOf(error) } : {}),
+    ...(modelId === undefined ? {} : { modelId }),
+  }, 'provider failure');
   return category;
 }
 

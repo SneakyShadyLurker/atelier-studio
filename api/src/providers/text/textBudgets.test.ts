@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  AI_FILL_DEFAULTS,
-  CLIPROXY_TEXT_DEFAULTS,
-  DRAFT_LIST_DEFAULTS,
-  DRAFT_TEMPLATE_DEFAULTS,
+  AI_FILL_MAX_OUTPUT_TOKENS,
+  ENHANCE_MAX_OUTPUT_TOKENS,
+  DRAFT_LIST_MAX_OUTPUT_TOKENS,
+  DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS,
+  MOTION_ENHANCE_MAX_OUTPUT_TOKENS,
+  STORY_PLANNER_MAX_OUTPUT_TOKENS,
   GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS,
   GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS,
   GLM_ABLITERATED_MAX_RESPONSE_BYTES,
@@ -17,47 +19,51 @@ import {
   aiFillPolicyEnvelopeMs,
   textMaxResponseBytes,
   textStreamDrainMs,
-  brainstormDefaults,
+  textStreamIdleMs,
+  brainstormMaxOutputTokens,
   PINNED_EFFORT_MAX_RESPONSE_BYTES,
   pinnedEffortMaxResponseBytes,
   brainstormRouteTimeoutMs,
-  INFER_DIMENSIONS_DEFAULTS,
+  INFER_DIMENSIONS_MAX_OUTPUT_TOKENS,
   KIMI_LOW_REASONING_OVERHEAD_TOKENS,
+  RESCUE_ROUTE_TIMEOUT_MS,
+  TEXT_ROUTE_TIMEOUT_MARGIN_MS,
+  textPerAttemptTimeoutMs,
+  textPolicyRouteTimeoutMs,
+  draftRouteTimeoutMs,
+  rescueRouteTimeoutMs,
 } from './textBudgets';
+import { testConfig } from '../../test/helpers';
 import { LEGACY_SEED } from '../../db/textSeed';
 
-describe('Shared ai-fill defaults', () => {
-  // 'low' here is KIMI's setting. Every other backend sends its own
-  // default at the wire, so do not "fix" this value for another backend.
-  test('keeps the shared Kimi-facing low default', () => {
-    expect(AI_FILL_DEFAULTS.reasoning_effort).toBe('low');
-    expect(AI_FILL_DEFAULTS.max_completion_tokens).toBe(36_000);
+describe('Shared ai-fill budget', () => {
+  test('keeps the 36k output budget', () => {
+    expect(AI_FILL_MAX_OUTPUT_TOKENS).toBe(36_000);
   });
 });
 
-describe('Kimi brainstorm defaults', () => {
-  test('uses low reasoning so K3 can think without starving content', () => {
-    expect(brainstormDefaults(10).reasoning_effort).toBe('low');
-  });
+describe('Kimi brainstorm budget', () => {
   test('sizes the budget for K3 content plus low CoT', () => {
-    expect(brainstormDefaults(4).max_completion_tokens).toBe(6400);
-    expect(brainstormDefaults(10).max_completion_tokens).toBe(10000);
+    expect(brainstormMaxOutputTokens(4)).toBe(6400);
+    expect(brainstormMaxOutputTokens(10)).toBe(10000);
   });
   test('a pinned effort above low widens the CoT headroom on top of the capped content budget', () => {
-    expect(brainstormDefaults(10, 'none').max_completion_tokens).toBe(10000);
-    expect(brainstormDefaults(10, 'max')).toMatchObject({ reasoning_effort: 'max', max_completion_tokens: 38000 });
-    expect(brainstormDefaults(60, 'low').max_completion_tokens).toBe(24000);
-    expect(brainstormDefaults(60, 'high').max_completion_tokens).toBe(36000);
+    expect(brainstormMaxOutputTokens(10, 'none')).toBe(10000);
+    expect(brainstormMaxOutputTokens(10, 'max')).toBe(38000);
+    expect(brainstormMaxOutputTokens(60, 'low')).toBe(24000);
+    expect(brainstormMaxOutputTokens(60, 'high')).toBe(36000);
   });
 });
 
-describe('Kimi generic text defaults', () => {
+describe('Kimi generic text budgets', () => {
   test('pins the low-reasoning budgets', () => {
     expect(KIMI_LOW_REASONING_OVERHEAD_TOKENS).toBe(4000);
-    expect(CLIPROXY_TEXT_DEFAULTS).toEqual(AI_FILL_DEFAULTS);
-    expect(INFER_DIMENSIONS_DEFAULTS.max_completion_tokens).toBe(36000);
-    expect(DRAFT_LIST_DEFAULTS.max_completion_tokens).toBe(5200);
-    expect(DRAFT_TEMPLATE_DEFAULTS.max_completion_tokens).toBe(5500);
+    expect(ENHANCE_MAX_OUTPUT_TOKENS).toBe(AI_FILL_MAX_OUTPUT_TOKENS);
+    expect(MOTION_ENHANCE_MAX_OUTPUT_TOKENS).toBe(36_000);
+    expect(STORY_PLANNER_MAX_OUTPUT_TOKENS).toBe(36_000);
+    expect(INFER_DIMENSIONS_MAX_OUTPUT_TOKENS).toBe(36000);
+    expect(DRAFT_LIST_MAX_OUTPUT_TOKENS).toBe(5200);
+    expect(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS).toBe(5500);
   });
 });
 
@@ -84,6 +90,12 @@ describe('budgets by latency profile (spec § 11.2 item 2)', () => {
     expect(textMaxResponseBytes('slow', 1024 * 1024)).toBe(GLM_ABLITERATED_MAX_RESPONSE_BYTES);
     // A configured value above the floor still wins.
     expect(textStreamDrainMs('slow', GLM_ABLITERATED_STREAM_DRAIN_MS + 1)).toBe(GLM_ABLITERATED_STREAM_DRAIN_MS + 1);
+  });
+
+  test('stream idle limit: slow rows get at least 10 min, standard keeps the configured value', () => {
+    expect(textStreamIdleMs('standard', 120_000)).toBe(120_000);
+    expect(textStreamIdleMs('slow', 120_000)).toBe(600_000);
+    expect(textStreamIdleMs('slow', 900_000)).toBe(900_000);
   });
 
   test('the legacy values: 360 s ai-fill, 420 s condense, 2,700 s drain, 4 MiB', () => {
@@ -128,5 +140,51 @@ describe('pinned-effort raw-stream cap', () => {
     expect(pinnedEffortMaxResponseBytes(1_048_576, 'low')).toBe(1_048_576);
     expect(pinnedEffortMaxResponseBytes(1_048_576, 'medium')).toBe(PINNED_EFFORT_MAX_RESPONSE_BYTES);
     expect(pinnedEffortMaxResponseBytes(32 * 1_048_576, 'max')).toBe(32 * 1_048_576);
+  });
+});
+
+describe('policy-wrapped call deadlines (drafts, rescue)', () => {
+  test('per attempt: the configured knob on standard rows, at least the slow floor on slow rows', () => {
+    expect(textPerAttemptTimeoutMs('standard', 70_000)).toBe(70_000);
+    expect(textPerAttemptTimeoutMs('slow', 70_000)).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
+    expect(textPerAttemptTimeoutMs('slow', 400_000)).toBe(400_000);
+  });
+
+  test('standard rows keep today\'s route deadlines exactly', () => {
+    // List and template drafts: CLOUD_TIMEOUT_MS; rescue: 90 s.
+    expect(textPolicyRouteTimeoutMs('standard', 300_000, { perAttemptTimeoutMs: 70_000, maxAttempts: 2, maxBackoffMs: 8_000 }))
+      .toBe(300_000);
+    expect(RESCUE_ROUTE_TIMEOUT_MS).toBe(90_000);
+    expect(textPolicyRouteTimeoutMs('standard', RESCUE_ROUTE_TIMEOUT_MS, { perAttemptTimeoutMs: 70_000, maxAttempts: 1, maxBackoffMs: 8_000 }))
+      .toBe(90_000);
+  });
+
+  test('slow rows get a route deadline that covers every slow attempt plus backoff', () => {
+    const slowAttempt = GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS;
+    expect(textPolicyRouteTimeoutMs('slow', 300_000, { perAttemptTimeoutMs: 70_000, maxAttempts: 2, maxBackoffMs: 8_000 }))
+      .toBe(2 * slowAttempt + 8_000 + TEXT_ROUTE_TIMEOUT_MARGIN_MS);
+    expect(textPolicyRouteTimeoutMs('slow', RESCUE_ROUTE_TIMEOUT_MS, { perAttemptTimeoutMs: 70_000, maxAttempts: 1, maxBackoffMs: 8_000 }))
+      .toBe(slowAttempt + TEXT_ROUTE_TIMEOUT_MARGIN_MS);
+    // A longer standard deadline still wins.
+    expect(textPolicyRouteTimeoutMs('slow', 3_000_000, { perAttemptTimeoutMs: 70_000, maxAttempts: 2, maxBackoffMs: 8_000 }))
+      .toBe(3_000_000);
+  });
+});
+
+describe('draft and rescue route deadlines', () => {
+  test('standard rows: CLOUD_TIMEOUT_MS for drafts and 90 s for rescue, as before', () => {
+    const config = testConfig();
+    expect(draftRouteTimeoutMs('standard', config)).toBe(config.CLOUD_TIMEOUT_MS);
+    expect(rescueRouteTimeoutMs('standard', config)).toBe(90_000);
+  });
+  test('slow rows cover the slow attempts of their policy', () => {
+    const config = testConfig();
+    expect(draftRouteTimeoutMs('slow', config)).toBe(Math.max(
+      config.CLOUD_TIMEOUT_MS,
+      GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS * config.RESILIENT_MAX_ATTEMPTS
+        + config.RESILIENT_MAX_BACKOFF_MS * (config.RESILIENT_MAX_ATTEMPTS - 1)
+        + TEXT_ROUTE_TIMEOUT_MARGIN_MS,
+    ));
+    expect(rescueRouteTimeoutMs('slow', config)).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS + TEXT_ROUTE_TIMEOUT_MARGIN_MS);
   });
 });

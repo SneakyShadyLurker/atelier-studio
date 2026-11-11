@@ -1,7 +1,7 @@
 import type { IPolicy } from 'cockatiel';
 import type { Pool } from '@atelier/shared';
 import { TransientUpstreamError, policyBreakerState } from '../lifecycle/resilient-call';
-import type { Provider, ProviderRequest, ProviderResult } from './types';
+import type { Provider, ProviderGenerateOptions, ProviderRequest, ProviderResult } from './types';
 
 /** Minimal hook the decorator uses to report breaker transitions to the queue gate. */
 export interface GateHook {
@@ -67,12 +67,12 @@ export function resilientImageProvider(base: Provider, opts: ResilientImageOptio
     id: base.id,
     backend: base.backend,
     ...(base.healthCheck ? { healthCheck: base.healthCheck.bind(base) } : {}),
-    async *generate(request: ProviderRequest, signal: AbortSignal): AsyncIterable<ProviderResult> {
+    async *generate(request: ProviderRequest, signal: AbortSignal, options?: ProviderGenerateOptions): AsyncIterable<ProviderResult> {
       let established: Established;
       try {
         established = await opts.policy.execute<Established>(async () => {
           if (signal.aborted) throw signal.reason ?? new DOMException('aborted', 'AbortError');
-          const iterator = base.generate(request, signal)[Symbol.asyncIterator]();
+          const iterator = base.generate(request, signal, options)[Symbol.asyncIterator]();
           const first = await iterator.next();
           if (!first.done && first.value.status === 'failed' && isTransientFailure(first.value)) {
             await iterator.return?.();

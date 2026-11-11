@@ -79,3 +79,21 @@ describe('withDecryptedArtifactFiles', () => {
     expect(order).toEqual(['aborted', 'big', 'small']);
   });
 });
+
+describe('byte budget charge', () => {
+  test('a charge counts bytes already written without waiting, and holds later acquirers until released', async () => {
+    const budget = new ByteBudget(10);
+    await budget.acquire(6);
+    // A file being written cannot wait for room: the charge may overdraw.
+    budget.charge(7);
+    expect(budget.tryAcquire(1)).toBe(false);
+    let served = false;
+    const waiting = budget.acquire(4).then(() => { served = true; });
+    budget.release(6);
+    await Bun.sleep(0);
+    expect(served).toBe(false);
+    budget.release(7);
+    await waiting;
+    expect(served).toBe(true);
+  });
+});

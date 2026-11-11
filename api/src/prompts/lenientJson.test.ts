@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseJsonLenient, repairJsonObject, sliceJsonObject } from './lenientJson';
+import { parseJsonLenient, parseModelJsonObject, repairJsonObject, sliceJsonObject } from './lenientJson';
 
 describe('parseJsonLenient', () => {
   it('returns well-formed JSON untouched', () => {
@@ -92,5 +92,24 @@ describe('sliceJsonObject', () => {
   it('returns the trimmed input when no object braces exist', () => {
     expect(sliceJsonObject('  nothing  ')).toBe('nothing');
     expect(sliceJsonObject('} {')).toBe('} {');
+  });
+});
+
+describe('parseModelJsonObject', () => {
+  it('takes the strict path for a fenced, well-formed object', () => {
+    expect(parseModelJsonObject('```json\n{"a":"b"}\n```\nDone.')).toEqual({ a: 'b' });
+  });
+
+  it('repairs a stray closing bracket', () => {
+    expect(parseModelJsonObject('{"a":"b"]}')).toEqual({ a: 'b' });
+  });
+
+  it('repairs a raw newline inside a string', () => {
+    expect(parseModelJsonObject('{"a":"line one\nline two"}')).toEqual({ a: 'line one\nline two' });
+  });
+
+  it('returns null for text with no recoverable object', () => {
+    expect(parseModelJsonObject('not json')).toBeNull();
+    expect(parseModelJsonObject('{"a":"trunc')).toBeNull();
   });
 });

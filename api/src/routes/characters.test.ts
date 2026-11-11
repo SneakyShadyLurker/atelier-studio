@@ -525,3 +525,22 @@ describe('brainstorm text model pin and failover', () => {
     expect(events.map((e) => e.event)).toEqual(['error']);
   });
 });
+
+describe('brainstorm terminal errors', () => {
+  test('a crash carries provider-error with the route message', async () => {
+    setTextModelProviderForTests({
+      ...fakeProvider(),
+      // eslint-disable-next-line require-yield -- a stream that crashes before its first frame
+      async *brainstormCharacters() {
+        await Promise.resolve();
+        throw new Error('boom');
+      },
+    });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    const events = await parseSse(await post(app, 'alice', { count: 2, modelId: 'gpt-image-2.6-sunburst' }));
+    expect(events.at(-1)).toEqual({
+      event: 'error',
+      data: { message: "Couldn't brainstorm characters. Please try again.", code: 'provider-error' },
+    });
+  });
+});

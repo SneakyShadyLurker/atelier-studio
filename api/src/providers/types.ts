@@ -93,6 +93,10 @@ export type ProviderResult =
       seed: number;
       /** Batch ordinal (0-based). Single-image providers always emit 0. */
       index: number;
+      /**
+       * The upstream's rewrite of the prompt (gpt-image `revised_prompt`).
+       * Prompt content: the orchestrator logs only its length.
+       */
       revisedPrompt?: string;
       /**
        * Frames of guide context this clip was actually rendered with, and that
@@ -130,7 +134,25 @@ export type ProviderErrorReason =
 export type HealthProbeCode =
   | 'privacy_transport' | 'privacy_not_ready' | 'host_transport'
   | 'inventory_transport' | 'inventory_invalid' | 'missing_file'
-  | 'missing_clip_type' | 'missing_node_class';
+  | 'missing_clip_type' | 'missing_node_class' | 'privacy_row_incompatible';
+
+const HOST_LEVEL_PROBE_CODES: ReadonlySet<HealthProbeCode> = new Set<HealthProbeCode>([
+  'privacy_transport', 'privacy_not_ready', 'host_transport', 'inventory_transport', 'inventory_invalid',
+]);
+
+/**
+ * True when the probe could not reach, trust or read the host at all, so the
+ * condition is expected to clear on its own (a worker restart). The remaining
+ * codes mean the host answered and this row's files, CLIP type or node classes
+ * are missing, or the worker's privacy metadata rules this row out
+ * (`privacy_row_incompatible`: a graph class outside its allowlist, or video
+ * on a worker without video outputs), which waiting will not fix. An absent
+ * code counts as row-level so an unclassified failure keeps the
+ * fail-at-dequeue rule.
+ */
+export function isHostLevelProbeCode(code: HealthProbeCode | undefined): boolean {
+  return code !== undefined && HOST_LEVEL_PROBE_CODES.has(code);
+}
 
 export type HealthResult =
   | { ok: true }
@@ -159,7 +181,15 @@ export interface Provider {
    * Implementations MUST honor `signal` and complete quickly (≤2s budget) —
    * the poller passes a short-timeout signal that aborts on overrun.
    */
-  healthCheck?(signal: AbortSignal): Promise<HealthResult>;
+  healthCheck?(signal: AbortSignal, options?: HealthCheckOptions): Promise<HealthResult>;
+}
+
+export interface HealthCheckOptions {
+  /**
+   * Set by a user-forced probe. Adapters that reuse host metadata between
+   * background rounds read it fresh instead; others can ignore it.
+   */
+  fresh?: boolean;
 }
 
 export function isAllowedArtifact(ext: string, mime: string): ext is MediaExt {

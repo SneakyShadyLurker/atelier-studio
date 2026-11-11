@@ -90,7 +90,7 @@ describe('inferDimensions api', () => {
     ))) as unknown as typeof fetch;
 
     const notifications: InferProgressNotification[] = [];
-    const res = await inferDimensions(undefined, (n) => notifications.push(n));
+    const res = await inferDimensions({ onProgress: (n) => notifications.push(n) });
 
     expect(res.proposalId).toBe('p');
     expect(notifications.map((n) => n.phase)).toEqual([
@@ -113,7 +113,7 @@ describe('inferDimensions api', () => {
     ))) as unknown as typeof fetch;
 
     const notifications: InferProgressNotification[] = [];
-    const res = await inferDimensions(undefined, (n) => notifications.push(n));
+    const res = await inferDimensions({ onProgress: (n) => notifications.push(n) });
 
     expect(res.proposalId).toBe('p');
     expect(notifications).toEqual([]);
@@ -130,7 +130,7 @@ describe('inferDimensions api', () => {
     ))) as unknown as typeof fetch;
 
     const notifications: InferProgressNotification[] = [];
-    const res = await inferDimensions(undefined, (n) => notifications.push(n));
+    const res = await inferDimensions({ onProgress: (n) => notifications.push(n) });
 
     expect(res.proposalId).toBe('p');
     expect(notifications).toEqual([{ phase: 'chunks' }]);

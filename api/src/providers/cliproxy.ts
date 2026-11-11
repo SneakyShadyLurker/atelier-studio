@@ -2,7 +2,7 @@ import type { TileExt, TileMime } from '@atelier/shared';
 import { toTileMime } from './types';
 import { NOOP_PROVIDER_LOGGER, type Provider, type ProviderLogger, type ProviderRequest, type ProviderResult } from './types';
 import { errorToRawString as providerErrorRaw, readBodyBounded as readBodyBoundedShared, tryParseJson } from './_http';
-import { frameDataText, readSseFrames } from './_sse';
+import { frameData, readSseFrames } from './_sse';
 import { createRefMemo } from './_refMemo';
 import {
   ERROR_PATTERN_DID_NOT_RETURN_IMAGE,
@@ -22,7 +22,7 @@ import {
   type CliproxyQuality,
 } from './cliproxy.config';
 import type { ProviderErrorReason } from './types';
-import { GptModerationError, moderateGptInput } from '../routing/gptModeration';
+import { createGptModerationMemo, GptModerationError } from '../routing/gptModeration';
 
 export interface CliproxyProviderConfig {
   baseUrl: string;
@@ -145,13 +145,16 @@ export function createCliproxyProvider(config: CliproxyProviderConfig): Provider
   // not N×. See createRefMemo.
   type CliproxyRefList = NonNullable<ProviderRequest['refImages']>;
   const refPayloadMemo = createRefMemo<CliproxyRefList, { image_url: string }[]>();
+  // The orchestrator calls generate once per tile, and the resilient wrapper
+  // again per retry, with the same prompt: one shared screen covers them all.
+  const moderation = createGptModerationMemo();
 
   return {
     id: CLIPROXY_MODEL_ID,
     backend: 'cloud',
     async *generate(req: ProviderRequest, signal: AbortSignal): AsyncIterable<ProviderResult> {
       try {
-        await moderateGptInput(config.openrouterApiKey, { task: 'image-generation', input: req.prompt }, signal);
+        await moderation.moderate(config.openrouterApiKey, { task: 'image-generation', input: req.prompt }, signal, { logger });
       } catch (error) {
         if (!(error instanceof GptModerationError)) throw error;
         // No HTTP status/cause: this local decision must not trigger GPT's
@@ -284,24 +287,24 @@ export function createCliproxyProvider(config: CliproxyProviderConfig): Provider
           if (signal.aborted) return;
           // Pretty-printed payload recovery (see frameDataText) runs before
           // event inference so a prefix-less multi-line JSON body can still
-          // carry its own `type` field.
-          const dataText = frameDataText(frame);
+          // carry its own `type` field. The payload is parsed once here and
+          // shared by inference, the error check and extraction.
+          const { parsed: payload } = frameData(frame);
           // Defensive fallback: if upstream ever emits frames without an
           // `event:` line (the spec leaves room — some servers carry the
           // type only inside the JSON payload), recover by reading the
           // `type` field. cliproxy's writeEvent() always writes the
           // event line today; this is insurance against a future change.
-          const eventName = frame.event === 'message' ? inferEventFromPayload(dataText) : frame.event;
+          const eventName = frame.event === 'message' ? inferEventFromPayload(payload) : frame.event;
           // Edits and generations differ only by SSE prefix; dispatch on behavior.
           // Error payloads carry `{ error: {...} }` with no top-level `type`,
           // so a data-only error frame (no `event:` line) cannot be inferred
           // from `type` — treat any otherwise-unclassified frame with a
           // top-level error object as terminal instead of skipping it into a
           // misleading "stream ended without a completed event".
-          const normalizedEvent = normalizeEvent(eventName) ?? (hasTopLevelError(dataText) ? 'error' : null);
+          const normalizedEvent = normalizeEvent(eventName) ?? (hasTopLevelError(payload) ? 'error' : null);
           if (normalizedEvent === 'partial_image') {
-            const payload = tryParseJson(dataText) as CliproxyPartialPayload | string;
-            const partial = extractPartialPreview(payload, outputFormat);
+            const partial = extractPartialPreview(payload as CliproxyPartialPayload | string, outputFormat);
             if (partial) {
               sawPartial = true;
               yield { status: 'partial', preview: partial.preview, index: partial.index, batchIndex: 0, seed: req.seed };
@@ -309,14 +312,12 @@ export function createCliproxyProvider(config: CliproxyProviderConfig): Provider
             continue;
           }
           if (normalizedEvent === 'completed') {
-            const payload = tryParseJson(dataText) as CliproxyCompletedPayload | string;
-            const final = completedResult(payload, outputFormat, response.status, req.seed);
+            const final = completedResult(payload as CliproxyCompletedPayload | string, outputFormat, response.status, req.seed);
             if (!sawPartial && final.status === 'ready') warnMissingPartials();
             yield final;
             return;
           }
           if (normalizedEvent === 'error') {
-            const payload = tryParseJson(dataText) as CliproxyErrorPayload | string;
             // CLIProxyAPI commits HTTP 200 before the generation finishes, so
             // server-side failures (codex credential cooldown, upstream
             // returning no image, severed upstream stream, shared-org rate
@@ -327,13 +328,14 @@ export function createCliproxyProvider(config: CliproxyProviderConfig): Provider
             // resilient wrapper retries them and exhaustion lands on
             // 'service unavailable' instead of the misleading
             // 'upstream rejected'.
-            const raw = providerErrorRaw(payload);
+            const errorPayload = payload as CliproxyErrorPayload | string;
+            const raw = providerErrorRaw(errorPayload);
             const reason = inStreamErrorReason(raw);
             yield {
               status: 'failed',
               error: {
                 status: reason.kind === 'http' ? reason.status : 400,
-                error: payload,
+                error: errorPayload,
                 reason,
               },
               seed: req.seed,
@@ -377,7 +379,7 @@ export function buildReferenceImagePayloads(
   refImages: readonly { bytes: Uint8Array; mime: string }[],
 ): { image_url: string }[] {
   return refImages.map((ref) => {
-    const imageUrl = `data:${ref.mime};base64,${Buffer.from(ref.bytes).toString('base64')}`;
+    const imageUrl = `data:${ref.mime};base64,${ref.bytes.toBase64()}`;
     // CLIProxyAPI accepts arbitrary image_url values; Atelier only forwards data images it built.
     if (!imageUrl.startsWith('data:image/')) throw new Error('invalid reference image data URL');
     return { image_url: imageUrl };
@@ -399,16 +401,14 @@ function normalizeEvent(name: string): 'partial_image' | 'completed' | 'error' |
   return null;
 }
 
-function hasTopLevelError(data: string): boolean {
-  const parsed = tryParseJson(data);
+function hasTopLevelError(parsed: unknown): boolean {
   return typeof parsed === 'object' && parsed !== null && (parsed as { error?: unknown }).error != null;
 }
 
-function inferEventFromPayload(data: string): string {
-  // Cheap parse + read of the `type` field. Returns 'message' (the SSE
+function inferEventFromPayload(parsed: unknown): string {
+  // Read of the `type` field of the already-parsed payload. Returns 'message' (the SSE
   // default) when the payload doesn't carry a recognizable type, so the
   // caller's existing "unknown event names are ignored" path still wins.
-  const parsed = tryParseJson(data);
   if (typeof parsed === 'object' && parsed !== null) {
     const type = (parsed as { type?: unknown }).type;
     if (typeof type === 'string') return type;

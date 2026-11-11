@@ -6,7 +6,8 @@ import { ensureUser } from '../../db/users';
 import { reorderOwned } from '../../db/reorder';
 import type { DraftResult } from '../../providers/text/featureHelpers';
 import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
-import { failedToSseError } from '../../lifecycle/llm-error';
+import { draftRouteTimeoutMs } from '../../providers/text/textBudgets';
+import { textFailureToSseError } from '../../lifecycle/llm-error';
 import { draftPool } from '../../orchestrator/llmAdmission';
 import { withLlmSlot } from '../../lifecycle/withLlmSlot';
 import { parseBody, parseParams } from '../_http';
@@ -376,7 +377,8 @@ export const listsRoutes = new Hono<AppEnv>()
     // and exactly one terminal `done`/`error` frame. Mirrors enhance.ts /
     // infer.ts. Success and clarify both ride a terminal `done` frame; the
     // sanitized failure paths ride `error`.
-    const timeoutMs = c.var.config.CLOUD_TIMEOUT_MS;
+    // Covers every attempt of the draft policy, which is longer on a slow row.
+    const timeoutMs = draftRouteTimeoutMs(textModel.latencyProfile, c.var.config);
     return {
       timeoutMs,
       disconnect: c.req.raw.signal,
@@ -402,16 +404,16 @@ export const listsRoutes = new Hono<AppEnv>()
           } else {
             logger.error({ err: error, event: 'draft_list_crash', userId }, 'draft list crashed');
           }
-          send('error', { message: SAFE });
+          send('error', textFailureToSseError(null, SAFE));
           return;
         }
 
         if (result.type === 'failed') {
           logger.warn(
-            { event: 'draft_list_upstream_error', status: result.status, detail: result.detail, userId },
+            { event: 'draft_list_upstream_error', textModelId: textModel.id, failureKind: result.kind, status: result.status, userId },
             'draft list failed',
           );
-          send('error', result.moderation ? failedToSseError(result) : { message: SAFE });
+          send('error', textFailureToSseError(result, SAFE));
           return;
         }
 

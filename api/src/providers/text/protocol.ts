@@ -16,11 +16,16 @@ export interface ResolvedProvider extends TextProviderRecord {
 export interface TextProtocolAdapter {
   readonly protocol: TextProtocol;
   /**
-   * Builds the language model for one model row; cached by the registry.
-   * `fetch` is the bounded, redirect-rejecting fetch (`boundedFetch`) sized for
-   * the row's latency profile.
+   * Builds the language model for one model row. Built per call, not cached:
+   * `fetch` is the bounded, redirect-rejecting fetch (`boundedFetch`) carrying
+   * that call's byte cap and, for streams, its wire tap.
    */
-  languageModel(provider: ResolvedProvider, model: TextModelRecord, fetch: typeof globalThis.fetch): LanguageModelV4;
+  languageModel(
+    provider: ResolvedProvider,
+    model: TextModelRecord,
+    fetch: typeof globalThis.fetch,
+    options?: LanguageModelOptions,
+  ): LanguageModelV4;
   /**
    * Call-time provider options for one reasoning level (null = none sent).
    * `wireNote` explains a level the protocol cannot express and left out.
@@ -37,6 +42,15 @@ export interface TextProtocolAdapter {
    * then; missing → TextConfigValidationError).
    */
   probeConnection(provider: ResolvedProvider, signal: AbortSignal, options?: ConnectionProbeOptions): Promise<ConnectionReport>;
+}
+
+export interface LanguageModelOptions {
+  /**
+   * Ask a streaming upstream for token usage where the protocol makes it
+   * opt-in (OpenAI-compatible `stream_options.include_usage`). Absent: the
+   * package default (not asked).
+   */
+  readonly includeUsage?: boolean;
 }
 
 export interface ReasoningOptions {

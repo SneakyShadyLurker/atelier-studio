@@ -90,11 +90,43 @@ export function classifyApiError(err: unknown, quotaFloorMs: number): Error {
 export function classifyStreamError(error: unknown, quotaFloorMs: number): Error {
   if (InvalidResponseDataError.isInstance(error)) return incompleteTextStream();
   if (error instanceof Error) return classifyApiError(error, quotaFloorMs);
+  // A status decides first, so an overload or 5xx frame is retried like the
+  // same failure at open. Other 4xx statuses still let quota / timeout wording
+  // win before the permanent verdict.
+  const status = streamErrorStatus(error);
+  const byStatus = status === null ? null : classifyHttpFailure(status, error, new Headers(), quotaFloorMs);
+  if (byStatus !== null && !(byStatus instanceof PermanentUpstreamError)) return byStatus;
   const msg = typeof error === 'string'
     ? error
     : (error as { readonly message?: unknown } | null)?.message;
   const text = typeof msg === 'string' ? msg : detailOf(error);
   if (QUOTA_BODY_RE.test(text)) return new QuotaExhaustedError(null, error, text);
   if (IN_STREAM_TIMEOUT_RE.test(text)) return new TransientUpstreamError('in-stream-timeout', error, text);
-  return new PermanentUpstreamError('in-stream', error, text);
+  return byStatus ?? new PermanentUpstreamError('in-stream', error, text);
+}
+
+// Anthropic error frames name a type, not a status; these are the retryable
+// ones, with the statuses `@ai-sdk/anthropic` assigns them.
+const ANTHROPIC_ERROR_TYPE_STATUS: Readonly<Record<string, number>> = {
+  overloaded_error: 529,
+  api_error: 500,
+  rate_limit_error: 429,
+};
+
+function isHttpErrorStatus(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 400 && value <= 599;
+}
+
+/**
+ * The HTTP status an in-stream error value carries: the SDK's provider stream
+ * error (`statusCode`), a raw frame's numeric `code` or `status`, or an
+ * Anthropic error `type`. Null when it carries none.
+ */
+function streamErrorStatus(error: unknown): number | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const record = error as { readonly statusCode?: unknown; readonly status?: unknown; readonly code?: unknown; readonly type?: unknown };
+  for (const value of [record.statusCode, record.status, record.code]) {
+    if (isHttpErrorStatus(value)) return value;
+  }
+  return typeof record.type === 'string' ? ANTHROPIC_ERROR_TYPE_STATUS[record.type] ?? null : null;
 }

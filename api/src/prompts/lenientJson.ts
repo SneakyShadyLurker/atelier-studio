@@ -94,3 +94,18 @@ export function parseJsonLenient(text: string): unknown {
     return null;
   }
 }
+
+/**
+ * The one parse for model output that should be a single JSON object (infer,
+ * rescue, drafts, the story planner). The strict slice runs first, so a
+ * well-formed answer wrapped in fences or prose is never reshaped; only when
+ * that fails does the repairing parser get a turn. Null when nothing parses;
+ * callers still validate the shape (zod or field checks) after this.
+ */
+export function parseModelJsonObject(text: string): unknown {
+  try {
+    return JSON.parse(sliceJsonObject(text)) as unknown;
+  } catch {
+    return parseJsonLenient(text);
+  }
+}

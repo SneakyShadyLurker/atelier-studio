@@ -48,3 +48,56 @@ export function nextSseFrame(buffer: string, from = 0): { raw: string; rest: str
   if (!match) return null;
   return { raw: buffer.slice(0, match.index), rest: buffer.slice(match.index + match[0].length) };
 }
+
+export interface SseFrameAssembler {
+  /** Feed one decoded chunk; returns the raw text of every frame it completes, in order. */
+  push(text: string): string[];
+  /** The unterminated remainder (dropped at end of stream, like the readers always did). */
+  pending(): string;
+}
+
+/**
+ * Reassembles frames from decoded chunks without re-flattening a growing
+ * string. A frame of a multi-MB base64 image arrives in many chunks; appending
+ * each to one string and running the terminator regex over it copied the
+ * whole buffer per chunk. Here the in-progress frame stays a list of chunks,
+ * the terminator is looked for only in the new chunk plus the last
+ * SSE_TERMINATOR_REWIND characters carried over (a terminator split across
+ * chunks still matches), and the list is joined once per completed frame.
+ */
+export function createSseFrameAssembler(): SseFrameAssembler {
+  let parts: string[] = [];
+  // The last few characters of `parts`, for terminators straddling chunks.
+  let tail = '';
+  return {
+    push(text: string): string[] {
+      const window = tail + text;
+      FRAME_TERMINATOR.lastIndex = 0;
+      const first = FRAME_TERMINATOR.exec(window);
+      if (!first) {
+        if (text.length > 0) parts.push(text);
+        tail = window.slice(-SSE_TERMINATOR_REWIND);
+        return [];
+      }
+      // `parts` holds no terminator, so the first match in the window is the
+      // first in the whole buffer. Join once and split every frame in it.
+      parts.push(text);
+      const buffer = parts.join('');
+      const offset = buffer.length - window.length;
+      const frames = [buffer.slice(0, offset + first.index)];
+      let start = offset + first.index + first[0].length;
+      for (;;) {
+        FRAME_TERMINATOR.lastIndex = start;
+        const match = FRAME_TERMINATOR.exec(buffer);
+        if (!match) break;
+        frames.push(buffer.slice(start, match.index));
+        start = match.index + match[0].length;
+      }
+      const rest = buffer.slice(start);
+      parts = rest.length > 0 ? [rest] : [];
+      tail = rest.slice(-SSE_TERMINATOR_REWIND);
+      return frames;
+    },
+    pending: () => parts.join(''),
+  };
+}

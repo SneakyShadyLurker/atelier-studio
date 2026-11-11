@@ -383,7 +383,7 @@ describe('POST /api/prompts/dimensions/apply', () => {
     expect(body.error.toLowerCase()).toContain('apply anyway');
   });
 
-  // Task 8: per-template apply gate + legacy overrideCoherence compat shim
+  // Task 8: per-template apply gate
   async function seedUnsatisfiableScene(
     app: ReturnType<typeof testRuntime>['app'],
     userId: string,
@@ -431,7 +431,9 @@ describe('POST /api/prompts/dimensions/apply', () => {
     expect(after.dimensions.some((d) => d.name === 'Genre')).toBe(true);
   });
 
-  test('apply with legacy overrideCoherence:true expands to all failing templates and warn-logs', async () => {
+  test('apply accepts a legacy overrideCoherence field but no longer acts on it', async () => {
+    // Tabs built before the per-template contract may still send the field;
+    // the strict schema accepts it so they get the coherence gate, not a 400.
     const { app, logs } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'warn' });
     const userId = 'alice';
     const { proposalId, allKeys } = await seedUnsatisfiableScene(app, userId);
@@ -444,12 +446,13 @@ describe('POST /api/prompts/dimensions/apply', () => {
         overrideCoherence: true,
       }),
     }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(422);
+    const body = await res.json() as { code: string; templates: string[] };
+    expect(body.code).toBe('coherence');
+    expect(body.templates).toEqual(['Scene']);
     const after = await getLibrary(app, userId);
-    expect(after.dimensions.some((d) => d.name === 'Genre')).toBe(true);
-    // Warn-level log emitted with the legacy-override event marker.
-    const matched = logs.find((line) => line.includes('apply_dimensions_legacy_override'));
-    expect(matched).toBeTruthy();
+    expect(after.dimensions.some((d) => d.name === 'Genre')).toBe(false);
+    expect(logs.some((line) => line.includes('apply_dimensions_legacy_override'))).toBe(false);
   });
 
   test('apply 422s when failing template not in acceptUnsatisfiableTemplates', async () => {
@@ -500,31 +503,10 @@ describe('POST /api/prompts/dimensions/apply', () => {
     // Warn-log emitted for the dropped name.
     const matched = logs.find((line) => line.includes('apply_dimensions_unknown_template_in_accept'));
     expect(matched).toBeTruthy();
-    expect(matched).toContain('NotARealTemplate');
+    expect(matched).toContain('"droppedCount":1');
+    expect(matched).not.toContain('NotARealTemplate');
   });
 
-  test('apply ignores overrideCoherence when acceptUnsatisfiableTemplates already covers the template', async () => {
-    const { app, logs } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'warn' });
-    const userId = 'alice';
-    const { proposalId, allKeys } = await seedUnsatisfiableScene(app, userId);
-    const res = await app.fetch(new Request('http://local/api/prompts/dimensions/apply', {
-      method: 'POST',
-      headers: { 'Remote-User': userId, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        proposalId,
-        acceptedBundleKeys: allKeys,
-        acceptUnsatisfiableTemplates: ['Scene'],
-        overrideCoherence: true,
-      }),
-    }));
-    expect(res.status).toBe(200);
-    const after = await getLibrary(app, userId);
-    expect(after.dimensions.some((d) => d.name === 'Genre')).toBe(true);
-    // Compat shim still warn-logs because legacy boolean was present, but the
-    // expansion is a no-op for the already-covered template (no dupes).
-    const matched = logs.find((line) => line.includes('apply_dimensions_legacy_override'));
-    expect(matched).toBeTruthy();
-  });
 });
 
 test('single-wave assignment before rename is diagnosed and blocked by the production apply gate', async () => {

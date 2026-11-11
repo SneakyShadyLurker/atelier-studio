@@ -96,8 +96,6 @@ export interface StartPreparedOptions {
   readonly boundProvider: Provider;
   readonly reservation: ReservationReleaser;
   readonly touchRequiredKey: (() => Promise<void>) | undefined;
-  /** The queue preparer already attempted the prompt rewrite (condensation or expansion). */
-  readonly promptPrepared?: boolean;
 }
 
 // The one detached start shared by the immediate (/generate) and dequeued
@@ -118,7 +116,6 @@ export function startPrepared(
     request: opts.request,
     registryEntry: opts.registryEntry,
     boundProvider: opts.boundProvider,
-    promptPrepared: opts.promptPrepared === true,
     // Never-aborting placeholder. In the decoupled model the client watches
     // via GET /batches/:id/events, not the submitting request — /generate
     // returns 201 synchronously, so its request signal aborts on response
@@ -175,7 +172,6 @@ async function startQueuedEntry(deps: DispatchDeps, entry: QueueEntry, reservati
       boundProvider,
       reservation,
       touchRequiredKey,
-      promptPrepared: entry.promptPreparation === 'ready',
     });
   } finally {
     if (!handedOffToPipeline) unregisterBatch(entry.batchId);

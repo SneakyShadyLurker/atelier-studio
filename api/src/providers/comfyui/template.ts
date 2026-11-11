@@ -158,8 +158,42 @@ export function buildWorkflow(
     throw new Error('comfyui workflow template did not parse to an object');
   }
   const workflow = parsed as Record<string, unknown>;
+  if (outputScale === 1) bypassNodes(workflow, outputScaleNodes(templateText));
   pruneNodes(workflow, emptyReferenceSlotNodes(templateText, referenceImages.length));
   return workflow;
+}
+
+// An `ImageScaleBy` at factor 1 leaves the size unchanged but still sends the
+// whole frame through a lanczos Pillow round trip on the host, so at scale 1
+// the node is bypassed instead. Found in the template, before user text is
+// substituted, so only the node that carries `{{outputScale}}` qualifies.
+function outputScaleNodes(templateText: string): Set<string> {
+  const nodes = new Set<string>();
+  if (!templateText.includes('{{outputScale}}')) return nodes;
+  for (const [id, node] of Object.entries(JSON.parse(templateText) as Record<string, unknown>)) {
+    if ((node as { class_type?: unknown }).class_type === 'ImageScaleBy' && nodeInputs(node)?.scale_by === '{{outputScale}}') nodes.add(id);
+  }
+  return nodes;
+}
+
+// Removes each node and points every link that read from it at the source of
+// the node's `image` input. pruneNodes alone would drop those links and leave
+// the consumer (the save node) without its images.
+function bypassNodes(workflow: Record<string, unknown>, bypassed: ReadonlySet<string>): void {
+  const sources = new Map<string, unknown>();
+  for (const id of bypassed) {
+    const source = nodeInputs(workflow[id])?.image;
+    if (Array.isArray(source) && typeof source[0] === 'string' && !bypassed.has(source[0])) sources.set(id, source);
+  }
+  for (const id of sources.keys()) Reflect.deleteProperty(workflow, id);
+  for (const node of Object.values(workflow)) {
+    const inputs = nodeInputs(node);
+    if (inputs === undefined) continue;
+    for (const [name, value] of Object.entries(inputs)) {
+      const source = Array.isArray(value) && typeof value[0] === 'string' ? sources.get(value[0]) : undefined;
+      if (source !== undefined) inputs[name] = structuredClone(source);
+    }
+  }
 }
 
 function referenceReplacements(images: readonly string[]): Record<(typeof REFERENCE_IMAGE_PLACEHOLDERS)[number], string> {

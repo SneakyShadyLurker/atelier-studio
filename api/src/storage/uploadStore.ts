@@ -11,6 +11,7 @@ import { ensureUser } from '../db/users';
 import type { AppLogger } from '../observability/logger';
 import { artifactExists, deleteArtifact, writeAtomic } from './files';
 import { normalizeUpload } from './normalizeUpload';
+import { deleteUploadThumbnail } from './thumbnail';
 
 // The one definition of "something still needs this upload": a tile's
 // reference list (live or archived), a batch's I2V source still, or a story
@@ -190,6 +191,7 @@ export function releaseUploads(options: ReleaseUploadsOptions): void {
     } catch (error) {
       logger.warn({ err: error, uploadId: row.id }, 'released upload unlink failed; will be reaped at next boot');
     }
+    deleteUploadThumbnail(dataDir, userId, row.id, logger);
   }
   if (released.length > 0) logger.info({ userId, count: released.length }, 'released uploads of deleted threads');
 }

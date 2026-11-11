@@ -23,7 +23,20 @@ beforeAll(() => {
     hostname: '127.0.0.1',
     async fetch(req) {
       if (isHostPortProbe(req)) return hostPortProbeResponse();
-      seen.push({ authorization: req.headers.get('authorization'), body: await req.json() as Record<string, unknown> });
+      const body = await req.json() as Record<string, unknown>;
+      seen.push({ authorization: req.headers.get('authorization'), body });
+      if (JSON.stringify(body.messages).includes('STALL_ME')) {
+        // One content frame, then silence until the client gives up.
+        let sent = false;
+        return new Response(new ReadableStream<Uint8Array>({
+          pull: (controller) => {
+            if (sent) return new Promise<void>((resolve) => setTimeout(resolve, 60_000));
+            sent = true;
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"index":0,"delta":{"content":"partial"}}]}\n\n'));
+            return Promise.resolve();
+          },
+        }), { headers: { 'content-type': 'text/event-stream' } });
+      }
       const frame = JSON.stringify({ choices: [{ index: 0, delta: { content: '{"kind":"entries","entries":["navy"]}' }, finish_reason: 'stop' }] });
       return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
     },
@@ -78,6 +91,26 @@ describe('textModelProviderFor', () => {
     // The stored key is decrypted at use time and the edited row is live.
     expect(request?.authorization).toBe('Bearer sk-stored-key');
     expect(request?.body).toMatchObject({ model: 'local-model', reasoning_effort: 'low', max_completion_tokens: 1234 });
+  });
+
+  test('TEXT_STREAM_IDLE_TIMEOUT_MS arms the stall watchdog on built providers', async () => {
+    const config = testConfig({ TEXT_STREAM_IDLE_TIMEOUT_MS: '50' });
+    const { store, modelRowId } = await setup();
+    const chunks = [];
+    for await (const chunk of textModelProviderFor(config, store, modelRowId).enhance('STALL_ME', [], new AbortController().signal)) {
+      chunks.push(chunk);
+    }
+    expect(chunks.at(-1)).toMatchObject({ type: 'failed', kind: 'transient' });
+  });
+
+  test('TEXT_STREAM_INCLUDE_USAGE asks streams for usage, on by default', async () => {
+    const { store, modelRowId } = await setup();
+    const signal = new AbortController().signal;
+    await textModelProviderFor(testConfig(), store, modelRowId).draftList({ name: 'Colours', existing: [], target: 5 }, signal);
+    expect(seen.at(-1)?.body.stream_options).toEqual({ include_usage: true });
+    const off = testConfig({ TEXT_STREAM_INCLUDE_USAGE: 'false' });
+    await textModelProviderFor(off, store, modelRowId).draftList({ name: 'Colours', existing: [], target: 5 }, signal);
+    expect(seen.at(-1)?.body.stream_options).toBeUndefined();
   });
 
   test('the test override wins over every row', async () => {

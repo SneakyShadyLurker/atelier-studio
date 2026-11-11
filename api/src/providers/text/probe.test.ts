@@ -200,6 +200,19 @@ describe('testModel', () => {
       .toEqual(['json_schema', 'json_object']);
   });
 
+  test('the json_object iteration sends no schema, so it adds no structuredOutputs wire note', async () => {
+    chat = scripted((body, kind) => {
+      if (kind !== 'json') return undefined;
+      return (body.response_format as { type: string }).type === 'json_schema'
+        ? { status: 400, body: 'json_schema is not supported' }
+        : { text: '{"answer":"ok"}' };
+    });
+    const report = await run();
+    expect(report.proposed.structuredOutput).toBe('json_object');
+    expect(report.wireNotes.some((note) => note.includes('structuredOutputs'))).toBe(false);
+    expect(captured.filter((c) => kindOf(c.body) === 'json').at(-1)?.body.response_format).toEqual({ type: 'json_object' });
+  });
+
   test('both JSON modes refused → none', async () => {
     chat = scripted((_body, kind) => (kind === 'json' ? { status: 400, body: 'response_format not supported' } : undefined));
     const report = await run();

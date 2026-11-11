@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import secrets
 import sys
 import time
 import uuid
@@ -32,12 +33,23 @@ ALLOWED = set(json.loads(Path(__file__).with_name('allowed_nodes.json').read_tex
 WORKER_BUILD = hashlib.sha256(b''.join(
     Path(__file__).with_name(name).read_bytes()
     for name in ('worker.py', 'store.py', 'allowed_nodes.json'))).hexdigest()
+# New on every process start, so the API can tell a restarted worker from the
+# one it already inventoried. Random, never derived from host state.
+BOOT_ID = secrets.token_hex(16)
 HOST_READY = False
 LAST_JOB = time.monotonic()
 HAS_RUN = False
 WRITE_GUARD = False
 IDLE_RESTART_SECONDS = 180 * 60
 IDLE_UNLOAD_SECONDS = 10 * 60
+# Native ComfyUI SaveImage uses 4. Pillow's default 6 holds the prompt worker,
+# and so the GPU queue, longer for a small size gain; 1 would push native 16 MP
+# outputs toward the MAX_PNG_BYTES cap.
+PNG_COMPRESS_LEVEL = 4
+CLIENT_MAX_SIZE = 2 * 1024 * 1024
+# Set by start() once the private aiohttp internals the boundary relies on
+# are proven to work on the installed version.
+AIOHTTP_INTERNALS = False
 UNLOADED_AT = None
 LAST_PROMPT_ID = None
 
@@ -67,7 +79,8 @@ def host_ready():
     # Match v0.42.3's selector: classic takes precedence; otherwise RAM pressure
     # is the default unless LRU or no-cache is selected.
     # https://github.com/Comfy-Org/ComfyUI/blob/v0.42.3/main.py#L301
-    return (len(TOKEN) >= 32 and logging.root.manager.disable >= logging.CRITICAL and WRITE_GUARD and os.environ.get('ATELIER_PRIVATE_WORKER') == '1'
+    return (len(TOKEN) >= 32 and logging.root.manager.disable >= logging.CRITICAL and WRITE_GUARD and AIOHTTP_INTERNALS
+            and os.environ.get('ATELIER_PRIVATE_WORKER') == '1'
             and args.disable_metadata and args.offline and args.disable_partner_nodes and args.disable_assets and args.disable_all_custom_nodes
             and (getattr(args, 'cache_classic', False)
                  or (getattr(args, 'cache_ram', None) is not None
@@ -151,7 +164,7 @@ class AtelierSaveImages:
         for image in images:
             pixels = np.clip(image.cpu().numpy() * 255.0, 0, 255).astype(np.uint8)
             with BoundedBuffer(MAX_PNG_BYTES) as buffer:
-                Image.fromarray(pixels).save(buffer, format='PNG')
+                Image.fromarray(pixels).save(buffer, format='PNG', compress_level=PNG_COMPRESS_LEVEL)
                 outputs.append((str(uuid.uuid4()), buffer.getvalue()))
         STORE.put_images(job_id, outputs)
         return {'ui': {'images': [{'filename': asset, 'subfolder': job_id, 'type': 'atelier-memory'}
@@ -271,7 +284,9 @@ async def private_boundary(request, handler):
 
 
 SERVER.app.middlewares.insert(0, private_boundary)
-SERVER.app._client_max_size = 2 * 1024 * 1024
+# Private aiohttp attribute: the public client_max_size argument is gone once
+# ComfyUI has built the app. start() verifies it still takes effect.
+SERVER.app._client_max_size = CLIENT_MAX_SIZE
 # Disable library logging before any content can reach this worker.
 logging.disable(logging.CRITICAL)
 
@@ -279,7 +294,7 @@ logging.disable(logging.CRITICAL)
 @SERVER.routes.get('/atelier/v1/privacy')
 async def privacy(request):
     return web.json_response({'protocol': 2, 'ready': HOST_READY,
-                             'worker_build': WORKER_BUILD,
+                             'worker_build': WORKER_BUILD, 'boot_id': BOOT_ID,
                              'allowed_nodes': sorted(ALLOWED),
                              'limits': {'max_jobs': MAX_JOBS, 'max_payload_bytes': MAX_BYTES,
                                         'max_image_bytes': MAX_PNG_BYTES, 'max_images': MAX_IMAGES,
@@ -486,8 +501,44 @@ async def reaper():
         await asyncio.sleep(1)
 
 
+async def aiohttp_internals_failure(app):
+    """Name the first private aiohttp internal that no longer works as relied on, else None.
+
+    The /prompt rewrite depends on BaseRequest.read() returning a replaced
+    _read_bytes, and the body cap on Application._client_max_size. Neither is
+    public API, so an aiohttp upgrade could silently break either one.
+    """
+    try:
+        # A fresh app proves the public constructor argument still lands in the
+        # attribute this module assigns; the live app must hold the set value.
+        if (web.Application(client_max_size=CLIENT_MAX_SIZE)._client_max_size != CLIENT_MAX_SIZE
+                or app._client_max_size != CLIENT_MAX_SIZE):
+            return 'Application._client_max_size'
+    except Exception:
+        return 'Application._client_max_size'
+    try:
+        from aiohttp.test_utils import make_mocked_request
+        expected = {'atelier': 'self-test'}
+        payload = json.dumps(expected).encode()
+        request = make_mocked_request('POST', '/prompt')
+        request._read_bytes = payload
+        if await request.read() != payload or await request.json() != expected:
+            return 'BaseRequest._read_bytes'
+    except Exception:
+        return 'BaseRequest._read_bytes'
+    return None
+
+
 async def start(app):
-    global WRITE_GUARD
+    global WRITE_GUARD, AIOHTTP_INTERNALS
+    # Runs before the write guard so its imports may cache bytecode as usual.
+    failed = await aiohttp_internals_failure(app)
+    if failed:
+        # Library logging is disabled for privacy; this content-free line is
+        # the only diagnostic, and host_ready() keeps the worker not ready.
+        print(f'Atelier worker not ready: aiohttp internal {failed} failed its startup self-test',
+              file=sys.stderr, flush=True)
+    AIOHTTP_INTERNALS = failed is None
     sys.addaudithook(deny_persistent_writes)
     WRITE_GUARD = True
     app['atelier_reaper'] = asyncio.create_task(reaper())

@@ -62,6 +62,9 @@ export function revalidateAtDequeue(ctx: DequeueContext, entry: QueueEntry): Rev
   // A seed entry (ok:false, no reason) only means the first probe has not
   // finished since boot; a recovered queued batch should try its host rather
   // than fail on the absence of evidence. A probed-offline entry carries a reason.
+  // Dequeue holds a local head whose host is down at host level before it is
+  // claimed (localHostGate), so a reasoned offline entry here is row-level:
+  // a missing file or node class that waiting will not fix.
   const health = ctx.registry.healthSnapshot().get(entry.modelId);
   if (health && !health.ok && health.reason !== undefined) return { ok: false, reason: 'upstream rejected' };
   if (!queuedRefArtifactsExist(ctx.db, ctx.config.DATA_DIR, entry.batchId, entry.userId)) {

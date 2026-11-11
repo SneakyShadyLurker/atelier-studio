@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { BrokenCircuitError, CircuitState, TaskCancelledError } from 'cockatiel';
 import {
   buildResilientPolicy,
+  CallerAbortedError,
   isRetriable,
-  Parse4xxError,
   PermanentUpstreamError,
   policyBreakerState,
   QuotaExhaustedError,
@@ -25,12 +25,6 @@ describe('typed upstream errors', () => {
     expect(err.name).toBe('PermanentUpstreamError');
     expect(err.category).toBe('4xx');
     expect(err.message).toContain('4xx');
-  });
-
-  test('Parse4xxError exposes truncated head', () => {
-    const err = new Parse4xxError('parse', '<<garbage>>');
-    expect(err.name).toBe('Parse4xxError');
-    expect(err.cause).toBe('<<garbage>>');
   });
 });
 
@@ -64,10 +58,6 @@ describe('isRetriable classifier', () => {
   test('PermanentUpstreamError -> false', () => {
     expect(isRetriable(new PermanentUpstreamError('4xx', null))).toBe(false);
     expect(isRetriable(new PermanentUpstreamError('in-stream', null))).toBe(false);
-  });
-
-  test('Parse4xxError -> false', () => {
-    expect(isRetriable(new Parse4xxError('parse', 'oops'))).toBe(false);
   });
 
   test('plain Error -> false', () => {
@@ -239,6 +229,168 @@ describe('QuotaExhaustedError', () => {
     const e = new QuotaExhaustedError(900, { status: 429, body: 'quota' });
     expect(e.retryAfterSeconds).toBe(900);
     expect(isRetriable(e)).toBe(false);
+  });
+});
+
+// Stands in for a fetch: settles only when its attempt signal aborts, and a
+// tick later, as a real abort travels back through fetch and the SDK.
+function hangUntilAborted({ signal }: { signal: AbortSignal }): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    signal.addEventListener('abort', () => {
+      setTimeout(() => {
+        reject(new DOMException('aborted', 'AbortError'));
+      }, 1);
+    }, { once: true });
+  });
+}
+
+const settle = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function runAbortedByCaller(
+  policy: ReturnType<typeof buildResilientPolicy>,
+  makeSignal: () => AbortSignal,
+  count: number,
+): Promise<unknown[]> {
+  const errors = await Promise.all(
+    Array.from({ length: count }, () =>
+      policy.execute(hangUntilAborted, makeSignal()).then(
+        () => undefined,
+        (err: unknown) => err,
+      ),
+    ),
+  );
+  // Let the inner layers settle after abortablePolicy has already rejected.
+  await settle();
+  return errors;
+}
+
+function abortSoon(): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => {
+    controller.abort(new DOMException('client-gone', 'AbortError'));
+  }, 10);
+  return controller.signal;
+}
+
+async function openBreaker(policy: ReturnType<typeof buildResilientPolicy>, threshold: number) {
+  for (let i = 0; i < threshold; i += 1) {
+    await policy.execute(() => {
+      throw new TransientUpstreamError('5xx', null);
+    }).catch(() => undefined);
+  }
+  expect(policyBreakerState(policy)).toBe('open');
+}
+
+describe('caller aborts and the circuit breaker', () => {
+  const abortOpts = {
+    timeoutPerAttemptMs: 1_000,
+    maxAttempts: 1,
+    initialBackoffMs: 1,
+    maxBackoffMs: 1,
+    breakerThreshold: 3,
+    halfOpenAfterMs: 30,
+  };
+
+  for (const breakerOutsideRetry of [false, true]) {
+    const label = breakerOutsideRetry ? 'breaker outside retry' : 'breaker inside retry';
+
+    test(`${label}: concurrent caller aborts above the threshold leave the breaker closed`, async () => {
+      const policy = buildResilientPolicy({ ...abortOpts, breakerOutsideRetry });
+      const errors = await runAbortedByCaller(policy, abortSoon, 6);
+      expect(policyBreakerState(policy)).toBe('closed');
+      // Callers still see their own abort reason.
+      for (const err of errors) {
+        expect((err as Error).name).toBe('AbortError');
+        expect((err as Error).message).toBe('client-gone');
+      }
+    });
+
+    test(`${label}: caller signals from AbortSignal.timeout leave the breaker closed`, async () => {
+      const policy = buildResilientPolicy({ ...abortOpts, breakerOutsideRetry });
+      const errors = await runAbortedByCaller(policy, () => AbortSignal.timeout(10), 6);
+      expect(policyBreakerState(policy)).toBe('closed');
+      for (const err of errors) {
+        expect((err as Error).name).toBe('TimeoutError');
+      }
+    });
+
+    for (const noTimeout of [false, true]) {
+      const variant = noTimeout ? 'noTimeout policy' : 'timeout policy';
+      test(`${label}, ${variant}: a caller abort during a half-open trial re-opens the breaker`, async () => {
+        const policy = buildResilientPolicy({ ...abortOpts, breakerOutsideRetry, noTimeout });
+        await openBreaker(policy, abortOpts.breakerThreshold);
+        await settle(abortOpts.halfOpenAfterMs + 10);
+        const errors = await runAbortedByCaller(policy, abortSoon, 1);
+        expect((errors[0] as Error).message).toBe('client-gone');
+        expect(policyBreakerState(policy)).toBe('open');
+      });
+    }
+  }
+
+  test('an older call that aborts during a newer half-open trial does not disturb the trial', async () => {
+    const policy = buildResilientPolicy({ ...abortOpts, noTimeout: true });
+    // Entered while the breaker was closed and still in flight when it opens.
+    const older = new AbortController();
+    const olderCall = policy.execute(hangUntilAborted, older.signal).catch((err: unknown) => err);
+    await openBreaker(policy, abortOpts.breakerThreshold);
+    await settle(abortOpts.halfOpenAfterMs + 10);
+    const trial = policy.execute(() => new Promise<string>((resolve) => { setTimeout(() => { resolve('ok'); }, 40); }));
+    await settle(10);
+    older.abort(new DOMException('client-gone', 'AbortError'));
+    expect(((await olderCall) as Error).message).toBe('client-gone');
+    expect(await trial).toBe('ok');
+    await settle();
+    expect(policyBreakerState(policy)).toBe('closed');
+  });
+
+  test('breaker outside retry: an older call whose retry starts during a newer trial does not own that trial', async () => {
+    const policy = buildResilientPolicy({
+      ...abortOpts, maxAttempts: 2, breakerThreshold: 1, breakerOutsideRetry: true, noTimeout: true,
+    });
+    // Entered while closed. Its first attempt fails only once released, so its
+    // retry starts while the newer call's half-open trial is in flight.
+    let releaseFirstAttempt!: () => void;
+    const firstAttemptHeld = new Promise<void>((resolve) => { releaseFirstAttempt = resolve; });
+    let olderAttempts = 0;
+    const older = new AbortController();
+    const olderCall = policy.execute(async (context) => {
+      olderAttempts += 1;
+      if (olderAttempts === 1) {
+        await firstAttemptHeld;
+        throw new TransientUpstreamError('5xx', null);
+      }
+      return hangUntilAborted(context);
+    }, older.signal).catch((err: unknown) => err);
+    await openBreaker(policy, 1);
+    await settle(abortOpts.halfOpenAfterMs + 10);
+    const trial = policy.execute(() => new Promise<string>((resolve) => { setTimeout(() => { resolve('ok'); }, 80); }));
+    await settle(5);
+    expect(policyBreakerState(policy)).toBe('half-open');
+    releaseFirstAttempt();
+    await settle(15);
+    expect(olderAttempts).toBe(2);
+    older.abort(new DOMException('client-gone', 'AbortError'));
+    expect(((await olderCall) as Error).message).toBe('client-gone');
+    expect(await trial).toBe('ok');
+    await settle();
+    expect(policyBreakerState(policy)).toBe('closed');
+  });
+
+  test('a genuine per-attempt timeout still counts and opens the breaker at the threshold', async () => {
+    const policy = buildResilientPolicy({ ...abortOpts, timeoutPerAttemptMs: 10 });
+    const caller = new AbortController();
+    for (let i = 0; i < abortOpts.breakerThreshold; i += 1) {
+      const err = await policy.execute(hangUntilAborted, caller.signal).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TaskCancelledError);
+    }
+    expect(policyBreakerState(policy)).toBe('open');
+  });
+
+  test('CallerAbortedError is never retriable and keeps the reason as its cause', () => {
+    const reason = new DOMException('late', 'TimeoutError');
+    const err = new CallerAbortedError(reason);
+    expect(err.cause).toBe(reason);
+    expect(isRetriable(err)).toBe(false);
   });
 });
 

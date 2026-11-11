@@ -265,7 +265,7 @@ export async function testModel(
   checks.push({ id: 'plain', status: 'pass', message: 'The model replied.' });
 
   // 2. JSON output, strongest mode first; a 400 falls through to the next.
-  checks.push(await jsonCheck(model, run, credential, proposed));
+  checks.push(await jsonCheck(adapter, model, run, credential, proposed));
 
   // 3. Image input.
   checks.push(await imageCheck(model, run, credential, proposed));
@@ -325,15 +325,19 @@ const JSON_MODE_LABEL: Record<Exclude<TextStructuredOutputMode, 'none'>, string>
   json_object: 'JSON object output',
 };
 
-async function jsonCheck(model: TextModelRecord, run: Run, credential: string | null, proposed: Proposed): Promise<TextProbeCheck> {
+async function jsonCheck(adapter: TextProtocolAdapter, model: TextModelRecord, run: Run, credential: string | null, proposed: Proposed): Promise<TextProbeCheck> {
   const refusals: string[] = [];
   for (const mode of ['json_schema', 'json_object'] as const) {
+    // Production json_object calls on OpenAI-compatible rows send no schema;
+    // one here would only add the SDK's "structuredOutputs" warning to the
+    // wire notes. Anthropic needs the schema in both modes (anthropic.ts).
+    const schemaless = mode === 'json_object' && adapter.protocol === 'openai-compatible';
     const outcome = await run({ ...model, structuredOutput: mode }, {
       prompt: [
         { role: 'system', content: 'Reply with a JSON object whose "answer" field is "ok".' },
         { role: 'user', content: [{ type: 'text', text: 'ping' }] },
       ],
-      responseFormat: { type: 'json', schema: PROBE_SCHEMA, name: 'probe' },
+      responseFormat: schemaless ? { type: 'json' } : { type: 'json', schema: PROBE_SCHEMA, name: 'probe' },
     });
     if (outcome.kind === 'http' && outcome.status === 400) {
       refusals.push(`${JSON_MODE_LABEL[mode]}: ${answered(outcome.status, credential, outcome.body)}`);

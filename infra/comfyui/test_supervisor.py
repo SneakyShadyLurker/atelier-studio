@@ -128,8 +128,12 @@ class World:
 class SupervisorTests(unittest.TestCase):
     def test_launcher_readiness_covers_api_capabilities_and_limits(self):
         root = SCRIPT.parent
+        api_source = root.parent.parent / 'api/src/providers/comfyui/privacy.ts'
+        if not api_source.exists():
+            # A staged copy on the worker host has no API source beside it.
+            self.skipTest('repository-only check: the API source is not beside this stage')
         launcher = (root / 'start-private-worker.ps1').read_text()
-        api = (root.parent.parent / 'api/src/providers/comfyui/privacy.ts').read_text()
+        api = api_source.read_text()
         api_caps = re.search(r"for \(const key of \[(.*?)\]\)", api, re.S)
         launcher_caps = re.search(r"all\(caps.get\(key\) is True for key in \((.*?)\)\)", launcher, re.S)
         self.assertIsNotNone(api_caps)

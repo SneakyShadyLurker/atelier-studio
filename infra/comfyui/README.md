@@ -26,7 +26,9 @@ Stage this directory as `atelier-private-stage` directly inside the ComfyUI
 portable install root (written `<root>` below); the existing embedded Python and
 ComfyUI dependencies suffice. Run `test_store.py`, `test_supervisor.py` and
 `test_worker.py` with `python_embeded\python.exe -B`. The first two are portable
-(`test_store.py` also runs the `test_protocol.py` boundary checks). The last uses
+(`test_store.py` also runs the `test_protocol.py` boundary checks; in a staged
+copy `test_supervisor.py` skips its one comparison against the API source, which
+only a repository checkout has beside it). The last uses
 the installed native media implementations and synthetic image/video/audio in memory.
 The root `bun run test` also runs the portable store/protocol and supervisor
 suites through `bun run test:comfyui`; local development and CI need Python 3.11+
@@ -175,7 +177,7 @@ Four automatic recoveries need no operator, and none writes a log or file:
 - **Idle VRAM.** Ten minutes after the last job, with no native work queued or
   running, the reaper sets the native `unload_models` and `free_memory` flags
   under the queue mutex, once per idle period. These are the flags `/free`
-  sets; `set_flag` wakes ComfyUI v0.42's idle worker, which unloads models and
+  sets; `set_flag` wakes ComfyUI's idle worker (v0.42 to v0.45), which unloads models and
   resets its caches. The next job reloads its models.
 
 To stop this mode, create `<root>\atelier-private.stop`; the supervisor stops
@@ -188,7 +190,7 @@ minutes and recycles ComfyUI after 180 idle minutes. Only the restart releases
 core's retained last-prompt stack as well as cached tensors. Autotune disk caching is disabled. The supervisor uses `--cache-ram` with upstream's default RAM pressure
 thresholds, alongside the existing fast-disk, fp16 accumulation and attention
 settings.
-Upstream v0.42.3's [RAMPressureCache](https://github.com/Comfy-Org/ComfyUI/blob/v0.42.3/comfy_execution/caching.py#L476) retains prior node outputs across jobs until pressure eviction, free or reset; lease payload expiry affects the separate Store and does not flush core node caches.
+Upstream v0.45.0's [RAMPressureCache](https://github.com/Comfy-Org/ComfyUI/blob/v0.45.0/comfy_execution/caching.py#L523), the default caching mode, retains prior node outputs across jobs until pressure eviction, free or reset; lease payload expiry affects the separate Store and does not flush core node caches.
 Python file writes are denied after
 startup; native codecs use BytesIO. This Python audit hook is defense in depth,
 not an OS sandbox for arbitrary native code. Keep the approved node allowlist
@@ -486,7 +488,7 @@ pagefile removal cannot promise forensic erasure of prior SSD writes.
 
 ## Upstream evidence
 
-The source links below pin ComfyUI v0.41.3 and v0.42.3. Native offline, partner-node and asset controls are required alongside the private routes and diskless media transport. v0.43.0 adds two server surfaces that this launch keeps closed: the Deploy to Cloud routes return 403 under `--offline` ([#17203](https://github.com/Comfy-Org/ComfyUI/pull/17203)), and the local agent loads only with `--enable-agent` ([#17241](https://github.com/Comfy-Org/ComfyUI/pull/17241)), which the supervisor must never pass. Record the running checkout rather than inferring its version from this document:
+The source links below pin ComfyUI v0.41.3 and v0.45.0. The launch flags and the worker's native tests (`test_worker.py`, including the aiohttp self-test) were last checked against v0.45.0 with aiohttp 3.14 and PyTorch 2.13. Native offline, partner-node and asset controls are required alongside the private routes and diskless media transport. v0.43.0 adds two server surfaces that this launch keeps closed: the Deploy to Cloud routes return 403 under `--offline` ([#17203](https://github.com/Comfy-Org/ComfyUI/pull/17203)), and the local agent loads only with `--enable-agent` ([#17241](https://github.com/Comfy-Org/ComfyUI/pull/17241)), which the supervisor must never pass. v0.44.0 and v0.45.0 add no server surface this launch has to close: the `partner_node_token` and `local_web_sso` feature flags that v0.45.0 turns on by default ([#17540](https://github.com/Comfy-Org/ComfyUI/pull/17540)) only steer the frontend's partner-node sign-in, and the private boundary serves neither the frontend nor `/features`. At v0.45.0 RAM-pressure caching is the default caching mode and previews default to none; the supervisor keeps `--cache-ram` and `--preview-method none` explicit so a changed upstream default cannot alter the launch. Dynamic VRAM (PyTorch 2.8 or later, 2.12 or later recommended) and asynchronous weight offload are on by default on NVIDIA and need no flag. Record the running checkout rather than inferring its version from this document:
 
 ```sh
 git describe --tags --always --dirty
@@ -499,6 +501,7 @@ Run these inside the operator-owned ComfyUI checkout. The API's source inventory
 - [Native video implementation at v0.41.3](https://github.com/Comfy-Org/ComfyUI/blob/v0.41.3/comfy_api/latest/_input_impl/video_types.py)
 - [Cancellation implementation at v0.41.3](https://github.com/Comfy-Org/ComfyUI/blob/v0.41.3/server.py)
 - [Native LightVAE with separate encoder/decoder support](https://github.com/Comfy-Org/ComfyUI/pull/17049)
-- [Native launch controls at v0.42.3](https://github.com/Comfy-Org/ComfyUI/blob/v0.42.3/comfy/cli_args.py)
+- [Native launch controls at v0.45.0](https://github.com/Comfy-Org/ComfyUI/blob/v0.45.0/comfy/cli_args.py)
+- [Feature flag registry at v0.45.0](https://github.com/Comfy-Org/ComfyUI/blob/v0.45.0/comfy_api/feature_flags.py)
 - [Official MiniMax H3 tutorial](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
 - [Workflow metadata](https://docs.comfy.org/development/api-development/workflow-metadata)

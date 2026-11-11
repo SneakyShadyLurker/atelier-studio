@@ -1,4 +1,4 @@
-import type { AdminProvider, Batch, Collection, CollectionsResponse, GenerateRequest, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse, TextModelsResponse, TextRoutingResponse } from '@atelier/shared';
+import type { AdminProvider, AiFillBatchRequest, AiFillRequest, Batch, Collection, CollectionsResponse, GenerateRequest, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse, TextModelsResponse, TextRoutingResponse } from '@atelier/shared';
 
 // Local SVG stills keep the preview deterministic and completely offline.
 function still(primary: string, secondary: string, accent: string, motif: number): string {
@@ -228,12 +228,40 @@ export function installOfflineResponses(): void {
   // running. `generateFinish=N` finishes them N ms after their batch event,
   // so the loading → done handoff can run against the real App.
   const generateFinish = Number(motionParams.get('generateFinish') ?? 0);
+  // Offline text preparation for queue-drain motion regressions. Announce a
+  // backend immediately, then resolve the slots after the requested delay.
+  const aiFillDelay = Number(motionParams.get('aiFillDelay') ?? 0);
   const generatedRows = new Map<string, Batch>();
   const studioWindow = window as Window & { __studioGenerated?: number };
   studioWindow.__studioGenerated = 0;
   const offlineFetch = Object.assign((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    if (aiFillDelay > 0 && method === 'POST' && (url.pathname === '/api/prompts/ai-fill' || url.pathname === '/api/prompts/ai-fill/batch')) {
+      const request = JSON.parse(typeof init?.body === 'string' ? init.body : '') as AiFillRequest | AiFillBatchRequest;
+      const fill = (item: Pick<AiFillRequest, 'staticSegments' | 'instructions'>) => ({
+        prompt: item.staticSegments.join('warm dusk light'),
+        fills: item.instructions.map(() => 'warm dusk light'),
+      });
+      const result = 'items' in request ? { items: request.items.map((item) => ({ ok: true, ...fill(item) })) } : fill(request);
+      const encoder = new TextEncoder();
+      const signal = init?.signal ?? undefined;
+      if (signal?.aborted) return Promise.reject(signal.reason as Error);
+      return Promise.resolve(new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`event: backend\ndata: ${JSON.stringify({ modelId: 'studio-writer', label: 'Studio writer' })}\n\n`));
+          const timer = window.setTimeout(() => {
+            controller.enqueue(encoder.encode(`event: result\ndata: ${JSON.stringify(result)}\n\n`));
+            controller.close();
+          }, aiFillDelay);
+          // A Stop aborts the request: no result may follow it.
+          signal?.addEventListener('abort', () => {
+            window.clearTimeout(timer);
+            controller.error(signal.reason);
+          }, { once: true });
+        },
+      }), { headers: { 'Content-Type': 'text/event-stream' } }));
+    }
     if (generates && method === 'POST' && url.pathname === '/api/generate') {
       if ((studioWindow.__studioGenerated ?? 0) >= generateCap) {
         return Promise.resolve(json({ error: 'queue full', code: 'QUEUE_FULL', retry_after_seconds: 5 }, 429));

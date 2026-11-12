@@ -16,7 +16,7 @@ import { isPaused, resetUpstreamGateForTests, setUpstreamGateTimersForTests } fr
 import { findModel } from '../providers/registry';
 import { testRuntime, testTextServices } from './helpers';
 
-const MODEL = 'moss-image-sft';
+const MODEL = 'moss-base';
 const HALF_OPEN_MS = 2_000;
 const MAX_PAUSE_MS = 30_000;
 

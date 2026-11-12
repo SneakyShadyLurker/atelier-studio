@@ -100,7 +100,7 @@ describe('POST /api/prompts/ai-fill', () => {
 
     const mossFrames = parseSseText(await (await postAiFill({
       ...BODY,
-      modelId: 'moss-image-sft',
+      modelId: 'moss-base',
       staticSegments: ['A lone figure, ', ', golden hour.'],
     })).text());
     expect(frameData(mossFrames, 'backend').label).toBe('Kimi K3');

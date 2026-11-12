@@ -20,7 +20,7 @@ describe('classifyImageModelTarget', () => {
     expect(classifyImageModelTarget('gpt-image-2.6-sunburst')).toBe('gpt');
     expect(classifyImageModelTarget('krea-2-gonzalomo')).toBe('krea');
     expect(classifyImageModelTarget('krea-2-test-alpha')).toBe('krea');
-    expect(classifyImageModelTarget('moss-image-sft')).toBe('moss');
+    expect(classifyImageModelTarget('moss-base')).toBe('moss');
     expect(classifyImageModelTarget('moss-test-turbo')).toBe('moss');
     expect(classifyImageModelTarget('minimax-h3-image')).toBe('h3image');
   });

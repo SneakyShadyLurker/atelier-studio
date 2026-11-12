@@ -44,24 +44,24 @@ describe('model steps settings routes', () => {
       defaultSteps: model.defaultSteps,
       steps: null,
     })));
-    expect(body.models.find((m) => m.modelId === 'moss-image-sft')?.defaultSteps).toBe(50);
+    expect(body.models.find((m) => m.modelId === 'moss-base')?.defaultSteps).toBe(50);
   });
 
   test('PUT sets an override, null resets it, and the default value deletes it', async () => {
     const rt = testRuntime(LOCAL_ON);
-    const set = await put(rt, 'moss-image-sft', { steps: 20 });
+    const set = await put(rt, 'moss-base', { steps: 20 });
     expect(set.status).toBe(200);
     expect(set.headers.get('cache-control')).toBe('private, no-store');
     const after = await set.json() as ModelStepsSettingsResponse;
-    expect(after.models.find((m) => m.modelId === 'moss-image-sft')).toEqual({
-      modelId: 'moss-image-sft', name: 'MOSS Image', defaultSteps: 50, steps: 20,
+    expect(after.models.find((m) => m.modelId === 'moss-base')).toEqual({
+      modelId: 'moss-base', name: 'MOSS Base', defaultSteps: 50, steps: 20,
     });
 
-    const reset = await put(rt, 'moss-image-sft', { steps: null });
-    expect((await reset.json() as ModelStepsSettingsResponse).models.find((m) => m.modelId === 'moss-image-sft')?.steps).toBeNull();
+    const reset = await put(rt, 'moss-base', { steps: null });
+    expect((await reset.json() as ModelStepsSettingsResponse).models.find((m) => m.modelId === 'moss-base')?.steps).toBeNull();
 
-    await put(rt, 'moss-image-sft', { steps: 30 });
-    const asDefault = await put(rt, 'moss-image-sft', { steps: 50 });
+    await put(rt, 'moss-base', { steps: 30 });
+    const asDefault = await put(rt, 'moss-base', { steps: 50 });
     expect((await asDefault.json() as ModelStepsSettingsResponse).models.every((m) => m.steps === null)).toBe(true);
   });
 

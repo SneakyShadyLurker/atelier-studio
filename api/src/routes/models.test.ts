@@ -95,7 +95,7 @@ describe('POST /api/models/:modelId/probe', () => {
       },
     });
 
-    const response = await app.fetch(new Request('http://local/api/models/moss-image-sft/probe', {
+    const response = await app.fetch(new Request('http://local/api/models/moss-base/probe', {
       method: 'POST',
       headers: { 'Remote-User': 'bob' },
     }));
@@ -108,7 +108,7 @@ describe('POST /api/models/:modelId/probe', () => {
   test('returns the refreshed model list for an allowed user', async () => {
     const runtime = testRuntime(VIDEO_ON);
     const availability = new Map<string, ModelAvailability>([
-      ['moss-image-sft', { ok: false, checkedAt: 1, reason: 'unavailable' }],
+      ['moss-base', { ok: false, checkedAt: 1, reason: 'unavailable' }],
     ]);
     let probeCalls = 0;
     const app = createApp({
@@ -129,7 +129,7 @@ describe('POST /api/models/:modelId/probe', () => {
       },
     });
 
-    const response = await app.fetch(new Request('http://local/api/models/moss-image-sft/probe', {
+    const response = await app.fetch(new Request('http://local/api/models/moss-base/probe', {
       method: 'POST',
       headers: { 'Remote-User': 'alice' },
     }));
@@ -138,7 +138,7 @@ describe('POST /api/models/:modelId/probe', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(probeCalls).toBe(1);
-    expect(refreshed.find((model) => model.id === 'moss-image-sft')?.availability).toEqual({
+    expect(refreshed.find((model) => model.id === 'moss-base')?.availability).toEqual({
       ok: true,
       checkedAt: 2,
     });
@@ -147,7 +147,7 @@ describe('POST /api/models/:modelId/probe', () => {
   test('uses the real startHealthProbe handle through the server wiring', async () => {
     const userId = 'real-probe-user';
     const runtime = testRuntime({ ...VIDEO_ON, LOCAL_MODELS_USERS: userId });
-    const registryEntry = findModel('moss-image-sft', runtime.config);
+    const registryEntry = findModel('moss-base', runtime.config);
     if (registryEntry === null) throw new Error('expected local model fixture');
     let healthCalls = 0;
     const provider: Provider = {
@@ -178,7 +178,7 @@ describe('POST /api/models/:modelId/probe', () => {
 
     try {
       const callsBeforeProbe = healthCalls;
-      const response = await app.fetch(new Request('http://local/api/models/moss-image-sft/probe', {
+      const response = await app.fetch(new Request('http://local/api/models/moss-base/probe', {
         method: 'POST',
         headers: { 'Remote-User': userId },
       }));
@@ -186,7 +186,7 @@ describe('POST /api/models/:modelId/probe', () => {
 
       expect(response.status).toBe(200);
       expect(healthCalls).toBe(callsBeforeProbe + 1);
-      expect(models.find((model) => model.id === 'moss-image-sft')?.availability?.ok).toBe(true);
+      expect(models.find((model) => model.id === 'moss-base')?.availability?.ok).toBe(true);
     } finally {
       healthProbe.stop();
       await healthProbe.drain();
@@ -210,7 +210,7 @@ describe('POST /api/models/:modelId/probe', () => {
       },
     });
 
-    const response = await app.fetch(new Request('http://local/api/models/moss-image-sft/probe', {
+    const response = await app.fetch(new Request('http://local/api/models/moss-base/probe', {
       method: 'POST',
       headers: { 'Remote-User': userId },
     }));
@@ -240,7 +240,7 @@ describe('POST /api/models/:modelId/probe', () => {
         drain: () => Promise.resolve(),
       },
     });
-    const request = () => app.fetch(new Request('http://local/api/models/moss-image-sft/probe', {
+    const request = () => app.fetch(new Request('http://local/api/models/moss-base/probe', {
       method: 'POST',
       headers: { 'Remote-User': userId },
     }));

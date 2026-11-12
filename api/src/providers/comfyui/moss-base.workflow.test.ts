@@ -5,8 +5,8 @@ import { loadBuiltinCatalog } from './catalog';
 
 const { kreaModels: KREA_MODELS, models: LOCAL_MODELS } = loadBuiltinCatalog();
 
-const _moss = LOCAL_MODELS.find((m) => m.id === 'moss-image-sft');
-if (!_moss) throw new Error('moss-image-sft row missing from LOCAL_MODELS');
+const _moss = LOCAL_MODELS.find((m) => m.id === 'moss-base');
+if (!_moss) throw new Error('moss-base row missing from LOCAL_MODELS');
 const moss = _moss;
 const workflowText = readFileSync(moss.workflowPath, 'utf8');
 
@@ -19,8 +19,8 @@ type Link = [string, number];
 
 const params = { prompt: 'Candid RAW photo of a woman on a balcony', seed: 1001, width: 1216, height: 1632, count: 4, steps: moss.defaultSteps };
 
-function build(): Record<string, Node> {
-  return buildWorkflow(workflowText, params, moss.requiredPlaceholders) as Record<string, Node>;
+function build(overrides: Partial<typeof params> = {}): Record<string, Node> {
+  return buildWorkflow(workflowText, { ...params, ...overrides }, moss.requiredPlaceholders) as Record<string, Node>;
 }
 
 function nodeOf(graph: Record<string, Node>, id: string): Node {
@@ -44,31 +44,11 @@ function single(graph: Record<string, Node>, classType: string): Node {
   return match;
 }
 
-function samplers(graph: Record<string, Node>): Node[] {
-  const matches = Object.values(graph).filter((n) => n.class_type === 'KSampler');
-  expect(matches).toHaveLength(2);
-  return matches;
-}
-
-/** The full-denoise sampler fed by the empty latent. */
-function firstPass(graph: Record<string, Node>): Node {
-  const match = samplers(graph).find((n) => linked(graph, n, 'latent_image').class_type === 'EmptyFlux2LatentImage');
-  if (!match) throw new Error('missing first-pass KSampler');
-  return match;
-}
-
-/** The hires sampler fed by the re-encoded upscale. */
-function secondPass(graph: Record<string, Node>): Node {
-  const match = samplers(graph).find((n) => linked(graph, n, 'latent_image').class_type === 'VAEEncode');
-  if (!match) throw new Error('missing second-pass KSampler');
-  return match;
-}
-
-describe('MOSS Image SFT workflow', () => {
+describe('MOSS Base workflow', () => {
   test('row is a batched local image model outside the Krea family', () => {
-    expect(LOCAL_MODELS.map((m) => m.id)).toContain('moss-image-sft');
-    expect(KREA_MODELS.map((m) => m.id)).not.toContain('moss-image-sft');
-    expect(moss.name).toBe('MOSS Image');
+    expect(LOCAL_MODELS.map((m) => m.id)).toContain('moss-base');
+    expect(KREA_MODELS.map((m) => m.id)).not.toContain('moss-base');
+    expect(moss.name).toBe('MOSS Base');
     expect(moss.saveImageNodeId).toBe('9');
     expect(moss.requiredPlaceholders).toEqual(['{{prompt}}', '{{seed}}', '{{width}}', '{{height}}', '{{count}}', '{{steps}}']);
     expect(moss.defaultSteps).toBe(50);
@@ -79,14 +59,14 @@ describe('MOSS Image SFT workflow', () => {
     expect(moss.extendWorkflowPath).toBeUndefined();
     expect(moss.requiredClipType).toBe('moss_image');
     expect(moss.requiredModelFiles).toEqual([
-      'moss_image_sft_int8_convrot.safetensors',
+      'moss_image_base_int8_convrot.safetensors',
       'qwen3.5_9b_int8_convrot.safetensors',
       'flux2-vae.safetensors',
     ]);
     for (const token of moss.requiredPlaceholders) expect(workflowText).toContain(token);
   });
 
-  test('ratio map stays at ~2 MP (1.9-2.06) with every side a multiple of 32, so the 1.5x pass lands on the 16-pixel grid', () => {
+  test('ratio map stays at ~2 MP (1.9-2.06) with every side a multiple of 32', () => {
     for (const { width, height } of Object.values(moss.ratioDims)) {
       expect(width % 32).toBe(0);
       expect(height % 32).toBe(0);
@@ -98,10 +78,10 @@ describe('MOSS Image SFT workflow', () => {
     expect(moss.ratioDims['3:4']).toEqual({ width: 1216, height: 1632 });
   });
 
-  test('loaders bind the INT8 DiT, the Qwen3.5-9B encoder as moss_image and the full FLUX.2 VAE', () => {
+  test('loaders bind the INT8 Base DiT, the Qwen3.5-9B encoder as moss_image and the full FLUX.2 VAE', () => {
     const graph = build();
     expect(single(graph, 'UNETLoader').inputs).toMatchObject({
-      unet_name: 'moss_image_sft_int8_convrot.safetensors',
+      unet_name: 'moss_image_base_int8_convrot.safetensors',
       weight_dtype: 'default',
     });
     expect(single(graph, 'CLIPLoader').inputs).toMatchObject({
@@ -111,91 +91,64 @@ describe('MOSS Image SFT workflow', () => {
     expect(single(graph, 'VAELoader').inputs.vae_name).toBe('flux2-vae.safetensors');
   });
 
-  test('samples er_sde / simple / 50 at CFG 3 with a real quality-only negative', () => {
+  test('one SamplerCustom pass: ER-SDE at s_noise 1.1, simple schedule, CFG 3, real quality-only negative', () => {
     const graph = build();
-    const sampler = firstPass(graph);
-    expect(sampler.inputs).toMatchObject({
-      seed: params.seed,
-      steps: 50,
-      cfg: 3,
-      sampler_name: 'er_sde',
-      scheduler: 'simple',
-      denoise: 1,
+    expect(Object.values(graph).some((n) => n.class_type === 'KSampler')).toBe(false);
+    const sampler = single(graph, 'SamplerCustom');
+    expect(sampler.inputs).toMatchObject({ add_noise: true, noise_seed: params.seed, cfg: 3 });
+    expect(linked(graph, sampler, 'sampler').inputs).toMatchObject({
+      solver_type: 'ER-SDE',
+      max_stage: 3,
+      eta: 1,
+      s_noise: 1.1,
     });
+    const schedule = linked(graph, sampler, 'sigmas');
+    expect(schedule.class_type).toBe('BasicScheduler');
+    expect(schedule.inputs).toMatchObject({ scheduler: 'simple', steps: 50, denoise: 1 });
+    expect(schedule.inputs.model).toEqual(sampler.inputs.model);
     const positive = linked(graph, sampler, 'positive');
     expect(positive.class_type).toBe('CLIPTextEncode');
     expect(positive.inputs.text).toBe(params.prompt);
     const negative = linked(graph, sampler, 'negative');
     expect(negative.class_type).toBe('CLIPTextEncode');
-    expect(typeof negative.inputs.text).toBe('string');
     expect((negative.inputs.text as string).length).toBeGreaterThan(0);
     expect(negative.inputs.text).not.toMatch(/nsfw/i);
-    expect(Object.values(graph).some((n) => n.class_type === 'ConditioningZeroOut')).toBe(false);
     for (const encoder of [positive, negative]) {
       expect(linked(graph, encoder, 'clip').class_type).toBe('CLIPLoader');
     }
   });
 
-  test('skip-layer guidance on single block 22 over 0-1 feeds the attention patch, which feeds the sampler', () => {
+  test('a step override reaches the scheduler', () => {
+    expect(single(build({ steps: 30 }), 'BasicScheduler').inputs.steps).toBe(30);
+  });
+
+  test('skip-layer guidance on single blocks 22 and 24 over 0-1 feeds the attention patch, which feeds the sampler', () => {
     const graph = build();
-    const sampler = firstPass(graph);
-    const attention = linked(graph, sampler, 'model');
+    const attention = linked(graph, single(graph, 'SamplerCustom'), 'model');
     expect(attention.class_type).toBe('ModelAttentionBackend');
     expect(attention.inputs.attention).toBe('comfy kitchen attention');
     const slg = linked(graph, attention, 'model');
     expect(slg.class_type).toBe('SkipLayerGuidanceDiTSimple');
-    expect(slg.inputs).toMatchObject({ single_layers: '22', double_layers: '', start_percent: 0, end_percent: 1 });
+    expect(slg.inputs).toMatchObject({ single_layers: '22, 24', double_layers: '', start_percent: 0, end_percent: 1 });
     expect(linked(graph, slg, 'model').class_type).toBe('UNETLoader');
   });
 
   test('EmptyFlux2LatentImage takes the substituted size and batch count', () => {
     const graph = build();
-    const latent = linked(graph, firstPass(graph), 'latent_image');
+    const latent = linked(graph, single(graph, 'SamplerCustom'), 'latent_image');
+    expect(latent.class_type).toBe('EmptyFlux2LatentImage');
     expect(latent.inputs).toEqual({ width: params.width, height: params.height, batch_size: params.count });
   });
 
-  test('second pass: Lanczos 1.5x, re-encode, 8 steps at denoise 0.3 on the same model, conditioning and seed', () => {
+  test('decodes the single pass into one SaveImageWebsocket terminal with every link resolving', () => {
     const graph = build();
-    const first = firstPass(graph);
-    const second = secondPass(graph);
-    expect(second.inputs).toMatchObject({
-      seed: params.seed,
-      steps: 8,
-      cfg: 3,
-      sampler_name: 'er_sde',
-      scheduler: 'simple',
-      denoise: 0.3,
-    });
-    for (const input of ['model', 'positive', 'negative']) {
-      expect(second.inputs[input]).toEqual(first.inputs[input]);
-    }
-    const encode = linked(graph, second, 'latent_image');
-    expect(encode.class_type).toBe('VAEEncode');
-    const vae = single(graph, 'VAELoader');
-    expect(linked(graph, encode, 'vae')).toBe(vae);
-    const upscale = linked(graph, encode, 'pixels');
-    expect(upscale.class_type).toBe('ImageScaleBy');
-    expect(upscale.inputs).toMatchObject({ upscale_method: 'lanczos', scale_by: 1.5 });
-    const firstDecode = linked(graph, upscale, 'image');
-    expect(firstDecode.class_type).toBe('VAEDecode');
-    expect(linked(graph, firstDecode, 'samples')).toBe(first);
-    expect(linked(graph, firstDecode, 'vae')).toBe(vae);
-  });
-
-  test('a step override changes only the first pass; the second stays at 8', () => {
-    const graph = buildWorkflow(workflowText, { ...params, steps: 30 }, moss.requiredPlaceholders) as Record<string, Node>;
-    expect(firstPass(graph).inputs.steps).toBe(30);
-    expect(secondPass(graph).inputs.steps).toBe(8);
-  });
-
-  test('decodes the second pass into a single SaveImageWebsocket terminal with every link resolving', () => {
-    const graph = build();
+    expect(Object.values(graph).some((n) => n.class_type === 'ImageScaleBy' || n.class_type === 'VAEEncode')).toBe(false);
     const save = nodeOf(graph, moss.saveImageNodeId);
     expect(save.class_type).toBe('SaveImageWebsocket');
     expect(Object.values(graph).filter((n) => n.class_type === 'SaveImageWebsocket')).toHaveLength(1);
     const decode = linked(graph, save, 'images');
     expect(decode.class_type).toBe('VAEDecode');
-    expect(linked(graph, decode, 'samples')).toBe(secondPass(graph));
+    expect(linked(graph, decode, 'samples')).toBe(single(graph, 'SamplerCustom'));
     expect(linked(graph, decode, 'vae').class_type).toBe('VAELoader');
     for (const node of Object.values(graph)) {
       for (const value of Object.values(node.inputs)) {

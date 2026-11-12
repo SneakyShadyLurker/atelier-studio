@@ -1118,8 +1118,8 @@ test('shutdown drain gate leaves queued batches unclaimed when a slot release ki
 });
 
 test('host-level local outage holds the queue unclaimed and opens the local gate, even on a probe token', () => {
-  seedQueued('l1', 'alice', 'moss-image-sft', 'local');
-  seedQueued('l2', 'bob', 'moss-image-sft', 'local');
+  seedQueued('l1', 'alice', 'moss-base', 'local');
+  seedQueued('l2', 'bob', 'moss-base', 'local');
   const kicks: string[] = [];
   configureUpstreamGate({
     kickPool: (pool) => { kicks.push(pool); },
@@ -1140,8 +1140,8 @@ test('host-level local outage holds the queue unclaimed and opens the local gate
   const started: string[] = [];
   const runtime = ctx({
     registry: {
-      findModel: () => ({ model: { id: 'moss-image-sft', pool: 'local', maxCountPerBatch: 8 } }),
-      healthSnapshot: () => new Map([['moss-image-sft', { ok: false, reason: 'unavailable' as const }]]),
+      findModel: () => ({ model: { id: 'moss-base', pool: 'local', maxCountPerBatch: 8 } }),
+      healthSnapshot: () => new Map([['moss-base', { ok: false, reason: 'unavailable' as const }]]),
     },
     acquireFor: (_pool, userId) => { acquired.push(userId); return { ok: true }; },
     startOrchestratorDetached: (entry) => { started.push(entry.batchId); return Promise.resolve(); },
@@ -1164,13 +1164,13 @@ test('host-level local outage holds the queue unclaimed and opens the local gate
 });
 
 test('row-level local offline still fails the batch at dequeue and does not pause the pool', () => {
-  seedQueued('row-1', 'alice', 'moss-image-sft', 'local');
+  seedQueued('row-1', 'alice', 'moss-base', 'local');
   configureLocalHostGate({ hostUnavailable: () => false, probeNow: () => Promise.resolve(undefined) });
 
   tryDequeueNext('local', ctx({
     registry: {
-      findModel: () => ({ model: { id: 'moss-image-sft', pool: 'local', maxCountPerBatch: 8 } }),
-      healthSnapshot: () => new Map([['moss-image-sft', { ok: false, reason: 'unavailable' as const }]]),
+      findModel: () => ({ model: { id: 'moss-base', pool: 'local', maxCountPerBatch: 8 } }),
+      healthSnapshot: () => new Map([['moss-base', { ok: false, reason: 'unavailable' as const }]]),
     },
   }));
 

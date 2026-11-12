@@ -30,7 +30,7 @@ import { buildCondensePromptSystemPrompt } from './condensePromptSystemPrompt';
 const MODEL_IDS = [
   'gemini-3-pro-image-preview',
   'krea-2-gonzalomo',
-  'moss-image-sft',
+  'moss-base',
   'minimax-h3-image',
   'some-other-model',
 ] as const;
@@ -70,7 +70,7 @@ describe('skin-marking ban', () => {
   const writers = WRITERS;
 
   for (const [name, prompt] of Object.entries(writers)) {
-    const moss = name.endsWith('/moss-image-sft');
+    const moss = name.endsWith('/moss-base');
     const h3 = name.endsWith('/minimax-h3-image');
     it(`${name} carries the ${moss ? 'MOSS' : h3 ? 'H3 Image' : 'no-micro-texture'} ban`, () => {
       expect(prompt).toContain(moss ? SKIN_MARKING_BAN_MOSS : h3 ? SKIN_MARKING_BAN_H3 : SKIN_MARKING_BAN);
@@ -88,7 +88,7 @@ describe('skin-marking ban', () => {
       'enhance/h3image-edit': H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
       ...ENHANCE_WRITERS,
     })) {
-      const moss = name.endsWith('/moss-image-sft') || name === 'enhance/moss';
+      const moss = name.endsWith('/moss-base') || name === 'enhance/moss';
       const h3 = name.endsWith('/minimax-h3-image') || name.startsWith('enhance/h3image');
       expect(prompt.includes('fine visible pores')).toBe(moss);
       expect(prompt.includes('never a named micro-texture')).toBe(!moss && !h3);

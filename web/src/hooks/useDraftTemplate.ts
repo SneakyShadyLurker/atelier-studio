@@ -13,14 +13,24 @@ interface Args {
   getCurrentBody: () => string;
   onBody: (body: string) => void;
   onWarnings: (warnings: readonly string[]) => void;
+  /** Saves the dialog's text-model choice; awaited before every request. */
+  commitChoice: () => Promise<void>;
 }
 
-export function useDraftTemplate({ name, getCurrentBody, onBody, onWarnings }: Args): UseAiDraftWithClarifyResult {
+// Every draft starts in a dialog: an empty body asks what to draft (seed), a
+// filled one what to change (rework). The answer to a rework is the whole
+// revised body, which the caller puts in place of the old one.
+export function useDraftTemplate({ name, getCurrentBody, onBody, onWarnings, commitChoice }: Args): UseAiDraftWithClarifyResult {
   const imageContext = usePromptImageContext();
   return useAiDraftWithClarify<string, DraftedBody>({
     captureBase: getCurrentBody,
     isEmptyBase: (body) => body.trim() === '',
-    run: (body, description, signal) => {
+    nonEmptyBase: 'rework',
+    run: async (body, description, signal) => {
+      // A failed save rejects here, so it shows inline and no draft is sent.
+      await commitChoice();
+      // Cancelled while the choice was saving: send nothing.
+      signal.throwIfAborted();
       const request: DraftTemplateRequest = description === undefined
         ? { name, existingBody: body.trim() }
         : { name, existingBody: body.trim(), description };

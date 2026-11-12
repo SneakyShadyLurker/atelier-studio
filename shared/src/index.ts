@@ -1119,6 +1119,8 @@ export interface TextModelsResponse {
   };
   /** Image model id → prompt-writer model id. */
   readonly writers: Readonly<Record<string, string>>;
+  /** Image model ids whose writer is locked: it wins over the user's own pick. */
+  readonly lockedWriters: readonly string[];
 }
 
 /** How a prompt writer applies: 'lock' always, 'prefer' unless the person picked their own. */
@@ -1385,7 +1387,11 @@ export interface DraftTemplateRequest {
   name: string;
   /** body.trim() — empty string when raw body is empty or whitespace-only. */
   existingBody: string;
-  /** Present on the seed-prompt first call AND on clarify follow-ups; omitted otherwise. */
+  /**
+   * Empty `existingBody`: what to draft (seed prompt and clarify answers).
+   * Non-empty `existingBody`: the change instructions for the rework, required;
+   * the answer is then the whole revised body, not a continuation.
+   */
   description?: string;
 }
 

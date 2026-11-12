@@ -41,16 +41,16 @@ function textModelsResponse(text: TextServices, userId: string): TextModelsRespo
   const byTask = Object.fromEntries(
     Object.entries(config.defaults.byTask).filter(([, id]) => listed(id)),
   ) as TextModelsResponse['defaults']['byTask'];
-  const writers = Object.fromEntries(
-    Object.entries(config.writers)
-      .filter(([, writer]) => listed(writer.modelId))
-      .map(([imageModelId, writer]) => [imageModelId, writer.modelId]),
-  );
+  const listedWriters = Object.entries(config.writers).filter(([, writer]) => listed(writer.modelId));
+  const writers = Object.fromEntries(listedWriters.map(([imageModelId, writer]) => [imageModelId, writer.modelId]));
+  // A locked writer wins over the user's own pick, so the browser must know which.
+  const lockedWriters = listedWriters.filter(([, writer]) => writer.mode === 'lock').map(([imageModelId]) => imageModelId);
   return {
     models,
     tasks,
     defaults: { ...(listed(config.defaults.default) ? { default: config.defaults.default } : {}), byTask },
     writers,
+    lockedWriters,
   };
 }
 

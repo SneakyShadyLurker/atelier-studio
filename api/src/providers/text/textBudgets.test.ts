@@ -4,6 +4,8 @@ import {
   ENHANCE_MAX_OUTPUT_TOKENS,
   DRAFT_LIST_MAX_OUTPUT_TOKENS,
   DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS,
+  draftTemplateMaxOutputTokens,
+  draftTemplateMaxResponseBytes,
   MOTION_ENHANCE_MAX_OUTPUT_TOKENS,
   STORY_PLANNER_MAX_OUTPUT_TOKENS,
   GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS,
@@ -64,6 +66,39 @@ describe('Kimi generic text budgets', () => {
     expect(INFER_DIMENSIONS_MAX_OUTPUT_TOKENS).toBe(36000);
     expect(DRAFT_LIST_MAX_OUTPUT_TOKENS).toBe(5200);
     expect(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS).toBe(5500);
+  });
+});
+
+describe('draftTemplateMaxOutputTokens', () => {
+  test('a fresh draft at low or default effort keeps the base budget', () => {
+    expect(draftTemplateMaxOutputTokens('', undefined)).toBe(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS);
+    expect(draftTemplateMaxOutputTokens('', null)).toBe(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS);
+    expect(draftTemplateMaxOutputTokens('', 'low')).toBe(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS);
+  });
+
+  test('a rework adds about one token per three characters of the existing body', () => {
+    expect(draftTemplateMaxOutputTokens('a'.repeat(3000), 'low')).toBe(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS + 1000);
+    expect(draftTemplateMaxOutputTokens('ab', undefined)).toBe(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS + 1);
+    // Counted in code points, like the body cap.
+    expect(draftTemplateMaxOutputTokens('🌅🌅🌅', 'minimal')).toBe(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS + 1);
+  });
+
+  test('an effort above low reasons through at least the enhance budget', () => {
+    expect(draftTemplateMaxOutputTokens('', 'high')).toBe(ENHANCE_MAX_OUTPUT_TOKENS);
+    expect(draftTemplateMaxOutputTokens('', 'medium')).toBe(ENHANCE_MAX_OUTPUT_TOKENS);
+    const huge = 'a'.repeat(3 * ENHANCE_MAX_OUTPUT_TOKENS);
+    expect(draftTemplateMaxOutputTokens(huge, 'max')).toBe(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS + ENHANCE_MAX_OUTPUT_TOKENS);
+  });
+});
+
+describe('draftTemplateMaxResponseBytes', () => {
+  test('a fresh draft keeps the cap it was given', () => {
+    expect(draftTemplateMaxResponseBytes(1024 * 1024, '')).toBe(1024 * 1024);
+  });
+
+  test('a rework adds stream room for the body it carries back', () => {
+    // 15,000 characters are 5,000 tokens, at 512 raw bytes each.
+    expect(draftTemplateMaxResponseBytes(1024 * 1024, 'a'.repeat(15_000))).toBe(1024 * 1024 + 5_000 * 512);
   });
 });
 

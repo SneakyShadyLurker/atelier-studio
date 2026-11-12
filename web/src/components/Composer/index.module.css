@@ -619,6 +619,7 @@
 }
 
 .motionTextarea {
+  composes: control from '../../styles/field.module.css';
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
@@ -636,12 +637,6 @@
 
 .motionTextarea::placeholder {
   color: var(--ink-3);
-}
-
-.motionTextarea:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-color: var(--focus-ring);
 }
 
 @media (prefers-reduced-motion: reduce) {

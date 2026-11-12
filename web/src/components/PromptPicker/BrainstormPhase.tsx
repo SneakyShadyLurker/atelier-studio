@@ -131,6 +131,7 @@ export default function BrainstormPhase({
           <label htmlFor={countId}>Count</label>
           <input
             id={countId}
+            className={styles.brainstormCount}
             type="number"
             min={BRAINSTORM_MIN_COUNT}
             max={BRAINSTORM_MAX_COUNT_CEILING}

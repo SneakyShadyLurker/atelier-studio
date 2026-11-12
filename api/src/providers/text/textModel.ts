@@ -68,7 +68,8 @@ import {
   AI_FILL_MAX_OUTPUT_TOKENS,
   brainstormMaxOutputTokens,
   DRAFT_LIST_MAX_OUTPUT_TOKENS,
-  DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS,
+  draftTemplateMaxOutputTokens,
+  draftTemplateMaxResponseBytes,
   ENHANCE_MAX_OUTPUT_TOKENS,
   INFER_DIMENSIONS_MAX_OUTPUT_TOKENS,
   pinnedEffortMaxResponseBytes,
@@ -1115,13 +1116,13 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       const knownNames = new Set(input.library.lists.map((l) => l.name));
       try {
         const text = await callWithPolicy(call, draftListPolicy, signal, {
-          maxOutputTokens: DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS,
+          maxOutputTokens: draftTemplateMaxOutputTokens(input.existingBody, effectiveEffort(model, input.reasoningEffort)),
           systemPrompt: imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, input.modelId),
           user: draftTemplateBrief(input),
           responseFormat: DRAFT_TEMPLATE_RESPONSE_FORMAT,
           ...withUserEffort(input.reasoningEffort),
-        }, responseCap(init.maxResponseBytes, input.reasoningEffort));
-        return draftTemplateResultFromContent(text, knownNames);
+        }, draftTemplateMaxResponseBytes(responseCap(init.maxResponseBytes, input.reasoningEffort), input.existingBody));
+        return draftTemplateResultFromContent(text, knownNames, input.existingBody);
       } catch (err) {
         if (signal.aborted) throw err;
         if (isAbortError(err)) throw err;

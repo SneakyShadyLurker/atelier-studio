@@ -8,6 +8,8 @@ import { useCreateTemplate, usePatchTemplate, useTemplatePatchPending } from '..
 import { useAtelierStore } from '../../store/atelier';
 import { useDraftTemplate } from '../../hooks/useDraftTemplate';
 import { useIsPhone } from '../../hooks/useIsPhone';
+import { usePromptImageContext } from '../../hooks/usePromptImageContext';
+import { useTaskModelChoice } from '../../hooks/useTaskModelChoice';
 import { useTextModelGate } from '../../hooks/useTextModelGate';
 import { runWhenReachable } from '../../lib/focus';
 import { goToTextModels } from '../../lib/textModelsNav';
@@ -35,6 +37,8 @@ function resolvedLength(body: string, lists: readonly VariableList[]): number {
 }
 
 const subscribeNoop = () => () => undefined;
+// Long enough to reach Undo, like the other undo toasts.
+const REWORK_UNDO_TOAST_MS = 5000;
 const getNotPending = () => false;
 
 interface TemplateEditorProps {
@@ -61,6 +65,8 @@ export default function TemplateEditor({ template, initialName = '', variableLis
   const bodyHelpId = useId();
   const refsPanelId = useId();
   const addToast = useAtelierStore((state) => state.addToast);
+  const dismissToast = useAtelierStore((state) => state.dismissToast);
+  const removeToast = useAtelierStore((state) => state.removeToast);
   const createTemplate = useCreateTemplate();
   const patchTemplate = usePatchTemplate();
   const draftStore = usePromptDraftStore();
@@ -92,27 +98,45 @@ export default function TemplateEditor({ template, initialName = '', variableLis
   }, [body, changed, draftKey, draftStore, name, pending]);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // The rework's Undo toast. Its Undo writes this editor's state, so the toast
+  // goes when the editor does rather than offering a dead action.
+  const undoToastRef = useRef<string | null>(null);
+  useEffect(() => () => {
+    if (undoToastRef.current !== null) removeToast(undoToastRef.current);
+  }, [removeToast]);
+  const { modelId: imageModelId } = usePromptImageContext();
+  const modelChoice = useTaskModelChoice('template-draft', imageModelId);
   const draftHook = useDraftTemplate({
     name: name.trim(),
     getCurrentBody: () => body,
+    commitChoice: modelChoice.commit,
     onBody: (generated) => {
-      setBody((prev) => {
-        let next: string;
-        if (prev.trim() === '') {
-          next = generated;
-        } else if (/\s$/.test(prev)) {
-          next = prev + generated;
-        } else {
-          next = prev + '\n\n' + generated;
-        }
-        runWhenReachable(() => {
-          const ta = textareaRef.current;
-          if (!ta) return;
-          ta.focus();
-          ta.setSelectionRange(next.length, next.length);
-        });
-        return next;
+      // The body field is disabled while a draft runs, so `body` is still the
+      // text the draft was based on. A rework's answer is the whole revised body.
+      const previous = body;
+      setBody(generated);
+      runWhenReachable(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        ta.setSelectionRange(generated.length, generated.length);
       });
+      if (previous.trim() === '') return;
+      if (undoToastRef.current !== null) removeToast(undoToastRef.current);
+      let undone = false;
+      const toastId = addToast('Template reworked', 'success', REWORK_UNDO_TOAST_MS, {
+        label: 'Undo',
+        onClick: () => {
+          if (undone) return;
+          undone = true;
+          undoToastRef.current = null;
+          dismissToast(toastId);
+          setBody(previous);
+        },
+      }, () => {
+        if (undoToastRef.current === toastId) undoToastRef.current = null;
+      });
+      undoToastRef.current = toastId;
     },
     onWarnings: (warnings) => {
       for (const warning of warnings) {
@@ -124,8 +148,22 @@ export default function TemplateEditor({ template, initialName = '', variableLis
   const busy = pending
     || draftHook.status === 'drafting'
     || draftHook.status === 'clarifying'
-    || draftHook.status === 'seed-prompt';
+    || draftHook.status === 'seed-prompt'
+    || draftHook.status === 'rework-prompt';
   const trimmedName = name.trim();
+
+  const startDraft = () => {
+    // The next draft is based on the body as it stands now, so the last
+    // rework's Undo goes: pressed under the open dialog it would swap the body
+    // out from under the request.
+    if (undoToastRef.current !== null) {
+      removeToast(undoToastRef.current);
+      undoToastRef.current = null;
+    }
+    // Each dialog opens on the saved model pick; a cancelled choice is not kept.
+    modelChoice.reset();
+    draftHook.draft();
+  };
 
   const save = () => {
     const trimmedName = name.trim();
@@ -202,10 +240,10 @@ export default function TemplateEditor({ template, initialName = '', variableLis
               className={btn.ai}
               onClick={() => {
                 if (textModelGate.availability === 'none') setTextNoteAnchor(draftButtonRef);
-                else draftHook.draft();
+                else startDraft();
               }}
               disabled={!trimmedName || busy}
-              data-tip={!trimmedName ? 'Name the template first' : 'Generate or continue the prompt body with the text model assigned to this task'}
+              data-tip={!trimmedName ? 'Name the template first' : 'Describe what to draft or what to change, and pick the text model that writes it'}
             >
               <I.sparkle aria-hidden="true" />
               {busy ? 'Drafting…' : 'Draft Template'}
@@ -232,7 +270,7 @@ export default function TemplateEditor({ template, initialName = '', variableLis
                 // The menu has already closed (instant selection), so the
                 // note opens after it, anchored to the More button.
                 if (action === 'draft' && textModelGate.availability === 'none') setTextNoteAnchor(moreButtonRef);
-                else if (action === 'draft') draftHook.draft();
+                else if (action === 'draft') startDraft();
                 else onDelete?.();
               }}
             />
@@ -316,6 +354,7 @@ export default function TemplateEditor({ template, initialName = '', variableLis
         onCancel={draftHook.cancelDialog}
         busy={draftHook.status === 'drafting'}
         error={draftHook.error}
+        modelChoice={modelChoice}
       />
     )}
     </>

@@ -1,0 +1,111 @@
+/* Model and reasoning selects of the template draft dialog: native <select>s
+   in the chip control dress (Composer .chip), sitting in the dialog's field
+   rhythm (dialog.module.css). The row holds its height while the listing loads
+   (unavailable to ready) so the dialog does not jump. Flat selectors. */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9.5rem;
+  align-items: end;
+  gap: 8px;
+  min-height: 58px;
+  margin: 0 0 14px;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.label {
+  composes: label from '../../styles/type.module.css';
+  display: block;
+  margin: 0 0 6px;
+}
+
+.selectWrap {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.select {
+  composes: control from '../../styles/field.module.css';
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  cursor: pointer;
+  appearance: none;
+  transition: border-color var(--dur-hover) var(--ease-out);
+}
+
+/* Hover never greys the focus edge (field.module.css). */
+.select:hover:not(:disabled, :focus-visible) {
+  border-color: var(--line-2);
+}
+
+.select:disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+/* Drawn over the select's right edge; clicks fall through to the select. */
+.caret {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  color: var(--ink-3);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+/* A locked writer replaces both selects with one line of body copy. The lock
+   cannot change while the dialog is open, so the note reserves no select height. */
+.lockedRow {
+  margin: 0 0 14px;
+}
+
+.locked {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+@media (hover: none), (any-pointer: coarse) {
+  .select {
+    min-height: 44px;
+  }
+
+  .row {
+    min-height: 68px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .select {
+    transition: none;
+  }
+}
+
+/* Phone sheet: the selects stack full width, and their text stays at 16px so
+   iOS does not zoom the page on focus. */
+@media (width < 768px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .select {
+    font-size: var(--text-base);
+  }
+}

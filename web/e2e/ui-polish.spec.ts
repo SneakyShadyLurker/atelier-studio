@@ -997,7 +997,7 @@ async function withSettingsOwnership(page: Page, holdTask?: string): Promise<voi
       { id: 'offline', displayName: 'Offline writer', providerName: 'Preview provider', vision: true, reasoningLevels: ['low', 'high'], status: 'offline' },
     ];
     let current: TextModelsResponse = {
-      models, defaults: { default: 'atlas', byTask: {} }, writers: {},
+      models, defaults: { default: 'atlas', byTask: {} }, writers: {}, lockedWriters: [],
       tasks: tasks.map((task) => task === 'storytelling'
         ? { task, pick: 'offline', pickState: 'offline', effectiveModelId: 'atlas', effort: 'high' }
         : task === 'list-draft'
@@ -3042,7 +3042,7 @@ async function withPrerequisiteReadiness(page: Page): Promise<void> {
       }
       if (url.pathname === '/api/text-models' && enabled) return Response.json({
         models: [{ id: 'text-model-preview', displayName: 'Preview writer', providerName: 'Preview provider', vision: false, reasoningLevels: [], status: 'available' }],
-        tasks: [], defaults: { byTask: {} }, writers: {},
+        tasks: [], defaults: { byTask: {} }, writers: {}, lockedWriters: [],
       } satisfies TextModelsResponse);
       const response = await inner(input, init);
       if (url.pathname === '/api/text-providers' && response.ok) {

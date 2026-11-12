@@ -468,6 +468,8 @@ Re-identified on 2026-11-01 to the "print room" identity: plate paper, lamp-blac
 
 Ratios are sRGB relative luminance. Text pairs clear WCAG AA and control boundaries clear 3:1 (WCAG 1.4.11) in both themes. `--accent` stays reserved for AI actions; selected state is the 2px `--ink` bar.
 
+**Focus.** Buttons, chips, links, menu rows, tiles and other non-text controls take the 2px `--focus-ring` outline at a 2px offset. Text-entry controls (text and number inputs, textareas, selects) never do: focus is one crisp edge that hugs the field, its 1px border turning `--focus-ring` with a flush 1px `--focus-ring` outline at offset 0, so the two read as a single 2px edge on the field's own radius. A wrapper that frames a borderless field (the dialog well) draws that edge itself and the field inside draws none; a borderless inline field with no frame (the editor's inline title, the rail search) shows a 2px `--focus-ring` underline instead. Invalid and tuned fields keep their edge colour at rest, and focus wins while typing. Under `prefers-contrast: more` the outline is 2px; under forced colours the edge is `Highlight`. The rules live once in `web/src/styles/field.module.css`, and every field composes them. The Composer prompt is the one exception: its card edge turns `--focus-ring` and the textarea draws no edge.
+
 **Materials**
 
 Every surface token names what the surface is in a print room. Pick by material, not by shade.

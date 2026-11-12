@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { DraftTemplateResponse, VariableList } from '@atelier/shared';
+import { TEMPLATE_DESCRIPTION_MAX_CHARS } from '@atelier/shared/prompt-limits';
 import { type TextFeatureProvider, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
 import type { LibraryOverview } from '../prompts/libraryOverview';
 import { parseSseText, pickLegacyTextModel, restoreFetch, testRuntime } from '../test/helpers';
@@ -101,7 +102,7 @@ describe('POST /api/prompts/templates/draft', () => {
       () => Promise.resolve({ type: 'ok', payload: expectedPayload }),
     ));
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    const res = await draftTemplate(app, { name: 'Portrait', existingBody: 'A portrait.' });
+    const res = await draftTemplate(app, { name: 'Portrait', existingBody: 'A portrait.', description: 'warmer light' });
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
     expect(done).toEqual(expectedPayload);
@@ -190,7 +191,7 @@ describe('POST /api/prompts/templates/draft', () => {
       () => Promise.resolve({ type: 'ok', payload: { kind: 'body', body: '🌅', warnings: [] } }),
     ));
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', MAX_TEMPLATE_BODY_BYTES: '4' });
-    const res = await draftTemplate(app, { name: 'T', existingBody: '🌅' });
+    const res = await draftTemplate(app, { name: 'T', existingBody: '🌅', description: 'keep it' });
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
     expect(done).toEqual({ kind: 'body', body: '🌅', warnings: [] });
@@ -201,7 +202,7 @@ describe('POST /api/prompts/templates/draft', () => {
       () => Promise.resolve({ type: 'ok', payload: { kind: 'body', body: '🌅🌅', warnings: [] } }),
     ));
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', MAX_TEMPLATE_BODY_BYTES: '4' });
-    const res = await draftTemplate(app, { name: 'T', existingBody: '🌅🌅' });
+    const res = await draftTemplate(app, { name: 'T', existingBody: '🌅🌅', description: 'keep it' });
     expect(res.status).toBe(409);
   });
 
@@ -246,30 +247,57 @@ describe('POST /api/prompts/templates/draft', () => {
     expect(listNames).not.toContain('mood');
   });
 
-  test('model-echoes-existing-body contract: editor appends model output verbatim (no server-side dedup)', async () => {
-    // Documents the current append contract: the route returns whatever the
-    // provider gives back, even if the model erroneously included the existing
-    // body. The editor (TemplateEditor.tsx) appends the returned body to the
-    // existing body with spacing — there is no server-side duplication check.
-    // If this test starts failing because we add a strip-if-duplicate guard,
-    // update both the route implementation and this test.
-    const existingBody = 'A portrait in golden hour light.';
-    const modelContinuation = 'Soft bokeh background.';
-    const modelOutput = existingBody + ' ' + modelContinuation; // model echoed + continued
+  test('rework: a filled body without change instructions → 400 with a plain message', async () => {
+    let called = false;
+    setTextModelProviderForTests(fakeProvider(() => {
+      called = true;
+      return Promise.resolve({ type: 'ok', payload: { kind: 'body', body: 'x', warnings: [] } });
+    }));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    const res = await draftTemplate(app, { name: 'Portrait', existingBody: 'A portrait in golden hour light.' });
+    expect(res.status).toBe(400);
+    const data = await res.json() as { error: string; issues: { message: string }[] };
+    expect(data.issues.map((issue) => issue.message)).toContain('Say what to change in the template');
+    expect(called).toBe(false);
+  });
+
+  test('rework: a whitespace-only body needs no description', async () => {
     setTextModelProviderForTests(fakeProvider(
-      () => Promise.resolve({ type: 'ok', payload: { kind: 'body', body: modelOutput, warnings: [] } }),
+      () => Promise.resolve({ type: 'ok', payload: { kind: 'body', body: 'drafted', warnings: [] } }),
     ));
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    const res = await draftTemplate(app, { name: 'Portrait', existingBody });
+    const res = await draftTemplate(app, { name: 'Portrait', existingBody: '   ' });
+    expect(res.status).toBe(200);
+  });
+
+  test('rework: the change instructions reach the provider and the revised body passes through whole', async () => {
+    // The answer to a rework is the complete revised body; the editor replaces
+    // its body with it, so the route relays it unchanged.
+    const existingBody = 'A portrait in golden hour light.';
+    const revised = 'A portrait in moody blue-hour light.';
+    const captured: { existingBody: string; description?: string }[] = [];
+    setTextModelProviderForTests(fakeProvider((input) => {
+      captured.push({ existingBody: input.existingBody, ...(input.description !== undefined ? { description: input.description } : {}) });
+      return Promise.resolve({ type: 'ok', payload: { kind: 'body', body: revised, warnings: [] } });
+    }));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    const res = await draftTemplate(app, { name: 'Portrait', existingBody, description: 'make the lighting moodier' });
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
-    // The route passes the model output through unchanged.
-    // The tightened system prompt instructs the model to omit the existing
-    // prefix — this test documents that the server has no defensive strip yet.
-    expect(done?.kind).toBe('body');
-    if (done?.kind === 'body') {
-      expect(done.body).toBe(modelOutput);
-    }
+    expect(done).toEqual({ kind: 'body', body: revised, warnings: [] });
+    expect(captured).toEqual([{ existingBody, description: 'make the lighting moodier' }]);
+  });
+
+  test('a description over TEMPLATE_DESCRIPTION_MAX_CHARS → 400, one at the limit is accepted', async () => {
+    setTextModelProviderForTests(fakeProvider(
+      () => Promise.resolve({ type: 'ok', payload: { kind: 'body', body: 'x', warnings: [] } }),
+    ));
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    const atLimit = await draftTemplate(app, { name: 'T', existingBody: 'body', description: 'a'.repeat(TEMPLATE_DESCRIPTION_MAX_CHARS) });
+    expect(atLimit.status).toBe(200);
+    await atLimit.text();
+    const over = await draftTemplate(app, { name: 'T', existingBody: 'body', description: 'a'.repeat(TEMPLATE_DESCRIPTION_MAX_CHARS + 1) });
+    expect(over.status).toBe(400);
   });
 
   test('stalled upstream is bounded by CLOUD_TIMEOUT_MS', async () => {

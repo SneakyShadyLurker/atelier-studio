@@ -7,7 +7,7 @@ const oneModel: TextModelsResponse = {
   models: [{ id: 'writer', displayName: 'Writer', providerName: 'Local', vision: false, reasoningLevels: [], status: 'available' }],
   tasks: [],
   defaults: { byTask: {} },
-  writers: {},
+  writers: {}, lockedWriters: [],
 };
 
 /**

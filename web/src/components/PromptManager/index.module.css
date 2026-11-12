@@ -453,6 +453,7 @@
 }
 
 .optionInput {
+  composes: control from '../../styles/field.module.css';
   height: 36px;
   align-self: center;
   width: 100%;
@@ -465,17 +466,13 @@
   padding: 0 10px;
 }
 
-.optionInput:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
 .optionRow > .rowButton {
   min-height: 36px;
   padding-block: 0;
 }
 
 .weightInput {
+  composes: control from '../../styles/field.module.css';
   width: 52px;
   height: 36px;
   align-self: center;
@@ -493,17 +490,16 @@
 }
 
 .weightInput[data-tuned='true'] {
-  border-color: var(--ink);
   font-weight: 600;
+}
+
+/* Tuned marks the edge at rest; focus wins while typing. */
+.weightInput[data-tuned='true']:not(:focus-visible) {
+  border-color: var(--ink);
 }
 
 .weightInput[data-flash-clamp='true'] {
   background: var(--scrim-tile);
-}
-
-.weightInput:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 .weightHelp {
@@ -547,17 +543,14 @@
   opacity: 1;
 }
 
+.inlineInput {
+  composes: control from '../../styles/field.module.css';
+}
+
 .field input,
 .inlineInput {
   min-height: 44px;
   padding: 0 10px;
-}
-
-.field input:focus-visible,
-.field textarea:focus-visible,
-.inlineInput:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 .field textarea {
@@ -567,6 +560,7 @@
 
 /* Template body source: template tokens read in the mono (R16). */
 .monoArea {
+  composes: control from '../../styles/field.module.css';
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
@@ -723,6 +717,7 @@
 }
 
 .parentSelect {
+  composes: control from '../../styles/field.module.css';
   flex: none;
   min-height: 34px;
   max-width: 190px;
@@ -732,11 +727,6 @@
   background: var(--bg-elev);
   color: var(--ink-2);
   font-size: var(--text-xs);
-}
-
-.parentSelect:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 @media (hover: none), (any-pointer: coarse) {
@@ -1025,6 +1015,7 @@
 }
 
 .inlineTitleInput {
+  composes: bare from '../../styles/field.module.css';
   min-width: 0;
   width: 100%;
   padding: 4px 22px 4px 0;
@@ -1045,10 +1036,10 @@
   border-bottom-color: var(--line);
 }
 
+/* Keyboard focus: the shared bare underline (field.module.css) is the one
+   mark, so the hover/focus hairline steps aside under it. */
 .inlineTitleInput:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-radius: var(--radius-control);
+  border-bottom-color: transparent;
 }
 
 .inlineTitlePencil {

@@ -156,8 +156,6 @@
 }
 
 .libRow:focus-visible,
-.libNameInput:focus-visible,
-.searchInput:focus-visible,
 .cancelText:focus-visible,
 .libDelete:focus-visible {
   outline: 2px solid var(--focus-ring);
@@ -359,6 +357,7 @@
 }
 
 .libNameInput {
+  composes: control from '../../styles/field.module.css';
   width: 100%;
   height: 36px;
   padding: 0 10px;
@@ -377,6 +376,7 @@
 }
 
 .searchInput {
+  composes: bare from '../../styles/field.module.css';
   width: 100%;
   height: 28px;
   padding: 0;

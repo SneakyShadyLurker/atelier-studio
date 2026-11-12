@@ -595,4 +595,52 @@ describe('design system drift guards', () => {
     expect(offenders).toEqual([]);
     expect(css).toMatch(/:where\(\.surface\) \{\s*opacity: 1;\s*transform: none;\s*\}/);
   });
+
+  test('every text-entry control takes the one shared field focus edge', () => {
+    const field = stripCssComments(read('web/src/styles/field.module.css'));
+    // The edge: border and a flush 1px outline in --focus-ring, at a
+    // specificity above the bare global :focus-visible ring.
+    expect(field).toMatch(/\.control:focus-visible,\s*\.frame:has\(:is\(input, textarea, select\):focus-visible\) \{\s*border-color: var\(--focus-ring\);\s*outline: 1px solid var\(--focus-ring\);\s*outline-offset: 0;\s*\}/);
+    expect(field).toMatch(/\.frame :is\(input, textarea, select\):focus-visible \{\s*outline: none;\s*\}/);
+    expect(field).toMatch(/\.bare:focus-visible \{\s*outline: none;\s*box-shadow: inset 0 -2px 0 var\(--focus-ring\);\s*\}/);
+    expect(field).toContain('@media (prefers-contrast: more)');
+    expect(field).toContain('@media (forced-colors: active)');
+
+    // [stylesheet, class, shared variant]; the dialog well frames every dialog
+    // field (fieldInput, fieldTextarea and the Text models aliases).
+    const sites = [
+      ['web/src/styles/dialog.module.css', '.fieldWell', 'frame'],
+      ['web/src/components/DescribeTemplateDialog/ModelFields.module.css', '.select', 'control'],
+      ['web/src/components/TextModels/ModelDialogs.module.css', '.select', 'control'],
+      ['web/src/components/Composer/index.module.css', '.motionTextarea', 'control'],
+      ['web/src/components/PromptPicker/index.module.css', '.searchInput', 'control'],
+      ['web/src/components/PromptPicker/index.module.css', '.menuFilter', 'control'],
+      ['web/src/components/PromptPicker/index.module.css', '.brainstormBrief', 'control'],
+      ['web/src/components/PromptPicker/index.module.css', '.brainstormCount', 'control'],
+      ['web/src/components/MovePopover/index.module.css', '.input', 'control'],
+      ['web/src/components/PromptManager/index.module.css', '.optionInput', 'control'],
+      ['web/src/components/PromptManager/index.module.css', '.weightInput', 'control'],
+      ['web/src/components/PromptManager/index.module.css', '.inlineInput', 'control'],
+      ['web/src/components/PromptManager/index.module.css', '.monoArea', 'control'],
+      ['web/src/components/PromptManager/index.module.css', '.parentSelect', 'control'],
+      ['web/src/components/PromptManager/index.module.css', '.inlineTitleInput', 'bare'],
+      ['web/src/components/PromptManager/SettingsPanel.module.css', '.stepsInput', 'control'],
+      ['web/src/components/Sidebar/index.module.css', '.libNameInput', 'control'],
+      ['web/src/components/Sidebar/index.module.css', '.searchInput', 'bare'],
+    ] as const;
+    for (const [path, selector, variant] of sites) {
+      const blocks = cssBlocks(stripCssComments(read(path)));
+      const composing = blocks.filter((block) => new RegExp(`(^|\\n)\\${selector} \\{`).test(block));
+      expect(composing.some((block) => block.includes(`composes: ${variant} from '`) && /from '(\.\/|(\.\.\/)+styles\/)field\.module\.css';/.test(block)), `${path} ${selector}`).toBe(true);
+      // No owner replays the old offset ring on its field.
+      const ring = blocks.filter((block) => new RegExp(`\\${selector}(\\[[^\\]]*\\])?:focus-visible[^{]*\\{[^]*outline-offset: 2px`).test(block));
+      expect(ring, `${path} ${selector} ring`).toEqual([]);
+    }
+
+    // Deliberate exception: the Composer card draws the prompt's focus edge
+    // (:focus-within), so the textarea removes its own ring above global.css.
+    const composer = stripCssComments(read('web/src/components/Composer/index.module.css'));
+    expect(composer).toMatch(/\.wrap:has\(\.composer:focus-within\)::before \{\s*border-color: var\(--focus-ring\);/);
+    expect(composer).toMatch(/(^|\n)\.textarea:focus-visible \{\s*outline: none;\s*\}/);
+  });
 });

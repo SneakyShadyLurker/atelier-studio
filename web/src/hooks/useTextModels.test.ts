@@ -20,7 +20,7 @@ const SETTINGS: TextModelsResponse = {
     ? { task, pick: 'kimi', effort: 'high', effectiveModelId: 'kimi', pickState: 'active' }
     : { task, effectiveModelId: 'kimi' })),
   defaults: { default: 'kimi', byTask: {} },
-  writers: {},
+  writers: {}, lockedWriters: [],
 };
 
 function setup(put: (init: RequestInit) => Promise<Response>) {

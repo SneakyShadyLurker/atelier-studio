@@ -225,7 +225,7 @@ describe('generate', () => {
     // Affinity applies across users; each user's own accepted work stays FIFO.
     const availability = new Map([
       ['krea-2-gonzalomo', { ok: true as const, checkedAt: 1_700_000_000_000 }],
-      ['moss-image-sft', { ok: true as const, checkedAt: 1_700_000_000_000 }],
+      ['moss-base', { ok: true as const, checkedAt: 1_700_000_000_000 }],
     ]);
     const runtime = testRuntime({ availability, LOCAL_MODELS_USERS: 'alice,bob' });
     resetConcurrencyForTests();
@@ -241,7 +241,7 @@ describe('generate', () => {
     expect(((await res.json()) as { status: string }).status).toBe('running');
 
     const queuedAt = Date.now();
-    queue.enqueue('local', { batchId: 'moss-1', userId: 'alice', modelId: 'moss-image-sft', count: 1, queuedAt });
+    queue.enqueue('local', { batchId: 'moss-1', userId: 'alice', modelId: 'moss-base', count: 1, queuedAt });
     queue.enqueue('local', { batchId: 'gonzalomo-2', userId: 'bob', modelId: 'krea-2-gonzalomo', count: 1, queuedAt });
     expect(queue.peekNext('local')?.batchId).toBe('gonzalomo-2');
     expect(queue.positionOf('local', 'moss-1')).toBe(1);

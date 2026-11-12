@@ -121,7 +121,7 @@ describe('createBatch acceptance order', () => {
     const clock = spyOn(Date, 'now').mockReturnValue(20_000);
     try {
       const first = create();
-      const local = create('alice', 'moss-image-sft');
+      const local = create('alice', 'moss-base');
       db.run("UPDATE batches SET status='done', archived_at=20000 WHERE id=?", [local.batch.id]);
       db.close();
       db = new Database(dbPath);

@@ -417,7 +417,7 @@ describe('PromptManager settings tab', () => {
 
 const STEPS_MODELS = [
   { modelId: 'krea-2-gonzalomo', name: 'Krea 2 GonzaLomo', defaultSteps: 8, steps: null },
-  { modelId: 'moss-image-sft', name: 'MOSS Image', defaultSteps: 50, steps: 30 },
+  { modelId: 'moss-base', name: 'MOSS Base', defaultSteps: 50, steps: 30 },
 ];
 
 function renderSteps(models: readonly unknown[] = STEPS_MODELS, putStatus = 200) {
@@ -458,11 +458,11 @@ describe('SettingsPanel model steps', () => {
     expect(screen.getByText('Default 8 steps')).toBeTruthy();
     expect(screen.getByText('Default 50 steps')).toBeTruthy();
     const krea = screen.getByRole('spinbutton', { name: /^Sampling steps for Krea 2 GonzaLomo/ });
-    const moss = screen.getByRole('spinbutton', { name: /^Sampling steps for MOSS Image/ });
+    const moss = screen.getByRole('spinbutton', { name: /^Sampling steps for MOSS Base/ });
     expect(inputValue(krea)).toBe('8');
     expect(inputValue(moss)).toBe('30');
     expect(screen.getByRole('button', { name: 'Reset Krea 2 GonzaLomo to 8 steps' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Reset MOSS Image to 50 steps' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Reset MOSS Base to 50 steps' }).hasAttribute('disabled')).toBe(false);
   });
 
   test('commits an edit on Enter and on blur', async () => {
@@ -495,29 +495,29 @@ describe('SettingsPanel model steps', () => {
 
   test('Reset sends null', async () => {
     const fetchMock = renderSteps();
-    fireEvent.click(await screen.findByRole('button', { name: 'Reset MOSS Image to 50 steps' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reset MOSS Base to 50 steps' }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/settings/model-steps/moss-image-sft',
+        '/api/settings/model-steps/moss-base',
         expect.objectContaining({ method: 'PUT', body: JSON.stringify({ steps: null }) }),
       );
     });
     await waitFor(() => {
-      expect(inputValue(screen.getByRole('spinbutton', { name: /^Sampling steps for MOSS Image/ }))).toBe('50');
+      expect(inputValue(screen.getByRole('spinbutton', { name: /^Sampling steps for MOSS Base/ }))).toBe('50');
     });
   });
 
   test('Reset over a pending edit discards it instead of saving it', async () => {
     const fetchMock = renderSteps();
-    const moss = await screen.findByRole('spinbutton', { name: /^Sampling steps for MOSS Image/ });
+    const moss = await screen.findByRole('spinbutton', { name: /^Sampling steps for MOSS Base/ });
     moss.focus();
     fireEvent.change(moss, { target: { value: '40' } });
-    const reset = screen.getByRole('button', { name: 'Reset MOSS Image to 50 steps' });
+    const reset = screen.getByRole('button', { name: 'Reset MOSS Base to 50 steps' });
     // Prevented mousedown keeps focus in the input, so its blur cannot commit 40 first.
     expect(fireEvent.mouseDown(reset)).toBe(false);
     fireEvent.click(reset);
     await waitFor(() => {
-      expect(inputValue(screen.getByRole('spinbutton', { name: /^Sampling steps for MOSS Image/ }))).toBe('50');
+      expect(inputValue(screen.getByRole('spinbutton', { name: /^Sampling steps for MOSS Base/ }))).toBe('50');
     });
     expect(putCalls(fetchMock).map(([, init]) => (init as RequestInit).body)).toEqual([JSON.stringify({ steps: null })]);
   });
@@ -540,7 +540,7 @@ describe('SettingsPanel model steps', () => {
     fireEvent.change(krea, { target: { value: '20' } });
     fireEvent.blur(krea);
     await waitFor(() => { expect(failKrea).toBeDefined(); });
-    const moss = screen.getByRole('spinbutton', { name: /^Sampling steps for MOSS Image/ });
+    const moss = screen.getByRole('spinbutton', { name: /^Sampling steps for MOSS Base/ });
     fireEvent.change(moss, { target: { value: '35' } });
     fireEvent.blur(moss);
     failKrea?.();

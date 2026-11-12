@@ -44,7 +44,7 @@ for (const pool of ['shared', 'byok', 'local'] as const) {
     await stopQueuedPromptPreparation();
     beginShutdownDrain();
     const modelId = pool === 'shared' ? 'mock-fast'
-      : pool === 'byok' ? 'gemini-3-pro-image-preview' : 'moss-image-sft';
+      : pool === 'byok' ? 'gemini-3-pro-image-preview' : 'moss-base';
     const olderModelId = pool === 'local' ? 'krea-2-gonzalomo' : modelId;
     const entry = findModel(modelId, runtime.config);
     const olderEntry = findModel(olderModelId, runtime.config);

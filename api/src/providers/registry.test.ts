@@ -97,7 +97,7 @@ describe('publicModelsForUser', () => {
     for (const model of gemini) expect(model.defaultRatio).toBe('3:4');
 
     expect(models.find((model) => model.id === 'krea-2-gonzalomo')?.defaultRatio).toBe('3:4');
-    expect(models.find((model) => model.id === 'moss-image-sft')?.defaultRatio).toBe('3:4');
+    expect(models.find((model) => model.id === 'moss-base')?.defaultRatio).toBe('3:4');
   });
 
   test('reference-image caps: gpt-image-2.6-sunburst = 4, all Gemini models = 10', async () => {
@@ -283,13 +283,13 @@ describe('Krea models are registered with correct fields', () => {
 });
 
 describe('MOSS Image is registered as a local image row outside the Krea family', () => {
-  test('moss-image-sft publishes batched local fields and no reference image', async () => {
+  test('moss-base publishes batched local fields and no reference image', async () => {
     const { keyStore } = await setup();
     const config = testConfig({ LOCAL_MODELS_USERS: 'alice' });
     const models = await publicModelsForUser(config, { userId: 'alice', keyStore });
-    const moss = models.find((model) => model.id === 'moss-image-sft');
+    const moss = models.find((model) => model.id === 'moss-base');
     expect(moss).toBeDefined();
-    expect(moss?.name).toBe('MOSS Image');
+    expect(moss?.name).toBe('MOSS Base');
     expect(moss?.pool).toBe('local');
     expect(moss?.tag).toBe('comfyui');
     expect(moss?.batched).toBe(true);
@@ -300,15 +300,15 @@ describe('MOSS Image is registered as a local image row outside the Krea family'
     expect(moss?.outputsVideo).toBeUndefined();
   });
 
-  test('moss-image-sft is gated by LOCAL_MODELS_USERS', async () => {
+  test('moss-base is gated by LOCAL_MODELS_USERS', async () => {
     const config = testConfig({ LOCAL_MODELS_USERS: 'alice' });
     const models = await publicModelsForUser(config, { userId: 'bob', keyStore: undefined });
-    expect(models.find((model) => model.id === 'moss-image-sft')).toBeUndefined();
+    expect(models.find((model) => model.id === 'moss-base')).toBeUndefined();
   });
 
-  test('moss-image-sft honors COMFYUI_BATCH_MAX and has no promptFormat', () => {
+  test('moss-base honors COMFYUI_BATCH_MAX and has no promptFormat', () => {
     const config = testConfig({ COMFYUI_BATCH_MAX: '2', COMFYUI_BASE_URL: 'https://comfyui.example.internal:7860' });
-    const entry = registryForConfig(config).find((candidate) => candidate.model.id === 'moss-image-sft');
+    const entry = registryForConfig(config).find((candidate) => candidate.model.id === 'moss-base');
     expect(entry?.model.maxCountPerBatch).toBe(2);
     expect(Object.prototype.hasOwnProperty.call(entry?.model ?? {}, 'promptFormat')).toBe(false);
   });

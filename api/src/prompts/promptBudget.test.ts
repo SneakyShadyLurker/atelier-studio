@@ -19,7 +19,7 @@ describe('prompt budgets', () => {
     expect(promptWordBudgetForModel('krea-2-gonzalomo')).toBe(200);
     expect(promptCharBudgetForModel('krea-2-gonzalomo')).toBe(1200);
 
-    for (const modelId of ['gemini-3-pro-image-preview', 'gpt-image-2.6-sunburst', 'moss-image-sft', 'other-model']) {
+    for (const modelId of ['gemini-3-pro-image-preview', 'gpt-image-2.6-sunburst', 'moss-base', 'other-model']) {
       expect(promptWordBudgetForModel(modelId)).toBeNull();
       expect(promptCharBudgetForModel(modelId)).toBe(MAX_PROMPT_CHARS);
     }

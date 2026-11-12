@@ -130,7 +130,7 @@ describe('buildAiFillSystemPrompt', () => {
 
 describe('buildAiFillSystemPrompt MOSS target', () => {
   test('MOSS gets its own long-caption hint with no Krea word budget', () => {
-    const moss = buildAiFillSystemPrompt({ modelId: 'moss-image-sft', slotCount: 2, perSlotWordBudget: 30 });
+    const moss = buildAiFillSystemPrompt({ modelId: 'moss-base', slotCount: 2, perSlotWordBudget: 30 });
     expect(moss).toContain('Target model: MOSS Image');
     expect(moss).toContain('There is no word budget');
     expect(moss).not.toContain('RAW photo');

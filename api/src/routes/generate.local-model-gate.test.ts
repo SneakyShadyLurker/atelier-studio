@@ -36,7 +36,7 @@ function postGenerate(
 describe('POST /api/generate local-model allowlist', () => {
   test('every local model is indistinguishable from an unknown id for a non-listed user', async () => {
     const ids = LOCAL_MODELS.map((model) => model.id);
-    for (const id of ['krea-2-gonzalomo', 'moss-image-sft', 'minimax-h3-image', 'minimax-h3-i2v', 'minimax-h3-t2v']) {
+    for (const id of ['krea-2-gonzalomo', 'moss-base', 'minimax-h3-image', 'minimax-h3-i2v', 'minimax-h3-t2v']) {
       expect(ids).toContain(id);
     }
     const availability = new Map<string, ModelAvailability>(

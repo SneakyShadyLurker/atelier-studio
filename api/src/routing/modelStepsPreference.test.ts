@@ -27,10 +27,10 @@ describe('model steps preference', () => {
     withDb((db) => {
       expect(readModelStepsOverride(db, 'alice', 'krea-2-gonzalomo')).toBeUndefined();
       writeModelStepsOverride(db, 'alice', 'krea-2-gonzalomo', 12, 8, 1);
-      writeModelStepsOverride(db, 'alice', 'moss-image-sft', 30, 50, 2);
+      writeModelStepsOverride(db, 'alice', 'moss-base', 30, 50, 2);
       writeModelStepsOverride(db, 'bob', 'krea-2-gonzalomo', 4, 8, 3);
       expect(readModelStepsOverride(db, 'alice', 'krea-2-gonzalomo')).toBe(12);
-      expect([...readModelStepsOverrides(db, 'alice')].sort()).toEqual([['krea-2-gonzalomo', 12], ['moss-image-sft', 30]]);
+      expect([...readModelStepsOverrides(db, 'alice')].sort()).toEqual([['krea-2-gonzalomo', 12], ['moss-base', 30]]);
 
       writeModelStepsOverride(db, 'alice', 'krea-2-gonzalomo', 16, 8, 4);
       expect(readModelStepsOverride(db, 'alice', 'krea-2-gonzalomo')).toBe(16);
@@ -43,8 +43,8 @@ describe('model steps preference', () => {
 
   test('a value equal to the default deletes the row instead of storing it', () => {
     withDb((db) => {
-      writeModelStepsOverride(db, 'alice', 'moss-image-sft', 30, 50);
-      writeModelStepsOverride(db, 'alice', 'moss-image-sft', 50, 50);
+      writeModelStepsOverride(db, 'alice', 'moss-base', 30, 50);
+      writeModelStepsOverride(db, 'alice', 'moss-base', 50, 50);
       expect(db.query('SELECT COUNT(*) AS count FROM user_model_steps').get()).toEqual({ count: 0 });
     });
   });

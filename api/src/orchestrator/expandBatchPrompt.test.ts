@@ -180,7 +180,7 @@ test('leaves Krea, MOSS and both H3 video prompts untouched without a call', asy
   const reply = replying(EXPANDED);
   const runtime = testRuntime({ seedLegacyText: true });
 
-  for (const modelId of ['krea-2-gonzalomo', 'moss-image-sft', 'minimax-h3-i2v', 'minimax-h3-t2v']) {
+  for (const modelId of ['krea-2-gonzalomo', 'moss-base', 'minimax-h3-i2v', 'minimax-h3-t2v']) {
     expect(await expand(runtime, SHORT, modelId)).toBe(SHORT);
   }
   expect(reply.calls()).toBe(0);

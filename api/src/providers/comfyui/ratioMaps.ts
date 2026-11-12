@@ -16,8 +16,8 @@ export const RATIO_MAPS = {
   },
   // MOSS Image: ~2 MP base, the top of the recommended 1 / 1.5 / 2 MP band.
   // The model is not trained at 4 MP, so it does not share the Krea map. Every
-  // base side is a multiple of 32 so the graph's 1.5x hires pass lands on the
-  // model's 16-pixel grid; the trailing comments give the output size.
+  // base side is a multiple of 32 so a graph's 1.5x hires pass lands on the
+  // model's 16-pixel grid; the trailing comments give that 1.5x output size.
   'moss-2mp': {
     '1:1': { width: 1408, height: 1408 },  // 1.98 MP -> 2112x2112
     '4:5': { width: 1280, height: 1600 },  // 2.05 MP -> 1920x2400

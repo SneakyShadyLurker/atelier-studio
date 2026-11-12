@@ -70,11 +70,11 @@ describe('local host gate', () => {
       },
     });
 
-    noteLocalGenerationFailure('moss-image-sft', refused());
+    noteLocalGenerationFailure('moss-base', refused());
 
     expect(isPaused('local')).toBe(true);
     expect(isPaused('shared')).toBe(false);
-    expect(probed).toEqual(['moss-image-sft']);
+    expect(probed).toEqual(['moss-base']);
     finishProbe();
     await Promise.resolve();
     await Promise.resolve();
@@ -86,12 +86,12 @@ describe('local host gate', () => {
     wireGate([]);
     configureLocalHostGate({ hostUnavailable: () => true, probeNow: () => Promise.resolve(undefined) });
 
-    noteLocalGenerationFailure('moss-image-sft', refused());
+    noteLocalGenerationFailure('moss-base', refused());
     await Promise.resolve();
     await Promise.resolve();
 
     expect(isPaused('local')).toBe(true);
-    expect(localHostUnavailable('moss-image-sft')).toBe(true);
+    expect(localHostUnavailable('moss-base')).toBe(true);
   });
 
   test('a non-transport failure neither pauses nor probes', () => {
@@ -102,7 +102,7 @@ describe('local host gate', () => {
       probeNow: (modelId) => { probed.push(modelId); return Promise.resolve(undefined); },
     });
 
-    noteLocalGenerationFailure('moss-image-sft', new Error('comfyui invalid memory output batch'));
+    noteLocalGenerationFailure('moss-base', new Error('comfyui invalid memory output batch'));
 
     expect(isPaused('local')).toBe(false);
     expect(probed).toEqual([]);
@@ -120,8 +120,8 @@ describe('local host gate', () => {
   });
 
   test('an unwired gate never reports the host unavailable', () => {
-    expect(localHostUnavailable('moss-image-sft')).toBe(false);
-    noteLocalGenerationFailure('moss-image-sft', refused());
+    expect(localHostUnavailable('moss-base')).toBe(false);
+    noteLocalGenerationFailure('moss-base', refused());
     expect(isPaused('local')).toBe(false);
   });
 });

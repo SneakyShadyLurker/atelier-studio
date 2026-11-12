@@ -129,7 +129,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     });
     const body = { brief: 'A solitary adult cartographer.', count: 2 };
     await parseSse(await post(app, 'alice', { ...body, modelId: 'krea-2-gonzalomo' }));
-    await parseSse(await post(app, 'alice', { ...body, modelId: 'moss-image-sft' }));
+    await parseSse(await post(app, 'alice', { ...body, modelId: 'moss-base' }));
     await parseSse(await post(app, 'alice', { ...body, modelId: 'gpt-image-2.6-sunburst' }));
 
     expect(requests.map((request) => request.model)).toEqual([

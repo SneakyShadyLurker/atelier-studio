@@ -1,6 +1,6 @@
 {
-  "id": "moss-image-sft",
-  "name": "MOSS Image",
+  "id": "moss-base",
+  "name": "MOSS Base",
   "family": "moss",
   "order": 70,
   "saveImageNodeId": "9",
@@ -22,7 +22,7 @@
     "9:16"
   ],
   "defaultRatio": "3:4",
-  "size": "≈4.5MP (1.5× hires) · INT8 ConvRot · uncensored",
+  "size": "≈2MP · INT8 ConvRot · uncensored",
   "latency": "medium",
   "batched": true,
   "defaultCount": 4,
@@ -30,7 +30,7 @@
     "base": "workflow.json"
   },
   "requiredModelFiles": [
-    "moss_image_sft_int8_convrot.safetensors",
+    "moss_image_base_int8_convrot.safetensors",
     "qwen3.5_9b_int8_convrot.safetensors",
     "flux2-vae.safetensors"
   ],

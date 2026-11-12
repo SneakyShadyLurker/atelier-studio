@@ -25,7 +25,7 @@ The built-in rows live in `api/src/providers/comfyui/models/` and ship with the 
 | Id | Family | State | Weights |
 |---|---|---|---|
 | `krea-2-gonzalomo` | `krea` | enabled | GonzaLomo INT8 ConvRot UNet, `qwen3vl_4b_bf16` encoder, `qwen_image_vae`; the reference graph adds `krea2_reid_rank32` |
-| `moss-image-sft` | `moss` | enabled | MOSS Image SFT INT8 ConvRot DiT, `qwen3.5_9b_int8_convrot` encoder, `flux2-vae` |
+| `moss-base` | `moss` | enabled | MOSS Image Base INT8 ConvRot DiT, `qwen3.5_9b_int8_convrot` encoder, `flux2-vae` |
 | `minimax-h3-image` | `h3image` | enabled | `minimax_h3_image_pruned_int8_convrot` DiT, `qwen3vl_32b_minimax_h3_nvfp4_awq` encoder, `minimax_h3_image_vae_fp16`; the reference graph loads the same three files |
 | `minimax-h3-i2v` | `video` | disabled template | see below; includes the extend graph |
 | `minimax-h3-t2v` | `video` | disabled template | see below |

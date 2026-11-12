@@ -667,7 +667,7 @@ describe('MOSS brainstorm target', () => {
   });
 
   it('gets its own phrasing hint and long-caption length band, never the Krea budget', () => {
-    const sys = buildBrainstormSystemPrompt({ count: 3, modelId: 'moss-image-sft' });
+    const sys = buildBrainstormSystemPrompt({ count: 3, modelId: 'moss-base' });
     expect(sys).toContain('Target model: MOSS Image');
     expect(sys).toContain('rather than the bare word "photograph"');
     expect(sys).toContain('never add blur, motion blur, grain, noise or softness the brief does not ask for');

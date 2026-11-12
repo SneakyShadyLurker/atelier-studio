@@ -188,7 +188,7 @@ describe('POST /api/enhance-prompt local-model allowlist', () => {
       LOCAL_MODELS_USERS: 'alice',
     });
 
-    const response = await postEnhance(app, 'alice', 'moss-image-sft');
+    const response = await postEnhance(app, 'alice', 'moss-base');
 
     expect(response.status).toBe(200);
     expect((await parseSse(response)).at(-1)?.event).toBe('done');
@@ -272,7 +272,7 @@ describe('POST /api/enhance-prompt local-model allowlist', () => {
       CLIPROXY_TOKEN: 'sk-x',
     });
 
-    const response = await postEnhance(app, 'bob', 'moss-image-sft');
+    const response = await postEnhance(app, 'bob', 'moss-base');
 
     expect(response.status).toBe(200);
     expect((await parseSse(response)).at(-1)?.event).toBe('done');

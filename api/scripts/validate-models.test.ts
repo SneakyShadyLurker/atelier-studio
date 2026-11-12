@@ -85,6 +85,77 @@ describe('validate-models', () => {
     expect(result.stderr).toContain(graphPath);
   });
 
+  describe('moss recipe', () => {
+    type MossGraph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+    // The fixture's single KSampler pass rebuilt as one SamplerCustom on
+    // SamplerER_SDE and a BasicScheduler, with a real negative and skip-layer
+    // guidance on the model.
+    function samplerCustomGraph(graph: MossGraph): void {
+      graph['5'] = { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: '' } };
+      graph['10'] = { class_type: 'SkipLayerGuidanceDiTSimple', inputs: { model: ['1', 0], double_layers: '', single_layers: '22, 24', start_percent: 0, end_percent: 1 } };
+      graph['11'] = { class_type: 'SamplerER_SDE', inputs: { solver_type: 'ER-SDE', max_stage: 3, eta: 1, s_noise: 1.1 } };
+      graph['12'] = { class_type: 'BasicScheduler', inputs: { model: ['10', 0], scheduler: 'simple', steps: '{{steps}}', denoise: 1 } };
+      graph['7'] = {
+        class_type: 'SamplerCustom',
+        inputs: { model: ['10', 0], add_noise: true, noise_seed: '{{seed}}', cfg: 3, positive: ['4', 0], negative: ['5', 0], sampler: ['11', 0], sigmas: ['12', 0], latent_image: ['6', 0] },
+      };
+    }
+    function mossRun(mutate: (graph: MossGraph) => void): { result: ReturnType<typeof run>; graphPath: string } {
+      const dir = copyFixture(join(FIXTURES, 'builtin'));
+      const graphPath = join(dir, 'moss-test-beta', 'workflow.json');
+      const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as MossGraph;
+      mutate(graph);
+      writeFileSync(graphPath, JSON.stringify(graph));
+      return { result: run(dir), graphPath };
+    }
+    function node(graph: MossGraph, id: string): MossGraph[string] {
+      const found = graph[id];
+      if (found === undefined) throw new Error(`moss graph has no node ${id}`);
+      return found;
+    }
+
+    test('a SamplerCustom base pass on SamplerER_SDE passes', () => {
+      expect(mossRun(samplerCustomGraph).result).toMatchObject({ code: 0, stderr: '' });
+    });
+
+    test('a KSampler base pass with skip-layer guidance on 22, 24 passes', () => {
+      const { result } = mossRun((graph) => {
+        graph['5'] = { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: '' } };
+        graph['10'] = { class_type: 'SkipLayerGuidanceDiTSimple', inputs: { model: ['1', 0], double_layers: '', single_layers: '22, 24', start_percent: 0, end_percent: 1 } };
+        Object.assign(node(graph, '7').inputs, { model: ['10', 0], cfg: 3, sampler_name: 'er_sde' });
+      });
+      expect(result).toMatchObject({ code: 0, stderr: '' });
+    });
+
+    const cases: [string, (graph: MossGraph) => void, string][] = [
+      ['a missing SamplerER_SDE', (graph) => {
+        graph['11'] = { class_type: 'KSamplerSelect', inputs: { sampler_name: 'er_sde' } };
+      }, 'SamplerCustom samples with SamplerER_SDE on ER-SDE at s_noise 1.0 to 1.1'],
+      ['s_noise 1.2', (graph) => { node(graph, '11').inputs.s_noise = 1.2; },
+        'SamplerCustom samples with SamplerER_SDE on ER-SDE at s_noise 1.0 to 1.1'],
+      ['a BasicScheduler without {{steps}}', (graph) => {
+        node(graph, '12').inputs.steps = 20;
+        node(graph, '11').inputs.parked = '{{steps}}';
+      }, 'graph has no {{steps}} KSampler or SamplerCustom base sampler'],
+      ['a scheduler other than simple', (graph) => { node(graph, '12').inputs.scheduler = 'beta'; },
+        "SamplerCustom sigmas come from a BasicScheduler on simple at denoise 1.0 on the sampler's model"],
+      ['single_layers 24', (graph) => { node(graph, '10').inputs.single_layers = '24'; },
+        'skip-layer guidance targets single blocks 22 or 22, 24'],
+      ['two base samplers', (graph) => {
+        graph['13'] = {
+          class_type: 'KSampler',
+          inputs: { model: ['10', 0], positive: ['4', 0], negative: ['5', 0], latent_image: ['6', 0], seed: '{{seed}}', steps: '{{steps}}', cfg: 3, sampler_name: 'er_sde', scheduler: 'simple', denoise: 1 },
+        };
+      }, 'graph has more than one base sampler'],
+    ];
+
+    test.each(cases)('a SamplerCustom graph with %s exits 1', (_label, mutate, reason) => {
+      const { result, graphPath } = mossRun((graph) => { samplerCustomGraph(graph); mutate(graph); });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: ${reason}`);
+    });
+  });
+
   describe('h3image recipe', () => {
     type H3Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
     function h3Violation(

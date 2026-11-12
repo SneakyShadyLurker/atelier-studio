@@ -65,12 +65,51 @@ function checkKrea(graph: Graph, kind: string, model: LocalModelDef, fail: (reas
   }
 }
 
+function sameLink(a: unknown, b: unknown): boolean {
+  return Array.isArray(a) && Array.isArray(b) && a.length === 2 && a[0] === b[0] && a[1] === b[1];
+}
+
+// A MOSS base pass is either the {{steps}} KSampler or a SamplerCustom whose
+// sigmas come from a BasicScheduler at {{steps}}.
+function mossBaseSamplers(graph: Graph): Node[] {
+  const custom = nodesOf(graph, 'SamplerCustom').filter((node) => {
+    const sigmas = linkedNode(graph, node.inputs.sigmas);
+    return sigmas?.class_type === 'BasicScheduler' && sigmas.inputs.steps === '{{steps}}';
+  });
+  return [...nodesOf(graph, 'KSampler').filter((node) => node.inputs.steps === '{{steps}}'), ...custom];
+}
+
+// The SamplerCustom form samples er_sde with extra noise: SamplerER_SDE on
+// ER-SDE at s_noise 1.0 to 1.1 over simple sigmas for the sampler's own model.
+function checkMossSamplerCustom(graph: Graph, sampler: Node, fail: (reason: string) => void): void {
+  const erSde = linkedNode(graph, sampler.inputs.sampler);
+  const sNoise = erSde?.inputs.s_noise;
+  if (erSde?.class_type !== 'SamplerER_SDE' || erSde.inputs.solver_type !== 'ER-SDE'
+    || typeof sNoise !== 'number' || sNoise < 1 || sNoise > 1.1) {
+    fail('SamplerCustom samples with SamplerER_SDE on ER-SDE at s_noise 1.0 to 1.1');
+  }
+  const sigmas = linkedNode(graph, sampler.inputs.sigmas);
+  if (sigmas?.inputs.scheduler !== 'simple' || sigmas.inputs.denoise !== 1 || !sameLink(sigmas.inputs.model, sampler.inputs.model)) {
+    fail("SamplerCustom sigmas come from a BasicScheduler on simple at denoise 1.0 on the sampler's model");
+  }
+  if (sampler.inputs.add_noise !== true || sampler.inputs.noise_seed !== '{{seed}}') fail('SamplerCustom adds noise seeded by {{seed}}');
+}
+
+const MOSS_SKIP_LAYERS: ReadonlySet<unknown> = new Set(['22', '22, 24']);
+
 function checkMoss(graph: Graph, model: LocalModelDef, fail: (reason: string) => void): void {
   if (model.requiredClipType !== 'moss_image') fail('moss rows require requiredClipType moss_image');
   const samplers = nodesOf(graph, 'KSampler');
   if (new Set(samplers.map((node) => node.inputs.sampler_name)).size > 1) fail('every KSampler in a graph shares one sampler');
-  const sampler = baseSampler(graph);
-  if (sampler === undefined) { fail('graph has no {{steps}} KSampler'); return; }
+  const bases = mossBaseSamplers(graph);
+  const sampler = bases[0];
+  if (sampler === undefined) { fail('graph has no {{steps}} KSampler or SamplerCustom base sampler'); return; }
+  if (bases.length > 1) { fail('graph has more than one base sampler'); return; }
+  const custom = sampler.class_type === 'SamplerCustom';
+  if (custom) {
+    checkMossSamplerCustom(graph, sampler, fail);
+    if (samplers.some((node) => node.inputs.sampler_name !== 'er_sde')) fail('a KSampler after a SamplerCustom base pass samples with er_sde');
+  }
   const cfg = sampler.inputs.cfg;
   if (typeof cfg !== 'number') { fail('base sampler has no numeric cfg'); return; }
   const negative = linkedNode(graph, sampler.inputs.negative);
@@ -82,8 +121,8 @@ function checkMoss(graph: Graph, model: LocalModelDef, fail: (reason: string) =>
     fail('cfg above 1.0 requires a real CLIPTextEncode negative');
   }
   if (slg.length > 0) {
-    if (sampler.inputs.sampler_name !== 'er_sde') fail('skip-layer guidance graphs sample with er_sde');
-    if (slg.some((node) => node.inputs.single_layers !== '22')) fail('skip-layer guidance targets single block 22');
+    if (!custom && sampler.inputs.sampler_name !== 'er_sde') fail('skip-layer guidance graphs sample with er_sde');
+    if (slg.some((node) => !MOSS_SKIP_LAYERS.has(node.inputs.single_layers))) fail('skip-layer guidance targets single blocks 22 or 22, 24');
   }
 }
 

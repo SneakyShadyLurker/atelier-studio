@@ -3,7 +3,7 @@ import allowedNodes from '../../../infra/comfyui/atelier_private/allowed_nodes.j
 
 export const currentWorkerPrivacy = {
   protocol: 2, ready: true, worker_build: 'a'.repeat(64),
-  allowed_nodes: [...allowedNodes, 'CheckpointLoaderSimple', 'SeedVR2VideoUpscaler', 'KSamplerAdvanced', 'SamplerCustom'].sort(),
+  allowed_nodes: [...allowedNodes, 'CheckpointLoaderSimple', 'SeedVR2VideoUpscaler', 'KSamplerAdvanced'].sort(),
   capabilities: { job_status: true, image_outputs: true, video_outputs: true,
     preview_control: true, lease_renewal: true, job_admission: true, execution_budget: true, residency_tracking: true },
   limits: { max_jobs: 4, max_payload_bytes: 512 * 1024 * 1024, max_image_bytes: 50 * 1024 * 1024,

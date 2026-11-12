@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from './server';
 import { existsSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
@@ -140,6 +141,7 @@ describe('/api/uploads', () => {
     const app = createApp(runtime);
     const server = Bun.serve({
       port: 0,
+      hostname: TEST_SERVER_HOSTNAME,
       maxRequestBodySize: MAX_UPLOAD_REQUEST_BYTES,
       fetch: (req) => {
         didFetch = true;

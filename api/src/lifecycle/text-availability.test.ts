@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import { Database } from 'bun:sqlite';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,7 +24,7 @@ const hits: { path: string; authorization: string | null }[] = [];
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
-    hostname: '127.0.0.1',
+    hostname: TEST_SERVER_HOSTNAME,
     fetch(req) {
       const path = new URL(req.url).pathname;
       hits.push({ path, authorization: req.headers.get('authorization') });

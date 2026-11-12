@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import { join } from 'node:path';
 import type { Server } from 'bun';
 import { CHARACTER_CARD_DIRECTION_MAX_CHARS, MAX_PROMPT_CHARS } from '@atelier/shared';
@@ -51,7 +52,7 @@ function startFake(answer: (id: string) => Response): Fake {
   const aborted = { value: false };
   fake = Bun.serve({
     port: 0,
-    hostname: '127.0.0.1',
+    hostname: TEST_SERVER_HOSTNAME,
     async fetch(req) {
       if (isHostPortProbe(req)) return hostPortProbeResponse();
       req.signal.addEventListener('abort', () => { aborted.value = true; });
@@ -70,7 +71,7 @@ function startFake(answer: (id: string) => Response): Fake {
       return answer(typeof id === 'string' ? id : '');
     },
   });
-  return { baseUrl: fake.url.origin, requests, aborted };
+  return { baseUrl: `http://${TEST_SERVER_HOSTNAME}:${fake.port}`, requests, aborted };
 }
 
 function ndjson(lines: readonly unknown[]): Response {

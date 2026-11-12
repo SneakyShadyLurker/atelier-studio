@@ -3,7 +3,7 @@ import { rejects } from 'node:assert/strict';
 import type { ServerWebSocket } from 'bun';
 import sharp from 'sharp';
 import { createComfyuiProvider, drainComfyUi } from './comfyui';
-import { TEST_EXECUTION_TIMEOUT_MS, currentWorkerPrivacy, privateWorkerTestPrivacy, privateWorkerTestTls } from '../test/private-worker-fixture';
+import { TEST_EXECUTION_TIMEOUT_MS, currentWorkerPrivacy, privateWorkerTestPrivacy, privateWorkerTestServerOptions } from '../test/private-worker-fixture';
 import { grayCardPng, pngBytes } from '../test/image-fixtures';
 import type { ProviderResult } from './types';
 import * as abort from '../lifecycle/abort';
@@ -35,7 +35,7 @@ function fixture(options: {
   const bytes = options.video ? MP4 : options.imageBytes ?? PNG;
   let finishAck: (() => void) | undefined;
   const server = Bun.serve<{ client: string }>({
-    port: 0, tls: privateWorkerTestTls, idleTimeout: 0,
+    port: 0, ...privateWorkerTestServerOptions, idleTimeout: 0,
     async fetch(req, server) {
       const path = new URL(req.url).pathname;
       calls.push(`${req.method} ${path}`);

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import type { JSONSchema7, LanguageModelV4CallOptions, LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import type { TextStructuredOutputMode } from '@atelier/shared';
 import type { TextModelRecord } from '../../db/textProviders';
@@ -32,7 +33,7 @@ function sse(events: readonly unknown[]): string {
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
-    hostname: '127.0.0.1',
+    hostname: TEST_SERVER_HOSTNAME,
     async fetch(req) {
       const body = await req.json() as Record<string, unknown>;
       captured.push({ path: new URL(req.url).pathname, headers: req.headers, body });

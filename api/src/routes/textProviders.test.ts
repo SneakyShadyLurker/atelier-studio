@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import type { AdminModel, AdminProvider, ConnectionReport, ListedModel, TestReport } from '@atelier/shared';
 import type { TextAvailabilityHandle } from '../lifecycle/text-availability';
 import { UNKNOWN_TEXT_AVAILABILITY } from '../routing/textServices';
@@ -55,7 +56,7 @@ function gated(then: Handler): { handler: Handler; arrived: Promise<void>; open:
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
-    hostname: '127.0.0.1',
+    hostname: TEST_SERVER_HOSTNAME,
     fetch(req) {
       if (isHostPortProbe(req)) return hostPortProbeResponse();
       seenAuth.push(req.headers.get('authorization'));

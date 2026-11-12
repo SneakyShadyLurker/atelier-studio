@@ -1,4 +1,5 @@
 import { afterAll } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from './server';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,10 @@ execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days
   '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1',
   '-keyout', keyPath, '-out', certPath], { timeout: 15_000, stdio: 'ignore' });
 export const privateWorkerTestTls = { key: readFileSync(keyPath), cert: readFileSync(certPath) };
+// Clients use IPv4 explicitly. On macOS an implicit localhost listener can
+// share its port with an unrelated 127.0.0.1 listener, sending TLS to that
+// process instead. Reserve the exact address used by every private fixture.
+export const privateWorkerTestServerOptions = { hostname: TEST_SERVER_HOSTNAME, tls: privateWorkerTestTls };
 export const privateWorkerTestCa = privateWorkerTestTls.cert.toString();
 export const privateWorkerTestToken = 'synthetic-worker-token-for-tests';
 afterAll(() => { rmSync(dir, { recursive: true, force: true }); });

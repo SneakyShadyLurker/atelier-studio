@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import { createComfyuiProvider, drainComfyUi } from './comfyui';
-import { TEST_EXECUTION_TIMEOUT_MS, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestTls } from '../test/private-worker-fixture';
+import { TEST_EXECUTION_TIMEOUT_MS, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestServerOptions } from '../test/private-worker-fixture';
 import type { ProviderProgress, ProviderRequest } from './types';
 
 // Minimal valid 1×1 PNG (red pixel).
@@ -83,7 +83,7 @@ function startMock(opts: {
   const sockets = new Map<string, ServerWebSocket<{ clientId: string }>>();
   const server = Bun.serve<{ clientId: string }>({
     port: 0,
-    tls: privateWorkerTestTls,
+    ...privateWorkerTestServerOptions,
     idleTimeout: 0,
     async fetch(req, srv) {
       const handled = worker.handle(req);
@@ -206,7 +206,7 @@ function startScripted(opts: {
   const socketsReleased = new Promise<void>((resolve) => { releaseSockets = resolve; });
   const server = Bun.serve<{ clientId: string }>({
     port: 0,
-    tls: privateWorkerTestTls,
+    ...privateWorkerTestServerOptions,
     idleTimeout: 0,
     async fetch(req, srv) {
       const url = new URL(req.url);

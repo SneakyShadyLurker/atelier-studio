@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import { restoreFetch } from '../../test/helpers';
 import { seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
 
@@ -9,7 +10,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.stop(true)));
 });
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: handler });
+  const server = Bun.serve({ port: 0, hostname: TEST_SERVER_HOSTNAME, fetch: handler });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }

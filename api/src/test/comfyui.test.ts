@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rejects } from 'node:assert/strict';
 import pino from 'pino';
-import { TEST_EXECUTION_TIMEOUT_MS, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestTls, privateImageFrames } from './private-worker-fixture';
+import { TEST_EXECUTION_TIMEOUT_MS, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestServerOptions, privateImageFrames } from './private-worker-fixture';
 import type { ServerWebSocket } from 'bun';
 import { __resetComfyuiResidentModels, ComfyuiUpstreamError, createComfyuiProvider, drainComfyUi } from '../providers/comfyui';
 import { buildWorkflow } from '../providers/comfyui/template';
@@ -81,7 +81,7 @@ function startMock(behavior: MockBehavior): MockServer {
 
   const server = Bun.serve<WsCtx>({
     port: 0,
-    tls: privateWorkerTestTls,
+    ...privateWorkerTestServerOptions,
     idleTimeout: 0,
     async fetch(req, srv) {
       const handled = worker.handle(req);

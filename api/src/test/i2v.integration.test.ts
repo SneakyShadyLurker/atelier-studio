@@ -1,4 +1,4 @@
-import { privateWorkerTestTls, privateWorkerTestCa, privateWorkerTestToken } from './private-worker-tls';
+import { privateWorkerTestServerOptions, privateWorkerTestCa, privateWorkerTestToken } from './private-worker-tls';
 import { privateWorkerFixture } from './private-worker-fixture';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
@@ -61,7 +61,7 @@ function startVideoMock(): VideoMockServer {
 
   const server = Bun.serve<WsCtx>({
     port: 0,
-    tls: privateWorkerTestTls,
+    ...privateWorkerTestServerOptions,
     idleTimeout: 0,
     async fetch(req, srv) {
       const url = new URL(req.url);

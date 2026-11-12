@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import type { TextProtocol } from '@atelier/shared';
 import {
   anthropicHints,
@@ -183,7 +184,7 @@ let respond: (url: URL) => Response | Promise<Response> = () => Response.json(ID
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
-    hostname: '127.0.0.1',
+    hostname: TEST_SERVER_HOSTNAME,
     fetch(req) {
       const url = new URL(req.url);
       captured.push({ url, headers: req.headers });

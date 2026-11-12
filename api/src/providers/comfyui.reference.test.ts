@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import { __resetComfyuiResidentModels, createComfyuiProvider, drainComfyUi } from './comfyui';
-import { TEST_EXECUTION_TIMEOUT_MS, currentWorkerPrivacy, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestTls } from '../test/private-worker-fixture';
+import { TEST_EXECUTION_TIMEOUT_MS, currentWorkerPrivacy, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestServerOptions } from '../test/private-worker-fixture';
 import type { Provider, ProviderRequest, ProviderResult } from './types';
 
 interface Node {
@@ -53,7 +53,7 @@ function startMock(metadata = currentWorkerPrivacy, uploadControl: { holdUploads
   let uploadsInFlight = 0;
   const server = Bun.serve<{ clientId: string }>({
     port: 0,
-    tls: privateWorkerTestTls,
+    ...privateWorkerTestServerOptions,
     idleTimeout: 0,
     async fetch(req, srv) {
       if (new URL(req.url).pathname === '/atelier/v1/privacy') return Response.json(metadata);

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import { __resetComfyuiResidentModels, createComfyuiProvider, drainComfyUi } from './comfyui';
-import { TEST_EXECUTION_TIMEOUT_MS, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestTls } from '../test/private-worker-fixture';
+import { TEST_EXECUTION_TIMEOUT_MS, privateWorkerFixture, privateWorkerTestPrivacy, privateWorkerTestServerOptions } from '../test/private-worker-fixture';
 import type { ProviderProgress, ProviderResult } from './types';
 
 interface PromptBody {
@@ -91,7 +91,7 @@ function startVideoMock(options: VideoMockOptions = {}): VideoMockServer {
 
   const server = Bun.serve<WsCtx>({
     port: 0,
-    tls: privateWorkerTestTls,
+    ...privateWorkerTestServerOptions,
     idleTimeout: 0,
     async fetch(req, srv) {
       if (new URL(req.url).pathname.includes('/outputs/')) state.lastOutputPath = new URL(req.url).pathname;

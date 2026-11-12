@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import type { TextProtocol } from '@atelier/shared';
 import { TextConfigValidationError, type TextModelRecord } from '../../db/textProviders';
 import { anthropicAdapter } from './anthropic';
@@ -53,7 +54,7 @@ function anthropicReply(text: string, jsonTool: boolean): Response {
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
-    hostname: '127.0.0.1',
+    hostname: TEST_SERVER_HOSTNAME,
     async fetch(req) {
       const path = new URL(req.url).pathname;
       if (req.method === 'GET') return listAnswer();
@@ -327,7 +328,7 @@ describe('testModel', () => {
   test('times out a hanging check with a plain message', async () => {
     const hang = Bun.serve({
       port: 0,
-      hostname: '127.0.0.1',
+      hostname: TEST_SERVER_HOSTNAME,
       fetch: () => new Promise<Response>((resolve) => {
         setTimeout(() => {
           resolve(openaiReply('OK'));

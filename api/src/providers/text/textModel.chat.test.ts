@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import { brainstormMaxOutputTokens } from './textBudgets';
 import type { ChatResponseFormat } from './featureHelpers';
 // These suites use modelId 'gpt-image-2.6-sunburst' → the GPT (anatomy-safe) constraints variant.
@@ -25,6 +26,7 @@ afterEach(async () => {
 function serveCapture(bodies: unknown[], frames: string): string {
   const server = Bun.serve({
     port: 0,
+    hostname: TEST_SERVER_HOSTNAME,
     async fetch(req) {
       bodies.push(await req.json());
       return new Response(frames, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });

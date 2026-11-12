@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import type { TextReasoningEffort, TextTokenField } from '@atelier/shared';
 import { LEGACY_SEED, type LegacySeedModel } from '../../db/textSeed';
@@ -53,7 +54,7 @@ const JSON_OK = JSON.stringify({
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
-    hostname: '127.0.0.1',
+    hostname: TEST_SERVER_HOSTNAME,
     async fetch(req) {
       if (isHostPortProbe(req)) return hostPortProbeResponse();
       const body = await req.json() as Record<string, unknown>;

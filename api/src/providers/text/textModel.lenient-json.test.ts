@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import { restoreFetch } from '../../test/helpers';
 import { genericTextModel, testTextModelProvider } from '../../test/textModelProvider';
 
@@ -17,6 +18,7 @@ afterEach(async () => {
 function provider(text: string) {
   const server = Bun.serve({
     port: 0,
+    hostname: TEST_SERVER_HOSTNAME,
     fetch: () => {
       const frames = [
         JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: null }] }),

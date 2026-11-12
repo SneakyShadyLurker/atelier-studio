@@ -391,36 +391,68 @@ export function draftTemplateBrief(input: DraftTemplateProviderInput): string {
   return parts.join('\n');
 }
 
+/**
+ * The form of a `{{…}}` macro: `random`, `pick`, `ai-fill`, `user` and the
+ * like. A comment is `//` whatever its text, which may follow with no space.
+ */
+function macroForm(tokenText: string): string {
+  if (/^\{\{\s*\/\//.test(tokenText)) return '//';
+  return /^\{\{\s*([^:{}\s]*)/.exec(tokenText)?.[1]?.toLowerCase() ?? '';
+}
+
+/** Every macro form `body` uses, at any nesting depth. */
+function macroFormsOf(body: string, into = new Set<string>()): ReadonlySet<string> {
+  for (const tok of findTokens(body)) {
+    if (!VAR_TOKEN_ANCHORED.test(tok.text)) into.add(macroForm(tok.text));
+    macroFormsOf(tok.text.slice(2, -2), into);
+  }
+  return into;
+}
+
 function stripUnknownTokens(
   body: string,
   knownNames: ReadonlySet<string>,
+  existingBody: string,
 ): { body: string; warnings: string[] } {
-  const tokens = findTokens(body);
-  if (tokens.length === 0) return { body, warnings: [] };
-
   const unknownVarNames = new Set<string>();
   let nonVarCount = 0;
-  let out = body;
-  // Walk back-to-front so prior splice offsets stay valid.
-  for (let i = tokens.length - 1; i >= 0; i--) {
-    const tok = tokens[i];
-    if (tok === undefined) continue;
-    const m = tok.text.match(VAR_TOKEN_ANCHORED);
-    if (m) {
-      const inner = m[1];
-      if (!inner) continue;
-      const { listName } = parseVarToken(inner);
-      if (!listName) continue;
-      if (knownNames.has(listName)) continue;
-      unknownVarNames.add(listName);
-      const replacement = listName.replace(/_/g, ' ');
-      out = out.slice(0, tok.start) + replacement + out.slice(tok.end);
-    } else {
-      nonVarCount += 1;
-      out = out.slice(0, tok.start) + out.slice(tok.end);
-    }
-  }
+  // A rework may edit the user's own macros (most bodies are one ai-fill
+  // wrapper), so a macro form their body already uses is theirs to keep.
+  const ownForms = existingBody === '' ? new Set<string>() : macroFormsOf(existingBody);
 
+  const clean = (text: string): string => {
+    const tokens = findTokens(text);
+    let out = text;
+    // Walk back-to-front so prior splice offsets stay valid.
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      const tok = tokens[i];
+      if (tok === undefined) continue;
+      // Anything already in the user's body verbatim stays, whatever its form or list.
+      if (existingBody !== '' && existingBody.includes(tok.text)) continue;
+      let replacement: string;
+      const m = tok.text.match(VAR_TOKEN_ANCHORED);
+      if (m) {
+        const inner = m[1];
+        if (!inner) continue;
+        const { listName } = parseVarToken(inner);
+        if (!listName) continue;
+        if (knownNames.has(listName)) continue;
+        unknownVarNames.add(listName);
+        replacement = listName.replace(/_/g, ' ');
+      } else if (ownForms.has(macroForm(tok.text))) {
+        // An edited macro of a form the user already writes: keep the wrapper
+        // and hold what it now contains to the same rules.
+        replacement = `{{${clean(tok.text.slice(2, -2))}}}`;
+      } else {
+        nonVarCount += 1;
+        replacement = '';
+      }
+      out = out.slice(0, tok.start) + replacement + out.slice(tok.end);
+    }
+    return out;
+  };
+
+  const cleaned = clean(body);
   const warnings: string[] = [];
   for (const name of unknownVarNames) {
     warnings.push(`Removed unknown {{var::${name}}} reference`);
@@ -430,7 +462,7 @@ function stripUnknownTokens(
       `Removed ${nonVarCount} non-var macro token${nonVarCount === 1 ? '' : 's'} (advanced syntax — add by hand)`,
     );
   }
-  return { body: out, warnings };
+  return { body: cleaned, warnings };
 }
 
 // The two answers of a template draft as one object: OpenAI strict schemas
@@ -452,12 +484,15 @@ const UNPARSEABLE_DRAFT = 'unparseable draft response';
 
 /**
  * Turns a draft-template answer into the result: parses the JSON (fences,
- * prose and the repairable defects tolerated), caps the body at
- * MAX_DRAFT_RAW_BODY_CHARS and strips unknown tokens.
+ * prose and the repairable defects tolerated), caps the body and strips
+ * unknown tokens. A fresh body is capped at MAX_DRAFT_RAW_BODY_CHARS; a rework
+ * of `existingBody` may grow it by that much, keeps every token already in it
+ * verbatim, and keeps an edited macro of a form that body already uses.
  */
 export function draftTemplateResultFromContent(
   content: string,
   knownNames: ReadonlySet<string>,
+  existingBody = '',
 ): DraftTemplateResult {
   const parsed = parseModelJsonObject(content);
   if (!parsed || typeof parsed !== 'object') return unparseableFailure(UNPARSEABLE_DRAFT);
@@ -476,18 +511,19 @@ export function draftTemplateResultFromContent(
 
   const truncationWarnings: string[] = [];
   const codepoints = Array.from(bodyText);
-  if (codepoints.length > MAX_DRAFT_RAW_BODY_CHARS) {
-    bodyText = codepoints.slice(0, MAX_DRAFT_RAW_BODY_CHARS).join('');
+  const maxChars = Array.from(existingBody).length + MAX_DRAFT_RAW_BODY_CHARS;
+  if (codepoints.length > maxChars) {
+    bodyText = codepoints.slice(0, maxChars).join('');
     // Strip a partial token if the cap landed inside an unclosed {{.
     const lastClose = bodyText.lastIndexOf('}}');
     const lastOpen = bodyText.lastIndexOf('{{');
     if (lastOpen > lastClose) {
       bodyText = bodyText.slice(0, lastOpen).replace(/\s+$/, '');
     }
-    truncationWarnings.push('Body truncated at MAX_DRAFT_RAW_BODY_CHARS');
+    truncationWarnings.push('The draft was cut off at the length limit');
   }
 
-  const { body: cleaned, warnings: stripWarnings } = stripUnknownTokens(bodyText, knownNames);
+  const { body: cleaned, warnings: stripWarnings } = stripUnknownTokens(bodyText, knownNames, existingBody);
   return {
     type: 'ok',
     payload: { kind: 'body', body: cleaned, warnings: [...truncationWarnings, ...stripWarnings] },

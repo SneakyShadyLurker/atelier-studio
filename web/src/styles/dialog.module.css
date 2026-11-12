@@ -138,6 +138,7 @@
 }
 
 .fieldWell {
+  composes: frame from './field.module.css';
   display: flex;
   align-items: center;
   gap: 8px;
@@ -154,15 +155,11 @@
   border-color: var(--ink-3);
 }
 
-/* The control inside carries no ring of its own; the well draws the shared
-   2px focus ring (buttons.module.css) around it. A link button in the well
-   keeps its own ring. */
-.fieldWell:has(:is(input, textarea, select):focus-visible) {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.fieldWell:has([aria-invalid='true']) {
+/* Focus: the well composes the shared text-entry frame (field.module.css),
+   which draws the edge on the well and none on the control inside. A link
+   button in the well keeps its own ring. Invalid keeps the danger edge at
+   rest; focus wins while typing. */
+.fieldWell:has([aria-invalid='true']:not(:focus-visible)) {
   border-color: var(--danger);
 }
 

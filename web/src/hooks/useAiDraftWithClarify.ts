@@ -10,8 +10,8 @@ import { useAbortableMutation } from './useAbortableMutation';
 // guarded the cancel-during-resolved race and aborted on cancel). Both hooks now
 // delegate here, supplying only their payload-shape callbacks.
 
-export type AiDraftStatus = 'idle' | 'seed-prompt' | 'drafting' | 'clarifying' | 'done' | 'error';
-export type AiDraftDialogMode = 'seed' | 'clarify' | null;
+export type AiDraftStatus = 'idle' | 'seed-prompt' | 'rework-prompt' | 'drafting' | 'clarifying' | 'done' | 'error';
+export type AiDraftDialogMode = 'seed' | 'rework' | 'clarify' | null;
 
 interface ClarifyResponse {
   kind: 'clarify';
@@ -30,6 +30,9 @@ interface UseAiDraftWithClarifyArgs<TBase, TResolved extends { kind: string }> {
   captureBase: () => TBase;
   /** Empty base → show the seed prompt instead of firing immediately. */
   isEmptyBase: (base: TBase) => boolean;
+  /** A non-empty base drafts at once ('draft', the default) or first asks
+   *  what to change in the rework prompt ('rework'). */
+  nonEmptyBase?: 'draft' | 'rework';
   /** Perform the request. Resolves to the final payload OR a clarify follow-up. */
   run: (base: TBase, description: string | undefined, signal: AbortSignal) => Promise<TResolved | ClarifyResponse>;
   /** Apply a resolved (non-clarify) payload. */
@@ -51,7 +54,7 @@ export interface UseAiDraftWithClarifyResult {
 interface FireVars<TBase> {
   base: TBase;
   description: string | undefined;
-  /** A seed/clarify dialog is mounted for this request and shows `error`
+  /** A seed/rework/clarify dialog is mounted for this request and shows `error`
    *  inline; the failure then needs no second, duplicate toast. */
   inlineOwner: boolean;
 }
@@ -59,7 +62,7 @@ interface FireVars<TBase> {
 export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>(
   args: UseAiDraftWithClarifyArgs<TBase, TResolved>,
 ): UseAiDraftWithClarifyResult {
-  const { captureBase, isEmptyBase, run, onResolve, errorFallback } = args;
+  const { captureBase, isEmptyBase, nonEmptyBase = 'draft', run, onResolve, errorFallback } = args;
   const addToast = useAtelierStore((s) => s.addToast);
   const abortable = useAbortableMutation();
   const [status, setStatus] = useState<AiDraftStatus>('idle');
@@ -109,7 +112,7 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
   const { mutate, isPending } = mutation;
 
   const fire = (value: TBase, description: string | undefined) => {
-    // Deliberately does NOT clear dialogMode: a seed/clarify submit keeps its
+    // Deliberately does NOT clear dialogMode: a seed/rework/clarify submit keeps its
     // dialog mounted through the request, so a failure leaves the dialog open
     // with its error for retry. draft()'s immediate path only runs when
     // dialogMode is already null (its re-entrancy guard), and onSuccess clears
@@ -120,7 +123,7 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
   };
 
   const draft = () => {
-    // Never re-enter while a dialog is open (seed/clarify, incl. the
+    // Never re-enter while a dialog is open (seed/rework/clarify, incl. the
     // failed-submit-keeps-dialog-mounted case) or a request is in flight.
     if (isPending || dialogMode !== null) return;
     const captured = captureBase();
@@ -130,6 +133,11 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
     if (isEmptyBase(captured)) {
       setDialogMode('seed');
       setStatus('seed-prompt');
+      return;
+    }
+    if (nonEmptyBase === 'rework') {
+      setDialogMode('rework');
+      setStatus('rework-prompt');
       return;
     }
     fire(captured, undefined);

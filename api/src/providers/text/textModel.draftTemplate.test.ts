@@ -147,7 +147,7 @@ describe('textModel.draftTemplate — truncation', () => {
     expect(r.type).toBe('ok');
     if (r.type === 'ok' && r.payload.kind === 'body') {
       expect(Array.from(r.payload.body).length).toBeLessThanOrEqual(2000);
-      expect(r.payload.warnings).toContain('Body truncated at MAX_DRAFT_RAW_BODY_CHARS');
+      expect(r.payload.warnings).toContain('The draft was cut off at the length limit');
     }
   });
 
@@ -193,7 +193,7 @@ describe('textModel.draftTemplate — truncation', () => {
     if (r.type === 'ok' && r.payload.kind === 'body') {
       expect(r.payload.body).not.toContain('{{');
       expect(r.payload.body).toBe(prefix);
-      expect(r.payload.warnings).toContain('Body truncated at MAX_DRAFT_RAW_BODY_CHARS');
+      expect(r.payload.warnings).toContain('The draft was cut off at the length limit');
     }
   });
 
@@ -237,5 +237,126 @@ describe('textModel.draftTemplate — truncation', () => {
       expect(r.payload.body).toContain('{{var::lens choice}}');
       expect(r.payload.warnings).toHaveLength(0);
     }
+  });
+});
+
+describe('textModel.draftTemplate — rework of an existing body', () => {
+  test('the brief carries the existing body and the change instructions; the budget grows with the body', async () => {
+    let body: Record<string, unknown> = {};
+    const up = serve(async (req) => {
+      body = (await req.json()) as Record<string, unknown>;
+      return streamed(JSON.stringify({ kind: 'body', body: 'revised', warnings: [] }));
+    });
+    const existingBody = 'A'.repeat(3000);
+    const r = await provider(up).draftTemplate(
+      { name: 'T', existingBody, description: 'make it moodier', library: emptyLibrary },
+      new AbortController().signal,
+    );
+    expect(r).toEqual({ type: 'ok', payload: { kind: 'body', body: 'revised', warnings: [] } });
+    expect(body.max_completion_tokens).toBe(5500 + 1000);
+    const user = JSON.stringify(body.messages);
+    expect(user).toContain('existing_body');
+    expect(user).toContain('make it moodier');
+  });
+
+  test('a pinned effort above low reasons through at least the enhance budget', async () => {
+    let body: Record<string, unknown> = {};
+    const up = serve(async (req) => {
+      body = (await req.json()) as Record<string, unknown>;
+      return streamed(JSON.stringify({ kind: 'body', body: 'ok', warnings: [] }));
+    });
+    await provider(up).draftTemplate(
+      { name: 'T', existingBody: '', library: emptyLibrary, reasoningEffort: 'high' },
+      new AbortController().signal,
+    );
+    expect(body.reasoning_effort).toBe('high');
+    expect(body.max_completion_tokens).toBe(36_000);
+  });
+
+  test("the user's own macros and tokens survive verbatim; new non-var or unknown tokens are still stripped", async () => {
+    const existingBody = 'A {{pick::red|blue}} coat, {{var::my_old_list}}, {{random::{{var::lens}}|wide}} and {{// note}}.';
+    const revised = 'A moody {{pick::red|blue}} coat, {{var::my_old_list}}, {{random::{{var::lens}}|wide}} and {{// note}}, {{roll::d6}} {{var::invented}} {{var::lens}}.';
+    const up = serve(() => streamed(JSON.stringify({ kind: 'body', body: revised, warnings: [] })));
+    const r = await provider(up).draftTemplate(
+      { name: 'T', existingBody, description: 'moodier', library: knownLibrary(['lens']) },
+      new AbortController().signal,
+    );
+    expect(r.type).toBe('ok');
+    if (r.type === 'ok' && r.payload.kind === 'body') {
+      expect(r.payload.body).toBe('A moody {{pick::red|blue}} coat, {{var::my_old_list}}, {{random::{{var::lens}}|wide}} and {{// note}},  invented {{var::lens}}.');
+      expect(r.payload.warnings).toEqual([
+        'Removed unknown {{var::invented}} reference',
+        'Removed 1 non-var macro token (advanced syntax — add by hand)',
+      ]);
+    }
+  });
+
+  test('a rework that edits inside an existing macro keeps the macro and its nested tokens', async () => {
+    // Most real bodies are one ai-fill wrapper, so any edit changes its text.
+    const existingBody = '{{ai-fill: a warm portrait in {{var::city}}, {{random::rain::fog}} outside, {{var::my_old_list}}}}';
+    const revised = '{{ai-fill: a cold portrait in {{var::city}}, {{random::rain::fog::snow}} outside, {{var::my_old_list}}, {{roll::d6}} {{var::invented}} {{var::lens}}}}';
+    const up = serve(() => streamed(JSON.stringify({ kind: 'body', body: revised, warnings: [] })));
+    const r = await provider(up).draftTemplate(
+      { name: 'T', existingBody, description: 'colder, add snow', library: knownLibrary(['lens']) },
+      new AbortController().signal,
+    );
+    expect(r.type).toBe('ok');
+    if (r.type === 'ok' && r.payload.kind === 'body') {
+      // The wrapper and the edited random stay; `city` and `my_old_list` are the
+      // user's own (unknown to the library); the new roll form and the invented
+      // list go, exactly as they would outside a wrapper.
+      expect(r.payload.body).toBe('{{ai-fill: a cold portrait in {{var::city}}, {{random::rain::fog::snow}} outside, {{var::my_old_list}},  invented {{var::lens}}}}');
+      expect(r.payload.warnings).toEqual([
+        'Removed unknown {{var::invented}} reference',
+        'Removed 1 non-var macro token (advanced syntax — add by hand)',
+      ]);
+    }
+  });
+
+  test('an edited comment macro keeps its form whatever its first word', async () => {
+    const existingBody = '{{ai-fill: warm {{//keep city token {{var::city}}}}}}';
+    const revised = '{{ai-fill: cold {{//retain city token {{var::city}}}}}}';
+    const up = serve(() => streamed(JSON.stringify({ kind: 'body', body: revised, warnings: [] })));
+    const r = await provider(up).draftTemplate(
+      { name: 'T', existingBody, description: 'colder', library: emptyLibrary },
+      new AbortController().signal,
+    );
+    expect(r.type).toBe('ok');
+    if (r.type === 'ok' && r.payload.kind === 'body') {
+      expect(r.payload.body).toBe(revised);
+      expect(r.payload.warnings).toEqual([]);
+    }
+  });
+
+  test('a fresh draft still loses every non-var macro, wrappers included', async () => {
+    const drafted = '{{ai-fill: a portrait in {{var::lens}}}} and {{random::a::b}}.';
+    const up = serve(() => streamed(JSON.stringify({ kind: 'body', body: drafted, warnings: [] })));
+    const r = await provider(up).draftTemplate(
+      { name: 'T', existingBody: '', description: 'a portrait', library: knownLibrary(['lens']) },
+      new AbortController().signal,
+    );
+    expect(r.type).toBe('ok');
+    if (r.type === 'ok' && r.payload.kind === 'body') {
+      expect(r.payload.body).toBe(' and .');
+      expect(r.payload.warnings).toEqual(['Removed 2 non-var macro tokens (advanced syntax — add by hand)']);
+    }
+  });
+
+  test('the length cap is the existing body plus MAX_DRAFT_RAW_BODY_CHARS', async () => {
+    const existingBody = 'B'.repeat(1500);
+    const fits = 'C'.repeat(3500);
+    const upFits = serve(() => streamed(JSON.stringify({ kind: 'body', body: fits, warnings: [] })));
+    const kept = await provider(upFits).draftTemplate(
+      { name: 'T', existingBody, description: 'longer', library: emptyLibrary },
+      new AbortController().signal,
+    );
+    expect(kept).toEqual({ type: 'ok', payload: { kind: 'body', body: fits, warnings: [] } });
+
+    const upOver = serve(() => streamed(JSON.stringify({ kind: 'body', body: fits + 'D', warnings: [] })));
+    const cut = await provider(upOver).draftTemplate(
+      { name: 'T', existingBody, description: 'longer', library: emptyLibrary },
+      new AbortController().signal,
+    );
+    expect(cut).toEqual({ type: 'ok', payload: { kind: 'body', body: fits, warnings: ['The draft was cut off at the length limit'] } });
   });
 });

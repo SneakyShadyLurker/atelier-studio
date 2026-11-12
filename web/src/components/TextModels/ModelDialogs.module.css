@@ -141,6 +141,7 @@
 }
 
 .select {
+  composes: control from '../../styles/field.module.css';
   min-height: 32px;
   box-sizing: border-box;
   padding: 0 8px;
@@ -152,12 +153,8 @@
   font-size: var(--text-xs);
 }
 
-.select:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.select[aria-invalid='true'] {
+/* Invalid keeps the danger edge at rest; focus wins while typing. */
+.select[aria-invalid='true']:not(:focus-visible) {
   border-color: var(--danger);
 }
 

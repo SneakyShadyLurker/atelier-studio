@@ -57,7 +57,20 @@ describe('GET /api/text-models', () => {
       tasks: TEXT_TASKS.map((task) => ({ task })),
       defaults: { byTask: {} },
       writers: {},
+      lockedWriters: [],
     });
+  });
+
+  test('lists the image models whose listed writer is locked, and only those', async () => {
+    const rt = testRuntime({ seedLegacyText: true });
+    const kimi = rowId(rt, 'kimi');
+    for (const imageModelId of Object.keys(rt.text.store.readWriters())) rt.text.store.setWriter(imageModelId, null);
+    rt.text.store.setWriter('img-locked', { modelId: kimi, mode: 'lock' });
+    rt.text.store.setWriter('img-preferred', { modelId: kimi, mode: 'prefer' });
+    bumpTextConfigRevision();
+    const body = await getModels(rt);
+    expect(body.writers).toEqual({ 'img-locked': kimi, 'img-preferred': kimi });
+    expect(body.lockedWriters).toEqual(['img-locked']);
   });
 
   test('is open to every signed-in user, not only prompt-library users', async () => {

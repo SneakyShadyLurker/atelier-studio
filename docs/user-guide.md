@@ -162,6 +162,18 @@ you prepare multiple prompts before generating them.
 Reordering templates, variable lists or dimensions keeps the current editor
 open, including its unsaved draft.
 
+**Draft Template** in the template editor asks a text model to write the body.
+On an empty template it asks what to draft, such as the subject, mood and
+style. On a template that already has a body it asks what to change: the text model rewrites the whole
+body, applies your instructions and keeps everything else as written, your
+tokens included. The rewrite replaces the body in the editor, and **Undo** in
+the "Template reworked" message brings the previous body back. Nothing is saved
+until you press **Save template**. The dialog also shows the **Model** and
+**Reasoning** level that write the draft. They are your **Template drafts**
+setting in **Settings**, so a change made in the dialog stays for later drafts.
+If an admin locked the prompt writer for the image model selected in the
+Composer, the dialog names that model instead and there is nothing to pick.
+
 **Enhance** asks a text model to rewrite the prompt and generates from the
 rewrite. Every press rolls the prompt's tokens afresh, rewrites that result and
 starts one batch, so you can press it repeatedly without waiting; the prompt

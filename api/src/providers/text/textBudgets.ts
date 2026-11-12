@@ -100,14 +100,17 @@ export function promptRewriteTimeoutMs(profile: TextLatencyProfile, configuredMs
 // ceiling takes ~16 MiB.
 export const PINNED_EFFORT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 
+/** An effort that reasons past the low-effort overhead the fixed budgets assume. */
+function effortAboveLow(effort: TextReasoningEffort | null | undefined): boolean {
+  return !(effort === undefined || effort === null || effort === 'none' || effort === 'minimal' || effort === 'low');
+}
+
 /** Raw-stream cap for a call carrying a user-pinned effort; default and low-or-less efforts keep `configuredBytes`. */
 export function pinnedEffortMaxResponseBytes(
   configuredBytes: number,
   effort: TextReasoningEffort | undefined,
 ): number {
-  return effort === undefined || effort === 'none' || effort === 'minimal' || effort === 'low'
-    ? configuredBytes
-    : Math.max(configuredBytes, PINNED_EFFORT_MAX_RESPONSE_BYTES);
+  return effortAboveLow(effort) ? Math.max(configuredBytes, PINNED_EFFORT_MAX_RESPONSE_BYTES) : configuredBytes;
 }
 
 /** Raw SSE byte cap; slow models' long streams would exhaust the shared 1 MiB cap first. */
@@ -142,6 +145,33 @@ export const INFER_DIMENSIONS_MAX_OUTPUT_TOKENS = 32000 + KIMI_LOW_REASONING_OVE
 // Draft-template generation: the 1500-token answer allowance plus the shared
 // low-reasoning overhead.
 export const DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS = 1500 + KIMI_LOW_REASONING_OVERHEAD_TOKENS;
+
+/** Tokens a rework's answer spends carrying the revised body back: about one per three characters. */
+function reworkBodyTokens(existingBody: string): number {
+  return Math.ceil(Array.from(existingBody).length / 3);
+}
+
+/**
+ * Output budget of one template draft. A rework answers with the whole revised
+ * body, so the existing body adds its tokens; an effort above low (the effort
+ * actually sent) reasons through at least the enhance budget.
+ */
+export function draftTemplateMaxOutputTokens(
+  existingBody: string,
+  effort: TextReasoningEffort | null | undefined,
+): number {
+  const answer = DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS + reworkBodyTokens(existingBody);
+  return effortAboveLow(effort) ? Math.max(answer, ENHANCE_MAX_OUTPUT_TOKENS) : answer;
+}
+
+// Raw SSE bytes one streamed completion token may cost, at the rate the
+// pinned-effort cap assumes (16 MiB for a 32,768-token budget).
+const STREAM_BYTES_PER_TOKEN_CEILING = PINNED_EFFORT_MAX_RESPONSE_BYTES / 32_768;
+
+/** Raw-stream cap of one template draft: `capBytes` plus room for the body a rework streams back. */
+export function draftTemplateMaxResponseBytes(capBytes: number, existingBody: string): number {
+  return capBytes + reworkBodyTokens(existingBody) * STREAM_BYTES_PER_TOKEN_CEILING;
+}
 
 // ai-fill writes at most AI_FILL_MAX_SLOTS short blanks, so it must not inherit
 // the 32k infer ceiling.

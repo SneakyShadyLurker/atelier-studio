@@ -351,7 +351,7 @@ export function installOfflineResponses(): void {
       defaults: { byTask: {} }, writers: {}, imageModels: models.map(({ id, name }) => ({ id, label: name })),
     } satisfies TextRoutingResponse));
     if (noTextModels && url.pathname === '/api/text-models') return Promise.resolve(json({
-      models: [], tasks: [], defaults: { byTask: {} }, writers: {},
+      models: [], tasks: [], defaults: { byTask: {} }, writers: {}, lockedWriters: [],
     } satisfies TextModelsResponse));
     if (url.pathname === '/api/models' && modelsFailures > 0) {
       modelsFailures -= 1;

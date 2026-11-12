@@ -33,7 +33,7 @@ function settings(rows: Partial<Record<string, Omit<TaskRow, 'task'>>> = {}): Te
     models: MODELS,
     tasks: TEXT_TASKS.map((task) => ({ task, effectiveModelId: 'kimi', ...rows[task] })),
     defaults: { default: 'kimi', byTask: {} },
-    writers: {},
+    writers: {}, lockedWriters: [],
   };
 }
 

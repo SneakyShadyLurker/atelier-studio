@@ -1,54 +1,16 @@
-import type { PublicTextModel, TaskRow, TextModelsResponse, TextReasoningEffort } from '@atelier/shared';
+import type { TaskRow } from '@atelier/shared';
 import { TEXT_REASONING_EFFORT_LABELS, TEXT_TASK_LABELS, TEXT_TASKS } from '@atelier/shared';
 import { useDeferredValue, useMemo, ViewTransition } from 'react';
 import { describeError } from '../../lib/errorCopy';
 import { useAtelierStore } from '../../store/atelier';
 import { usePendingTaskPicks, useSetTaskPick, useTextModels } from '../../hooks/useTextModels';
 import { useTextModelGate } from '../../hooks/useTextModelGate';
-import ChipSelect, { type ChipSelectOption } from '../Composer/ChipSelect';
+import { DEFAULT_PICK, defaultModelId, effortOptions, modelOptions, rowPick, type EffortValue } from '../../lib/textModelPick';
+import ChipSelect from '../Composer/ChipSelect';
 import { LoadingState, ErrorState } from '../StateView';
 import ModelResolutionSection from './ModelResolutionSection';
 import ModelStepsSection from './ModelStepsSection';
 import styles from './SettingsPanel.module.css';
-
-// Model ids are never empty, so '' stands for "Use default".
-const DEFAULT_PICK = '';
-type EffortValue = 'default' | TextReasoningEffort;
-
-// Models grouped by provider in first-appearance order; offline ones stay
-// listed but dimmed, since the server refuses to save them.
-function modelOptions(models: readonly PublicTextModel[], defaultName: string | undefined): readonly ChipSelectOption<string>[] {
-  const byProvider = new Map<string, PublicTextModel[]>();
-  for (const model of models) {
-    const group = byProvider.get(model.providerName);
-    if (group) group.push(model);
-    else byProvider.set(model.providerName, [model]);
-  }
-  return [
-    { value: DEFAULT_PICK, label: defaultName === undefined ? 'Use default' : `Use default (${defaultName})` },
-    ...[...byProvider].flatMap(([providerName, group]) => group.map((model) => (model.status === 'offline'
-      ? { value: model.id, label: model.displayName, group: providerName, hint: 'offline', disabled: true }
-      : { value: model.id, label: model.displayName, group: providerName }))),
-  ];
-}
-
-function effortOptions(levels: readonly TextReasoningEffort[]): readonly ChipSelectOption<EffortValue>[] {
-  return [
-    { value: 'default', label: 'Default' },
-    ...levels.map((value) => ({ value, label: TEXT_REASONING_EFFORT_LABELS[value] })),
-  ];
-}
-
-// The model "Use default" resolves to. Without a usable pick the server's
-// effective model already is the default (after its own fallbacks); otherwise
-// the first listed fallback that is not offline, as the resolver skips those.
-function defaultModelId(data: TextModelsResponse, row: TaskRow, byId: ReadonlyMap<string, PublicTextModel>): string | undefined {
-  const configured = [data.defaults.byTask[row.task], data.defaults.default].find((id) => {
-    const model = id === undefined ? undefined : byId.get(id);
-    return model !== undefined && model.status !== 'offline';
-  });
-  return row.pick === undefined || row.pickState === 'offline' ? row.effectiveModelId ?? configured : configured;
-}
 
 function TextModelsSection() {
   const settings = useTextModels();
@@ -107,18 +69,11 @@ function TextModelsSection() {
           const label = TEXT_TASK_LABELS[row.task];
           const defaultId = defaultModelId(data, row, byId);
           const defaultName = defaultId === undefined ? undefined : byId.get(defaultId)?.displayName;
-          // A pick the response does not list shows as the default instead of breaking the panel.
-          const picked = row.pick === undefined ? undefined : byId.get(row.pick);
-          const offlinePick = picked !== undefined && row.pickState === 'offline';
           // An effort belongs to a pick the task actually uses; the default keeps its own.
-          const activePick = picked !== undefined && !offlinePick ? picked : undefined;
+          const { picked, offlinePick, activePick, effort } = rowPick(row, byId);
           const display = picked !== undefined
             ? picked.displayName
             : defaultName === undefined ? 'Default' : `Default (${defaultName})`;
-          // Only an effort the picked model still offers is in use.
-          const effort: EffortValue = activePick !== undefined && row.effort !== undefined && activePick.reasoningLevels.includes(row.effort)
-            ? row.effort
-            : 'default';
           const effortDisplay = effort === 'default'
             ? 'Default effort'
             : `${TEXT_REASONING_EFFORT_LABELS[effort]} effort`;
@@ -127,7 +82,7 @@ function TextModelsSection() {
             <div key={row.task} className={styles.row}>
               <div className={styles.rowMain}>
                 <p className={styles.rowLabel}>{label}</p>
-                {offlinePick && (
+                {offlinePick && picked !== undefined && (
                   <p className={styles.rowNote}>
                     {`${picked.displayName} is offline right now; ${label} is using the default.`}
                   </p>

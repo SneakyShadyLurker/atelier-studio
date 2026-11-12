@@ -104,7 +104,12 @@ export const DraftTemplateRequestSchema = z.object({
   name: NameSchema,
   existingBody: z.string().check(maxUtf16Length(TEMPLATE_BODY_HARD_MAX)),
   description: z.string().trim().min(1).check(maxUtf16Length(TEMPLATE_DESCRIPTION_MAX_CHARS)).optional(),
-}).strict();
+}).strict().refine(
+  // A filled body is reworked from the user's change instructions; without them
+  // (a stale tab on the old continue-the-body flow) the answer would be a guess.
+  (body) => body.existingBody.trim() === '' || body.description !== undefined,
+  { message: 'Say what to change in the template', path: ['description'] },
+);
 
 // Only modelId provides image context. Server unconditionally recomputes
 // the prior diagnosis from its own DB on every call — never trusts the

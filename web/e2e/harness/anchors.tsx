@@ -445,7 +445,7 @@ const TEXT_MODELS: TextModelsResponse = {
     return { task, effectiveModelId: 'kimi' };
   }),
   defaults: { default: 'kimi', byTask: {} },
-  writers: {},
+  writers: {}, lockedWriters: [],
 };
 
 function SettingsCase() {

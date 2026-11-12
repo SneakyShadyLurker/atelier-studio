@@ -143,6 +143,7 @@
 }
 
 .stepsInput {
+  composes: control from '../../styles/field.module.css';
   width: 64px;
   height: 36px;
   box-sizing: border-box;
@@ -157,13 +158,12 @@
 }
 
 .stepsInput[data-tuned='true'] {
-  border-color: var(--ink);
   font-weight: 600;
 }
 
-.stepsInput:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+/* Tuned marks the edge at rest; focus wins while typing. */
+.stepsInput[data-tuned='true']:not(:focus-visible) {
+  border-color: var(--ink);
 }
 
 .stepsInput:disabled {

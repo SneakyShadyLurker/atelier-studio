@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import type { PromptTemplate } from '@atelier/shared';
+import type { PromptTemplate, TextModelsResponse } from '@atelier/shared';
+import { TEXT_TASKS } from '@atelier/shared';
 import { useAtelierStore } from '../../store/atelier';
 import TemplateEditor from './TemplateEditor';
 
@@ -20,6 +21,48 @@ function draftDone(payload: unknown): Response {
   return new Response(`event: done\ndata: ${JSON.stringify(payload)}\n\n`, {
     status: 200, headers: { 'content-type': 'text/event-stream' },
   });
+}
+
+
+const LISTING: TextModelsResponse = {
+  models: [
+    { id: 'kimi', displayName: 'Kimi K3', providerName: 'CLIProxyAPI', vision: true, reasoningLevels: ['low', 'high'], status: 'available' },
+    { id: 'grok', displayName: 'Grok 4.7', providerName: 'CLIProxyAPI', vision: false, reasoningLevels: ['low', 'medium'], status: 'available' },
+    { id: 'scout', displayName: 'Llama 4 Scout', providerName: 'Ollama', vision: true, reasoningLevels: [], status: 'available' },
+  ],
+  tasks: TEXT_TASKS.map((task) => (task === 'template-draft'
+    ? { task, pick: 'kimi', effectiveModelId: 'kimi', pickState: 'active' }
+    : { task, effectiveModelId: 'kimi' })),
+  defaults: { default: 'kimi', byTask: {} },
+  writers: { 'img-lock': 'scout' },
+  lockedWriters: ['img-lock'],
+};
+
+// Routes the editor's requests: the text-model listing, the task-pick PUT and
+// the draft POST, recording what was sent and in which order.
+function routedFetch(options: { draft?: unknown; putStatus?: number } = {}) {
+  const calls = { order: [] as string[], puts: [] as unknown[], drafts: [] as unknown[] };
+  globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) as unknown : undefined;
+    if (url.endsWith('/text-models/tasks/template-draft') && init?.method === 'PUT') {
+      calls.order.push('PUT template-draft');
+      calls.puts.push(body);
+      return Promise.resolve(options.putStatus === undefined ? Response.json(LISTING) : Response.json({ error: 'nope' }, { status: options.putStatus }));
+    }
+    if (url.endsWith('/text-models')) {
+      calls.order.push('GET text-models');
+      return Promise.resolve(Response.json(LISTING));
+    }
+    if (url.endsWith('/prompts/templates/draft')) {
+      calls.order.push('POST draft');
+      const { modelId: _imageModel, ...rest } = body as Record<string, unknown>;
+      calls.drafts.push(rest);
+      return Promise.resolve(draftDone(options.draft ?? { kind: 'body', body: 'REVISED', warnings: [] }));
+    }
+    return Promise.resolve(new Response('not found', { status: 404 }));
+  }) as unknown as typeof fetch;
+  return calls;
 }
 
 describe('TemplateEditor — AI Draft Template integration', () => {
@@ -66,24 +109,134 @@ describe('TemplateEditor — AI Draft Template integration', () => {
     });
   });
 
-  test('non-empty body continuation: joined with \\n\\n when no trailing whitespace', async () => {
-    globalThis.fetch = mock(() => Promise.resolve(draftDone({ kind: 'body', body: 'CONT', warnings: [] }))) as unknown as typeof fetch;
-    wrap(<TemplateEditor template={{ id: 't-1', name: 'X', body: 'existing' } as unknown as PromptTemplate} variableLists={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
-    await waitFor(() => {
-      const ta = screen.getByRole<HTMLTextAreaElement>('textbox', { name: /^body$/i });
-      expect(ta.value).toBe('existing\n\nCONT');
-    });
+  test('the Draft button tooltip names both jobs', () => {
+    wrap(<TemplateEditor template={null} variableLists={[]} initialName="MyTpl" />);
+    expect(screen.getByRole('button', { name: /draft template/i }).getAttribute('data-tip'))
+      .toBe('Describe what to draft or what to change, and pick the text model that writes it');
   });
 
-  test('non-empty body continuation: no separator when existing ends in whitespace', async () => {
-    globalThis.fetch = mock(() => Promise.resolve(draftDone({ kind: 'body', body: 'CONT', warnings: [] }))) as unknown as typeof fetch;
+  test('a seed draft fills the empty body without a rework toast', async () => {
+    useAtelierStore.setState({ toasts: [] });
+    globalThis.fetch = mock(() => Promise.resolve(draftDone({ kind: 'body', body: 'GENERATED', warnings: [] }))) as unknown as typeof fetch;
+    wrap(<TemplateEditor template={null} variableLists={[]} initialName="MyTpl" />);
+    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: /description/i }), { target: { value: 'noir' } });
+    fireEvent.click(screen.getByRole('button', { name: /generate template/i }));
+    await waitFor(() => { expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: /^body$/i }).value).toBe('GENERATED'); });
+    expect(useAtelierStore.getState().toasts.some((t) => t.text === 'Template reworked')).toBe(false);
+  });
+
+  test('a filled body opens the rework dialog and sends nothing until submitted', async () => {
+    const calls = routedFetch();
+    wrap(<TemplateEditor template={{ id: 't-1', name: 'X', body: 'existing' } as unknown as PromptTemplate} variableLists={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+    expect(screen.getByRole('heading', { name: 'Rework the template' })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(calls.drafts).toEqual([]);
+  });
+
+  test('rework replaces the body and Undo in its toast restores the previous one', async () => {
+    useAtelierStore.setState({ toasts: [] });
+    const calls = routedFetch({ draft: { kind: 'body', body: 'REVISED', warnings: [] } });
     wrap(<TemplateEditor template={{ id: 't-1', name: 'X', body: 'existing ' } as unknown as PromptTemplate} variableLists={[]} />);
     fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
-    await waitFor(() => {
-      const ta = screen.getByRole<HTMLTextAreaElement>('textbox', { name: /^body$/i });
-      expect(ta.value).toBe('existing CONT');
-    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Change instructions' }), { target: { value: 'moodier' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rework template' }));
+    const ta = () => screen.getByRole<HTMLTextAreaElement>('textbox', { name: /^body$/i });
+    await waitFor(() => { expect(ta().value).toBe('REVISED'); });
+    expect(calls.drafts).toEqual([{ name: 'X', existingBody: 'existing', description: 'moodier' }]);
+    const toast = useAtelierStore.getState().toasts.find((t) => t.text === 'Template reworked');
+    expect(toast?.tone).toBe('success');
+    expect(toast?.action?.label).toBe('Undo');
+    toast?.action?.onClick();
+    await waitFor(() => { expect(ta().value).toBe('existing '); });
+  });
+
+  test('a changed model choice is saved before the draft request; an unchanged one is not', async () => {
+    const calls = routedFetch({ draft: { kind: 'body', body: 'REVISED', warnings: [] } });
+    wrap(<TemplateEditor template={{ id: 't-1', name: 'X', body: 'existing' } as unknown as PromptTemplate} variableLists={[]} />);
+    await waitFor(() => { expect(calls.order).toContain('GET text-models'); });
+    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+    const model = await screen.findByLabelText<HTMLSelectElement>('Model');
+    await waitFor(() => { expect(model.disabled).toBe(false); });
+    fireEvent.change(model, { target: { value: 'grok' } });
+    fireEvent.change(screen.getByLabelText('Reasoning'), { target: { value: 'medium' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Change instructions' }), { target: { value: 'moodier' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rework template' }));
+    await waitFor(() => { expect(calls.drafts).toHaveLength(1); });
+    expect(calls.puts).toEqual([{ modelId: 'grok', effort: 'medium' }]);
+    expect(calls.order.filter((entry) => entry !== 'GET text-models')).toEqual(['PUT template-draft', 'POST draft']);
+  });
+
+  test('cancelling the dialog saves no model choice; reopening shows the saved pick', async () => {
+    const calls = routedFetch();
+    wrap(<TemplateEditor template={{ id: 't-1', name: 'X', body: 'existing' } as unknown as PromptTemplate} variableLists={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+    const model = await screen.findByLabelText<HTMLSelectElement>('Model');
+    await waitFor(() => { expect(model.disabled).toBe(false); });
+    fireEvent.change(model, { target: { value: 'grok' } });
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    // Dismissal rides the shared exit transition before the dialog unmounts.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(screen.queryByRole('heading', { name: 'Rework the template' }) === null).toBe(true);
+    expect(calls.puts).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+    expect((await screen.findByLabelText<HTMLSelectElement>('Model')).value).toBe('kimi');
+  });
+
+  test('a failed model save shows inline and sends no draft', async () => {
+    const calls = routedFetch({ putStatus: 500 });
+    wrap(<TemplateEditor template={{ id: 't-1', name: 'X', body: 'existing' } as unknown as PromptTemplate} variableLists={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+    const model = await screen.findByLabelText<HTMLSelectElement>('Model');
+    await waitFor(() => { expect(model.disabled).toBe(false); });
+    fireEvent.change(model, { target: { value: 'grok' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Change instructions' }), { target: { value: 'moodier' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rework template' }));
+    await waitFor(() => { expect(screen.getByRole('status').textContent).not.toBe(''); });
+    expect(screen.getByRole('heading', { name: 'Rework the template' })).toBeTruthy();
+    expect(calls.drafts).toEqual([]);
+  });
+
+  test('a locked writer for the Composer image model shows the fixed note instead of the selects', async () => {
+    const previous = useAtelierStore.getState().draft;
+    useAtelierStore.setState({ draft: { ...previous, modelId: 'img-lock' } });
+    try {
+      routedFetch();
+      wrap(<TemplateEditor template={{ id: 't-1', name: 'X', body: 'existing' } as unknown as PromptTemplate} variableLists={[]} />);
+      fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+      expect(await screen.findByText('Prompts for this image model are always written by Llama 4 Scout.')).toBeTruthy();
+      expect(screen.queryByLabelText('Model')).toBeNull();
+    } finally {
+      useAtelierStore.setState({ draft: previous });
+    }
+  });
+
+  test('starting the next draft retires the previous rework\'s Undo', async () => {
+    useAtelierStore.setState({ toasts: [] });
+    routedFetch({ draft: { kind: 'body', body: 'REVISED', warnings: [] } });
+    wrap(<TemplateEditor template={{ id: 't-1', name: 'X', body: 'existing' } as unknown as PromptTemplate} variableLists={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Change instructions' }), { target: { value: 'moodier' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rework template' }));
+    await waitFor(() => { expect(useAtelierStore.getState().toasts.some((t) => t.text === 'Template reworked')).toBe(true); });
+    // The second dialog captures the revised body; an Undo pressed under it
+    // would put the old body back while the request reworks the new one.
+    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+    expect(screen.getByRole('textbox', { name: 'Change instructions' })).toBeTruthy();
+    expect(useAtelierStore.getState().toasts.some((t) => t.text === 'Template reworked')).toBe(false);
+  });
+
+  test('unmounting the editor takes its Undo toast with it', async () => {
+    useAtelierStore.setState({ toasts: [] });
+    routedFetch({ draft: { kind: 'body', body: 'REVISED', warnings: [] } });
+    const view = wrap(<TemplateEditor template={{ id: 't-1', name: 'X', body: 'existing' } as unknown as PromptTemplate} variableLists={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: /draft template/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Change instructions' }), { target: { value: 'moodier' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rework template' }));
+    await waitFor(() => { expect(useAtelierStore.getState().toasts.some((t) => t.text === 'Template reworked')).toBe(true); });
+    view.unmount();
+    expect(useAtelierStore.getState().toasts.some((t) => t.text === 'Template reworked')).toBe(false);
   });
 
   test('each warning from the AI response fires a separate soft toast', async () => {
@@ -145,7 +298,7 @@ describe('TemplateEditor — no text model', () => {
     globalThis.fetch = mock((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       requests.push(url);
-      if (url.endsWith('/text-models')) return Promise.resolve(Response.json({ models: [], tasks: [], defaults: { byTask: {} }, writers: {} }));
+      if (url.endsWith('/text-models')) return Promise.resolve(Response.json({ models: [], tasks: [], defaults: { byTask: {} }, writers: {}, lockedWriters: [] }));
       return Promise.resolve(new Response('not found', { status: 404 }));
     }) as unknown as typeof fetch;
     wrap(<TemplateEditor template={null} variableLists={[]} initialName="MyTpl" />);

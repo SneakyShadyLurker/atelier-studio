@@ -1,0 +1,58 @@
+/* Text-entry focus: the one focus treatment for every text input, textarea
+   and select. A field shows focus as a single crisp edge that hugs it: the
+   1px border turns --focus-ring and a 1px outline at offset 0 sits flush
+   outside it, so the two read as one 2px edge on the field's own radius. No
+   gap, no second frame. Everything that is not a text-entry control keeps the
+   offset ring (buttons.module.css, global.css).
+   .control  a field that draws its own border (compose it into the field's class)
+   .frame    a wrapper that frames a borderless field (dialog .fieldWell); the
+             wrapper draws the edge and the field inside draws none
+   .bare     a borderless inline field with no frame (inline title, rail
+             search): a 2px underline inside its box instead of an edge
+   Every selector here outranks the bare global :focus-visible ring (0,1,0)
+   in global.css, which loads after the CSS modules, so the result does not
+   depend on stylesheet order. Owners whose rest state recolours the border
+   (invalid, tuned) scope it to :not(:focus-visible): focus wins while typing.
+   No motion of its own; an owner's border-color transition may ease it. */
+
+.control:focus-visible,
+.frame:has(:is(input, textarea, select):focus-visible) {
+  border-color: var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 0;
+}
+
+.frame :is(input, textarea, select):focus-visible {
+  outline: none;
+}
+
+.bare:focus-visible {
+  outline: none;
+  box-shadow: inset 0 -2px 0 var(--focus-ring);
+}
+
+@media (prefers-contrast: more) {
+  .control:focus-visible,
+  .frame:has(:is(input, textarea, select):focus-visible) {
+    outline-width: 2px;
+  }
+
+  .bare:focus-visible {
+    box-shadow: inset 0 -3px 0 var(--focus-ring);
+  }
+}
+
+/* Forced colours drop box-shadow and repaint borders, so the edge and the
+   bare field's mark both become a Highlight outline. */
+@media (forced-colors: active) {
+  .control:focus-visible,
+  .frame:has(:is(input, textarea, select):focus-visible) {
+    border-color: Highlight;
+    outline-color: Highlight;
+  }
+
+  .bare:focus-visible {
+    outline: 1px solid Highlight;
+    outline-offset: 0;
+  }
+}

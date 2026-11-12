@@ -471,7 +471,7 @@ describe('BatchView tile memoization (SSE re-render path)', () => {
     const clip: Tile = { id: 'clip-1', status: 'done', seed: 1, url: '/clip.mp4', ext: 'mp4', mime: 'video/mp4', completedAt: Date.now() - 120_000 };
     const standalone: Batch = { ...batch, id: 'video-batch', modelId: videoModel.id, modelLabel: videoModel.name, tiles: [clip] };
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    seedTextModelGate(client, { models: { models: [], tasks: [], defaults: { byTask: {} }, writers: {} } });
+    seedTextModelGate(client, { models: { models: [], tasks: [], defaults: { byTask: {} }, writers: {}, lockedWriters: [] } });
     const onTellStoryTile = mock(() => Promise.resolve(true));
     render(
       <BatchView

@@ -8,5 +8,6 @@ export const MAX_PROMPT_CHARS = 6000;
 export const PROMPT_LIBRARY_NAME_MAX_CHARS = 64;
 // Free-text description seeding an AI list draft.
 export const LIST_DESCRIPTION_MAX_CHARS = 2_000;
-// Free-text description seeding an AI template draft.
-export const TEMPLATE_DESCRIPTION_MAX_CHARS = 500;
+// Free-text description seeding an AI template draft, or the change
+// instructions for reworking an existing template body.
+export const TEMPLATE_DESCRIPTION_MAX_CHARS = 2_000;

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import { allowJevForProviderTests, resetJevForProviderTests } from '../test/jev-fixture';
 import { MAX_PROMPT_CHARS } from '@atelier/shared';
@@ -32,7 +33,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.stop(true)));
 });
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
+  const server = Bun.serve({ port: 0, hostname: TEST_SERVER_HOSTNAME, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }

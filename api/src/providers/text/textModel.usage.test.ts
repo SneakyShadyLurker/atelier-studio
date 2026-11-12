@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import type { LanguageModelV4, LanguageModelV4StreamPart, LanguageModelV4Usage, SharedV4Warning } from '@ai-sdk/provider';
 import { restoreFetch } from '../../test/helpers';
 import { hostPortProbeResponse, isHostPortProbe } from '../../test/hostProbe';
@@ -31,6 +32,7 @@ function serveHeldOpen(frames: readonly string[], captured?: Captured): { url: s
   const released = new Promise<void>((resolve) => { release = resolve; });
   const server = Bun.serve({
     port: 0,
+    hostname: TEST_SERVER_HOSTNAME,
     async fetch(req) {
       if (isHostPortProbe(req)) return hostPortProbeResponse();
       captured?.bodies.push(await req.json() as Record<string, unknown>);
@@ -50,6 +52,7 @@ function serveHeldOpen(frames: readonly string[], captured?: Captured): { url: s
 function serveResetAfter(frames: readonly string[]): string {
   const server = Bun.serve({
     port: 0,
+    hostname: TEST_SERVER_HOSTNAME,
     fetch(req) {
       if (isHostPortProbe(req)) return hostPortProbeResponse();
       return new Response(new ReadableStream<Uint8Array>({

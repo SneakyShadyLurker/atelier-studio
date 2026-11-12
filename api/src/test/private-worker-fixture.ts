@@ -1,4 +1,4 @@
-import { privateWorkerTestCa, privateWorkerTestTls, privateWorkerTestToken } from './private-worker-tls';
+import { privateWorkerTestCa, privateWorkerTestToken } from './private-worker-tls';
 import allowedNodes from '../../../infra/comfyui/atelier_private/allowed_nodes.json';
 
 export const currentWorkerPrivacy = {
@@ -13,7 +13,7 @@ export const currentWorkerPrivacy = {
 export const TEST_EXECUTION_TIMEOUT_MS = 60 * 60 * 1_000;
 
 export const privateWorkerTestPrivacy = { ca: privateWorkerTestCa, token: privateWorkerTestToken };
-export { privateWorkerTestTls };
+export { privateWorkerTestServerOptions } from './private-worker-tls';
 
 /** Shared authenticated readiness/lease routes for local adapter fixtures. */
 export function privateWorkerFixture() {

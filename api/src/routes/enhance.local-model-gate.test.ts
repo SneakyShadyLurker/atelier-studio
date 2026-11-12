@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import { parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds } from '../test/helpers';
 import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
@@ -39,6 +40,7 @@ const servers: Bun.Server<unknown>[] = [];
 function serveCapture(requests: CapturedRequest[]): string {
   const server = Bun.serve({
     port: 0,
+    hostname: TEST_SERVER_HOSTNAME,
     async fetch(request) {
       if (isHostPortProbe(request)) return hostPortProbeResponse();
       requests.push((await request.json()) as CapturedRequest);

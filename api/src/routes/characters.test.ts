@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import type { Database } from 'bun:sqlite';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import { allowJevForProviderTests, resetJevForProviderTests } from '../test/jev-fixture';
@@ -27,6 +28,7 @@ afterEach(async () => {
 function serveCapture(requests: Record<string, unknown>[]): string {
   const server = Bun.serve({
     port: 0,
+    hostname: TEST_SERVER_HOSTNAME,
     async fetch(request) {
       requests.push((await request.json()) as Record<string, unknown>);
       return new Response('data: [DONE]\n\n', {
@@ -51,6 +53,7 @@ function serveByModel(
   const finishFrame = (reason: string): string => `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: reason }] })}\n\n`;
   const server = Bun.serve({
     port: 0,
+    hostname: TEST_SERVER_HOSTNAME,
     async fetch(request) {
       const body = (await request.json()) as Record<string, unknown>;
       requests.push(body);

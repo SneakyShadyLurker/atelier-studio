@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import { TaskCancelledError } from 'cockatiel';
 import type { VariableList } from '@atelier/shared';
@@ -300,6 +301,7 @@ describe('POST /api/prompts/dimensions/infer', () => {
     const content = JSON.stringify({ ops: [] });
     const server = Bun.serve({
       port: 0,
+      hostname: TEST_SERVER_HOSTNAME,
       async fetch(req) {
         if (new URL(req.url).pathname !== '/v1/chat/completions') return new Response('not found', { status: 404 });
         efforts.push((await req.json() as { reasoning_effort?: unknown }).reasoning_effort);

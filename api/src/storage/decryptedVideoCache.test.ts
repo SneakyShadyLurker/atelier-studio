@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import { testRuntime } from '../test/helpers';
 import { writeAtomic } from './files';
 import { acquireDecryptedVideo, resetDecryptedVideoCacheForTests, sweepDecryptedVideoCache, videoCacheBudgetForTests, VIDEO_CACHE_BUDGET_BYTES } from './decryptedVideoCache';
@@ -152,7 +153,7 @@ describe('decrypted video playback cache', () => {
     const { config } = testRuntime();
     const id = crypto.randomUUID();
     await writeAtomic(config.DATA_DIR, 'images', 'alice', id, 'mp4', new Uint8Array([1, 2, 3, 4]));
-    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (request) => {
+    const server = Bun.serve({ hostname: TEST_SERVER_HOSTNAME, port: 0, fetch: async (request) => {
       const video = await acquireDecryptedVideo(config.DATA_DIR, 'alice', id, 'mp4');
       if (!video) throw new Error('missing cached video');
       return videoResponse(video, request);

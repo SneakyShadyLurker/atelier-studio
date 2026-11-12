@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import type { Database } from 'bun:sqlite';
 import { existsSync, unlinkSync } from 'node:fs';
 import { adoptStandaloneBatch, appendSegment, markReady } from '../db/sequences';
@@ -268,7 +269,7 @@ describe('video sequence routes and submit validation', () => {
     let calls = 0;
     const observedBodies: boolean[] = [];
     setLastFrameRunnerForTests(() => { calls += 1; return Promise.resolve(pngBytes()); });
-    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: (request) => {
+    const server = Bun.serve({ hostname: TEST_SERVER_HOSTNAME, port: 0, fetch: (request) => {
       observedBodies.push(request.body !== null);
       return runtime.app.fetch(request);
     } });

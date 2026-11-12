@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import { type EnhanceCallOptions } from './featureHelpers';
 import { FINISH_GRACE_MS } from './textModel';
 import { restoreFetch } from '../../test/helpers';
@@ -19,7 +20,7 @@ afterEach(async () => {
 });
 
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
+  const server = Bun.serve({ port: 0, hostname: TEST_SERVER_HOSTNAME, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }

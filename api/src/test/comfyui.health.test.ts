@@ -3,7 +3,7 @@ import type { Provider, HealthResult } from '../providers/types';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createComfyuiProvider } from '../providers/comfyui';
-import { privateWorkerTestCa, privateWorkerTestTls, privateWorkerTestToken } from './private-worker-tls';
+import { privateWorkerTestCa, privateWorkerTestServerOptions, privateWorkerTestToken } from './private-worker-tls';
 import { currentWorkerPrivacy, privateWorkerFixture, privateWorkerTestPrivacy } from './private-worker-fixture';
 
 function checkHealth(p: Provider, signal: AbortSignal): Promise<HealthResult> {
@@ -14,7 +14,7 @@ function checkHealth(p: Provider, signal: AbortSignal): Promise<HealthResult> {
 function startInventoryMock(opts: { files: string[]; ready?: boolean; clipTypes?: string[] }): { baseUrl: string; stop: () => void } {
   const worker = privateWorkerFixture();
   const server = Bun.serve({
-    port: 0, tls: privateWorkerTestTls,
+    port: 0, ...privateWorkerTestServerOptions,
     fetch(req) {
       if (new URL(req.url).pathname === '/atelier/v1/privacy' && opts.ready === false) return new Response(null, { status: 503 });
       const handled = worker.handle(req);
@@ -96,12 +96,33 @@ describe('per-model health readiness', () => {
 });
 
 describe('private worker health readiness', () => {
+  test('private worker reserves the IPv4 loopback endpoint used by clients', async () => {
+    const host = startInventoryMock({ files: [] });
+    let conflicting: ReturnType<typeof Bun.serve> | undefined;
+    try {
+      // An implicit localhost bind can coexist with a different IPv4 listener
+      // on the same port. Clients using 127.0.0.1 would reach that listener.
+      expect(() => {
+        conflicting = Bun.serve({
+          hostname: '127.0.0.1', port: Number(new URL(host.baseUrl).port),
+          fetch() { return new Response('unrelated plaintext listener'); },
+        });
+      }).toThrow(/in use/);
+      expect(await checkHealth(createComfyuiProvider({
+        ...BASE_CONFIG, baseUrl: host.baseUrl, requiredModelFiles: [],
+      }), AbortSignal.timeout(1_000))).toEqual({ ok: true });
+    } finally {
+      await conflicting?.stop(true);
+      host.stop();
+    }
+  });
+
   function startPrivateHost(opts: {
     ready?: boolean; file?: boolean; node?: boolean; clip?: boolean; inventoryStatus?: number;
   } = {}) {
     const calls: string[] = [];
     const server = Bun.serve({
-      port: 0, tls: privateWorkerTestTls,
+      port: 0, ...privateWorkerTestServerOptions,
       fetch(req) {
         const path = new URL(req.url).pathname;
         calls.push(path);
@@ -184,7 +205,7 @@ describe('terminal node class readiness', () => {
   function objectInfoMock(opts: { files: string[]; includeWsNode: boolean }): { baseUrl: string; stop: () => void } {
     const worker = privateWorkerFixture();
     const server = Bun.serve({
-      port: 0, tls: privateWorkerTestTls,
+      port: 0, ...privateWorkerTestServerOptions,
       fetch(req) {
         const handled = worker.handle(req);
         if (handled) return handled;
@@ -280,7 +301,7 @@ describe('extend graph readiness', () => {
       const worker = privateWorkerFixture();
       const classes = ['AtelierSaveImages', 'MiniMaxH3AddGuide', 'GetVideoComponents', 'AtelierLoadVideo', 'AtelierSaveVideo'];
       const server = Bun.serve({
-        port: 0, tls: privateWorkerTestTls,
+        port: 0, ...privateWorkerTestServerOptions,
         fetch(req) {
           const handled = worker.handle(req);
           if (handled) return handled;
@@ -331,7 +352,7 @@ describe('mid-graph node class readiness', () => {
   function hostMock(registered: readonly string[]): { baseUrl: string; stop: () => void } {
     const worker = privateWorkerFixture();
     const server = Bun.serve({
-      port: 0, tls: privateWorkerTestTls,
+      port: 0, ...privateWorkerTestServerOptions,
       fetch(req) {
         const handled = worker.handle(req);
         if (handled) return handled;

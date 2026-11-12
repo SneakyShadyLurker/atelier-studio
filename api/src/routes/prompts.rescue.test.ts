@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
 import { type RescueDimensionArgs, type TestTextFeatureProvider } from '../providers/text/featureHelpers';
@@ -306,6 +307,7 @@ describe('POST /api/prompts/dimensions/rescue', () => {
     const efforts: unknown[] = [];
     const server = Bun.serve({
       port: 0,
+      hostname: TEST_SERVER_HOSTNAME,
       async fetch(request) {
         if (new URL(request.url).pathname !== '/v1/chat/completions') return new Response('not found', { status: 404 });
         efforts.push((await request.json() as { reasoning_effort?: unknown }).reasoning_effort);

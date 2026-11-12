@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import type { Server } from 'bun';
 import type { CharacterCardKind } from '@atelier/shared';
 import { ephemeraEnabled, loadConfig, type EphemeraConfig } from '../../config';
@@ -17,12 +18,12 @@ afterEach(async () => {
 });
 
 function serve(handler: (req: Request) => Response | Promise<Response>): EphemeraConfig {
-  server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: handler });
+  server = Bun.serve({ port: 0, hostname: TEST_SERVER_HOSTNAME, fetch: handler });
   const config = loadConfig({
     CLIPROXY_BASE_URL: 'http://127.0.0.1:1',
     CLIPROXY_TOKEN: 'stub',
     DATA_DIR: '/tmp/atelier-ephemera-client-test',
-    EPHEMERA_BASE_URL: server.url.origin,
+    EPHEMERA_BASE_URL: `http://${TEST_SERVER_HOSTNAME}:${server.port}`,
     EPHEMERA_INTEGRATION_KEY: KEY,
     EPHEMERA_ORIGIN: ORIGIN,
   });

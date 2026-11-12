@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../../test/server';
 import { boundedFetch, setTextFetchForTests, TextResponseTooLargeError } from './fetch';
 
 let server: ReturnType<typeof Bun.serve>;
@@ -7,7 +8,7 @@ let origin = '';
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
-    hostname: '127.0.0.1',
+    hostname: TEST_SERVER_HOSTNAME,
     fetch(req) {
       const path = new URL(req.url).pathname;
       if (path === '/redirect') return new Response(null, { status: 302, headers: { location: '/small' } });

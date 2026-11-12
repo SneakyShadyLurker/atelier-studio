@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from './server';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateHybridIdentity, identityToRecipient } from 'age-encryption';
@@ -183,7 +184,7 @@ describe('encrypted video playback', () => {
     await writeAtomic(runtime.config.DATA_DIR, 'images', 'alice', tileId, 'mp4', clip);
 
     // Exercise Range and leased-body completion through a real listener.
-    const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: runtime.app.fetch });
+    const server = Bun.serve({ port: 0, hostname: TEST_SERVER_HOSTNAME, fetch: runtime.app.fetch });
     try {
       const url = `http://127.0.0.1:${server.port}/api/img/${tileId}`;
       const ranged = await fetch(url, { headers: { 'Remote-User': 'alice', Range: 'bytes=100000-100099' } });

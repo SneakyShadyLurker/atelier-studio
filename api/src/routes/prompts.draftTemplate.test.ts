@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { TEST_SERVER_HOSTNAME } from '../test/server';
 import { setTextModelProviderForTests } from '../providers/text/registry';
 import type { DraftTemplateResponse, VariableList } from '@atelier/shared';
 import { TEMPLATE_DESCRIPTION_MAX_CHARS } from '@atelier/shared/prompt-limits';
@@ -16,7 +17,7 @@ afterEach(async () => {
 });
 
 function serve(handler: (req: Request) => Response | Promise<Response>): string {
-  const server = Bun.serve({ port: 0, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
+  const server = Bun.serve({ port: 0, hostname: TEST_SERVER_HOSTNAME, fetch: (req) => (isHostPortProbe(req) ? hostPortProbeResponse() : handler(req)) });
   servers.push(server);
   return `http://127.0.0.1:${server.port}`;
 }
@@ -339,7 +340,7 @@ describe('POST /api/prompts/templates/draft', () => {
 
     // Stand up a real Bun.serve so the client abort propagates as a real network
     // disconnect — c.req.raw.signal fires when the client closes the connection.
-    const appServer = Bun.serve({ port: 0, fetch: (req) => app.fetch(req) });
+    const appServer = Bun.serve({ port: 0, hostname: TEST_SERVER_HOSTNAME, fetch: (req) => app.fetch(req) });
     servers.push(appServer);
     const base = `http://127.0.0.1:${appServer.port}`;
 

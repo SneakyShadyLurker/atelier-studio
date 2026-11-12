@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { rejects } from 'node:assert/strict';
 import type { ServerWebSocket } from 'bun';
 import { createComfyuiProvider, drainComfyUi } from './comfyui';
-import { TEST_EXECUTION_TIMEOUT_MS, currentWorkerPrivacy, privateWorkerTestPrivacy, privateWorkerTestTls } from '../test/private-worker-fixture';
+import { TEST_EXECUTION_TIMEOUT_MS, currentWorkerPrivacy, privateWorkerTestPrivacy, privateWorkerTestServerOptions } from '../test/private-worker-fixture';
 import { pngBytes } from '../test/image-fixtures';
 
 const stops: (() => Promise<void>)[] = [];
@@ -24,7 +24,7 @@ function fixture(options: { metadata?: unknown; running?: boolean; lostDelete?: 
   const freeGate = new Promise<void>((resolve) => { resumeFree = resolve; });
   const sockets = new Set<ServerWebSocket>();
   const server = Bun.serve({
-    port: 0, tls: privateWorkerTestTls,
+    port: 0, ...privateWorkerTestServerOptions,
     async fetch(req, server) {
       const path = new URL(req.url).pathname;
       calls.push(`${req.method} ${path}`);

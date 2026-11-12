@@ -1157,6 +1157,8 @@ interface VtFrame {
   t: number;
   /** `<pseudo> <animationName>` per running view-transition animation; tracked names read as `{key}`. */
   animations: string[];
+  /** Each entry's own end time in ms (delay + active duration), off its effect rather than the sampling clock. */
+  ends: Record<string, number>;
   /** Computed transform of each tracked key's `::view-transition-group`. */
   groups: Record<string, string>;
   /** Live boxes of `live` selectors (null when absent). */
@@ -1187,17 +1189,20 @@ async function recordVt(page: Page, track: Record<string, VtTarget>, live: Recor
       }
     });
     observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['style'] });
-    const raw: { t: number; animations: string[]; transforms: Record<string, string>; live: VtFrame['live'] }[] = [];
+    const raw: { t: number; animations: string[]; ends: Record<string, number>; transforms: Record<string, string>; live: VtFrame['live'] }[] = [];
     window.__vtDone = false;
     const start = performance.now();
     const tick = (now: number) => {
+      const ends: Record<string, number> = {};
       const animations = document.getAnimations().flatMap((animation) => {
         const effect = animation.effect as KeyframeEffect | null;
         const pseudo = effect?.pseudoElement ?? '';
+        const timing = effect?.getComputedTiming();
         // React parks a boundary it decided not to animate with a 0ms
         // opacity-0 animation of its own; that is not motion.
-        if (!pseudo.startsWith('::view-transition') || effect?.getComputedTiming().duration === 0) return [];
+        if (!pseudo.startsWith('::view-transition') || timing?.duration === 0) return [];
         const name = 'animationName' in animation ? (animation as CSSAnimation).animationName : '';
+        ends[`${pseudo} ${name}`] = Number(timing?.endTime);
         return [`${pseudo} ${name}`];
       });
       const transforms: Record<string, string> = {};
@@ -1211,13 +1216,15 @@ async function recordVt(page: Page, track: Record<string, VtTarget>, live: Recor
         const { x, y, width, height } = element.getBoundingClientRect();
         boxes[key] = { x, y, width, height };
       }
-      raw.push({ t: now - start, animations, transforms, live: boxes });
+      raw.push({ t: now - start, animations, ends, transforms, live: boxes });
       if (now - start < duration) { requestAnimationFrame(tick); return; }
       observer.disconnect();
       const byName = new Map(Object.entries(names).map(([key, name]) => [name, key]));
+      const keyed = (entry: string) => entry.replace(/\(([^)]+)\)/, (whole, name: string) => (byName.has(name) ? `({${byName.get(name) ?? ''}})` : whole));
       window.__vtFrames = raw.map((frame) => ({
         t: frame.t,
-        animations: frame.animations.map((entry) => entry.replace(/\(([^)]+)\)/, (whole, name: string) => (byName.has(name) ? `({${byName.get(name) ?? ''}})` : whole))),
+        animations: frame.animations.map(keyed),
+        ends: Object.fromEntries(Object.entries(frame.ends).map(([entry, end]) => [keyed(entry), end])),
         groups: Object.fromEntries(Object.entries(names).map(([key, name]) => [key, frame.transforms[name] ?? 'none'])),
         live: frame.live,
       }));
@@ -1272,6 +1279,245 @@ async function openWritableFeed(page: Page, extra = 2): Promise<void> {
   await page.getByTestId('canvas-scroller').click({ position: { x: 4, y: 4 } });
   await page.waitForTimeout(700);
 }
+
+interface ModalCapture {
+  modal: boolean;
+  groups: string[];
+  outside: string[];
+  animations: string[];
+  rows: string[];
+  finished?: boolean;
+}
+
+declare global {
+  interface Window {
+    __modalMotion?: {
+      captures: ModalCapture[];
+      outsideFrames: string[][];
+      hold: boolean;
+      openOnReady?: () => void;
+      skipped: number;
+      backgroundGroups?: () => string[];
+    };
+  }
+}
+
+/** Observe React's native transitions before React installs its ready handler. */
+async function openModalMotionFeed(page: Page): Promise<string[]> {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => { errors.push(error.message); });
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') errors.push(message.text());
+  });
+  await page.addInitScript(() => {
+    const state: NonNullable<Window['__modalMotion']> = { captures: [], outsideFrames: [], hold: false, skipped: 0 };
+    window.__modalMotion = state;
+    const original = document.startViewTransition.bind(document);
+    const named = () => new Map(Array.from(document.querySelectorAll('*')).flatMap((element) => {
+      const name = getComputedStyle(element).viewTransitionName;
+      return name && name !== 'none' ? [[name, element.closest('dialog:modal') !== null] as const] : [];
+    }));
+    const groups = () => document.getAnimations().flatMap((animation) => {
+      const effect = animation.effect as KeyframeEffect | null;
+      // React also creates zero-duration opacity-zero effects for boundaries
+      // it cancels. They are not captured groups and persist after playback.
+      if (effect?.getComputedTiming().duration === 0) return [];
+      const pseudo = effect?.pseudoElement ?? '';
+      const name = /^::view-transition-group\((.+)\)$/.exec(pseudo)?.[1];
+      // Engines create a structural root group even with an unnamed root;
+      // it carries no background image and is not an element capture.
+      return name && (name !== 'root' || getComputedStyle(document.documentElement).viewTransitionName !== 'none') ? [name] : [];
+    });
+    const owners = new Map<string, boolean>();
+    const backgroundGroups = () => groups().filter((name) => !owners.get(name));
+    state.backgroundGroups = backgroundGroups;
+    document.startViewTransition = (options) => {
+      let before = named();
+      let after = before;
+      const modal = document.querySelector('dialog:modal') !== null;
+      const update = typeof options === 'function' ? options : options?.update;
+      const observeUpdate = () => {
+        // React names the old boundaries after calling startViewTransition;
+        // read them at the browser's capture/update boundary, before exits
+        // remove their DOM nodes, then read the new capture after layout.
+        before = named();
+        const result: unknown = update?.();
+        after = named();
+        if (result instanceof Promise) return result.then(() => { after = named(); });
+        return undefined;
+      };
+      const transition = original(typeof options === 'object' ? { ...options, update: observeUpdate } : observeUpdate);
+      const skip = transition.skipTransition.bind(transition);
+      transition.skipTransition = () => { state.skipped += 1; skip(); };
+      void transition.ready.then(() => {
+        for (const [name, inside] of [...before, ...after]) owners.set(name, inside);
+        const captured = [...new Set(groups())];
+        const capture: ModalCapture = {
+          modal,
+          groups: captured,
+          outside: [...new Set([
+            ...captured.filter((name) => !owners.get(name)),
+            // CSS-named WebKit header/dock groups have animation:none, so
+            // also check computed names at both capture boundaries.
+            ...(modal ? [...before, ...after].filter(([, inside]) => !inside).map(([name]) => name) : []),
+          ])],
+          animations: document.getAnimations().flatMap((animation) => 'animationName' in animation ? [String(animation.animationName)] : []),
+          rows: Array.from(document.querySelectorAll('[data-testid="canvas-scroller"] [data-index][data-batch-id]'))
+            .map((element) => getComputedStyle(element).viewTransitionName).filter((name) => captured.includes(name)),
+        };
+        state.captures.push(capture);
+        void transition.finished.then(() => { capture.finished = true; });
+        if (state.hold) {
+          for (const animation of document.getAnimations()) {
+            const effect = animation.effect as KeyframeEffect | null;
+            if (!effect?.pseudoElement?.startsWith('::view-transition')) continue;
+            animation.pause();
+            animation.currentTime = Number(effect.getComputedTiming().duration) / 2;
+          }
+        }
+        const open = state.openOnReady;
+        delete state.openOnReady;
+        open?.();
+      }, () => undefined);
+      return transition;
+    };
+    const tick = () => {
+      if (document.querySelector('dialog:modal')) {
+        const outside = backgroundGroups();
+        if (outside.length) state.outsideFrames.push(outside);
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.route('**/api/uploads/studio-ref-*', (route) => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><path fill="#a4876c" d="M0 0h32v32H0z"/></svg>',
+  }));
+  await page.goto('/e2e/studio/index.html?modalMotion=1&refs=1');
+  await expect(page.locator(FEED_BATCH('studio-batch-4'))).toBeVisible();
+  await settleModalMotion(page);
+  return errors;
+}
+
+async function settleModalMotion(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(() => document.getAnimations().flatMap((animation) => {
+    const effect = animation.effect as KeyframeEffect | null;
+    const relevant = effect?.pseudoElement?.startsWith('::view-transition') === true
+      || (effect?.target instanceof Element && effect.target.closest('dialog') !== null
+        && animation.playState === 'running' && effect.getComputedTiming().iterations !== Infinity);
+    return relevant && animation.playState !== 'finished' ? [{
+      name: 'animationName' in animation ? String(animation.animationName) : '',
+      pseudo: effect.pseudoElement,
+      state: animation.playState,
+    }] : [];
+  })), { timeout: 5000 }).toEqual([]);
+}
+
+async function releaseModalMotion(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    if (window.__modalMotion) window.__modalMotion.hold = false;
+    for (const animation of document.getAnimations()) {
+      const effect = animation.effect as KeyframeEffect | null;
+      if (effect?.pseudoElement?.startsWith('::view-transition') && animation.playState === 'paused') animation.finish();
+    }
+  });
+  await settleModalMotion(page);
+}
+
+async function writeModalMotionFeed(page: Page, action: 'insert' | 'complete', id: string): Promise<ModalCapture[]> {
+  const count = await page.evaluate(({ action, id }) => {
+    const state = window.__modalMotion;
+    if (!state || !window.__studioMotion) throw new Error('Missing modal motion fixture');
+    state.hold = true;
+    const count = state.captures.length;
+    window.__studioMotion[action](id);
+    return count;
+  }, { action, id });
+  await page.waitForFunction((count) => (window.__modalMotion?.captures.length ?? 0) > count, count);
+  return page.evaluate((count) => window.__modalMotion?.captures.slice(count) ?? [], count);
+}
+
+test.describe('Lightbox view-transition isolation', () => {
+  test('feed updates never paint above an open Lightbox', async ({ page }) => {
+    const errors = await openModalMotionFeed(page);
+    await page.locator(FEED_BATCH('studio-batch-4')).getByRole('button', { name: /^Open image 1/ }).click();
+    const image = page.locator('dialog img[alt^="Expanded generated image"]');
+    await expect(image).toHaveJSProperty('complete', true);
+    await settleModalMotion(page);
+    const box = await image.boundingBox();
+    if (!box) throw new Error('Missing viewer image');
+    const clip = { x: Math.round(box.x + box.width / 2 - 64), y: Math.round(box.y + box.height / 2 - 64), width: 128, height: 128 };
+    const baseline = await page.screenshot({ clip, animations: 'allow' });
+    for (const action of ['insert', 'complete'] as const) {
+      const captures = await writeModalMotionFeed(page, action, 'modal-batch');
+      // Snapshot pixels exercise actual paint order, which DOM hit-testing
+      // alone cannot see for the view-transition pseudo tree.
+      const during = await page.screenshot({ clip, animations: 'allow' });
+      expect.soft(await countDifferingPixels(page, baseline, during), `${action}: viewer pixels covered`).toBeLessThan(100);
+      expect.soft(captures.filter((capture) => capture.modal).flatMap((capture) => capture.outside), `${action}: background captured above Lightbox`).toEqual([]);
+      await releaseModalMotion(page);
+    }
+    // An internal dialog boundary still exits while all background names
+    // (including WebKit's header/dock) are suppressed.
+    await page.evaluate(() => { if (window.__modalMotion) window.__modalMotion.hold = true; });
+    const count = await page.evaluate(() => window.__modalMotion?.captures.length ?? 0);
+    await page.keyboard.press('ArrowRight');
+    await page.waitForFunction((count) => (window.__modalMotion?.captures.length ?? 0) > count, count);
+    const internal = await page.evaluate((count) => window.__modalMotion?.captures.slice(count) ?? [], count);
+    expect(internal.flatMap((capture) => capture.animations)).toContain('atelier-drop-out');
+    expect(internal.flatMap((capture) => capture.outside)).toEqual([]);
+    await releaseModalMotion(page);
+    expect(await page.evaluate(() => window.__modalMotion?.outsideFrames)).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  test('opening the Lightbox ends a running feed transition', async ({ page }) => {
+    const errors = await openModalMotionFeed(page);
+    await page.evaluate(async () => {
+      const storeUrl = '/src/store/atelier.ts';
+      const { useAtelierStore } = await import(/* @vite-ignore */ storeUrl) as { useAtelierStore: typeof AtelierStore };
+      if (!window.__modalMotion) throw new Error('Missing transition instrumentation');
+      // The feed is genuinely captured and held before opening. Opening on
+      // ready also avoids a driver round trip racing the 300 ms animation.
+      window.__modalMotion.openOnReady = () => { useAtelierStore.getState().openLightbox('studio-batch-4', 'studio-tile-4-1'); };
+    });
+    const captures = await writeModalMotionFeed(page, 'insert', 'opening-batch');
+    expect(captures.flatMap((capture) => capture.outside).length).toBeGreaterThan(0);
+    await expect(page.locator('dialog:modal')).toBeVisible();
+    const groups = await page.evaluate(() => window.__modalMotion?.backgroundGroups?.());
+    expect.soft(groups, 'background groups must end as soon as Lightbox opens').toEqual([]);
+    expect.soft(await page.evaluate(() => window.__modalMotion?.captures.find((capture) => !capture.modal && capture.outside.length > 0)?.finished), 'the pre-modal feed transition finished').toBe(true);
+    expect.soft(await page.evaluate(() => window.__modalMotion?.outsideFrames)).toEqual([]);
+    await releaseModalMotion(page);
+    expect(errors).toEqual([]);
+    const interruption = await page.evaluate(() => ({
+      activeApi: 'activeViewTransition' in document,
+      skipped: window.__modalMotion?.skipped ?? 0,
+    }));
+    if (interruption.activeApi) expect(interruption.skipped).toBeGreaterThan(0);
+    await writeFile(test.info().outputPath('interruption.json'), JSON.stringify({ react: '19.3.1', ...interruption, errors }, null, 2));
+    test.info().annotations.push({ type: 'external-skip', description: `React 19.3.1: ${String(interruption.skipped)} skips, no console warnings/errors or page errors` });
+  });
+
+  test('feed rows animate again after the Lightbox closes', async ({ page }) => {
+    const errors = await openModalMotionFeed(page);
+    await page.locator(FEED_BATCH('studio-batch-4')).getByRole('button', { name: /^Open image 1/ }).click();
+    await expect(page.locator('dialog:modal')).toBeVisible();
+    await page.getByRole('button', { name: 'Close lightbox' }).click();
+    await expect(page.locator('dialog')).toHaveCount(0);
+    await settleModalMotion(page);
+    const captures = await writeModalMotionFeed(page, 'insert', 'after-modal-batch');
+    expect(captures.every((capture) => !capture.modal)).toBe(true);
+    expect(captures.flatMap((capture) => capture.animations)).toContain('atelier-rise-in');
+    expect(captures.flatMap((capture) => capture.rows).length).toBeGreaterThan(0);
+    expect(captures.flatMap((capture) => capture.outside).length).toBeGreaterThan(0);
+    await releaseModalMotion(page);
+    expect(errors).toEqual([]);
+  });
+});
 
 test.describe('grid reflow and tile exits (React ViewTransition)', () => {
   test('archiving one of two tiles moves the survivor through its group and Undo reverses it', async ({ page }) => {
@@ -1535,9 +1781,11 @@ test.describe('grid reflow and tile exits (React ViewTransition)', () => {
       expect(ran(frames, 'old', 'removed', 'atelier-shrink-out')).toBe(true);
       const exitMs = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--dur-overlay').trim());
       expect(exitMs).toBe('80ms');
-      // The exit lasts no longer than the reduced duration plus a frame.
-      const exitFrames = frames.filter((frame) => frame.animations.includes('::view-transition-old({removed}) atelier-shrink-out')).map((frame) => frame.t);
-      expect(Math.max(...exitFrames) - Math.min(...exitFrames)).toBeLessThan(80 + 34);
+      // The exit lasts exactly the reduced duration, with no delay: read off
+      // the animation's own timing, because the span between sampled frames
+      // stretches with every late frame on a busy machine.
+      const exitEnds = frames.flatMap((frame) => frame.ends['::view-transition-old({removed}) atelier-shrink-out'] ?? []);
+      expect([...new Set(exitEnds)]).toEqual([80]);
       // --m-scale collapses to 1: the exit only fades.
       const scale = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--m-scale').trim());
       expect(scale).toBe('1');

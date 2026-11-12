@@ -203,7 +203,16 @@
    while a feed boundary carries React's name), and raise their groups above
    the feed's, the header's on the page background it otherwise shows
    through. They hold still, with no cross-fade: the new image is live and
-   opaque over the old one, so typing shows. */
+   opaque over the old one, so typing shows.
+   A native modal is below the pseudo tree too: while one is open, exclude
+   every element outside modal dialogs from capture, including React's inline
+   names and WebKit's header/dock names. Dialog parts keep their own motion.
+   Gate on :modal, not inert (view navigation also uses inert). */
+:root:has(dialog:modal),
+:root:has(dialog:modal) :not(dialog:modal, dialog:modal *) {
+  view-transition-name: none !important;
+}
+
 ::view-transition-group-children(atelier-feed) {
   overflow: clip;
   clip-path: inset(0 0 var(--composer-top, 0px) 0);

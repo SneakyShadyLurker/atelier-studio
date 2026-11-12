@@ -9,7 +9,7 @@ import type { ResolvedTextModel, ResolveTextModelInput } from '../routing/textMo
 import type { TextServices } from '../routing/textServices';
 import { enhancePool } from './llmAdmission';
 
-/** Dependencies of a queued prompt rewrite (Krea condense, H3 Image expand). */
+/** Dependencies of a queued prompt rewrite (Krea condense, H3 Image or MOSS expand). */
 export interface RewriteDeps {
   readonly config: Config;
   readonly text: TextServices;

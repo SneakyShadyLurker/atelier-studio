@@ -113,12 +113,12 @@ describe('MOSS_ENHANCE_SYSTEM_PROMPT MOSS Image optimiser', () => {
 
   it('carries the MOSS caption contract', () => {
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('Optimise for MOSS Image:');
-    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('in two to four paragraphs');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('in one to three paragraphs');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('never with a verb');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('RAW photo');
-    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('can render a printed photo');
-    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('around 220 to 320 words for a single subject and 320 to 500');
-    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('a deliberately minimal request stays minimal');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('usually lands around 150 to 250 words');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('may run to about 400');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('220 to 320');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('at least 200 words');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('Never cut visible detail from an already detailed prompt');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('150 to 300');
@@ -128,6 +128,27 @@ describe('MOSS_ENHANCE_SYSTEM_PROMPT MOSS Image optimiser', () => {
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('evidence for the caption only');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('do not add blur, motion blur, film grain, noise or a soft, out-of-focus look the user did not ask for');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('individual hair strands, fabric weave and crisp edges in the setting');
+  });
+
+  it('names a plain everyday capture and bans the style-realism words', () => {
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('open by naming the kind of photograph it is');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('Keep the kind the user names');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('an amateur photograph, a candid smartphone snapshot or a compact-camera photo');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('“HDR”, “photorealistic” or “hyperrealistic”');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('can render a printed photo');
+    // The retired few-step rows were the only soft variants this rule named.
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('few-step');
+  });
+
+  it('states the person facets, the light and deep focus', () => {
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('apparent age as a number or a decade, build, hair, and each garment with its material');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('Always describe the light, even when the user did not');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('the setting stays in focus along with the subject');
+  });
+
+  it('completes a short scene request, since it also expands short queued prompts', () => {
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('a deliberately minimal image, such as a plain logo or one object on an empty ground, stays minimal');
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('A short request for a scene is not a minimal image: complete it to a full description.');
   });
 
   it('drops the Krea-only rules', () => {

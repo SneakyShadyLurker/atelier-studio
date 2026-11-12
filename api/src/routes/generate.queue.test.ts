@@ -38,6 +38,8 @@ for (const pool of ['shared', 'byok', 'local'] as const) {
       MAX_CONCURRENT_TILES: '4',
       MAX_CONCURRENT_TILES_PER_USER: '4',
       MAX_CONCURRENT_TILES_PER_USER_BYOK: '4',
+      // The local case submits a short MOSS prompt; expansion is not under test.
+      MOSS_AUTO_EXPAND: 'false',
     });
     // Keep queue kicks from obscuring the route's admission decision. The
     // local predecessor represents a preparer still owning an older request.

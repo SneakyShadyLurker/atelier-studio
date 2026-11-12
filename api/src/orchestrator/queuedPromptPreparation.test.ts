@@ -390,3 +390,23 @@ test('with H3_IMAGE_AUTO_EXPAND off a short H3 Image prompt is ready without pre
   expect(queue.entries('local')[0]?.promptPreparation).toBe('ready');
   expect(calls).toBe(0);
 });
+
+test('a short MOSS prompt is expanded before dispatch and the batch keeps the expanded text', async () => {
+  reply = expandedH3;
+  const runtime = setup();
+  seed(runtime, 'moss', shortH3, 'moss-base');
+  prepareQueuedPrompts(runtime.db);
+  expect(queue.entries('local')[0]?.promptPreparation).toBe('pending');
+  await until(() => calls === 1);
+  gates[0]?.();
+  await until(() => queue.entries('local')[0]?.promptPreparation === 'ready');
+  expect(runtime.db.query("SELECT prompt FROM batches WHERE id='moss'").get()).toEqual({ prompt: expandedH3 });
+});
+
+test('with MOSS_AUTO_EXPAND off a short MOSS prompt is ready without preparation', () => {
+  const runtime = setup({ MOSS_AUTO_EXPAND: 'false' });
+  seed(runtime, 'moss', shortH3, 'moss-base');
+  prepareQueuedPrompts(runtime.db);
+  expect(queue.entries('local')[0]?.promptPreparation).toBe('ready');
+  expect(calls).toBe(0);
+});

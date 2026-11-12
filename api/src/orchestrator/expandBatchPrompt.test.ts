@@ -8,8 +8,12 @@ import {
   type TestTextFeatureProvider,
 } from '../providers/text/featureHelpers';
 import sharp from 'sharp';
-import { H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT, H3_IMAGE_ENHANCE_SYSTEM_PROMPT } from '../prompts/enhanceSystemPrompt';
-import { H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS } from '../prompts/promptBudget';
+import {
+  H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
+  H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
+  MOSS_ENHANCE_SYSTEM_PROMPT,
+} from '../prompts/enhanceSystemPrompt';
+import { H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS, MOSS_PROMPT_EXPAND_BELOW_WORDS } from '../prompts/promptBudget';
 import { expandBatchPrompt } from './expandBatchPrompt';
 import { needsQueuedPromptPreparation } from './queuedPromptPreparation';
 
@@ -25,6 +29,7 @@ afterEach(() => {
 });
 
 const H3 = 'minimax-h3-image';
+const MOSS = 'moss-base';
 
 function fakeProvider(enhance: TestTextFeatureProvider['enhance']): TestTextFeatureProvider {
   return {
@@ -176,14 +181,104 @@ test('expands at 59 words and leaves 60 or more untouched without a call', async
   expect(reply.calls()).toBe(1);
 });
 
-test('leaves Krea, MOSS and both H3 video prompts untouched without a call', async () => {
+test('leaves Krea and both H3 video prompts untouched without a call', async () => {
   const reply = replying(EXPANDED);
   const runtime = testRuntime({ seedLegacyText: true });
 
-  for (const modelId of ['krea-2-gonzalomo', 'moss-base', 'minimax-h3-i2v', 'minimax-h3-t2v']) {
+  for (const modelId of ['krea-2-gonzalomo', 'minimax-h3-i2v', 'minimax-h3-t2v']) {
     expect(await expand(runtime, SHORT, modelId)).toBe(SHORT);
   }
   expect(reply.calls()).toBe(0);
+});
+
+test('expands a short MOSS prompt with the MOSS enhance system prompt', async () => {
+  const seen: { prompt: string; images: number; systemPrompt?: string }[] = [];
+  setTextModelProviderForTests(fakeProvider(async function* (prompt, images, _signal, systemPrompt) {
+    await Promise.resolve();
+    seen.push({ prompt, images: images.length, ...(systemPrompt === undefined ? {} : { systemPrompt }) });
+    yield { type: 'delta', text: EXPANDED } satisfies EnhanceChunk;
+    yield { type: 'done' } satisfies EnhanceChunk;
+  }));
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
+
+  // Every MOSS row shares the family, whatever follows the family name.
+  for (const modelId of [MOSS, 'moss-base-variant']) {
+    expect(await expand(runtime, SHORT, modelId)).toBe(EXPANDED);
+  }
+  expect(seen).toEqual([
+    { prompt: SHORT, images: 0, systemPrompt: MOSS_ENHANCE_SYSTEM_PROMPT },
+    { prompt: SHORT, images: 0, systemPrompt: MOSS_ENHANCE_SYSTEM_PROMPT },
+  ]);
+  const log = logRecords(runtime.logs).find((entry) => entry.event === 'moss_prompt_expanded');
+  expect(log).toMatchObject({ beforeWords: 7, afterWords: 154 });
+  expect(logRecords(runtime.logs).some((entry) => entry.event === 'h3_image_prompt_expanded')).toBe(false);
+  // Content-free: no prompt text reaches the logs.
+  expect(runtime.logs.some((line) => line.includes('reading by a window') || line.includes('detail1'))).toBe(false);
+});
+
+test('expands a MOSS prompt at 59 words and leaves 60 or more untouched without a call', async () => {
+  const reply = replying(EXPANDED);
+  const runtime = testRuntime({ seedLegacyText: true });
+  const below = wordPrompt(MOSS_PROMPT_EXPAND_BELOW_WORDS - 1);
+  const at = wordPrompt(MOSS_PROMPT_EXPAND_BELOW_WORDS);
+
+  expect(MOSS_PROMPT_EXPAND_BELOW_WORDS).toBe(60);
+  expect(await expand(runtime, at, MOSS)).toBe(at);
+  expect(await expand(runtime, wordPrompt(250), MOSS)).toBe(wordPrompt(250));
+  expect(reply.calls()).toBe(0);
+  expect(await expand(runtime, below, MOSS)).toBe(EXPANDED);
+  expect(reply.calls()).toBe(1);
+});
+
+test('a MOSS expansion that is not longer, or fails, keeps the original prompt', async () => {
+  let attempt = 0;
+  setTextModelProviderForTests(fakeProvider(async function* () {
+    await Promise.resolve();
+    attempt += 1;
+    if (attempt === 1) {
+      yield { type: 'delta', text: 'a woman reading' } satisfies EnhanceChunk;
+      yield { type: 'done' } satisfies EnhanceChunk;
+      return;
+    }
+    yield { type: 'failed', status: 403, detail: 'refused' } satisfies EnhanceChunk;
+  }));
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info' });
+
+  expect(await expand(runtime, SHORT, MOSS)).toBe(SHORT);
+  expect(await expand(runtime, SHORT, MOSS)).toBe(SHORT);
+  const reasons = logRecords(runtime.logs)
+    .filter((entry) => entry.event === 'moss_prompt_expand_skipped')
+    .map((entry) => entry.skipReason);
+  expect(reasons).toEqual(['not-longer', 'provider-failed']);
+});
+
+test('MOSS_AUTO_EXPAND=false turns the MOSS predicate and pass off and leaves H3 Image on', async () => {
+  const reply = replying(EXPANDED);
+  const on = testRuntime({ seedLegacyText: true });
+  const off = testRuntime({ seedLegacyText: true, MOSS_AUTO_EXPAND: 'false' });
+
+  expect(needsQueuedPromptPreparation(on.config, MOSS, SHORT, 0)).toBe(true);
+  expect(needsQueuedPromptPreparation(on.config, MOSS, wordPrompt(60), 0)).toBe(false);
+  expect(needsQueuedPromptPreparation(off.config, MOSS, SHORT, 0)).toBe(false);
+  expect(needsQueuedPromptPreparation(off.config, H3, SHORT, 0)).toBe(true);
+  expect(await expand(off, SHORT, MOSS)).toBe(SHORT);
+  expect(reply.calls()).toBe(0);
+  // The H3 switch does not reach MOSS either.
+  const h3Off = testRuntime({ seedLegacyText: true, H3_IMAGE_AUTO_EXPAND: 'false' });
+  expect(needsQueuedPromptPreparation(h3Off.config, MOSS, SHORT, 0)).toBe(true);
+  expect(needsQueuedPromptPreparation(h3Off.config, H3, SHORT, 0)).toBe(false);
+});
+
+test('MOSS expansion gives up on its own timeout knob', async () => {
+  setTextModelProviderForTests(fakeProvider(async function* (_prompt, _images, signal) {
+    await waitForAbort(signal);
+    if (!signal.aborted) yield { type: 'done' } satisfies EnhanceChunk;
+  }));
+  const runtime = testRuntime({ seedLegacyText: true, LOG_LEVEL: 'info', MOSS_EXPAND_TIMEOUT_MS: '1000' });
+
+  expect(await expand(runtime, SHORT, MOSS)).toBe(SHORT);
+  const skipped = logRecords(runtime.logs).find((entry) => entry.event === 'moss_prompt_expand_skipped');
+  expect(skipped?.skipReason).toBe('timeout');
 });
 
 test('H3_IMAGE_AUTO_EXPAND=false turns the preparation predicate and the pass off', async () => {

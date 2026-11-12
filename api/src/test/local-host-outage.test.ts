@@ -41,6 +41,9 @@ function setup(failureFor: (call: number) => unknown) {
     MAX_CONCURRENT_TILES_LOCAL: '1',
     IMAGE_BREAKER_HALF_OPEN_MS: String(HALF_OPEN_MS),
     IMAGE_BREAKER_MAX_PAUSE_MS: String(MAX_PAUSE_MS),
+    // The prompts are short on purpose; these tests cover the outage gate,
+    // not queue-time prompt expansion.
+    MOSS_AUTO_EXPAND: 'false',
   });
   const snapshot = new Map<string, ModelAvailability>();
   const deps: DispatchDeps = {

@@ -786,6 +786,8 @@ The text-call resilience layer wraps every upstream call in Cockatiel retry, cir
 | `KREA_CONDENSE_TIMEOUT_MS` | 150000 | 1000-300000 | Per-call Krea condensation cap; condensation fails open. Models marked Slow model use at least 420000. |
 | `H3_IMAGE_EXPAND_TIMEOUT_MS` | 120000 | 1000-300000 | Per-call cap on expanding a MiniMax H3 Image prompt under 60 words; expansion fails open and renders the original. Models marked Slow model use at least 420000. |
 | `H3_IMAGE_AUTO_EXPAND` | true | true/false | Kill-switch for that expansion. Off: short MiniMax H3 Image prompts are not prepared at all and render as submitted. |
+| `MOSS_EXPAND_TIMEOUT_MS` | 120000 | 1000-300000 | Per-call cap on expanding a MOSS Image prompt under 60 words; expansion fails open and renders the original. Models marked Slow model use at least 420000. |
+| `MOSS_AUTO_EXPAND` | true | true/false | Kill-switch for that expansion. Off: short MOSS Image prompts are not prepared at all and render as submitted. |
 | `TEXT_STREAM_IDLE_TIMEOUT_MS` | 120000 | positive | Silence on the upstream body before a streamed text call is cut as a transient failure. Models marked Slow model use at least 600000. |
 | `TEXT_STREAM_INCLUDE_USAGE` | true | true/false | Asks OpenAI-compatible streams for token usage (`stream_options.include_usage`), which the `text_call` log event reports. Set false for a server that rejects `stream_options`. |
 | `QUOTA_MIN_RETRY_AFTER_MS` | 300000 | 30000-3600000 | A `429` counts as budget exhaustion (non-retriable, breaker-exempt) only when its `Retry-After` is at least this floor or the body names a token budget. |

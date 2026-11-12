@@ -113,9 +113,9 @@ on a real prompt to confirm the result reads well.
 | `BYOK_ENCRYPTION_KEY` unset | Image generation still works. Saving a provider with an API key fails, and the key field is disabled with an explanation |
 
 Three features keep working without a text model: Krea prompt condensing,
-MiniMax H3 Image short-prompt expansion and automatic video motion rewriting
-fall back to the original text. Short MiniMax H3 Image prompts then render
-unexpanded, which that model handles poorly.
+MiniMax H3 Image and MOSS short-prompt expansion and automatic video motion
+rewriting fall back to the original text. Short MiniMax H3 Image and MOSS
+prompts then render unexpanded, which those models handle poorly.
 
 ## 5. Optional fine-tuning
 

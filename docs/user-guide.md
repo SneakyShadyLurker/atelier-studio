@@ -186,11 +186,12 @@ model. If they lock that choice, your pick does not apply there and the result
 can come from a different model than the one you chose. Otherwise your pick
 still wins.
 
-On **MiniMax H3 Image**, a prompt under 60 words is expanded automatically
-before it renders, because that model draws very short prompts poorly. The
-batch then shows the expanded prompt. A prompt of 60 words or more is sent as
-written, so write a fuller prompt, or press **Enhance**, copy the batch's
-prompt and edit it, to keep full control. An operator can switch the expansion off.
+On **MiniMax H3 Image** and **MOSS**, a prompt under 60 words is expanded
+automatically before it renders, because those models draw very short prompts
+poorly. The batch then shows the expanded prompt. A prompt of 60 words or more
+is sent as written, so write a fuller prompt, or press **Enhance**, copy the
+batch's prompt and edit it, to keep full control. An operator can switch the
+expansion off for either model.
 
 Read [Prompt Library authoring](prompt-library-authoring.md) for syntax,
 weights, dimensions and worked examples.

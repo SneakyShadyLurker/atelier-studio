@@ -70,8 +70,20 @@ export const H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS = 60;
 // prompt that already names a picture was written for the model and is kept.
 const H3_IMAGE_PICTURE_TOKEN = /<Picture \d+>/;
 
+// MOSS Image Base runs at CFG 3, which OpenMOSS calls sufficient for long
+// prompts and too low for short ones, and community reports describe short
+// prompts on Base as soft and under-resolved. The rows keep one CFG, so a
+// prompt too short to carry subject, setting, light and framing is expanded
+// with the MOSS enhance prompt instead, the same job the official ComfyUI
+// template's upsampler does. The threshold follows the H3 Image one and was
+// not measured on MOSS. MOSS takes no reference pictures, so the count never
+// matters here.
+export const MOSS_PROMPT_EXPAND_BELOW_WORDS = 60;
+
 export function promptNeedsExpansionForModel(modelId: string, prompt: string, referenceCount = 0): boolean {
-  return classifyImageModelTarget(modelId) === 'h3image'
+  const target = classifyImageModelTarget(modelId);
+  if (target === 'moss') return countPromptWords(prompt) < MOSS_PROMPT_EXPAND_BELOW_WORDS;
+  return target === 'h3image'
     && countPromptWords(prompt) < H3_IMAGE_PROMPT_EXPAND_BELOW_WORDS
     && !(referenceCount > 0 && H3_IMAGE_PICTURE_TOKEN.test(prompt));
 }

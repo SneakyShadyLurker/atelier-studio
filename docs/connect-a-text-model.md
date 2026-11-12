@@ -3,13 +3,13 @@
 Atelier uses a text model (an LLM) for every feature that writes words
 instead of pixels. That covers **Enhance**, `{{ai-fill: …}}` blanks,
 **Brainstorm**, story planning, the motion writer for video, Krea prompt
-condensing, the automatic expansion of short MiniMax H3 Image prompts (it
-uses the **Enhance** model, not a task of its own) and the AI helpers in the
-Prompt Library. Image generation works
+condensing, the automatic expansion of short MiniMax H3 Image and MOSS
+prompts (it uses the **Enhance** model, not a task of its own) and the AI
+helpers in the Prompt Library. Image generation works
 without one. Until an admin connects a text model and sets a default, most of
 those features fail with "No text model is set up". Krea condensing,
-MiniMax H3 Image expansion and automatic motion rewriting keep the original
-text instead.
+MiniMax H3 Image and MOSS expansion and automatic motion rewriting keep the
+original text instead.
 
 This guide connects one, step by step. It assumes Atelier already runs, either
 locally from [Getting started](getting-started.md) or on a server from

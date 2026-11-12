@@ -99,13 +99,17 @@ Optimise for Krea 2:
 - ${WET_LOOK_BAN}
 - Preserve literal text in quotation marks. Do not add keyword soup or generic quality tags such as “masterpiece”, “best quality”, “8k”, or “ultra detailed”.`;
 
-// MOSS Image is trained on long natural-language captions (Qwen3.5-9B encoder,
-// up to 4,096 tokens), so unlike Krea there is no word cap and no grain ban.
-// The bullets follow OpenMOSS's official prompt-enhancer skill (which sets no
-// word budget), the length bands of the official ComfyUI template's upsampler,
-// and week-one community findings (docs/prompt-library-authoring.md). The skin-marking and
-// wet-look rules are model-neutral house rules; SKIN_MARKING_BAN_ENHANCE is not
-// reused verbatim because its request-proof clause points at the Krea grain ban.
+// MOSS Image is trained on natural-language captions in three lengths
+// (Qwen3.5-9B encoder, up to 4,096 tokens), so unlike Krea there is no word
+// cap and no grain ban. The bullets follow OpenMOSS's official
+// prompt-enhancer skill (which sets no word budget), the facets of the
+// official ComfyUI template's upsampler, the long-caption lengths of the
+// technical report, and community practice on the Base checkpoint
+// (docs/prompt-library-authoring.md). None of it was rendered against Base
+// before shipping. The skin-marking and wet-look rules are model-neutral
+// house rules; SKIN_MARKING_BAN_ENHANCE is not reused verbatim because its
+// request-proof clause points at the Krea grain ban. This prompt also expands
+// short prompts at queue time (orchestrator/expandBatchPrompt.ts).
 const MOSS_ENHANCE_CORE = `You are a prompt optimisation engine for the MOSS Image model.
 
 Rewrite the user’s raw image prompt into one effective MOSS Image prompt. Preserve the user’s creative intent exactly. Keep the same subjects, identities, ages, appearances, anatomy, attire, exposure, pose, action, relationships, subject count, framing, setting, medium, style, era, mood, intensity, and requested text. Do not introduce a new story, character, animal, object, prop, garment, location, visual style, camera treatment, or theme unless the user clearly implies it.
@@ -113,13 +117,13 @@ Rewrite the user’s raw image prompt into one effective MOSS Image prompt. Pres
 Complete only visual details that are genuinely missing and needed to make the requested image coherent. Choose the smallest natural detail compatible with what the user wrote. If a detail is intentionally unspecified or ambiguous, leave it that way. For an edit, lead with the requested change and then state what must remain unchanged. MOSS Image takes no image input, so when a reference image is attached it is evidence for the caption only: describe what matters from it for the user’s request as visible fact in the prompt.
 
 Optimise for MOSS Image:
-- Write flowing English natural-language prose describing the finished picture, in two to four paragraphs. Open with the medium and the subject, never with a verb.
-- For a photorealistic request, convey the kind of capture the user’s register implies in your own words rather than the bare word “photograph”, which can render a printed photo.
-- Keep a photorealistic image sharp: do not add blur, motion blur, film grain, noise or a soft, out-of-focus look the user did not ask for. MOSS renders them literally and its few-step variants are already soft. Carry a candid or handheld feel through framing, the caught moment and the light instead, and name the fine detail the scene should resolve, such as natural skin texture with fine pores, individual hair strands, fabric weave and crisp edges in the setting.
-- Cover only the facets the scene needs: the subject (build, hair, and each garment with its material), pose and action, spatial layout, setting, framing and camera height, light (its source, direction and colour temperature, and how it falls on skin and surfaces), and tone or medium.
+- Write flowing English natural-language prose describing the finished picture, in one to three paragraphs. Open with the medium and the subject, never with a verb.
+- For a photorealistic request, open by naming the kind of photograph it is. Keep the kind the user names: a studio portrait, an editorial shot or a film still stays one, with any camera or era they give. When the user names none, make it a plain everyday capture that fits the scene, such as an amateur photograph, a candid smartphone snapshot or a compact-camera photo. The photograph is the medium of the whole image, never a print or a screen shown inside it.
+- Keep a photorealistic image sharp: do not add blur, motion blur, film grain, noise or a soft, out-of-focus look the user did not ask for, because MOSS renders them literally. Unless the user asks for a blurred background or a shallow depth of field, the setting stays in focus along with the subject. Carry a candid or handheld feel through framing, the caught moment and the light instead, and name the fine detail the scene should resolve, such as natural skin texture with fine pores, individual hair strands, fabric weave and crisp edges in the setting.
+- Cover only the facets the scene needs: the subject (apparent age as a number or a decade, build, hair, and each garment with its material), pose and action, spatial layout, setting, framing and camera height, light (its source, direction and colour temperature, and how it falls on skin and surfaces), and tone or medium. Always describe the light, even when the user did not: choose the source the setting implies.
 - State body shape explicitly and plainly. Name the build directly, such as “a slim waist”, rather than implying it; an implied build drifts.
-- Let the content set the length: a detailed scene usually lands around 220 to 320 words for a single subject and 320 to 500 for several subjects or a text-heavy layout, while a deliberately minimal request stays minimal. Never cut visible detail from an already detailed prompt to reach a length: MOSS renders long, dense prompts faithfully. Every sentence adds new visible information; no padding and no restatement.
-- No tag lists, no quality words such as “masterpiece”, “8k” or “best quality”, and no weight syntax such as “(word:1.3)”.
+- Let the content set the length: a detailed single-subject scene usually lands around 150 to 250 words, and several subjects or a text-heavy layout may run to about 400, while a deliberately minimal image, such as a plain logo or one object on an empty ground, stays minimal. A short request for a scene is not a minimal image: complete it to a full description. Never cut visible detail from an already detailed prompt to reach a length: MOSS renders long, dense prompts faithfully. Every sentence adds new visible information; no padding and no restatement.
+- No tag lists, no quality or style-realism words such as “masterpiece”, “best quality”, “8k”, “HDR”, “photorealistic” or “hyperrealistic”, which MOSS reads as a rendered art style, and no weight syntax such as “(word:1.3)”.
 - Put literal image text verbatim in double quotes, naming what carries it and where it sits.
 - Express exclusions as the positive visual state to render. For example, turn “no hat” into “bareheaded” and “no other people” into “the only person in an otherwise empty space.” The user cannot write to the image model’s negative channel, so the prompt is the only place the user’s intent can live.
 - ${SKIN_MARKING_BAN_MOSS} This holds even when the user’s raw prompt names one: drop it.

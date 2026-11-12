@@ -134,7 +134,11 @@ describe('buildAiFillSystemPrompt MOSS target', () => {
     expect(moss).toContain('Target model: MOSS Image');
     expect(moss).toContain('There is no word budget');
     expect(moss).not.toContain('RAW photo');
-    expect(moss).toContain('can render a printed photo');
+    expect(moss).not.toContain('can render a printed photo');
+    expect(moss).toContain('such as an amateur photograph or a candid smartphone snapshot');
+    expect(moss).toContain('"HDR", "photorealistic", "hyperrealistic"');
+    expect(moss).toContain('give the apparent age as a number or a decade unless the skeleton already states it');
+    expect(moss).toContain('keep the setting in focus along with the subject unless the brief asks for a blurred background');
     expect(moss).toContain('never add blur, motion blur, grain, noise or softness the brief does not ask for');
     expect(moss).toContain('State exclusions POSITIVELY');
     expect(moss).toContain('name a slim waist outright');

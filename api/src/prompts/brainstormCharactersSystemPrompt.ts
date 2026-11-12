@@ -43,9 +43,12 @@ export const BRAINSTORM_CONSTRAINTS_H3 =
 // MOSS variant: positive like the Krea arm (no MOSS row lets the prompt reach
 // the negative channel, so a negated clause has nothing to act through),
 // and the build is named outright — in validation one seed of four drifted
-// heavier than an implied slim waist.
+// heavier than an implied slim waist. It names visible facts only: quality
+// claims such as "hyper-detailed" or "realistic" are the words MOSS writers
+// are told to leave out, and the writer cannot override text spliced in
+// after it.
 export const BRAINSTORM_CONSTRAINTS_MOSS =
-  'Constraints: a slim build with a slim waist, shown full body from head to feet; hyper-detailed anatomy with realistic proportions and realistic skin texture; the depicted scene fills the entire frame edge to edge, running uninterrupted to all four edges.';
+  'Constraints: a slim build with a slim waist, shown full body from head to feet; natural anatomical proportions and natural skin texture with fine visible pores; the depicted scene fills the entire frame edge to edge, running uninterrupted to all four edges.';
 
 // Appended to the constraints tail for layout: 'diptych'. Shared by every
 // target, so it is worded entirely positively — the Krea arm of the tail must
@@ -63,10 +66,11 @@ export const BRAINSTORM_DIPTYCH_CONSTRAINT =
 export const BRAINSTORM_PHOTOGRAPH_CONSTRAINT = 'a real-life photograph, available light only; ';
 export const BRAINSTORM_PHOTOGRAPH_CONSTRAINT_EXPLICIT =
   'a real-life photograph, available light only, no flash, no professional or studio lighting; ';
-// MOSS renders a bare "photograph" as a printed photo (community finding),
-// so its arm avoids the word; positive only. No fixed capture
-// phrase either: a concrete example got copied into every prompt.
-export const BRAINSTORM_PHOTOGRAPH_CONSTRAINT_MOSS = 'a photorealistic real-life scene, available light only; ';
+// MOSS reads "photorealistic" as a rendered art style (community practice on
+// the Base checkpoint), so its arm names a plain everyday capture instead, the
+// register the writer's own first field uses; positive only. Era-neutral: the
+// writer names the camera the era had.
+export const BRAINSTORM_PHOTOGRAPH_CONSTRAINT_MOSS = 'a candid amateur photograph, available light only; ';
 
 function photographConstraintForTarget(target: ImageModelTarget): string {
   switch (target) {
@@ -220,7 +224,7 @@ function modelPhrasingHint(target: ImageModelTarget): string {
     case 'krea':
       return 'Target model: Krea 2. Describe exactly what you want to see in plain natural language, with the subject and concrete lighting ahead of supporting detail. Keep the setting sparse: every additional named object has to be lit to be visible, so an inventoried background is what talks this model out of the lighting you described and into a flat, evenly-lit frame — name only the props the moment actually needs. State exclusions positively: describe the visible emptiness of a place the concept already names, rather than writing a negation about what is absent — a negated clause reads to this model as if it were absent, so what it excludes comes back.';
     case 'moss':
-      return 'Target model: MOSS Image, trained on long natural-language captions. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. For a photorealistic concept, convey the capture in words that fit the scene rather than the bare word "photograph", which can render a printed photo. Keep a photorealistic image sharp: never add blur, motion blur, grain, noise or softness the brief does not ask for, because MOSS renders them literally; carry a candid or handheld feel through framing, the caught moment and the light instead, and name the fine detail the scene should resolve, such as natural skin texture with fine pores, individual hair strands, fabric weave and crisp edges in the setting. State her build plainly, naming a slim waist outright rather than implying it, and give each garment its material. Describe the light by its source, direction and colour temperature and how it falls on her skin. State exclusions positively as the visual state to render: the user cannot write to the image model\'s negative channel, so a negated clause has nothing to act through.';
+      return 'Target model: MOSS Image, trained on natural-language captions. Write flowing prose, never tag lists or weight syntax, and make every sentence add new visible information. Leave out quality and style-realism words such as "masterpiece", "8k", "HDR", "photorealistic" and "hyperrealistic": MOSS reads them as a rendered art style. For a photographic concept, name the capture in field 1 as the plain everyday photograph the era implies, such as an amateur smartphone snapshot or a 35mm film snapshot; it is the medium of the whole image, never a print shown inside it. Keep a photographic image sharp: never add blur, motion blur, grain, noise or softness the brief does not ask for, because MOSS renders them literally, and keep the setting in focus along with her unless the brief asks for a blurred background; carry a candid or handheld feel through framing, the caught moment and the light instead, and name the fine detail the scene should resolve, such as natural skin texture with fine pores, individual hair strands, fabric weave and crisp edges in the setting. State her apparent age as a number or a decade. State her build plainly, naming a slim waist outright rather than implying it, and give each garment its material. Describe the light by its source, direction and colour temperature and how it falls on her skin. State exclusions positively as the visual state to render: the user cannot write to the image model\'s negative channel, so a negated clause has nothing to act through.';
     case 'h3image':
       return 'Target model: MiniMax H3 Image, which reads detailed English natural-language descriptions best. Write flowing prose, never tag lists, quality words or weight syntax, and make every sentence add new visible information. Open each concept with the kind of image and the subject, and describe one frozen moment: her visible state or action, the viewpoint, the setting, the meaningful light and the medium, with left and right, foreground and background, gaze, hands and contact all agreeing; when hands or contact matter, say which hand touches what. State her apparent age as a number or a decade because vague ages render older on this model, and state her build plainly: name a slim waist outright rather than implying it, and know that "athletic" renders visible muscle definition. Give each garment its material. Add detail only where it makes an interaction readable or a material, depth or light convincing, and replace mood words with the visible cues that carry them. The model has no negative prompt: an exclusion is a plain statement of what does not appear.';
     case 'other':
@@ -252,6 +256,12 @@ export function buildBrainstormSystemPrompt({ count, layout, medium, modelId, va
   // Skin wording on MiniMax H3 Image is the user's call, so its goal names no
   // skin finish; every other target keeps the texture push.
   const skinRealismGoal = target === 'h3image' ? '' : ', detailed skin texture';
+  // The grain ban is a Krea 2 measurement that the other targets inherit. It
+  // was never measured on MOSS, whose own hint carries the narrower rule: add
+  // none the brief does not ask for.
+  const grainRule = target === 'moss'
+    ? ''
+    : ' Never write grain, noise or speckle into a prompt, and never call a stock fine- or coarse-grained — the image models resolve a named emulsion texture as literal objects scattered over the subject. Let a period capture read through its light and optics instead.';
   const diptychFieldOneGuidance = diptych
     ? ' For this batch that mode-setter also names the two-panel structure — e.g. "a side-by-side two-panel front-and-back diptych, candid amateur smartphone snapshot" — stated once and briefly; the full panel contract is appended to every prompt automatically, so spend the rest of your words on her and the place she is in.'
     : '';
@@ -334,7 +344,7 @@ Lean on your own invention first; these widen the space, they do not fence it.
 
 VARY across the batch whatever the brief leaves open — ethnicity, age, era, role, body (always slim-waisted), setting — and span genuinely distinct roles and personas rather than variations of one. No two prompts should feel alike. Sampling randomness is off for this model, so every bit of that variety has to come from how differently you write each prompt — not from chance.
 
-${mediumSection} Never write grain, noise or speckle into a prompt, and never call a stock fine- or coarse-grained — the image models resolve a named emulsion texture as literal objects scattered over the subject. Let a period capture read through its light and optics instead.
+${mediumSection}${grainRule}
 
 ${skinMarkingBanFor(target)}
 

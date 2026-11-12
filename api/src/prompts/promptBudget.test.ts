@@ -8,6 +8,7 @@ import {
   KREA_PROMPT_WORD_BUDGET,
   promptCharBudgetForModel,
   promptMinPerSlotWordsForModel,
+  promptNeedsExpansionForModel,
   promptWordBudgetForModel,
 } from './promptBudget';
 
@@ -35,6 +36,21 @@ describe('prompt budgets', () => {
     expect(Math.max(promptMinPerSlotWordsForModel('krea-2-gonzalomo'), share)).toBe(KREA_MIN_PER_SLOT_WORDS);
     // Non-Krea targets keep the original floor.
     expect(promptMinPerSlotWordsForModel('gpt-image-2.6-sunburst')).toBe(8);
+  });
+
+  test('marks short MOSS and H3 Image prompts for expansion and no other family', () => {
+    const short = 'an adult woman reading by a window';
+    const sixty = Array.from({ length: 60 }, () => 'word').join(' ');
+    for (const modelId of ['moss-base', 'minimax-h3-image']) {
+      expect(promptNeedsExpansionForModel(modelId, short)).toBe(true);
+      expect(promptNeedsExpansionForModel(modelId, sixty)).toBe(false);
+    }
+    for (const modelId of ['krea-2-gonzalomo', 'gpt-image-2.6-sunburst', 'gemini-3-pro-image-preview', 'other-model']) {
+      expect(promptNeedsExpansionForModel(modelId, short)).toBe(false);
+    }
+    // Only H3 Image reads pictures: a named picture keeps its short prompt.
+    expect(promptNeedsExpansionForModel('minimax-h3-image', 'recolour <Picture 1>', 1)).toBe(false);
+    expect(promptNeedsExpansionForModel('moss-base', 'recolour <Picture 1>', 1)).toBe(true);
   });
 
   test('counts whitespace-delimited words while ignoring empty tokens', () => {

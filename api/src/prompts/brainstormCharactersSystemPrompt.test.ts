@@ -650,31 +650,50 @@ describe('assembleBrainstormCharacterPrompt', () => {
 describe('MOSS brainstorm target', () => {
   const record = `scene${BRAINSTORM_FIELD_SEPARATOR}subject${BRAINSTORM_FIELD_SEPARATOR}details`;
 
-  it('appends a positive tail that names the build and avoids a bare "photograph"', () => {
+  it('appends a positive tail of visible facts that names the build and a plain capture', () => {
     const single = assembleBrainstormCharacterPrompt(record, 'moss');
     expect(single.text).toEndWith(BRAINSTORM_CONSTRAINTS_MOSS);
     expect(single.text).toContain('slim build with a slim waist');
+    expect(single.text).toContain('natural anatomical proportions and natural skin texture with fine visible pores');
     const photo = assembleBrainstormCharacterPrompt(record, 'moss', 'single', 'photograph');
-    expect(photo.text).toContain(BRAINSTORM_PHOTOGRAPH_CONSTRAINT_MOSS);
+    expect(photo.text).toContain(`Constraints: ${BRAINSTORM_PHOTOGRAPH_CONSTRAINT_MOSS}a slim build`);
+    expect(photo.text).toContain('a candid amateur photograph, available light only; ');
     expect(photo.text).not.toContain(BRAINSTORM_PHOTOGRAPH_CONSTRAINT);
     const diptych = assembleBrainstormCharacterPrompt(record, 'moss', 'diptych', 'photograph');
     expect(diptych.text).toEndWith(BRAINSTORM_DIPTYCH_CONSTRAINT);
     for (const assembled of [single, photo, diptych]) {
       const tail = assembled.text.slice(assembled.text.indexOf('Constraints:'));
       expect(tail).not.toMatch(/\bno\b|\bnot\b|\bwithout\b|\bnever\b/i);
-      expect(tail).not.toMatch(/\bphotograph\b/i);
+      // The quality and style-realism words MOSS writers are told to leave out.
+      expect(tail).not.toMatch(/photorealistic|hyper|realistic|masterpiece|\b8k\b|\bHDR\b/i);
     }
   });
 
   it('gets its own phrasing hint and long-caption length band, never the Krea budget', () => {
     const sys = buildBrainstormSystemPrompt({ count: 3, modelId: 'moss-base' });
     expect(sys).toContain('Target model: MOSS Image');
-    expect(sys).toContain('rather than the bare word "photograph"');
+    expect(sys).not.toContain('rather than the bare word "photograph"');
+    expect(sys).toContain('name the capture in field 1 as the plain everyday photograph the era implies');
+    expect(sys).toContain('"HDR", "photorealistic" and "hyperrealistic"');
+    expect(sys).toContain('State her apparent age as a number or a decade.');
     expect(sys).toContain('never add blur, motion blur, grain, noise or softness the brief does not ask for');
     expect(sys).not.toContain('RAW photo');
     expect(sys).toContain('~110-250 words across the three fields');
     expect(sys).not.toContain('Target model: Krea 2');
     expect(sys).not.toContain('~60-180 words');
+  });
+});
+
+describe('brainstorm grain rule', () => {
+  const absoluteBan = 'Never write grain, noise or speckle into a prompt';
+
+  it('stays absolute for every target but MOSS, whose hint carries the conditional rule', () => {
+    for (const modelId of ['krea-2-gonzalomo', 'minimax-h3-image', 'gemini-3-pro-image-preview', 'some-other-model']) {
+      expect(buildBrainstormSystemPrompt({ count: 2, modelId })).toContain(absoluteBan);
+    }
+    const moss = buildBrainstormSystemPrompt({ count: 2, modelId: 'moss-base' });
+    expect(moss).not.toContain(absoluteBan);
+    expect(moss).toContain('never add blur, motion blur, grain, noise or softness the brief does not ask for');
   });
 });
 

@@ -11,7 +11,7 @@ import {
   promptWordBudgetForModel,
 } from '../prompts/promptBudget';
 import { condenseBatchPrompt } from './condenseBatchPrompt';
-import { expandBatchPrompt } from './expandBatchPrompt';
+import { expandBatchPrompt, promptExpansionEnabled } from './expandBatchPrompt';
 import * as queue from './queue';
 import { loadRefImages, refImageIdsForBatch } from './refImages';
 import { getBatchForUser, preRegisterBatch, setBatchDonePromise, unregisterBatch, type BatchEntry } from './registry';
@@ -44,12 +44,12 @@ function needsCondensation(modelId: string, prompt: string): boolean {
     && countPromptWords(prompt) > KREA_PROMPT_CONDENSE_TRIGGER_WORDS;
 }
 
-// Krea condensation and H3 Image expansion are exclusive by target. With
-// H3_IMAGE_AUTO_EXPAND off a short H3 Image prompt is not prepared at all, so
-// it gains no queue delay.
+// Krea condensation and H3 Image or MOSS expansion are exclusive by target.
+// With a family's switch off (H3_IMAGE_AUTO_EXPAND, MOSS_AUTO_EXPAND) its
+// short prompts are not prepared at all, so they gain no queue delay.
 export function needsQueuedPromptPreparation(config: Config, modelId: string, prompt: string, referenceCount: number): boolean {
   return needsCondensation(modelId, prompt)
-    || (config.H3_IMAGE_AUTO_EXPAND && promptNeedsExpansionForModel(modelId, prompt, referenceCount));
+    || (promptExpansionEnabled(config, modelId) && promptNeedsExpansionForModel(modelId, prompt, referenceCount));
 }
 
 // The batch's reference pictures in order. Missing or unreadable pictures

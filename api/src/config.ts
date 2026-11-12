@@ -344,6 +344,8 @@ const ConfigSchema = z.object({
   // bounds a background call. Expansion fails open: on timeout the short
   // prompt renders as submitted.
   H3_IMAGE_EXPAND_TIMEOUT_MS: numericString(120_000).pipe(z.number().int().min(1_000).max(300_000)),
+  // MOSS Image prompt expansion: the same background call, bound separately.
+  MOSS_EXPAND_TIMEOUT_MS: numericString(120_000).pipe(z.number().int().min(1_000).max(300_000)),
   SWAG_PROXY_READ_TIMEOUT_MS: numericString(600_000).pipe(z.number().int().min(60_000).max(3_600_000)),
   // Raw on-disk ref-image budget per batch. Note: providers may impose tighter
   // per-request ceilings on the post-encode payload — see
@@ -432,6 +434,10 @@ const ConfigSchema = z.object({
   // ON; operator kill-switch. Off → short prompts are not prepared at all and
   // render exactly as submitted.
   H3_IMAGE_AUTO_EXPAND: boolish(true),
+  // MOSS Image queue-time expansion of prompts under 60 words. Default ON;
+  // operator kill-switch. Off → short prompts are not prepared at all and
+  // render exactly as submitted.
+  MOSS_AUTO_EXPAND: boolish(true),
   // TRUSTED_PROXY_KEY: the api trusts `Remote-User` only when
   // SWAG/Authelia is the sole upstream. If the api ever gets exposed
   // directly (port leak, misconfigured network), Remote-User format

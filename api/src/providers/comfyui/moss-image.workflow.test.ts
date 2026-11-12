@@ -44,6 +44,26 @@ function single(graph: Record<string, Node>, classType: string): Node {
   return match;
 }
 
+function samplers(graph: Record<string, Node>): Node[] {
+  const matches = Object.values(graph).filter((n) => n.class_type === 'KSampler');
+  expect(matches).toHaveLength(2);
+  return matches;
+}
+
+/** The full-denoise sampler fed by the empty latent. */
+function firstPass(graph: Record<string, Node>): Node {
+  const match = samplers(graph).find((n) => linked(graph, n, 'latent_image').class_type === 'EmptyFlux2LatentImage');
+  if (!match) throw new Error('missing first-pass KSampler');
+  return match;
+}
+
+/** The hires sampler fed by the re-encoded upscale. */
+function secondPass(graph: Record<string, Node>): Node {
+  const match = samplers(graph).find((n) => linked(graph, n, 'latent_image').class_type === 'VAEEncode');
+  if (!match) throw new Error('missing second-pass KSampler');
+  return match;
+}
+
 describe('MOSS Image SFT workflow', () => {
   test('row is a batched local image model outside the Krea family', () => {
     expect(LOCAL_MODELS.map((m) => m.id)).toContain('moss-image-sft');
@@ -66,14 +86,15 @@ describe('MOSS Image SFT workflow', () => {
     for (const token of moss.requiredPlaceholders) expect(workflowText).toContain(token);
   });
 
-  test('ratio map stays at ~2 MP (1.9-2.01) with every side a multiple of 16', () => {
+  test('ratio map stays at ~2 MP (1.9-2.06) with every side a multiple of 32, so the 1.5x pass lands on the 16-pixel grid', () => {
     for (const { width, height } of Object.values(moss.ratioDims)) {
-      expect(width % 16).toBe(0);
-      expect(height % 16).toBe(0);
+      expect(width % 32).toBe(0);
+      expect(height % 32).toBe(0);
       const megapixels = (width * height) / 1_000_000;
       expect(megapixels).toBeGreaterThan(1.9);
-      expect(megapixels).toBeLessThan(2.01);
+      expect(megapixels).toBeLessThan(2.06);
     }
+    expect(moss.ratioDims['4:5']).toEqual({ width: 1280, height: 1600 });
     expect(moss.ratioDims['3:4']).toEqual({ width: 1216, height: 1632 });
   });
 
@@ -92,7 +113,7 @@ describe('MOSS Image SFT workflow', () => {
 
   test('samples er_sde / simple / 50 at CFG 3 with a real quality-only negative', () => {
     const graph = build();
-    const sampler = single(graph, 'KSampler');
+    const sampler = firstPass(graph);
     expect(sampler.inputs).toMatchObject({
       seed: params.seed,
       steps: 50,
@@ -117,7 +138,7 @@ describe('MOSS Image SFT workflow', () => {
 
   test('skip-layer guidance on single block 22 over 0-1 feeds the attention patch, which feeds the sampler', () => {
     const graph = build();
-    const sampler = single(graph, 'KSampler');
+    const sampler = firstPass(graph);
     const attention = linked(graph, sampler, 'model');
     expect(attention.class_type).toBe('ModelAttentionBackend');
     expect(attention.inputs.attention).toBe('comfy kitchen attention');
@@ -129,20 +150,52 @@ describe('MOSS Image SFT workflow', () => {
 
   test('EmptyFlux2LatentImage takes the substituted size and batch count', () => {
     const graph = build();
-    const sampler = single(graph, 'KSampler');
-    const latent = linked(graph, sampler, 'latent_image');
-    expect(latent.class_type).toBe('EmptyFlux2LatentImage');
+    const latent = linked(graph, firstPass(graph), 'latent_image');
     expect(latent.inputs).toEqual({ width: params.width, height: params.height, batch_size: params.count });
   });
 
-  test('decodes into a single SaveImageWebsocket terminal with every link resolving', () => {
+  test('second pass: Lanczos 1.5x, re-encode, 8 steps at denoise 0.3 on the same model, conditioning and seed', () => {
+    const graph = build();
+    const first = firstPass(graph);
+    const second = secondPass(graph);
+    expect(second.inputs).toMatchObject({
+      seed: params.seed,
+      steps: 8,
+      cfg: 3,
+      sampler_name: 'er_sde',
+      scheduler: 'simple',
+      denoise: 0.3,
+    });
+    for (const input of ['model', 'positive', 'negative']) {
+      expect(second.inputs[input]).toEqual(first.inputs[input]);
+    }
+    const encode = linked(graph, second, 'latent_image');
+    expect(encode.class_type).toBe('VAEEncode');
+    const vae = single(graph, 'VAELoader');
+    expect(linked(graph, encode, 'vae')).toBe(vae);
+    const upscale = linked(graph, encode, 'pixels');
+    expect(upscale.class_type).toBe('ImageScaleBy');
+    expect(upscale.inputs).toMatchObject({ upscale_method: 'lanczos', scale_by: 1.5 });
+    const firstDecode = linked(graph, upscale, 'image');
+    expect(firstDecode.class_type).toBe('VAEDecode');
+    expect(linked(graph, firstDecode, 'samples')).toBe(first);
+    expect(linked(graph, firstDecode, 'vae')).toBe(vae);
+  });
+
+  test('a step override changes only the first pass; the second stays at 8', () => {
+    const graph = buildWorkflow(workflowText, { ...params, steps: 30 }, moss.requiredPlaceholders) as Record<string, Node>;
+    expect(firstPass(graph).inputs.steps).toBe(30);
+    expect(secondPass(graph).inputs.steps).toBe(8);
+  });
+
+  test('decodes the second pass into a single SaveImageWebsocket terminal with every link resolving', () => {
     const graph = build();
     const save = nodeOf(graph, moss.saveImageNodeId);
     expect(save.class_type).toBe('SaveImageWebsocket');
     expect(Object.values(graph).filter((n) => n.class_type === 'SaveImageWebsocket')).toHaveLength(1);
     const decode = linked(graph, save, 'images');
     expect(decode.class_type).toBe('VAEDecode');
-    expect(linked(graph, decode, 'samples').class_type).toBe('KSampler');
+    expect(linked(graph, decode, 'samples')).toBe(secondPass(graph));
     expect(linked(graph, decode, 'vae').class_type).toBe('VAELoader');
     for (const node of Object.values(graph)) {
       for (const value of Object.values(node.inputs)) {

@@ -14,15 +14,16 @@ export const RATIO_MAPS = {
     '16:9': { width: 2048, height: 1152 }, // long edge 2048
     '9:16': { width: 1152, height: 2048 }, // long edge 2048
   },
-  // MOSS Image: ~2 MP, the top of the recommended 1 / 1.5 / 2 MP band, every
-  // side a multiple of 16. The model is not trained at 4 MP, so it does not
-  // share the Krea map.
+  // MOSS Image: ~2 MP base, the top of the recommended 1 / 1.5 / 2 MP band.
+  // The model is not trained at 4 MP, so it does not share the Krea map. Every
+  // base side is a multiple of 32 so the graph's 1.5x hires pass lands on the
+  // model's 16-pixel grid; the trailing comments give the output size.
   'moss-2mp': {
-    '1:1': { width: 1408, height: 1408 },  // 1.98 MP
-    '4:5': { width: 1264, height: 1584 },  // 2.00 MP
-    '3:4': { width: 1216, height: 1632 },  // 1.98 MP
-    '16:9': { width: 1888, height: 1056 }, // 1.99 MP
-    '9:16': { width: 1056, height: 1888 }, // 1.99 MP
+    '1:1': { width: 1408, height: 1408 },  // 1.98 MP -> 2112x2112
+    '4:5': { width: 1280, height: 1600 },  // 2.05 MP -> 1920x2400
+    '3:4': { width: 1216, height: 1632 },  // 1.98 MP -> 1824x2448
+    '16:9': { width: 1888, height: 1056 }, // 1.99 MP -> 2832x1584
+    '9:16': { width: 1056, height: 1888 }, // 1.99 MP -> 1584x2832
   },
   // MOSS turbo: ~1.5 MP, every side a multiple of 16.
   'moss-turbo-1.5mp': {

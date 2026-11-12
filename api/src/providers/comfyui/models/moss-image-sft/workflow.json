@@ -67,7 +67,7 @@
   "9": {
     "class_type": "SaveImageWebsocket",
     "inputs": {
-      "images": ["8", 0]
+      "images": ["33", 0]
     }
   },
   "10": {
@@ -85,6 +85,43 @@
       "single_layers": "22",
       "start_percent": 0.0,
       "end_percent": 1.0
+    }
+  },
+  "30": {
+    "class_type": "ImageScaleBy",
+    "inputs": {
+      "image": ["8", 0],
+      "upscale_method": "lanczos",
+      "scale_by": 1.5
+    }
+  },
+  "31": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["30", 0],
+      "vae": ["3", 0]
+    }
+  },
+  "32": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["10", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["31", 0],
+      "seed": "{{seed}}",
+      "steps": 8,
+      "cfg": 3.0,
+      "sampler_name": "er_sde",
+      "scheduler": "simple",
+      "denoise": 0.3
+    }
+  },
+  "33": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["32", 0],
+      "vae": ["3", 0]
     }
   }
 }

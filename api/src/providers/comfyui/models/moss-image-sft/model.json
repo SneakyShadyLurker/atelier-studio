@@ -22,7 +22,7 @@
     "9:16"
   ],
   "defaultRatio": "3:4",
-  "size": "≈2MP · INT8 ConvRot · uncensored",
+  "size": "≈4.5MP (1.5× hires) · INT8 ConvRot · uncensored",
   "latency": "medium",
   "batched": true,
   "defaultCount": 4,

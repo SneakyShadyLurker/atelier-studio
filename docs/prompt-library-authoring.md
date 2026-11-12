@@ -168,7 +168,7 @@ Atelier's word budgets, positive-phrasing rules and texture exclusions are local
 
 **MOSS Image** (`moss-image-sft`) is a separate local lane with its own contract; none of the Krea rules above carry over unless restated here. Official sources: [OpenMOSS/MOSS-Image `USERGUIDE.md`](https://github.com/OpenMOSS/MOSS-Image) and its prompt-enhancer skill, and the [technical report](https://arxiv.org/html/2610.23374v1).
 
-| Axis | MOSS Image (Qwen3.5-9B encoder, up to 4,096 tokens · er_sde 50 steps · CFG 3 · ~2 MP) |
+| Axis | MOSS Image (Qwen3.5-9B encoder, up to 4,096 tokens · er_sde 50 steps · CFG 3 · ~2 MP, then 1.5× hires pass to ~4.5 MP) |
 |---|---|
 | Structure | Flowing English prose describing the finished picture, two to four paragraphs, opening with the medium and the subject, never with a verb (official enhancer). Prose beats booru tags. |
 | Length | No Atelier word budget and no condense pass: long library prompts render as faithfully as shorter rewrites, condensation drops props, and `MAX_PROMPT_CHARS` keeps English-prose prompts inside the 4,096-token context (a character cap, not a token bound). OpenMOSS's enhancer sets no word budget; Atelier's enhancer uses the official ComfyUI template upsampler's bands as typical sizes for a detailed scene (220–320 words for one subject, 320–500 for several or text-heavy layouts), keeps a minimal request minimal, and never cuts detail from an already detailed prompt. |

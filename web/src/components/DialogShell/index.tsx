@@ -97,7 +97,28 @@ export function DialogShell({
         ? restoreFocusRef.current?.(opener) ?? (() => (focusReachable(opener) ? opener : null))
         : null;
     }
-    if (element && !element.open) element.showModal();
+    if (element && !element.open) {
+      // The snapshot tree paints above the top layer. Excluding background
+      // names in motion.css prevents future captures; end the existing one
+      // before the modal paints as well. Wait for ready: skipping preparation
+      // rejects ready with AbortError, which React reports as recoverable.
+      // Typed optional: the DOM lib declares the property, older engines and
+      // the unit-test DOM lack it (and the latter getAnimations as well).
+      const active: { readonly activeViewTransition?: ViewTransition | null } = document;
+      if ('activeViewTransition' in active) {
+        const transition = active.activeViewTransition;
+        if (transition) void transition.ready.then(() => { transition.skipTransition(); }, () => undefined);
+      } else if (typeof document.getAnimations === 'function') {
+        // Older engines expose the running pseudo animations, but not the
+        // active transition. Finishing those ends its paint without rejecting
+        // React's ready promise or touching ordinary element animations.
+        for (const animation of document.getAnimations()) {
+          const effect = animation.effect as KeyframeEffect | null;
+          if (effect?.pseudoElement?.startsWith('::view-transition')) animation.finish();
+        }
+      }
+      element.showModal();
+    }
     return () => {
       // close() rather than a bare unmount so the element leaves the top layer
       // through the platform's own path; the restore is ours because the

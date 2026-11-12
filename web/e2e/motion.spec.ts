@@ -1172,8 +1172,15 @@ declare global {
   }
 }
 
-async function recordVt(page: Page, track: Record<string, VtTarget>, live: Record<string, string> = {}, ms = 900): Promise<void> {
-  await page.evaluate(({ track: targets, live: selectors, ms: duration }) => {
+/**
+ * Samples view-transition animations for `ms`. With `until`, an animation
+ * name the test is waiting for, sampling goes on past `ms` until that
+ * animation has run and no view-transition animation is left (capped at
+ * 10 s), so a queue of transitions that runs late on a busy machine is still
+ * recorded whole.
+ */
+async function recordVt(page: Page, track: Record<string, VtTarget>, live: Record<string, string> = {}, ms = 900, until?: string): Promise<void> {
+  await page.evaluate(({ track: targets, live: selectors, ms: duration, until: awaited }) => {
     const names: Record<string, string> = {};
     for (const [key, target] of Object.entries(targets)) if ('name' in target) names[key] = target.name;
     const matches = (element: Element, target: VtTarget) => 'selector' in target
@@ -1192,6 +1199,7 @@ async function recordVt(page: Page, track: Record<string, VtTarget>, live: Recor
     const raw: { t: number; animations: string[]; ends: Record<string, number>; transforms: Record<string, string>; live: VtFrame['live'] }[] = [];
     window.__vtDone = false;
     const start = performance.now();
+    let awaitedSeen = false;
     const tick = (now: number) => {
       const ends: Record<string, number> = {};
       const animations = document.getAnimations().flatMap((animation) => {
@@ -1217,7 +1225,9 @@ async function recordVt(page: Page, track: Record<string, VtTarget>, live: Recor
         boxes[key] = { x, y, width, height };
       }
       raw.push({ t: now - start, animations, ends, transforms, live: boxes });
-      if (now - start < duration) { requestAnimationFrame(tick); return; }
+      if (awaited !== undefined && animations.some((entry) => entry.includes(awaited))) awaitedSeen = true;
+      const waiting = awaited !== undefined && !(awaitedSeen && animations.length === 0) && now - start < 10_000;
+      if (now - start < duration || waiting) { requestAnimationFrame(tick); return; }
       observer.disconnect();
       const byName = new Map(Object.entries(names).map(([key, name]) => [name, key]));
       const keyed = (entry: string) => entry.replace(/\(([^)]+)\)/, (whole, name: string) => (byName.has(name) ? `({${byName.get(name) ?? ''}})` : whole));
@@ -1231,7 +1241,7 @@ async function recordVt(page: Page, track: Record<string, VtTarget>, live: Recor
       window.__vtDone = true;
     };
     requestAnimationFrame(tick);
-  }, { track, live, ms });
+  }, { track, live, ms, until });
 }
 
 async function vtFrames(page: Page): Promise<VtFrame[]> {
@@ -1678,18 +1688,30 @@ test.describe('grid reflow and tile exits (React ViewTransition)', () => {
     await recordVt(page, {
       a: { selector: `${GRID('studio-batch-4')} > *`, img: firstImg ?? '' },
       b: { selector: `${GRID('studio-extra-2')} > *`, img: secondImg ?? '' },
-    }, {}, 1400);
-    // Two archives 50ms apart on the page's own clock, then a view switch.
-    await page.evaluate(() => {
+    }, {}, 1400, 'atelier-view-in-deeper');
+    // The second archive and the view switch land as soon as the first
+    // archive's transition has applied its update, so they queue behind it.
+    // Not on a timer: React handles no event between starting a view
+    // transition and the browser running its update callback (its event
+    // system is off for the whole commit), so a press timed into that window,
+    // which is as long as the capture takes, is dropped.
+    const archiveNav = await page.getByRole('button', { name: 'Archive', exact: true }).elementHandle();
+    await page.evaluate((nav) => new Promise<void>((resolve, reject) => {
       const button = (batchId: string) => document.querySelector<HTMLButtonElement>(`[data-testid="canvas-scroller"] section[data-batch-id="${batchId}"] button[aria-label="Archive tile"]`);
       const a = button('studio-batch-4');
       const b = button('studio-extra-2');
-      if (!a || !b) throw new Error('missing tile actions');
+      if (!a || !b || !(nav instanceof HTMLElement)) throw new Error('missing tile actions');
+      const follow = () => { b.click(); nav.click(); resolve(); };
+      if (!('startViewTransition' in document)) { a.click(); follow(); return; }
+      const start = document.startViewTransition.bind(document);
+      document.startViewTransition = (...args) => {
+        document.startViewTransition = start;
+        const transition = start(...args);
+        transition.updateCallbackDone.then(follow, reject);
+        return transition;
+      };
       a.click();
-      window.setTimeout(() => { b.click(); }, 50);
-    });
-    await page.waitForTimeout(80);
-    await page.getByRole('button', { name: 'Archive', exact: true }).click();
+    }), archiveNav);
     const frames = await vtFrames(page);
     await expect(page.getByTestId('feed').getByTestId('canvas-scroller')).toHaveCount(0);
     expect(errors).toEqual([]);
@@ -1825,7 +1847,9 @@ test.describe('conditional parts enter and exit (React ViewTransition)', () => {
     await page.waitForTimeout(400);
     const supported = await page.evaluate(() => 'startViewTransition' in document);
     const before = await page.locator('#atelier-composer').boundingBox();
-    await recordVt(page, { frame: { selector: '#atelier-composer' }, body: { selector: '#atelier-composer [data-zone="i2v"]' } }, { frame: '#atelier-composer' }, 900);
+    // Sampling runs until the swap's groups have animated and ended: the two
+    // menu presses below spend an unknown share of a fixed window.
+    await recordVt(page, { frame: { selector: '#atelier-composer' }, body: { selector: '#atelier-composer [data-zone="i2v"]' } }, { frame: '#atelier-composer' }, 900, '::view-transition-group(');
     await page.getByRole('button', { name: 'Model', exact: true }).click();
     await page.getByRole('option', { name: /Studio Motion/ }).click();
     const frames = await vtFrames(page);

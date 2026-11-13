@@ -445,9 +445,12 @@ describe('design system drift guards', () => {
     // The listed owners are the only captures; React alone starts transitions
     // and names boundaries.
     const owners = ['web/src/App.tsx', 'web/src/components/Batch/index.tsx', 'web/src/components/Canvas/index.tsx', 'web/src/components/Archive/index.tsx', ...partOwners];
+    // The input guard observes `document.startViewTransition` to know when a
+    // commit is pending; it starts no transition itself.
+    const observers = ['web/src/lib/viewTransitionGuard.ts'];
     for (const path of webSources()) {
       const source = read(path);
-      expect(source, path).not.toContain('startViewTransition');
+      if (!observers.includes(path)) expect(source, path).not.toContain('startViewTransition');
       expect(source, path).not.toContain('viewTransitionName');
       if (!owners.includes(path)) expect(source, path).not.toMatch(/<ViewTransition\b/);
     }

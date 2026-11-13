@@ -1,10 +1,11 @@
 import type { Batch, Collection, DoneTile, Model, Tile } from '@atelier/shared';
 import { isVideoMime } from '@atelier/shared';
-import { memo, useCallback, useDeferredValue, useEffect, useRef, useState, ViewTransition } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, ViewTransition } from 'react';
 import { refImageThumbUrl } from '../../api/uploads';
 import { sequenceMasterUrl } from '../../api/sequences';
 import { findI2VModel } from '../../lib/i2v';
 import { queueLabel } from '../../lib/queueLabel';
+import { sameRows, useMotionSnapshot } from '../../lib/feedMotion';
 import { runWhenReachable } from '../../lib/focus';
 import { announceBatchSettled } from '../../lib/queueLiveAnnouncer';
 import { getRatioDefinition } from '../../lib/ratios';
@@ -219,11 +220,18 @@ function TileRowImpl({
 // batch's ref, so unrelated-batch SSE events still skip every row here.
 const TileRow = memo(TileRowImpl);
 
+/** The batch shows the same tiles in the same order, pinned as before. */
+function batchKeptShape(shown: Batch, live: Batch): boolean {
+  return shown.pinned === live.pinned && sameRows(shown.tiles, live.tiles);
+}
+
 function BatchView({ batch: liveBatch, modelById, activeView, currentCollection, isAboveFold = false, isFirstBatch = false, seen = false, onBatchAction, promptsEnabled, readOnlyActions = false, onTileAction, onOpenTile, onEditTile, onAnimateTile, onTellStoryTile, onCreateCardTile, cardPendingTileIds, q }: BatchViewProps) {
   // One render snapshot for the whole batch: header, tiles and every handler
-  // read it, so they never disagree, and a tile removal or insertion commits
-  // in a Transition, which is what lets the tile boundaries below animate.
-  const batch = useDeferredValue(liveBatch);
+  // read it, so they never disagree. A tile leaving or coming back, or the
+  // pin changing, commits in a Transition, which is what lets the boundaries
+  // below animate; a tile changing in place (progress, a finished image, the
+  // batch's status) commits at once, with no view transition (lib/feedMotion).
+  const batch = useMotionSnapshot(liveBatch, batchKeptShape);
   const [moveOpen, setMoveOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   // The header prompt is cut off (BatchPrompt measures it), so the More menu

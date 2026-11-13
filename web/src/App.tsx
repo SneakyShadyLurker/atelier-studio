@@ -46,6 +46,7 @@ import { useDiscardSequenceTail } from './hooks/useDiscardSequenceTail';
 import { useGenerate } from './hooks/useGenerate';
 import { useHistory } from './hooks/useHistory';
 import { useHistoryHeadProbe } from './hooks/useHistoryHeadProbe';
+import { ViewTransitionGuard } from './components/ViewTransitionGuard';
 import { useIsPhone } from './hooks/useIsPhone';
 import { useKeyboard } from './hooks/useKeyboard';
 import { useTooltipDismiss } from './hooks/useTooltipDismiss';
@@ -731,6 +732,7 @@ function AppContent() {
       {...(sidebarCollapsed ? { 'data-sidebar-collapsed': 'true' } : {})}
       {...(isViewPending ? { 'data-view-pending': 'true' } : {})}
     >
+      <ViewTransitionGuard />
       <HistoryHeadProbe view={view} q={debouncedQ} />
       <h1 className="srOnly">Atelier</h1>
       <a

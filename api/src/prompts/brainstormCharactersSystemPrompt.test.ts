@@ -28,9 +28,10 @@ import {
 } from './promptBudget';
 import { BRAINSTORM_MAX_COUNT_CEILING } from '@atelier/shared';
 import { joinBrainstormPrompt, splitBrainstormPrompt } from '@atelier/shared/brainstorm-prompt';
+import { USER_PROVIDED_AGE_RULE } from './subjectControl';
 
 const PLACE_RULE =
-  'PLACE — every concept names where she is. When the brief states or implies a place, that place is pinned like any other brief attribute: stage the scene there, named concretely in field 3 — the venue itself plus the one or two props that identify it, lit as the moment demands — never swapped for a generic backdrop. When the brief gives no place, invent one that fits her role and era and name it just as concretely.';
+  'PLACE — every concept names where the subject is. When the brief states or implies a place, that place is pinned like any other brief attribute: stage the scene there, named concretely in field 3 — the venue itself plus the one or two props that identify it, lit as the moment demands — never swapped for a generic backdrop. When the brief gives no place, invent one that fits the subject\'s role and era and name it just as concretely.';
 
 const withoutPlaceRule = (prompt: string): string => prompt.replace(`\n\n${PLACE_RULE}`, '');
 
@@ -66,7 +67,10 @@ describe('brainstorm system prompt', () => {
     expect(sys).toContain(BRAINSTORM_RECORD_SEPARATOR);
     expect(sys).toContain(BRAINSTORM_FIELD_SEPARATOR);
     expect(sys.toLowerCase()).toContain('full body');
-    expect(sys.toLowerCase()).toContain('female');
+    expect(sys).toContain('Every subject is fictional.');
+    expect(sys).not.toContain('Every subject is a fictional woman.');
+    expect(sys).not.toContain('- Female.');
+    expect(sys).toContain(USER_PROVIDED_AGE_RULE);
     expect(sys.toLowerCase()).toContain('slim waist');
     expect(sys).toContain('12');
     // Maximize-exposure default and always-on realism.
@@ -74,7 +78,7 @@ describe('brainstorm system prompt', () => {
     expect(sys.toLowerCase()).toContain('anatomical');
     expect(sys.toLowerCase()).toContain('smartphone');
     expect(sys).toContain(
-      'EVERY woman in the concept belongs in this one field, however many there are; a second woman never gets a field of her own.',
+      'EVERY subject in the concept belongs in this one field, however many there are; a second subject never gets a field of their own.',
     );
     expect(sys).toContain(
       'Each concept is exactly three fields and therefore exactly two separator lines.',
@@ -100,6 +104,24 @@ describe('brainstorm system prompt', () => {
     }
   });
 
+  it('keeps age user-provided and outside open variation for every target', () => {
+    for (const modelId of [
+      'gpt-image-test',
+      'gpt-image-2.6-sunburst',
+      'gemini-3-pro-image-preview',
+      'krea-2-gonzalomo',
+      'moss-base',
+      'minimax-h3-image',
+      'custom-image-model',
+    ]) {
+      const prompt = buildBrainstormSystemPrompt({ count: 3, modelId });
+      expect(prompt, modelId).toContain(USER_PROVIDED_AGE_RULE);
+      expect(prompt, modelId).toContain('numeric age or decade');
+      expect(prompt, modelId).not.toContain('apparent age');
+      expect(prompt, modelId).not.toContain('ethnicity, age, era');
+    }
+  });
+
   it('GPT target keeps the creative contract without moderation phrasing', () => {
     const sys = buildBrainstormSystemPrompt({ count: 5, modelId: 'gpt-image-test' });
     expect(sys.toLowerCase()).toContain('verbatim');
@@ -117,10 +139,13 @@ describe('brainstorm system prompt', () => {
     expect(sys.toLowerCase()).toContain('verbatim');
     expect(sys).toContain('deliberately sexy concepts');
     expect(sys).toContain(
-      'Three zones: her tits with both nipples and areolae, her pussy, and her ass.',
+      'Apply this contract and the WARDROBE, OPEN WARDROBE and GARMENT CEILING rules below only to subjects the brief explicitly designates as female; never infer or substitute any subject\'s anatomy.',
+    );
+    expect(sys).toContain(
+      'For each applicable subject, three zones: their tits with both nipples and areolae, their pussy, and their ass.',
     );
     expect(sys).toContain('GARMENT CEILING —');
-    expect(sys).toContain('WARDROBE — nudity follows the brief');
+    expect(sys).toContain('WARDROBE — for each applicable subject, nudity follows the brief');
     expect(sys).toContain('OPEN WARDROBE —');
     expect(sys.toLowerCase()).not.toContain('keyword-first');
   });
@@ -163,7 +188,7 @@ describe('brainstorm system prompt', () => {
 
   it('adds the exposure per-panel zone clause only for diptych layouts', () => {
     const panelClause =
-      'her tits, nipples and pussy in the frontal panel, her ass in the rear panel';
+      'their tits, nipples and pussy in the frontal panel, their ass in the rear panel';
 
     for (const modelId of [
       'gemini-3-pro-image-preview',
@@ -184,37 +209,41 @@ describe('brainstorm system prompt', () => {
     expect(sys.toLowerCase()).not.toContain('keyword-first');
   });
 
-  // A named second woman was rendering as scenery: "extras" reads as a
+  // A named second subject was rendering as scenery: "extras" reads as a
   // background person, and the EXPOSURE CONTRACT was singular throughout, so
   // the writer applied it to the lead and left the rest undescribed. Observed
   // in a live run as a clothed daughter at ~25 words against the mother's ~120.
-  it('treats every named woman as a subject rather than an extra', () => {
+  it('treats every named subject as a focal point rather than an extra', () => {
     for (const modelId of ['krea-2-gonzalomo', 'gpt-image-test', 'gemini-3-pro-image-preview']) {
       const sys = buildBrainstormSystemPrompt({ count: 3, modelId });
-      expect(sys, modelId).toContain('every woman the brief names is a focal point');
+      expect(sys, modelId).toContain('every subject the brief names is a focal point');
       expect(sys, modelId).toContain('unnamed bystanders support them and never crowd them out');
-      expect(sys, modelId).toContain('unnamed bystanders kept supportive and behind the named women');
+      expect(sys, modelId).toContain('unnamed bystanders kept supportive and behind the named subjects');
       expect(sys, modelId).toContain('Give each of them a comparable share of the words');
       // "extras" is the word that licensed the demotion — it must be gone.
       expect(sys, modelId).not.toContain('extras');
     }
   });
 
-  it('applies the exposure contract to every woman, not just the lead', () => {
+  it('applies the exposure contract only to explicitly female subjects, including every applicable subject', () => {
     for (const modelId of ['krea-2-gonzalomo', 'gemini-3-pro-image-preview']) {
       const sys = buildBrainstormSystemPrompt({ count: 3, modelId });
-      expect(sys, modelId).toContain('This contract applies to EVERY woman in the frame');
-      expect(sys, modelId).toContain('never in full for one woman and skipped or abbreviated for another');
+      expect(sys, modelId).toContain('Apply this contract and the WARDROBE, OPEN WARDROBE and GARMENT CEILING rules below only to subjects the brief explicitly designates as female');
+      expect(sys, modelId).toContain('WARDROBE — for each applicable subject');
+      expect(sys, modelId).toContain('OPEN WARDROBE — whenever an applicable subject is dressed');
+      expect(sys, modelId).toContain('GARMENT CEILING — for each applicable subject');
+      expect(sys, modelId).toContain('This contract applies to EVERY applicable subject in the frame');
+      expect(sys, modelId).toContain('never in full for one subject and skipped or abbreviated for another');
     }
     const gpt = buildBrainstormSystemPrompt({ count: 3, modelId: 'gpt-image-test' });
-    expect(gpt).toContain('dress every woman in the most daring wardrobe');
+    expect(gpt).toContain('dress every subject in the most daring wardrobe');
   });
 
-  it('Krea target keeps the solo band and adds a per-woman allowance', () => {
+  it('Krea target keeps the solo band and adds a per-subject allowance', () => {
     const sys = buildBrainstormSystemPrompt({ count: 5, modelId: 'krea-2-gonzalomo' });
-    expect(sys).toContain('a solo-woman concept stays within ~60-180 words across the three fields');
-    expect(sys).toContain(`up to ~${KREA_MULTI_SUBJECT_FIELD_WORD_CAP} words for two women`);
-    expect(sys).toContain(`plus ~${KREA_PROMPT_PER_EXTRA_SUBJECT_WORDS} words for each further woman`);
+    expect(sys).toContain('a single-subject concept stays within ~60-180 words across the three fields');
+    expect(sys).toContain(`up to ~${KREA_MULTI_SUBJECT_FIELD_WORD_CAP} words for two subjects`);
+    expect(sys).toContain(`plus ~${KREA_PROMPT_PER_EXTRA_SUBJECT_WORDS} words for each further subject`);
     expect(sys).not.toContain('up to ~220 words');
     expect(sys).toContain('Target model: Krea 2');
     // Measured: a negated exclusion behaves like no clause at all
@@ -241,7 +270,7 @@ describe('brainstorm system prompt', () => {
 
       expect(diptych).toContain('DIPTYCH — FRONT AND BACK:');
       expect(diptych).toContain(
-        'so spend the rest of your words on her and the place she is in.',
+        'so spend the rest of your words on the subject and their surroundings.',
       );
       expect(diptych).toContain('the MIRROR is what supplies the opposite view and appears in BOTH panels');
       expect(diptych).toContain('- Full body in frame, head to feet — in BOTH panels.');
@@ -538,8 +567,8 @@ describe('assembleBrainstormCharacterPrompt', () => {
     expect(
       countPromptWords(BRAINSTORM_DIPTYCH_CONSTRAINT),
       'Editing the diptych constraint changes the derived budget; re-measure the full assembly.',
-    ).toBe(64);
-    expect(KREA_DIPTYCH_FIELD_WORD_CAP).toBe(134);
+    ).toBe(66);
+    expect(KREA_DIPTYCH_FIELD_WORD_CAP).toBe(132);
 
     const threeFieldAtCap = assertWithinCondenseTrigger(
       recordWithWords(KREA_DIPTYCH_FIELD_WORD_CAP, 3),
@@ -573,7 +602,7 @@ describe('assembleBrainstormCharacterPrompt', () => {
     );
     expect(systemPrompt).not.toContain('~60-160 words across the three fields');
     expect(systemPrompt).toContain(
-      `up to ~${KREA_DIPTYCH_MULTI_SUBJECT_FIELD_WORD_CAP} words for two women`,
+      `up to ~${KREA_DIPTYCH_MULTI_SUBJECT_FIELD_WORD_CAP} words for two subjects`,
     );
   });
 
@@ -601,7 +630,7 @@ describe('assembleBrainstormCharacterPrompt', () => {
     // the tighter of the two — but never tighter than the solo diptych cap.
     expect(KREA_DIPTYCH_MULTI_SUBJECT_FIELD_WORD_CAP).toBeLessThan(KREA_MULTI_SUBJECT_FIELD_WORD_CAP);
     expect(KREA_DIPTYCH_MULTI_SUBJECT_FIELD_WORD_CAP).toBeGreaterThan(KREA_DIPTYCH_FIELD_WORD_CAP);
-    expect(KREA_DIPTYCH_MULTI_SUBJECT_FIELD_WORD_CAP).toBe(184);
+    expect(KREA_DIPTYCH_MULTI_SUBJECT_FIELD_WORD_CAP).toBe(182);
   });
 
   it('a two-woman diptych at the derived cap survives condense untouched', () => {
@@ -675,7 +704,8 @@ describe('MOSS brainstorm target', () => {
     expect(sys).not.toContain('rather than the bare word "photograph"');
     expect(sys).toContain('name the capture in field 1 as the plain everyday photograph the era implies');
     expect(sys).toContain('"HDR", "photorealistic" and "hyperrealistic"');
-    expect(sys).toContain('State her apparent age as a number or a decade.');
+    expect(sys).toContain(USER_PROVIDED_AGE_RULE);
+    expect(sys).not.toContain('apparent age');
     expect(sys).toContain('never add blur, motion blur, grain, noise or softness the brief does not ask for');
     expect(sys).not.toContain('RAW photo');
     expect(sys).toContain('~110-250 words across the three fields');
@@ -723,8 +753,9 @@ describe('MiniMax H3 Image brainstorm target', () => {
     expect(sys).toContain('Target model: MiniMax H3 Image');
     expect(sys).toContain('~90-220 words across the three fields');
     expect(sys).toContain('say which hand touches what');
-    expect(sys).toContain('State her apparent age as a number or a decade');
-    expect(sys).toContain('state her build plainly');
+    expect(sys).toContain(USER_PROVIDED_AGE_RULE);
+    expect(sys).not.toContain('apparent age');
+    expect(sys).toContain('State the subject\'s build plainly');
     // Skin wording is the user's call on this model: the hint and the shared
     // goal name no skin finish.
     expect(sys).not.toContain('skin-realism');

@@ -3,6 +3,7 @@
 import { describe, expect, test } from 'bun:test';
 import { AI_FILL_FIELD_SEPARATOR, AI_FILL_RECORD_SEPARATOR } from '@atelier/shared/ai-fill';
 import { KREA_PROMPT_WORD_BUDGET } from './promptBudget';
+import { USER_PROVIDED_AGE_RULE } from './subjectControl';
 import {
   buildAiFillBatchSystemPrompt,
   buildAiFillBatchUserContent,
@@ -137,7 +138,8 @@ describe('buildAiFillSystemPrompt MOSS target', () => {
     expect(moss).not.toContain('can render a printed photo');
     expect(moss).toContain('such as an amateur photograph or a candid smartphone snapshot');
     expect(moss).toContain('"HDR", "photorealistic", "hyperrealistic"');
-    expect(moss).toContain('give the apparent age as a number or a decade unless the skeleton already states it');
+    expect(moss).toContain(USER_PROVIDED_AGE_RULE);
+    expect(moss).not.toContain('apparent age');
     expect(moss).toContain('keep the setting in focus along with the subject unless the brief asks for a blurred background');
     expect(moss).toContain('never add blur, motion blur, grain, noise or softness the brief does not ask for');
     expect(moss).toContain('State exclusions POSITIVELY');
@@ -153,8 +155,9 @@ describe('buildAiFillSystemPrompt MiniMax H3 Image target', () => {
     expect(h3).toContain('Target model: MiniMax H3 Image');
     expect(h3).toContain('There is no word budget');
     expect(h3).toContain('one plain closing statement of what does not appear');
-    expect(h3).toContain('State the subject\'s apparent age as a number or a decade');
-    expect(h3).toContain('state the subject\'s build plainly');
+    expect(h3).toContain(USER_PROVIDED_AGE_RULE);
+    expect(h3).not.toContain('apparent age');
+    expect(h3).toContain('State the subject\'s build plainly');
     // Skin wording is the user's call on this model.
     expect(h3).not.toContain('skin-realism');
     expect(h3).not.toContain('smooth, clear, even-toned skin');
@@ -236,6 +239,8 @@ describe('ai-fill batch prompts', () => {
       buildKimiAiFillBatchSystemPrompt(args),
     ];
     for (const prompt of prompts) {
+      expect(prompt).toContain(USER_PROVIDED_AGE_RULE);
+      expect(prompt).not.toContain('apparent age');
       expect(prompt).not.toContain('<permissions>');
       expect(prompt).not.toContain('<context>');
       expect(prompt).not.toContain('FINAL PROMPT AGE');

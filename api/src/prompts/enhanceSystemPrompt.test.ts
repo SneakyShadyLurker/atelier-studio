@@ -8,6 +8,7 @@ import {
   MOSS_ENHANCE_SYSTEM_PROMPT,
 } from './enhanceSystemPrompt';
 import { SUNBURST_ENHANCE_SYSTEM_PROMPT } from './gptSystemPrompt';
+import { USER_PROVIDED_AGE_RULE } from './subjectControl';
 
 describe('ENHANCE_SYSTEM_PROMPT editorial-bias contract', () => {
   it('does not hardcode an editorial / polished default', () => {
@@ -41,6 +42,21 @@ describe('ENHANCE_SYSTEM_PROMPT editorial-bias contract', () => {
   test('includes the reference-images grounding block', () => {
     expect(ENHANCE_SYSTEM_PROMPT).toContain('Reference images:');
     expect(ENHANCE_SYSTEM_PROMPT).toContain('ground the rewritten prompt in what they actually show');
+  });
+
+  it('keeps age explicitly user-controlled in every enhancer', () => {
+    for (const prompt of [
+      ENHANCE_SYSTEM_PROMPT,
+      SUNBURST_ENHANCE_SYSTEM_PROMPT,
+      KREA_ENHANCE_SYSTEM_PROMPT,
+      MOSS_ENHANCE_SYSTEM_PROMPT,
+      H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
+      H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
+    ]) {
+      expect(prompt).toContain(USER_PROVIDED_AGE_RULE);
+      expect(prompt).toContain('numeric age or decade');
+      expect(prompt).not.toContain('apparent age');
+    }
   });
 
   it('base prompt carries no GPT register-substitution section', () => {
@@ -140,8 +156,9 @@ describe('MOSS_ENHANCE_SYSTEM_PROMPT MOSS Image optimiser', () => {
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('few-step');
   });
 
-  it('states the person facets, the light and deep focus', () => {
-    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('apparent age as a number or a decade, build, hair, and each garment with its material');
+  it('states the person facets, user-controlled age, the light and deep focus', () => {
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain(USER_PROVIDED_AGE_RULE);
+    expect(MOSS_ENHANCE_SYSTEM_PROMPT).not.toContain('apparent age');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('Always describe the light, even when the user did not');
     expect(MOSS_ENHANCE_SYSTEM_PROMPT).toContain('the setting stays in focus along with the subject');
   });
@@ -175,7 +192,8 @@ describe('H3_IMAGE_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image optimiser', () => {
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('opening with the kind of image');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('give every region its actual content');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('as one frozen moment');
-    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('apparent age as a number or a decade');
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain(USER_PROVIDED_AGE_RULE);
+    expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain('apparent age');
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).toContain('name the build outright');
     // Skin wording is the user's call on this model.
     expect(H3_IMAGE_ENHANCE_SYSTEM_PROMPT).not.toContain('skin-realism');
@@ -218,7 +236,8 @@ describe('H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT MiniMax H3 Image reference-edit wr
   });
 
   it('keeps the H3 Image person and exclusion rules and the plain-text output rule, and leaves skin to the user', () => {
-    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('apparent age as a number or a decade');
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain(USER_PROVIDED_AGE_RULE);
+    expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).not.toContain('apparent age');
     expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).not.toContain('skin-realism');
     expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).not.toContain('smooth, clear, even-toned skin');
     expect(H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT).toContain('state them in one plain closing sentence');

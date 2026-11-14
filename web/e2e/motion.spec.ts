@@ -1437,7 +1437,13 @@ async function releaseModalMotion(page: Page): Promise<void> {
   await settleModalMotion(page);
 }
 
-async function writeModalMotionFeed(page: Page, action: 'insert' | 'complete', id: string): Promise<ModalCapture[]> {
+/**
+ * A cache write as the stream would make it. A batch leaving reshapes the feed
+ * and runs as a view transition, which is awaited and held; a batch entering
+ * or its tile finishing commits without one (lib/feedMotion), so those only
+ * wait for the row or its image.
+ */
+async function writeModalMotionFeed(page: Page, action: 'insert' | 'complete' | 'remove', id: string): Promise<ModalCapture[]> {
   const count = await page.evaluate(({ action, id }) => {
     const state = window.__modalMotion;
     if (!state || !window.__studioMotion) throw new Error('Missing modal motion fixture');
@@ -1446,7 +1452,8 @@ async function writeModalMotionFeed(page: Page, action: 'insert' | 'complete', i
     window.__studioMotion[action](id);
     return count;
   }, { action, id });
-  await page.waitForFunction((count) => (window.__modalMotion?.captures.length ?? 0) > count, count);
+  if (action === 'remove') await page.waitForFunction((count) => (window.__modalMotion?.captures.length ?? 0) > count, count);
+  else await expect(page.locator(`${FEED_BATCH(id)}${action === 'complete' ? ' img' : ''}`).first()).toBeAttached();
   return page.evaluate((count) => window.__modalMotion?.captures.slice(count) ?? [], count);
 }
 
@@ -1461,8 +1468,10 @@ test.describe('Lightbox view-transition isolation', () => {
     if (!box) throw new Error('Missing viewer image');
     const clip = { x: Math.round(box.x + box.width / 2 - 64), y: Math.round(box.y + box.height / 2 - 64), width: 128, height: 128 };
     const baseline = await page.screenshot({ clip, animations: 'allow' });
-    for (const action of ['insert', 'complete'] as const) {
+    for (const action of ['insert', 'complete', 'remove'] as const) {
       const captures = await writeModalMotionFeed(page, action, 'modal-batch');
+      // Background work starts no view transition; a batch leaving does.
+      expect.soft(captures.length > 0, `${action}: view transition started`).toBe(action === 'remove');
       // Snapshot pixels exercise actual paint order, which DOM hit-testing
       // alone cannot see for the view-transition pseudo tree.
       const during = await page.screenshot({ clip, animations: 'allow' });
@@ -1494,7 +1503,9 @@ test.describe('Lightbox view-transition isolation', () => {
       // ready also avoids a driver round trip racing the 300 ms animation.
       window.__modalMotion.openOnReady = () => { useAtelierStore.getState().openLightbox('studio-batch-4', 'studio-tile-4-1'); };
     });
-    const captures = await writeModalMotionFeed(page, 'insert', 'opening-batch');
+    await writeModalMotionFeed(page, 'insert', 'opening-batch');
+    await page.waitForTimeout(500);
+    const captures = await writeModalMotionFeed(page, 'remove', 'opening-batch');
     expect(captures.flatMap((capture) => capture.outside).length).toBeGreaterThan(0);
     await expect(page.locator('dialog:modal')).toBeVisible();
     const groups = await page.evaluate(() => window.__modalMotion?.backgroundGroups?.());
@@ -1519,9 +1530,11 @@ test.describe('Lightbox view-transition isolation', () => {
     await page.getByRole('button', { name: 'Close lightbox' }).click();
     await expect(page.locator('dialog')).toHaveCount(0);
     await settleModalMotion(page);
-    const captures = await writeModalMotionFeed(page, 'insert', 'after-modal-batch');
+    await writeModalMotionFeed(page, 'insert', 'after-modal-batch');
+    await page.waitForTimeout(500);
+    const captures = await writeModalMotionFeed(page, 'remove', 'after-modal-batch');
     expect(captures.every((capture) => !capture.modal)).toBe(true);
-    expect(captures.flatMap((capture) => capture.animations)).toContain('atelier-rise-in');
+    expect(captures.flatMap((capture) => capture.animations)).toContain('atelier-shrink-out');
     expect(captures.flatMap((capture) => capture.rows).length).toBeGreaterThan(0);
     expect(captures.flatMap((capture) => capture.outside).length).toBeGreaterThan(0);
     await releaseModalMotion(page);
@@ -2477,7 +2490,7 @@ test.describe('feed touch micro-interactions', () => {
 });
 
 /*
- * R12: a feed view transition (a batch entering, the rows above it moving up)
+ * R12: a feed view transition (a batch leaving, the rows below it moving up)
  * never paints a tile or batch snapshot over the view header or the
  * Composer, and typing keeps reaching the prompt while it runs. The pseudo
  * tree draws in the top layer above every live element, so the feed's groups
@@ -2487,7 +2500,7 @@ test.describe('feed touch micro-interactions', () => {
 test('a feed view transition stays between the view header and the Composer', async ({ page, context, browserName }) => {
   test.skip(browserName !== 'chromium', 'Slowing the animation clock needs CDP; WebKit has no nested groups and is covered by the header and Composer groups.');
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/e2e/studio/index.html?generate=1&generateDelay=50');
+  await page.goto('/e2e/studio/index.html?generate=1&generateDelay=50&modalMotion=1');
   const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
   const expand = page.getByRole('button', { name: 'Expand composer', exact: true });
   if (await expand.isVisible()) await expand.click();
@@ -2522,7 +2535,9 @@ test('a feed view transition stays between the view header and the Composer', as
     const effect = animation.effect;
     return effect instanceof KeyframeEffect && (effect.pseudoElement ?? '').startsWith('::view-transition-group') && animation.playState === 'running';
   }));
-  await generateButton.click();
+  // A batch entering starts no view transition (lib/feedMotion); one leaving
+  // above the parked tile does, and moves that tile's row up.
+  await page.evaluate(() => { window.__studioMotion?.remove('studio-generated-1'); });
   await expect.poll(viewTransitionRunning, { intervals: [5], timeout: 5000 }).toBe(true);
   const clip = (box: { x: number; y: number; width: number; height: number }) => ({ x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) });
   // Typing reaches the prompt mid-transition: keyboard input is not hit-tested.
@@ -2726,10 +2741,10 @@ test.describe('feed view transitions without nested groups', () => {
     for (const result of results) expect(result.composer).toBeLessThan(5000);
   });
 
-  test('typing reaches the prompt while a batch enters the feed', async ({ page }) => {
+  test('typing reaches the prompt while a batch leaves the feed', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/e2e/studio/index.html?generate=1&generateDelay=50');
+    await page.goto('/e2e/studio/index.html?generate=1&generateDelay=50&modalMotion=1');
     const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
     const expand = page.getByRole('button', { name: 'Expand composer', exact: true });
     if (await expand.isVisible()) await expand.click();
@@ -2747,7 +2762,7 @@ test.describe('feed view transitions without nested groups', () => {
     const composer = await page.locator('#atelier-composer').boundingBox();
     if (!composer) throw new Error('missing composer');
     const results = await midFrames(page, { header, composer }, async () => {
-      await generateButton.click();
+      await page.evaluate(() => { window.__studioMotion?.remove('studio-generated-1'); });
     }, async () => {
       // Keyboard input is not hit-tested, so it reaches the prompt.
       await prompt.focus();

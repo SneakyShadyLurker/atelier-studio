@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from '../../src/App';
 import { batches, installOfflineResponses } from './fixture';
 import { historyKeys } from '../../src/api/history';
-import { updateBatchStatus, updateBatchTile, upsertNewBatch } from '../../src/hooks/historyCache';
+import { removeBatchFromCache, updateBatchStatus, updateBatchTile, upsertNewBatch } from '../../src/hooks/historyCache';
 import { useAtelierStore } from '../../src/store/atelier';
 import '../../src/styles/global.css';
 
@@ -23,7 +23,7 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false 
 // Unlike generateFinish's timer, these can land precisely while a modal is open.
 declare global {
   interface Window {
-    __studioMotion?: { insert: (id: string) => void; complete: (id: string) => void };
+    __studioMotion?: { insert: (id: string) => void; complete: (id: string) => void; remove: (id: string) => void };
   }
 }
 if (studioParams.get('modalMotion') === '1') {
@@ -42,6 +42,11 @@ if (studioParams.get('modalMotion') === '1') {
         ...image, id: `${id}-tile`, status: 'done', completedAt: Date.now(),
       });
       updateBatchStatus(queryClient, historyKeys.list(), id, { status: 'done' });
+    },
+    // A batch leaving reshapes the feed, so it runs as a view transition;
+    // an insert or a completion commits without one (lib/feedMotion).
+    remove(id) {
+      removeBatchFromCache(queryClient, historyKeys.list(), id);
     },
   };
 }

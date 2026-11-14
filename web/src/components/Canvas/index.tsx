@@ -1,6 +1,6 @@
 import type { Batch, Collection, DoneTile, Model, Tile } from '@atelier/shared';
-import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
-import { memo, useCallback, useDeferredValue, useEffect, useEffectEvent, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, ViewTransition, type Ref } from 'react';
+import { elementScroll, observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
+import { memo, useCallback, useEffect, useEffectEvent, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, ViewTransition, type Ref } from 'react';
 import { flushSync } from 'react-dom';
 import { useIsPhone } from '../../hooks/useIsPhone';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
@@ -18,6 +18,9 @@ import { FeedRetention } from './FeedRetention';
 import { ManagedViewHeader } from '../ManagedViewHeader';
 import { StateView, LoadingState } from '../StateView';
 import { requestComposerYield } from '../Composer/composerYield';
+import { grewOnlyAtEnd, useMotionSnapshot } from '../../lib/feedMotion';
+import { easeFeedFollow } from '../../lib/feedFollow';
+import { viewTransitionPreparing } from '../../lib/viewTransitionGuard';
 import styles from './index.module.css';
 
 interface CanvasProps {
@@ -69,6 +72,8 @@ export interface CanvasHandle {
 const CANVAS_FALLBACK_BATCHES = 7;
 /** A scroll this soon after a reader's drag or wheel is theirs (covers touch momentum). */
 const READER_SCROLL_WINDOW_MS = 1_000;
+/** How long after a batch enters the feed's own scrolls are still it following that batch. */
+const FEED_FOLLOW_EASE_WINDOW_MS = 600;
 // Keys that scroll the feed when nothing else consumes them.
 const SCROLL_KEYS: ReadonlySet<string> = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End']);
 // Controls that use those keys themselves.
@@ -274,14 +279,21 @@ const VirtualBatchRow = memo(function VirtualBatchRow({
 
 function Canvas({ batches: liveBatches, modelById, collections, activeView, hasNextPage, isFetchingNextPage, isFetchNextPageError = false, isLoading = false, error = null, readOnlyActions = false, onLoadMore, onRetry, onBatchAction, promptsEnabled, onTileAction, onOpenTile, onEditTile, onAnimateTile, onTellStoryTile, onCreateCardTile, cardPendingTileIds, ref, q }: CanvasProps) {
   // One render snapshot of the feed: the virtualizer, the rows and every
-  // handler read it, so a batch removal or insertion commits in a Transition
-  // and the batch-row boundaries animate it (removeBatchFromCache).
+  // handler read it. A change that reshapes the list (a batch leaving or
+  // coming back, an older page, a scope swap) commits in a Transition, so the
+  // batch-row boundaries animate it (removeBatchFromCache). Work arriving in
+  // the background does not: a new batch at the newest end and a batch
+  // changing in place commit at once, with no view transition to swallow the
+  // reader's typing (lib/feedMotion).
   // `readOnlyActions` is App's placeholder flag (keepPreviousData showing the
   // previous scope or search); it rides in the same snapshot as the rows.
   // Controls read `readOnly`: a placeholder row stays inert until the commit
   // that replaces it, though the live flag clears first.
+  const seenBatchIds = useSeenBatches('canvas');
   const liveFeed = useMemo(() => ({ batches: liveBatches, placeholder: readOnlyActions }), [liveBatches, readOnlyActions]);
-  const { batches, placeholder } = useDeferredValue(liveFeed);
+  const { batches, placeholder } = useMotionSnapshot(liveFeed, (shown, live) => (
+    shown.placeholder === live.placeholder && grewOnlyAtEnd(shown.batches, live.batches, seenBatchIds)
+  ));
   const readOnly = readOnlyActions || placeholder;
   const trimmedQ = q.trim();
   const blockingError = batches.length === 0 ? error : null;
@@ -292,6 +304,10 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   const reducedMotion = useReducedMotion();
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const virtualFeedRef = useRef<HTMLDivElement | null>(null);
+  const virtualWindowRef = useRef<HTMLDivElement | null>(null);
+  // Until when the feed's own scrolls are it following a batch that just
+  // entered (see followNewest below), so the rows they move are eased.
+  const followUntilRef = useRef(0);
   // Where the virtual list starts inside the scroller (the history status row
   // and column padding sit above it). TanStack's `scrollMargin` puts the
   // virtualizer's offsets in scroller coordinates, so scrollToIndex lands on
@@ -300,7 +316,6 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   const marginStateRef = useRef<FeedMarginState>({ margin: null, owed: 0 });
   // The history status row's footprint, on the render it commits in.
   const statusFootprint = useStatusFootprint(hasNextPage);
-  const seenBatchIds = useSeenBatches('canvas');
   const getBatchKey = useCallback((index: number) => canvasBatchKey(batches, index), [batches]);
   // Unmeasured rows are laid out at the estimate, so it reads the geometry
   // the grid lays out with (lib/feedEstimate). The scroller rect arrives from
@@ -329,6 +344,27 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
   // Set in the commit after the virtualizer first attached; it stays on.
   const [feedStarted, setFeedStarted] = useState(false);
   const virtualizerOn = scrollerReady && (feedStarted || batches.length > 0);
+
+  // A batch entering at the newest end commits outside a Transition
+  // (lib/feedMotion), so the rows the feed pushes up as it follows it are
+  // eased by lib/feedFollow, not by a view transition. This effect opens the
+  // window before the virtualizer's own layout effect scrolls to follow (it
+  // is declared first), and `scrollToFn` below eases each of its writes as
+  // it is made: the follow itself and the corrections that come as the new
+  // row measures against its estimate. A commit that does run as a view
+  // transition animates its own rows; its update callback is still open
+  // during layout effects.
+  const newestBatchId = batches.at(-1)?.id;
+  const shownNewestRef = useRef(newestBatchId);
+  const followNewest = useEffectEvent(() => {
+    const previous = shownNewestRef.current;
+    shownNewestRef.current = newestBatchId;
+    if (previous === undefined || previous === newestBatchId || viewTransitionPreparing()) return;
+    // Only an append: the batch that was newest is still there, above.
+    if (!batches.some((batch) => batch.id === previous)) return;
+    followUntilRef.current = performance.now() + FEED_FOLLOW_EASE_WINDOW_MS;
+  });
+  useLayoutEffect(() => { followNewest(); }, [newestBatchId]);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual's useVirtualizer is the canonical virtualization primitive; React Compiler escape hatch.
   const batchVirtualizer = useVirtualizer({
@@ -366,6 +402,18 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
     // same 12px breathing room `.batch { scroll-margin-top }` gives focus scrolls.
     scrollPaddingStart: 12,
     ...FEED_VIRTUALIZER_ANCHORING,
+    // Every scroll the virtualizer makes passes through here, so a follow is
+    // eased in the task that moves the rows, before a frame can paint them
+    // at their new place. A smooth scroll (a jump to a batch) eases itself.
+    scrollToFn: (offset, options, instance) => {
+      const scroller = instance.scrollElement;
+      const following = !reducedMotion && options.behavior !== 'smooth' && performance.now() < followUntilRef.current;
+      const from = following && scroller ? scroller.scrollTop : 0;
+      elementScroll(offset, options, instance);
+      // The window, not the list around it: the list's rectangle is what
+      // the scroll margin is measured from (measureFeedScrollMargin).
+      if (following && scroller) easeFeedFollow(virtualWindowRef.current, scroller.scrollTop - from);
+    },
     // A viewport resize must reconcile row positions and end anchoring before
     // the browser samples intersections and CSS anchor fallbacks. Keep scroll
     // notifications batched so removals still capture their ViewTransition.
@@ -524,6 +572,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
       const index = batches.findIndex((batch) => batch.id === batchId);
       if (index < 0) return false;
       landingRef.current = false;
+      followUntilRef.current = 0;
       batchVirtualizer.scrollToIndex(index, { align: 'start', behavior: reducedMotion ? 'auto' : 'smooth' });
       return true;
     },
@@ -607,6 +656,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
     // Focus first: the control leaves once the feed reaches the end.
     scroller.focus({ preventScroll: true });
     landingRef.current = false;
+    followUntilRef.current = 0;
     batchVirtualizer.scrollToEnd({ behavior: reducedMotion ? 'auto' : 'smooth' });
   };
 
@@ -780,6 +830,7 @@ function Canvas({ batches: liveBatches, modelById, collections, activeView, hasN
                 after the virtualizer re-measured it, one commit later and
                 outside the removal's Transition, so they jumped. */}
             <div
+              ref={virtualWindowRef}
               className={styles.virtualWindow}
               style={{ transform: `translateY(${String((renderBatches[0]?.start ?? 0) - (virtualBatches.length > 0 ? scrollMargin : 0))}px)` }}
             >

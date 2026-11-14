@@ -46,6 +46,7 @@ export default defineConfig({
     // <ViewTransition>) is resolved by each engine's animation and view
     // transition implementation, so it runs on WebKit too.
     { name: 'webkit-motion', use: { ...devices['Desktop Safari'] }, testMatch: '**/motion.spec.ts' },
+    { name: 'webkit-composer', use: { ...devices['Desktop Safari'] }, testMatch: '**/composer-typing.spec.ts' },
     // The plate's etching paints through CSS `mask` / `-webkit-mask`, which
     // each engine resolves itself.
     { name: 'webkit-plate', use: { ...devices['Desktop Safari'] }, testMatch: '**/plate.spec.ts' },

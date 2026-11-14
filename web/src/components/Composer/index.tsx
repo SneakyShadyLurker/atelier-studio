@@ -32,6 +32,7 @@ import { I } from '../icons/I';
 import ChipSelect, { type ChipSelectOption } from './ChipSelect';
 import { CollapsedBar } from './CollapsedBar';
 import { registerComposerYield } from './composerYield';
+import { protectPresses } from '../../lib/viewTransitionGuard';
 import { useComposerIdleYield } from './useComposerIdleYield';
 import { elementContainsPoint, useRootClickRescue } from './useRootClickRescue';
 import EnhanceControl from './EnhanceControl';
@@ -168,6 +169,13 @@ function Composer({
   const [dragActive, setDragActive] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const pointerInsideRef = useRef(false);
+  // Unsent edits, per field (R24 idle yield): the reader typed in it since
+  // the last submit, and it no longer holds what that submit sent.
+  const typedRef = useRef({ image: false, motion: false });
+  const submittedRef = useRef<{ image: string | null; motion: string | null }>({ image: null, motion: null });
+  // Fields the reader has put a caret in since they mounted. A fresh field
+  // reports its selection at 0 whatever it holds, so only these are trusted.
+  const caretFieldsRef = useRef(new WeakSet<HTMLTextAreaElement>());
   const [sourceUploading, setSourceUploading] = useState(false);
   const [probingModelId, setProbingModelId] = useState<string | null>(null);
   const modelIntentRef = useRef(0);
@@ -483,7 +491,27 @@ function Composer({
     setComposerMinimized(true);
   }, { enabled: !isPhone && !collapsed && !forceExpanded });
   useEffect(() => registerComposerYield(yieldViewport));
-  useComposerIdleYield(wrapRef, !isPhone && !collapsed && !forceExpanded && workRunning, yieldViewport);
+  // Idle is not leaving: a caret resting in a field the reader has typed in
+  // since the last submit, whose text is not what that submit sent, is the
+  // reader composing the next prompt, however long the pause. A scroll or a
+  // press on the feed still yields, and so does text that only sits there
+  // (a draft never typed in, or edited back to what was sent).
+  const composing = (): boolean => {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLTextAreaElement) || active.value.trim().length === 0) return false;
+    if (active === textRef.current) return typedRef.current.image && active.value !== submittedRef.current.image;
+    if (active === motionRef.current) return typedRef.current.motion && active.value !== submittedRef.current.motion;
+    return false;
+  };
+  useComposerIdleYield(wrapRef, !isPhone && !collapsed && !forceExpanded && workRunning, () => {
+    if (!composing()) yieldViewport();
+  });
+  // Presses inside the dock reach it even while a view transition has it
+  // captured (lib/viewTransitionGuard).
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    return wrap ? protectPresses(wrap) : undefined;
+  });
   useKeyboardScopeActive('composer', composerKeyboardActive);
   useKeyboardScoped('composer', 'Escape', (event) => {
     // Escape during IME composition dismisses the candidate window, not us.
@@ -541,6 +569,8 @@ function Composer({
       return;
     }
     if (generateDisabled) return;
+    typedRef.current = { image: false, motion: false };
+    submittedRef.current = { image: prompt, motion: motionPrompt ?? '' };
     run();
   };
   const submit = () => { fire(onSubmit); };
@@ -572,16 +602,30 @@ function Composer({
   ]);
 
   // A printable key on the focused collapsed bar: expand, focus the field
-  // and insert that one character at its end.
+  // and type that one character where the caret was. The hidden field keeps
+  // the selection it had when the Composer minimized, so typing resumes in
+  // place and replaces a selection, as it would have in the open field. A
+  // field the reader has not focused since it mounted has no caret of theirs
+  // (it reports 0): there the character goes at the end.
   const typeIntoComposer = (character: string) => {
+    const field = parts.isI2VMode ? motionRef.current : textRef.current;
+    const value = parts.isI2VMode ? (motionPrompt ?? '') : prompt;
+    const placed = field !== null && caretFieldsRef.current.has(field);
+    const start = placed ? Math.min(field.selectionStart, value.length) : value.length;
+    const end = placed ? Math.min(Math.max(field.selectionEnd, start), value.length) : value.length;
+    const next = `${value.slice(0, start)}${character}${value.slice(end)}`;
+    const caret = start + character.length;
+    typedRef.current[parts.isI2VMode ? 'motion' : 'image'] = true;
     setComposerExpanded(true);
-    if (parts.isI2VMode) setDraft({ motionPrompt: `${motionPrompt ?? ''}${character}` });
-    else onPromptChange(`${prompt}${character}`);
+    if (parts.isI2VMode) setDraft({ motionPrompt: next });
+    else onPromptChange(next);
+    // React writes the new value before this microtask runs; a value write
+    // moves the caret to the end, so the caret is placed after it.
     runWhenReachable(() => {
       const target = parts.isI2VMode ? motionRef.current : textRef.current;
       if (!target) return;
       target.focus();
-      target.setSelectionRange(target.value.length, target.value.length);
+      target.setSelectionRange(caret, caret);
     }, wrapRef.current);
   };
 
@@ -1114,7 +1158,11 @@ function Composer({
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck
-                onChange={(event) => { setDraft({ motionPrompt: event.target.value }); }}
+                onChange={(event) => {
+                  typedRef.current.motion = true;
+                  setDraft({ motionPrompt: event.target.value });
+                }}
+                onFocus={(event) => { caretFieldsRef.current.add(event.currentTarget); }}
                 onKeyDown={handleKeyDown}
                 rows={3}
               />
@@ -1133,7 +1181,11 @@ function Composer({
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck
-            onChange={(event) => { onPromptChange(event.target.value); }}
+            onChange={(event) => {
+              typedRef.current.image = true;
+              onPromptChange(event.target.value);
+            }}
+            onFocus={(event) => { caretFieldsRef.current.add(event.currentTarget); }}
             onKeyDown={handleKeyDown}
             rows={1}
           />

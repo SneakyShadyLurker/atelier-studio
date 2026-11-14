@@ -149,7 +149,7 @@ describe('PUT /api/keys/google', () => {
   });
 
   test('returns 503 when google probe returns a transient upstream failure', async () => {
-    const rt = testRuntime();
+    const rt = testRuntime({ LOG_LEVEL: 'warn' });
     rt.armGoogleResponse(new Response('', { status: 500 }));
 
     const res = await rt.fetch('/api/keys/google', {
@@ -164,10 +164,15 @@ describe('PUT /api/keys/google', () => {
       code: 'GOOGLE_UNAVAILABLE',
     });
     expect(await rt.keyStore?.load('alice', 'google')).toBeNull();
+    const rendered = rt.logs.join('\n');
+    expect(rendered).toContain('"event":"byok_key_probe_failed"');
+    expect(rendered).toContain('"failureKind":"unavailable"');
+    expect(rendered).toContain('"upstreamStatus":500');
+    expect(rendered).not.toContain(VALID_GOOGLE_KEY);
   });
 
   test('returns 503 when google probe cannot reach the network', async () => {
-    const rt = testRuntime();
+    const rt = testRuntime({ LOG_LEVEL: 'warn' });
     globalThis.fetch = (() => Promise.reject(new TypeError('network down'))) as unknown as typeof fetch;
 
     const res = await rt.fetch('/api/keys/google', {
@@ -182,6 +187,12 @@ describe('PUT /api/keys/google', () => {
       code: 'GOOGLE_UNAVAILABLE',
     });
     expect(await rt.keyStore?.load('alice', 'google')).toBeNull();
+    const rendered = rt.logs.join('\n');
+    expect(rendered).toContain('"event":"byok_key_probe_failed"');
+    expect(rendered).toContain('"failureKind":"unavailable"');
+    expect(rendered).toContain('"upstreamStatus":null');
+    expect(rendered).toContain('"errorType":"TypeError"');
+    expect(rendered).not.toContain(VALID_GOOGLE_KEY);
   });
 
   test('persists on probe success', async () => {

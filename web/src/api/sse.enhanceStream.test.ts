@@ -88,3 +88,16 @@ describe('openSseStream', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('parseEnhanceStream delta validation', () => {
+  test('rejects a delta frame without text', async () => {
+    const error = await rejectedValue(Array.fromAsync(parseEnhanceStream(streamOf('event: delta\ndata: {"text":3}\n\n'))));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('invalid delta SSE payload');
+  });
+
+  test('yields only the text of a delta frame', async () => {
+    const events = await Array.fromAsync(parseEnhanceStream(streamOf('event: delta\ndata: {"text":"a","extra":1}\n\n')));
+    expect(events).toEqual([{ event: 'delta', data: { text: 'a' } }]);
+  });
+});

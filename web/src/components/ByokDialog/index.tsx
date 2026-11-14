@@ -41,7 +41,8 @@ function ByokDialogInner() {
   const key = draft.trim();
   const hasStoredKey = status.data?.present === true;
   const present = hasStoredKey && !replacing;
-  const canSave = key.length >= MIN_KEY_LENGTH && !busy;
+  const keyReady = key.length >= MIN_KEY_LENGTH;
+  const canSave = keyReady && !busy;
   const inlineErrorBlocksForm = inlineError === "BYOK isn't configured on this server.";
 
   useEffect(() => {
@@ -204,7 +205,17 @@ function ByokDialogInner() {
                 Cancel
               </button>
               {!present && (
-                <button type="button" className={btn.primary} onClick={save} disabled={!canSave}>
+                // Busy is aria-disabled with the guard in save(), never
+                // `disabled`: a focused control that becomes disabled drops
+                // keyboard focus to <body>.
+                <button
+                  type="button"
+                  className={btn.primary}
+                  onClick={save}
+                  disabled={!keyReady}
+                  aria-disabled={busy || undefined}
+                  aria-busy={busy || undefined}
+                >
                   {busy ? 'Saving...' : 'Save Key'}
                 </button>
               )}

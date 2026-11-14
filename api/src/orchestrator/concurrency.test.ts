@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   acquireByokTiles,
+  acquireForPool,
+  acquireLocalTiles,
   acquireTiles,
   byokTilesInFlight,
   createReservationReleaser,
+  localTilesInFlight,
   releaseByokTiles,
   releaseTiles,
   resetConcurrencyForTests,
   tilesInFlight,
+  waitsOnGlobalCapAlone,
 } from './concurrency';
 
 afterEach(() => {
@@ -77,6 +81,36 @@ describe('counter independence', () => {
     // CLIProxyAPI tiles running.
     expect(acquireByokTiles('alice', 8, 8)).toEqual({ ok: true });
     expect(byokTilesInFlight('alice')).toBe(8);
+  });
+});
+
+describe('waitsOnGlobalCapAlone', () => {
+  const sharedCaps = { globalCap: 5, perUserCap: 4 };
+
+  test('is true only when the global cap blocks and the per-user cap does not, and changes no count', () => {
+    expect(acquireForPool('shared', 'alice', 3, sharedCaps)).toEqual({ ok: true });
+    expect(acquireByokTiles('alice', 2, 8)).toEqual({ ok: true });
+    expect(acquireLocalTiles(1, 1)).toEqual({ ok: true });
+
+    // Fits: nothing blocks it.
+    expect(waitsOnGlobalCapAlone('shared', 'bob', 2, sharedCaps)).toBe(false);
+    // Global cap only.
+    expect(waitsOnGlobalCapAlone('shared', 'bob', 3, sharedCaps)).toBe(true);
+    // Per-user cap only.
+    expect(waitsOnGlobalCapAlone('shared', 'alice', 2, { globalCap: 10, perUserCap: 4 })).toBe(false);
+    // Both caps: freed pool capacity alone would not start it.
+    expect(waitsOnGlobalCapAlone('shared', 'alice', 3, sharedCaps)).toBe(false);
+    // byok has no global cap; local has only a global cap.
+    expect(waitsOnGlobalCapAlone('byok', 'alice', 7, { globalCap: null, perUserCap: 8 })).toBe(false);
+    expect(waitsOnGlobalCapAlone('local', 'carol', 1, { globalCap: 1, perUserCap: 1 })).toBe(true);
+
+    expect(tilesInFlight()).toBe(3);
+    expect(byokTilesInFlight('alice')).toBe(2);
+    expect(byokTilesInFlight('bob')).toBe(0);
+    expect(localTilesInFlight()).toBe(1);
+    // Nothing was reserved: the probed slots stay acquirable.
+    expect(acquireForPool('shared', 'bob', 2, sharedCaps)).toEqual({ ok: true });
+    expect(tilesInFlight()).toBe(5);
   });
 });
 

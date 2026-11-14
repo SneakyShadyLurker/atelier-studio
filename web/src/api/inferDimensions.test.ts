@@ -259,3 +259,52 @@ describe('isInferDimensionsResponse — discriminated-union bundle validator', (
     expect(isInferDimensionsResponse(payload)).toBe(false);
   });
 });
+
+describe('isInferDimensionsResponse — review sections', () => {
+  const base = { proposalId: 'p', proposal: { bundles: [] }, baseSnapshotHash: 'h', warnings: [], coverage: [], rejected: [], conflicts: [] };
+
+  test('accepts warnings, every coverage kind, rejected ops, conflicts and notices', () => {
+    expect(isInferDimensionsResponse({
+      ...base,
+      warnings: [{ templateName: 'portrait', detail: 'x' }],
+      coverage: [
+        { kind: 'orphanTag', dim: 'Era', label: '1920s', detail: 'x' },
+        { kind: 'lowCoverage', listName: 'outfit', dim: 'Era', coverage: 0.5, taggedCount: 1, totalCount: 2, detail: 'x' },
+        { kind: 'missingDimension', listName: 'outfit', dim: 'Era', detail: 'x' },
+      ],
+      rejected: [{ reason: 'duplicate', count: 2 }],
+      conflicts: [{ templateName: 'portrait', reason: 'r', culpritBundleKeys: ['k'], rescueAttempted: false, culpritKind: 'non-local' }],
+      notices: ['re-run to fill the gaps'],
+    })).toBe(true);
+  });
+
+  test('rejects malformed review sections', () => {
+    expect(isInferDimensionsResponse({ ...base, warnings: [{ templateName: 'portrait' }] })).toBe(false);
+    expect(isInferDimensionsResponse({ ...base, coverage: [{ kind: 'orphanTag', dim: 'Era', detail: 'x' }] })).toBe(false);
+    expect(isInferDimensionsResponse({ ...base, coverage: [{ kind: 'unknown', detail: 'x' }] })).toBe(false);
+    expect(isInferDimensionsResponse({ ...base, rejected: [{ reason: 'duplicate' }] })).toBe(false);
+    expect(isInferDimensionsResponse({ ...base, conflicts: [{ templateName: 'portrait', reason: 'r', culpritBundleKeys: [], rescueAttempted: false, culpritKind: 'elsewhere' }] })).toBe(false);
+    expect(isInferDimensionsResponse({ ...base, notices: [1] })).toBe(false);
+  });
+});
+
+describe('inferDimensions progress frames', () => {
+  test('skips phase and progress frames outside the known vocabulary', async () => {
+    globalThis.fetch = mock(() => Promise.resolve(sseTextResponse(
+      'event: infer-phase\ndata: {"phase":"chunks"}\n\n' +
+      'event: infer-phase\ndata: {"phase":"mystery"}\n\n' +
+      'event: infer-progress\ndata: {"done":1,"total":3,"wave":3}\n\n' +
+      'event: infer-progress\ndata: {"done":"1","total":3,"wave":1}\n\n' +
+      'event: infer-progress\ndata: {"done":2,"total":3,"wave":2}\n\n' +
+      'event: done\ndata: {"proposalId":"p","proposal":{"bundles":[]},"baseSnapshotHash":"h","warnings":[],"coverage":[],"rejected":[],"conflicts":[]}\n\n',
+    ))) as unknown as typeof fetch;
+
+    const notifications: InferProgressNotification[] = [];
+    await inferDimensions({ onProgress: (n) => notifications.push(n) });
+
+    expect(notifications).toEqual([
+      { phase: 'chunks' },
+      { phase: 'chunks', progress: { done: 2, total: 3, wave: 2 } },
+    ]);
+  });
+});

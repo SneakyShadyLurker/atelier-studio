@@ -68,3 +68,22 @@ describe('draftTemplate', () => {
     expect(init?.signal).toBe(ac.signal);
   });
 });
+
+describe('draftTemplate payload validation', () => {
+  test('passes a clarify payload through', async () => {
+    globalThis.fetch = sseFetch(doneFrame({ kind: 'clarify', question: 'Which era?' })) as unknown as typeof fetch;
+    expect(await draftTemplate({ name: 'X', existingBody: '' })).toEqual({ kind: 'clarify', question: 'Which era?' });
+  });
+
+  test('rejects a body payload without warnings', async () => {
+    globalThis.fetch = sseFetch(doneFrame({ kind: 'body', body: 'text' })) as unknown as typeof fetch;
+    let caught: unknown;
+    try {
+      await draftTemplate({ name: 'X', existingBody: '' });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as Error).message).toBe('invalid draft template payload');
+  });
+});

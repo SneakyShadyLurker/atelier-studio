@@ -16,8 +16,9 @@ export class EnhanceFailedError extends Error {
   }
 }
 
-// Codes get hand-tuned copy that beats the raw server string. Keys are the
-// shared wire vocabulary — a code the api stops emitting fails typecheck here.
+// Codes get hand-tuned copy that beats the raw server string. Keys must be in
+// the shared wire vocabulary (`ApiErrorCode`), so a code removed from that union
+// fails typecheck here; typecheck does not prove the api still emits a code.
 const CODE_COPY: Partial<Record<ApiErrorCode, string>> = {
   NEEDS_GOOGLE_KEY: 'Add your Google API key to use this model.',
   MODEL_OFFLINE: 'This model is offline right now. Pick another or try again later.',

@@ -1,4 +1,4 @@
-import type { TextModelsResponse, TextReasoningEffort, TextTask } from '@atelier/shared';
+import type { TextModelsResponse, TextModelTaskPutRequest, TextTask } from '@atelier/shared';
 import { queryOptions } from '@tanstack/react-query';
 import { ApiError, requestJson } from './client';
 
@@ -22,14 +22,7 @@ export const textModelsOpts = () =>
     },
   });
 
-export interface TaskPickBody {
-  /** null clears the pick (back to the admin's default). */
-  readonly modelId: string | null;
-  /** Omitted keeps a stored effort the model still accepts; null resets it. */
-  readonly effort?: TextReasoningEffort | null;
-}
-
-export function putTaskPick(task: TextTask, { modelId, effort }: TaskPickBody): Promise<TextModelsResponse> {
+export function putTaskPick(task: TextTask, { modelId, effort }: TextModelTaskPutRequest): Promise<TextModelsResponse> {
   return requestJson<TextModelsResponse>(`/text-models/tasks/${encodeURIComponent(task)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

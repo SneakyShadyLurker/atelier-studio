@@ -118,7 +118,7 @@ type BatchItemResult = Extract<AiFillBatchSseEvent, { event: 'result' }>['data']
 // The ai-fill text model for an image-model target: its prompt writer when
 // one is set, else the user's pick, the task assignment or the default.
 function resolveAiFillModel(c: Context<AppEnv>, modelId: string): ResolvedTextModel {
-  return c.var.text.resolve({ userId: c.var.userId, task: 'ai-fill', ...imageModelRouting(c.var.config, modelId) });
+  return c.var.text.resolve({ userId: c.var.userId, task: 'ai-fill', ...imageModelRouting(c.var.config, modelId, c.var.userId) });
 }
 
 /** The advisory `backend` frame naming the serving row. */

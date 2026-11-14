@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { toGenerateEvent } from './sse';
+import { isTileEvent, toGenerateEvent } from './sse';
 
 describe('progress tile SSE events', () => {
   test('accepts video done events', () => {
@@ -75,4 +75,37 @@ describe('progress tile SSE events', () => {
       });
     });
   }
+});
+
+describe('batch, queue and done SSE events', () => {
+  test('accepts queue and done events', () => {
+    expect(toGenerateEvent({ event: 'queue', data: '{"batchId":"b1","status":"running","startedAt":5}' }))
+      .toEqual({ event: 'queue', data: { batchId: 'b1', status: 'running', startedAt: 5 } });
+    expect(toGenerateEvent({ event: 'done', data: '{"batchId":"b1"}' })).toEqual({ event: 'done', data: { batchId: 'b1' } });
+  });
+
+  test('rejects queue and done events outside their shape', () => {
+    expect(() => toGenerateEvent({ event: 'queue', data: '{"batchId":"b1","status":"queued"}' })).toThrow('invalid queue SSE payload');
+    expect(() => toGenerateEvent({ event: 'done', data: '{}' })).toThrow('invalid done SSE payload');
+  });
+
+  test('accepts a batch event with status and queue position, and rejects an unknown status', () => {
+    const data = { batchId: 'b1', createdAt: 1, startedAt: 2, status: 'queued', queueLengthAhead: 3, tiles: [{ tileId: 't1', tileIndex: 0, seed: 7 }] } as const;
+    expect(toGenerateEvent({ event: 'batch', data: JSON.stringify(data) })).toEqual({ event: 'batch', data });
+    expect(() => toGenerateEvent({ event: 'batch', data: JSON.stringify({ ...data, status: 'paused' }) })).toThrow('invalid batch SSE payload');
+    expect(() => toGenerateEvent({ event: 'batch', data: JSON.stringify({ ...data, tiles: [{ tileId: 't1', tileIndex: 0 }] }) })).toThrow('invalid batch SSE payload');
+  });
+
+  test('accepts failed tiles with a moderation notice and rejects a malformed one', () => {
+    const failed = { tileId: 't1', tileIndex: 0, status: 'failed', error: 'content-policy violation', completedAt: 1, moderation: { reason: 'graphic-violence', target: 'image' } } as const;
+    expect(toGenerateEvent({ event: 'tile', data: JSON.stringify(failed) })).toEqual({ event: 'tile', data: failed });
+    expect(() => toGenerateEvent({ event: 'tile', data: JSON.stringify({ ...failed, moderation: { reason: 'other', target: 'image' } }) }))
+      .toThrow('invalid tile SSE payload');
+  });
+
+  test('rejects a malformed progress event without stripping its step set', () => {
+    const value: Record<string, unknown> = { tileId: 't1', tileIndex: 0, status: 'progress', progress: 3, step: 0 };
+    expect(isTileEvent(value)).toBe(false);
+    expect(value.step).toBe(0);
+  });
 });

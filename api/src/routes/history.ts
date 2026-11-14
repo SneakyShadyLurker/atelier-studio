@@ -16,9 +16,17 @@ import { PatchBatchBody } from './collections.schema';
 import { HistoryDeleteQuerySchema, HistoryQuerySchema, ThreadDeleteQuerySchema, TileDeleteParamSchema, UuidParamSchema } from './history.schema';
 import { uploadIdsForBatchScope } from '../storage/uploadStore';
 import { releaseRequestUploads } from './_uploads';
+import { unlinkTileArtifactsBestEffort } from './_tileArtifacts';
+import { runAllPostCommit } from './_postCommit';
 import { parseDeleteKeepUploads } from './_deleteUploads';
 import { tileArtifactUrls } from '../orchestrator/tileEvents';
-import { softArchiveOrDeleteBatch, softArchiveOrDeleteTile, SQL_TOMBSTONE_DELETE_STATUSES } from '../db/tombstone';
+import {
+  softArchiveOrDeleteBatch,
+  softArchiveOrDeleteTile,
+  SQL_TOMBSTONE_DELETE_STATUSES,
+  type RemovedTileArtifact,
+  type TombstoneResult,
+} from '../db/tombstone';
 import * as queue from '../orchestrator/queue';
 import * as bus from '../orchestrator/bus';
 import { terminalFrame } from '../lifecycle/sse';
@@ -199,6 +207,7 @@ export const historyRoutes = new Hono<AppEnv>()
     const queuedCancellations: QueuedCancellation[] = [];
     const sequenceEffects: SequenceMutationEffect[] = [];
     const deletedBatchIds: string[] = [];
+    const removedArtifacts: RemovedTileArtifact[] = [];
     let releasedUploadIds: string[] = [];
     c.var.db.transaction(() => {
       releasedUploadIds = uploadIdsForBatchScope(c.var.db, `SELECT id FROM batches ${predicate.where}`, predicate.params);
@@ -248,15 +257,20 @@ export const historyRoutes = new Hono<AppEnv>()
         for (let offset = 0; offset < cancelIntentBatchIds.length; offset += MAX_SQLITE_PARAMS_PER_QUERY) {
           const chunk = cancelIntentBatchIds.slice(offset, offset + MAX_SQLITE_PARAMS_PER_QUERY);
           const cancelIntentPlaceholders = chunk.map(() => '?').join(',');
-          c.var.db.query(
+          const removed = c.var.db.query<{ id: string; ext: RemovedTileArtifact['ext'] | null }, (string | number)[]>(
             // batch_id IN (cancelIntentPlaceholders) narrows the hard-delete
             // to ONLY in-flight (cancel-intent) batches; `tileScopeSql`
             // matches every batch in the bulk predicate (a superset). Without
             // the narrow filter the DELETE would hard-delete `done` tiles for
             // non-cancel-intent batches too, violating per-batch tombstone
-            // semantics (see softArchiveOrDeleteBatch).
-            `DELETE FROM tiles WHERE user_id = ? AND archived_at IS NULL AND status = 'done' AND batch_id IN (${cancelIntentPlaceholders}) AND ${tileScopeSql}`,
-          ).run(c.var.userId, ...chunk, ...predicate.params);
+            // semantics (see softArchiveOrDeleteBatch). RETURNING feeds the
+            // post-commit unlink of the files these rows pointed at.
+            `DELETE FROM tiles WHERE user_id = ? AND archived_at IS NULL AND status = 'done' AND batch_id IN (${cancelIntentPlaceholders}) AND ${tileScopeSql}
+             RETURNING id, ext`,
+          ).all(c.var.userId, ...chunk, ...predicate.params);
+          for (const row of removed) {
+            if (row.ext !== null) removedArtifacts.push({ id: row.id, ext: row.ext });
+          }
         }
       }
       c.var.db.query(
@@ -270,17 +284,18 @@ export const historyRoutes = new Hono<AppEnv>()
       c.var.db.query(`UPDATE batches SET archived_at = ? ${predicate.where}`)
         .run(now, ...predicate.params);
     })();
-    for (const effect of sequenceEffects) {
-      applySequenceMutationEffect(c.var.config, c.var.logger, effect);
-    }
-    releaseRequestUploads(c, releasedUploadIds, keepUploads.value);
-    for (const batchId of deletedBatchIds) notifyStoryBatchTerminal(batchId, false);
-    for (const cancellation of queuedCancellations) cancelQueuedBatch(cancellation, now);
-    if (queuedCancellations.length > 0) kickQueuesAfterQueuedCancellation(c);
-    // Post-commit: abort the in-flight controllers now that the delete txn
-    // has durably committed. Synchronous abort-listener dispatch can no
-    // longer affect the transaction.
-    for (const controller of controllersToAbort) controller.abort(new UserCanceledError());
+    // Post-commit: the delete txn has durably committed, so synchronous
+    // abort-listener dispatch can no longer affect it. Every step runs even
+    // if an earlier one throws; the aborts must never be skipped.
+    runAllPostCommit([
+      ...sequenceEffects.map((effect) => () => { applySequenceMutationEffect(c.var.config, c.var.logger, effect); }),
+      () => { releaseRequestUploads(c, releasedUploadIds, keepUploads.value); },
+      () => { unlinkRemovedArtifacts(c, removedArtifacts); },
+      ...deletedBatchIds.map((batchId) => () => { notifyStoryBatchTerminal(batchId, false); }),
+      ...queuedCancellations.map((cancellation) => () => { cancelQueuedBatch(cancellation, now); }),
+      () => { if (queuedCancellations.length > 0) kickQueuesAfterQueuedCancellation(c); },
+      ...controllersToAbort.map((controller) => () => { controller.abort(new UserCanceledError()); }),
+    ]);
     return c.body(null, 204);
   })
   .delete('/history/:batchId', async (c) => {
@@ -312,7 +327,7 @@ export const historyRoutes = new Hono<AppEnv>()
         'DELETE batch followed an earlier client disconnect',
       );
     }
-    const { uploadIds: releasedUploadIds, batchDeleted } = c.var.db.transaction(() => {
+    const { uploadIds: releasedUploadIds, tombstone } = c.var.db.transaction((): { uploadIds: string[]; tombstone: TombstoneResult } => {
       const uploadIds = batchUploadIds(c, params.value.batchId);
       if (cancelIntent || queuedCancellation !== null) {
         sequenceEffect = autoUnlinkSequenceBatch(
@@ -321,20 +336,22 @@ export const historyRoutes = new Hono<AppEnv>()
           params.value.batchId,
         );
       }
-      const deleted = softArchiveOrDeleteBatch(c.var.db, c.var.userId, params.value.batchId, { cancelIntent: cancelIntent || queuedCancellation !== null, now });
-      return { uploadIds, batchDeleted: deleted };
+      const result = softArchiveOrDeleteBatch(c.var.db, c.var.userId, params.value.batchId, { cancelIntent: cancelIntent || queuedCancellation !== null, now });
+      return { uploadIds, tombstone: result };
     })();
-    applySequenceMutationEffect(c.var.config, c.var.logger, sequenceEffect);
-    releaseRequestUploads(c, releasedUploadIds, keepUploads.value);
-    if (batchDeleted) notifyStoryBatchTerminal(params.value.batchId, false);
-    if (queuedCancellation) {
-      cancelQueuedBatch(queuedCancellation, now);
-      kickQueuesAfterQueuedCancellation(c);
-    }
-    // Post-commit abort: same invariant as bulk DELETE /history — abort()
+    // Post-commit: same invariant as bulk DELETE /history — abort()
     // dispatches its listeners synchronously, so it must run after the
-    // delete txn has durably committed, never inside the txn callback.
-    entry?.batchController.abort(new UserCanceledError());
+    // delete txn has durably committed, never inside the txn callback, and
+    // it runs even when an earlier step throws.
+    runAllPostCommit([
+      () => { applySequenceMutationEffect(c.var.config, c.var.logger, sequenceEffect); },
+      () => { releaseRequestUploads(c, releasedUploadIds, keepUploads.value); },
+      () => { unlinkRemovedArtifacts(c, tombstone.removedArtifacts); },
+      () => { if (tombstone.batchDeleted) notifyStoryBatchTerminal(params.value.batchId, false); },
+      () => { if (queuedCancellation) cancelQueuedBatch(queuedCancellation, now); },
+      () => { if (queuedCancellation) kickQueuesAfterQueuedCancellation(c); },
+      () => { entry?.batchController.abort(new UserCanceledError()); },
+    ]);
     return c.body(null, 204);
   })
   .delete('/history/:batchId/:tileId', async (c) => {
@@ -350,7 +367,7 @@ export const historyRoutes = new Hono<AppEnv>()
     const queuedCancellation = queuedTileCancellationSnapshot(c.var.db, c.var.userId, params.value.batchId, params.value.tileId);
     const cancelIntent = tileController !== undefined || queuedCancellation !== null;
     let sequenceEffect: SequenceMutationEffect = { kind: 'none' };
-    const { uploadIds: releasedUploadIds, batchDeleted } = c.var.db.transaction(() => {
+    const { uploadIds: releasedUploadIds, tombstone } = c.var.db.transaction((): { uploadIds: string[]; tombstone: TombstoneResult } => {
       const uploadIds = batchUploadIds(c, params.value.batchId);
       if (cancelIntent) {
         sequenceEffect = autoUnlinkSequenceBatch(
@@ -359,28 +376,37 @@ export const historyRoutes = new Hono<AppEnv>()
           params.value.batchId,
         );
       }
-      const deleted = softArchiveOrDeleteTile(c.var.db, c.var.userId, params.value.batchId, params.value.tileId, { cancelIntent, now });
-      return { uploadIds, batchDeleted: deleted };
+      const result = softArchiveOrDeleteTile(c.var.db, c.var.userId, params.value.batchId, params.value.tileId, { cancelIntent, now });
+      return { uploadIds, tombstone: result };
     })();
-    applySequenceMutationEffect(c.var.config, c.var.logger, sequenceEffect);
-    releaseRequestUploads(c, releasedUploadIds, keepUploads.value);
-    if (batchDeleted) notifyStoryBatchTerminal(params.value.batchId, false);
-    if (queuedCancellation) {
-      const remainingTiles = queuedLoadingTileCount(c.var.db, c.var.userId, params.value.batchId);
-      const modelId = c.var.db.query<{ model_id: string }, [string]>(
-        'SELECT model_id FROM batches WHERE id = ?',
-      ).get(params.value.batchId)?.model_id;
-      const remainingSlots = modelId === undefined
-        ? remainingTiles
-        : queueSlotsFor(c.var.config, modelId, remainingTiles);
-      cancelQueuedTile(queuedCancellation, remainingSlots, now);
-      kickQueuesAfterQueuedCancellation(c);
-    }
-    // Post-commit abort: see bulk DELETE /history rationale (synchronous
-    // abort-listener dispatch must not run inside the delete txn).
-    tileController?.abort(new UserCanceledError());
+    // Post-commit: see bulk DELETE /history rationale (synchronous
+    // abort-listener dispatch must not run inside the delete txn, and the
+    // abort runs even when an earlier step throws).
+    runAllPostCommit([
+      () => { applySequenceMutationEffect(c.var.config, c.var.logger, sequenceEffect); },
+      () => { releaseRequestUploads(c, releasedUploadIds, keepUploads.value); },
+      () => { unlinkRemovedArtifacts(c, tombstone.removedArtifacts); },
+      () => { if (tombstone.batchDeleted) notifyStoryBatchTerminal(params.value.batchId, false); },
+      () => {
+        if (!queuedCancellation) return;
+        const remainingTiles = queuedLoadingTileCount(c.var.db, c.var.userId, params.value.batchId);
+        const modelId = c.var.db.query<{ model_id: string }, [string]>(
+          'SELECT model_id FROM batches WHERE id = ?',
+        ).get(params.value.batchId)?.model_id;
+        const remainingSlots = modelId === undefined
+          ? remainingTiles
+          : queueSlotsFor(c.var.config, modelId, remainingTiles);
+        cancelQueuedTile(queuedCancellation, remainingSlots, now);
+        kickQueuesAfterQueuedCancellation(c);
+      },
+      () => { tileController?.abort(new UserCanceledError()); },
+    ]);
     return c.body(null, 204);
   });
+
+function unlinkRemovedArtifacts(c: Context<AppEnv>, artifacts: readonly RemovedTileArtifact[]): void {
+  for (const artifact of artifacts) unlinkTileArtifactsBestEffort(c, c.var.userId, artifact.id, artifact.ext);
+}
 
 function batchUploadIds(c: Context<AppEnv>, batchId: string): string[] {
   return uploadIdsForBatchScope(c.var.db, 'SELECT id FROM batches WHERE id = ? AND user_id = ?', [batchId, c.var.userId]);

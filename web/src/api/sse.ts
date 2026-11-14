@@ -1,9 +1,18 @@
-import { SseTerminalErrorSchema, TILE_MIMES } from '@atelier/shared';
+import { SseTerminalErrorSchema } from '@atelier/shared';
 import { createSseFrameAssembler, parseSseFrame } from '@atelier/shared/sse';
 import type { BatchEvent, BrainstormSseEvent, DoneEvent, EnhanceSseEvent, QueueEvent, TileEvent } from '@atelier/shared';
 import type { SseFrame } from '@atelier/shared/sse';
+import {
+  BatchEventSchema,
+  BrainstormDoneSchema,
+  BrainstormPromptSchema,
+  DoneEventSchema,
+  EnhanceDeltaSchema,
+  QueueEventSchema,
+  TileEventSchema,
+} from '@atelier/shared/wire-schemas';
 import { ApiError, apiFetch, extractApiError, request, responseRequestId } from './client';
-import { isMediaPair, isRecord, isTileErrorCategory } from '../lib/guards';
+import { isRecord } from '../lib/guards';
 import { GptModerationNoticeSchema } from '@atelier/shared';
 import { ModerationError, useModerationNotice } from '../lib/moderationNotice';
 
@@ -46,35 +55,12 @@ interface ReadSseFramesOptions {
   onRead?: () => void;
 }
 
-// Whitelist for partial-preview data URLs. The api enforces the same
-// constraint (per output_format) at egress; this is the second line of
-// defence in case any other code path ever forwards a `partial` event
-// without going through the api validator. Derived from TILE_MIMES, so a new
-// tile mime is automatically an allowed preview format too.
-const allowedPreviewPrefixes = TILE_MIMES.map((mime) => `data:${mime};base64,`);
-function isAllowedPreviewDataUrl(value: string): boolean {
-  return allowedPreviewPrefixes.some((prefix) => value.startsWith(prefix) && value.length > prefix.length);
-}
-
 function isBatchEvent(value: unknown): value is BatchEvent {
-  return isRecord(value)
-    && typeof value.batchId === 'string'
-    && typeof value.createdAt === 'number'
-    && (value.startedAt === undefined || typeof value.startedAt === 'number')
-    && Array.isArray(value.tiles)
-    && value.tiles.every((tile) => isRecord(tile) && typeof tile.tileId === 'string' && typeof tile.tileIndex === 'number' && typeof tile.seed === 'number')
-    && (value.status === undefined || value.status === 'queued' || value.status === 'running' || value.status === 'done')
-    && (value.queueLengthAhead === undefined || typeof value.queueLengthAhead === 'number')
-    && (value.refImageIds === undefined
-        || (Array.isArray(value.refImageIds)
-            && value.refImageIds.every((id) => typeof id === 'string')));
+  return BatchEventSchema.safeParse(value).success;
 }
 
 function isQueueEvent(value: unknown): value is QueueEvent {
-  return isRecord(value)
-    && typeof value.batchId === 'string'
-    && value.status === 'running'
-    && (value.startedAt === undefined || typeof value.startedAt === 'number');
+  return QueueEventSchema.safeParse(value).success;
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -87,41 +73,25 @@ function hasValidProgressSteps(value: Record<string, unknown>): boolean {
     && isPositiveInteger(passCount) && step <= totalSteps && pass <= passCount;
 }
 
+// Client-side rule on top of TileEventSchema: a progress event's optional
+// step set travels whole. A malformed set leaves the fraction usable, so the
+// guard strips it from the original event (only when the rest is valid) and
+// the UI never sees a partial set.
 export function isTileEvent(value: unknown): value is TileEvent {
-  if (!isRecord(value) || typeof value.tileId !== 'string' || typeof value.tileIndex !== 'number') return false;
-  if (value.status === 'partial') {
-    return typeof value.preview === 'string'
-      && isAllowedPreviewDataUrl(value.preview)
-      && typeof value.index === 'number';
+  if (isRecord(value) && value.status === 'progress' && !hasValidProgressSteps(value)) {
+    const { step: _step, totalSteps: _totalSteps, pass: _pass, passCount: _passCount, ...rest } = value;
+    if (!TileEventSchema.safeParse(rest).success) return false;
+    delete value.step;
+    delete value.totalSteps;
+    delete value.pass;
+    delete value.passCount;
+    return true;
   }
-  if (value.status === 'progress') {
-    const valid = typeof value.progress === 'number'
-      && Number.isFinite(value.progress)
-      && value.progress >= 0
-      && value.progress <= 1
-      && (value.phase === undefined || typeof value.phase === 'string');
-    // The step set is optional and travels whole. A malformed set leaves the
-    // fraction usable, so strip it here and the UI never sees a partial set.
-    if (valid && !hasValidProgressSteps(value)) {
-      delete value.step;
-      delete value.totalSteps;
-      delete value.pass;
-      delete value.passCount;
-    }
-    return valid;
-  }
-  if (typeof value.completedAt !== 'number') return false;
-  if (value.status === 'canceled') return true;
-  if (value.status === 'failed') return isTileErrorCategory(value.error)
-    && (value.moderation === undefined || GptModerationNoticeSchema.safeParse(value.moderation).success);
-  return value.status === 'done'
-    && typeof value.url === 'string'
-    && (value.thumbUrl === undefined || typeof value.thumbUrl === 'string')
-    && isMediaPair(value.ext, value.mime);
+  return TileEventSchema.safeParse(value).success;
 }
 
 function isDoneEvent(value: unknown): value is DoneEvent {
-  return isRecord(value) && typeof value.batchId === 'string';
+  return DoneEventSchema.safeParse(value).success;
 }
 
 export function toGenerateEvent(frame: SseFrame | undefined): GenerateSseEvent {
@@ -201,9 +171,9 @@ export async function* parseSseStream(
 
 function toEnhanceEvent(frame: SseFrame): EnhanceSseEvent {
   const data = JSON.parse(frame.data) as unknown;
-  if (frame.event === 'delta' && isRecord(data) && typeof data.text === 'string') {
-    return { event: 'delta', data: { text: data.text } };
-  }
+  const delta = frame.event === 'delta' ? EnhanceDeltaSchema.safeParse(data) : undefined;
+  if (delta?.success) return { event: 'delta', data: { text: delta.data.text } };
+  // The done frame's payload carries nothing the client reads.
   if (frame.event === 'done') return { event: 'done', data: {} };
   if (frame.event === 'error') {
     throw parseTerminalSseError(frame.data);
@@ -222,12 +192,10 @@ export async function* parseEnhanceStream(stream: ReadableStream<Uint8Array>): A
 
 function toBrainstormEvent(frame: SseFrame): BrainstormSseEvent {
   const data = JSON.parse(frame.data) as unknown;
-  if (frame.event === 'prompt' && isRecord(data) && typeof data.index === 'number' && typeof data.text === 'string') {
-    return { event: 'prompt', data: { index: data.index, text: data.text } };
-  }
-  if (frame.event === 'done' && isRecord(data) && typeof data.count === 'number') {
-    return { event: 'done', data: { count: data.count } };
-  }
+  const prompt = frame.event === 'prompt' ? BrainstormPromptSchema.safeParse(data) : undefined;
+  if (prompt?.success) return { event: 'prompt', data: { index: prompt.data.index, text: prompt.data.text } };
+  const done = frame.event === 'done' ? BrainstormDoneSchema.safeParse(data) : undefined;
+  if (done?.success) return { event: 'done', data: { count: done.data.count } };
   if (frame.event === 'error') {
     throw parseTerminalSseError(frame.data);
   }

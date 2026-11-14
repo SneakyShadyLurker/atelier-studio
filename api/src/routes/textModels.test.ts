@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { TEXT_TASKS, type TextModelsResponse } from '@atelier/shared';
-import { bumpTextConfigRevision } from '../db/textProviders';
+import { bumpTextConfigRevisionForTests } from '../db/textProviders';
 import { listedTextAvailability, testConfig, testRuntime } from '../test/helpers';
 
 const config = testConfig();
@@ -67,7 +67,7 @@ describe('GET /api/text-models', () => {
     for (const imageModelId of Object.keys(rt.text.store.readWriters())) rt.text.store.setWriter(imageModelId, null);
     rt.text.store.setWriter('img-locked', { modelId: kimi, mode: 'lock' });
     rt.text.store.setWriter('img-preferred', { modelId: kimi, mode: 'prefer' });
-    bumpTextConfigRevision();
+    bumpTextConfigRevisionForTests();
     const body = await getModels(rt);
     expect(body.writers).toEqual({ 'img-locked': kimi, 'img-preferred': kimi });
     expect(body.lockedWriters).toEqual(['img-locked']);
@@ -128,7 +128,7 @@ describe('GET /api/text-models', () => {
 
     // An admin removes the level from the model.
     rt.db.query('UPDATE text_models SET reasoning_levels = ? WHERE id = ?').run(JSON.stringify(['low', 'high']), kimi);
-    bumpTextConfigRevision();
+    bumpTextConfigRevisionForTests();
     expect(taskRow(await getModels(rt), 'enhance')).toEqual({
       task: 'enhance', pick: kimi, effectiveModelId: kimi, pickState: 'active',
     });
@@ -219,7 +219,7 @@ describe('PUT /api/text-models/tasks/:task', () => {
     expect((await put(rt, 'enhance', { modelId: 'kimi' })).status).toBe(400);
 
     rt.db.query('UPDATE text_models SET enabled = 0 WHERE legacy_key = ?').run('grok');
-    bumpTextConfigRevision();
+    bumpTextConfigRevisionForTests();
     const disabled = await put(rt, 'enhance', { modelId: rowId(rt, 'grok') });
     expect(disabled.status).toBe(400);
     expect(rt.db.query('SELECT COUNT(*) AS count FROM user_text_models').get()).toEqual({ count: 0 });

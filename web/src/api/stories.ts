@@ -1,47 +1,25 @@
 import {
-  isVideoDurationFrames,
-  type Ratio,
+  SseTerminalErrorSchema,
+  type CancelStoryResponse,
   type StoryPlanSseEvent,
-  type StorySegmentPlan,
+  type TellStoryRequest,
 } from '@atelier/shared';
-import { isRecord } from '../lib/guards';
+import { CancelStoryResponseSchema, StoryPlanSchema, StoryPlanStatusSchema } from '@atelier/shared/wire-schemas';
 import { apiPath, requestJsonValidated } from './client';
 import { openSseStream, readSseFrames, type SseFrame } from './sse';
 
-export interface TellStoryRequest {
-  readonly outline: string;
-  readonly sourceUploadId?: string;
-  readonly extendsTileId?: string;
-  readonly sourcePrompt?: string;
-  readonly ratio?: Ratio;
-}
+type StoryPlan = Extract<StoryPlanSseEvent, { event: 'plan' }>['data'];
 
-export interface CancelStoryResponse {
-  readonly inflightBatchId: string | null;
-}
-
-function isStorySegmentPlan(value: unknown): value is StorySegmentPlan {
-  return isRecord(value)
-    && typeof value.beat === 'string'
-    && isVideoDurationFrames(typeof value.durationFrames === 'number' ? value.durationFrames : undefined);
+function isStoryPlan(value: unknown): value is StoryPlan {
+  return StoryPlanSchema.safeParse(value).success;
 }
 
 function toStoryPlanEvent(frame: SseFrame): StoryPlanSseEvent {
   const data = JSON.parse(frame.data) as unknown;
-  if (frame.event === 'status' && isRecord(data) && data.phase === 'planning') {
+  if (frame.event === 'status' && StoryPlanStatusSchema.safeParse(data).success) {
     return { event: 'status', data: { phase: 'planning' } };
   }
-  if (
-    frame.event === 'plan'
-    && isRecord(data)
-    && typeof data.storyId === 'string'
-    && typeof data.logline === 'string'
-    && Array.isArray(data.segments)
-    && data.segments.every(isStorySegmentPlan)
-    && typeof data.etaMs === 'number'
-    && Number.isFinite(data.etaMs)
-    && data.etaMs >= 0
-  ) {
+  if (frame.event === 'plan' && isStoryPlan(data)) {
     return {
       event: 'plan',
       data: {
@@ -52,19 +30,11 @@ function toStoryPlanEvent(frame: SseFrame): StoryPlanSseEvent {
       },
     };
   }
-  if (
-    frame.event === 'error'
-    && isRecord(data)
-    && typeof data.message === 'string'
-    && (data.code === undefined || typeof data.code === 'string')
-  ) {
-    return {
-      event: 'error',
-      data: {
-        message: data.message,
-        ...(typeof data.code === 'string' ? { code: data.code } : {}),
-      },
-    };
+  if (frame.event === 'error') {
+    // The shared terminal error frame, quota and moderation detail included;
+    // the dialog turns it into an Error with parseTerminalSseErrorFromData.
+    const parsed = SseTerminalErrorSchema.safeParse(data);
+    if (parsed.success) return { event: 'error', data: parsed.data };
   }
   if (frame.event !== 'status' && frame.event !== 'plan' && frame.event !== 'error') {
     throw new Error(`unknown SSE event: ${frame.event}`);
@@ -87,8 +57,7 @@ export async function* tellStoryStream(
 }
 
 function isCancelStoryResponse(value: unknown): value is CancelStoryResponse {
-  return isRecord(value)
-    && (value.inflightBatchId === null || typeof value.inflightBatchId === 'string');
+  return CancelStoryResponseSchema.safeParse(value).success;
 }
 
 export function cancelStory(storyId: string): Promise<CancelStoryResponse> {

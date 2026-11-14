@@ -4,6 +4,7 @@ import type {
   LibraryDiagnosisResponse,
 } from '@atelier/shared';
 import { DIAGNOSIS_VERSION, DIAGNOSIS_VERSION_HEADER } from '@atelier/shared';
+import { ConflictingPairSchema, LibraryDiagnosisEntrySchema, LibraryDiagnosisResponseSchema } from '@atelier/shared/wire-schemas';
 import { queryOptions } from '@tanstack/react-query';
 import { ApiError, apiFetch, extractApiError, responseRequestId } from './client';
 
@@ -44,42 +45,13 @@ async function fetchLibraryDiagnosis(signal?: AbortSignal): Promise<LibraryDiagn
 }
 
 export function isConflictingPair(value: unknown): value is ConflictingPair {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as { listA?: unknown; listB?: unknown; dimensionName?: unknown };
-  return typeof v.listA === 'string' && typeof v.listB === 'string' && typeof v.dimensionName === 'string';
+  return ConflictingPairSchema.safeParse(value).success;
 }
 
 export function isLibraryDiagnosisEntry(value: unknown): value is LibraryDiagnosisEntry {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as {
-    templateName?: unknown;
-    satisfiable?: unknown;
-    reason?: unknown;
-    conflictingPairs?: unknown;
-  };
-  if (typeof v.templateName !== 'string') return false;
-  if (v.satisfiable !== null && typeof v.satisfiable !== 'boolean') return false;
-  if (v.reason !== undefined && typeof v.reason !== 'string') return false;
-  if (v.conflictingPairs !== undefined) {
-    if (!Array.isArray(v.conflictingPairs)) return false;
-    if (!v.conflictingPairs.every(isConflictingPair)) return false;
-  }
-  return true;
+  return LibraryDiagnosisEntrySchema.safeParse(value).success;
 }
 
 export function isLibraryDiagnosisResponse(value: unknown): value is LibraryDiagnosisResponse {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as {
-    templates?: unknown;
-    librarySnapshotHash?: unknown;
-    templatesDigest?: unknown;
-    incompleteTemplateNames?: unknown;
-  };
-  if (!Array.isArray(v.templates)) return false;
-  if (!v.templates.every(isLibraryDiagnosisEntry)) return false;
-  if (typeof v.librarySnapshotHash !== 'string') return false;
-  if (typeof v.templatesDigest !== 'string') return false;
-  if (v.incompleteTemplateNames !== undefined && (!Array.isArray(v.incompleteTemplateNames)
-    || !v.incompleteTemplateNames.every((name: unknown) => typeof name === 'string'))) return false;
-  return true;
+  return LibraryDiagnosisResponseSchema.safeParse(value).success;
 }

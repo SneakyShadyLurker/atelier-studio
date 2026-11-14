@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import type {
   ApiErrorCode,
+  CancelStoryResponse,
   Ratio,
   StoryPlanSseEvent,
   StorySegmentPlan,
@@ -370,5 +371,5 @@ export const storiesRoutes = new Hono<AppEnv>()
     if (result.status === 'not-found') return c.json({ error: 'not found' }, 404);
     if (result.status === 'terminal') return c.json({ error: 'story is not rendering' }, 409);
     abortStoryPreparation(c.var.db, params.value.id, c.var.userId);
-    return c.json({ inflightBatchId: result.inflightBatchId });
+    return c.json({ inflightBatchId: result.inflightBatchId } satisfies CancelStoryResponse);
   });

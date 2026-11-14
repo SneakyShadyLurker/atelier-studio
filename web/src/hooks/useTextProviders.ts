@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import type { TextRoutingResponse, TextTask } from '@atelier/shared';
+import type {
+  TextModelCreateEntry,
+  TextModelPatchRequest,
+  TextProviderCreateRequest,
+  TextProviderPatchRequest,
+  TextRoutingResponse,
+  TextTask,
+  TextWriterPutRequest,
+} from '@atelier/shared';
 import { ApiError } from '../api/client';
 import {
   addModels,
@@ -15,11 +23,6 @@ import {
   textProvidersOpts,
   textRoutingOpts,
   testModel,
-  type ModelPatchBody,
-  type NewModelBody,
-  type ProviderCreateBody,
-  type ProviderPatchBody,
-  type WriterBody,
 } from '../api/textProviders';
 import { textModelKeys } from '../api/textModels';
 
@@ -67,7 +70,7 @@ export function useTextAdminMutation<TVars, TData>(mutationFn: (vars: TVars) => 
 }
 
 export function useCreateProvider() {
-  return useTextAdminMutation((body: ProviderCreateBody) => createProvider(body));
+  return useTextAdminMutation((body: TextProviderCreateRequest) => createProvider(body));
 }
 
 export function useDeleteProvider() {
@@ -75,7 +78,7 @@ export function useDeleteProvider() {
 }
 
 export function useAddModels() {
-  return useTextAdminMutation(({ providerId, models }: { providerId: string; models: readonly NewModelBody[] }) => addModels(providerId, models));
+  return useTextAdminMutation(({ providerId, models }: { providerId: string; models: readonly TextModelCreateEntry[] }) => addModels(providerId, models));
 }
 
 /** "Test model" stores its report and may mark the model tested. */
@@ -84,7 +87,7 @@ export function useTestModel() {
 }
 
 export function useUpdateProvider() {
-  return useTextAdminMutation(({ id, patch }: { id: string; patch: ProviderPatchBody }) => patchProvider(id, patch));
+  return useTextAdminMutation(({ id, patch }: { id: string; patch: TextProviderPatchRequest }) => patchProvider(id, patch));
 }
 
 /**
@@ -97,7 +100,7 @@ export function useRefreshProvider() {
 
 export function useUpdateModel() {
   return useTextAdminMutation(
-    ({ providerId, modelId, patch }: { providerId: string; modelId: string; patch: ModelPatchBody }) =>
+    ({ providerId, modelId, patch }: { providerId: string; modelId: string; patch: TextModelPatchRequest }) =>
       patchModel(providerId, modelId, patch),
   );
 }
@@ -119,7 +122,7 @@ export function useSetRoutingDefault() {
 
 export function useSetRoutingWriter() {
   return useTextAdminMutation(
-    ({ imageModelId, body }: { imageModelId: string; body: WriterBody }) => putRoutingWriter(imageModelId, body),
+    ({ imageModelId, body }: { imageModelId: string; body: TextWriterPutRequest }) => putRoutingWriter(imageModelId, body),
     keepRouting,
   );
 }

@@ -769,7 +769,7 @@ The web app persists a narrow slice of the React Query cache in IndexedDB under 
 
 ## Resilience knobs
 
-The text-call resilience layer wraps every upstream call in Cockatiel retry, circuit-breaker and timeout policies. `api/src/config.ts` owns the defaults; override only deliberately:
+The text-call resilience layer wraps every upstream call in Cockatiel retry, circuit-breaker and timeout policies. GPT Image calls have their own retry and breaker knobs (`IMAGE_*`), and the video sequence stitch its own time limit. `api/src/config.ts` owns the defaults; override only deliberately:
 
 | Var | Default | Range | What it does |
 |---|---:|---|---|
@@ -780,8 +780,9 @@ The text-call resilience layer wraps every upstream call in Cockatiel retry, cir
 | `RESILIENT_MAX_BACKOFF_MS` | 8000 | 500-60000 | Backoff ceiling. |
 | `RESILIENT_BREAKER_THRESHOLD` | 8 | 3-32 | Consecutive transient failures before the breaker opens, per capability. |
 | `RESILIENT_HALF_OPEN_AFTER_MS` | 30000 | 5000-120000 | Cooldown before the breaker tries half-open. |
-| `ENHANCE_OPEN_TIMEOUT_MS` | 15000 | 5000-60000 | Per-attempt cap for the `/enhance` open phase. The stream drain stays outside the policy. |
+| `ENHANCE_OPEN_TIMEOUT_MS` | 15000 | 5000-60000 | Per-attempt cap for the `/enhance` open phase. The stream drain stays outside the policy. The bundled `infra/docker/docker-compose.yml` defaults it to 60000; setting it in `.env` overrides that. |
 | `BRAINSTORM_OPEN_TIMEOUT_MS` | 45000 | 5000-120000 | Per-attempt open-phase cap for character brainstorming. A transient failure before any prompt was emitted fails over once to the next model in routing order (`brainstorm_backend_fallback`). |
+| `BRAINSTORM_MAX_RESPONSE_BYTES` | 4194304 | positive | Raw stream cap for character brainstorming, larger than the enhance cap and sized for the largest count. A pinned reasoning effort above `low` raises it to at least 16 MiB. |
 | `AI_FILL_PER_ATTEMPT_TIMEOUT_MS` | 120000 | 30000-180000 | Per-attempt timeout for ai-fill (`maxAttempts: 2`). Models marked Slow model use at least 360000. |
 | `KREA_CONDENSE_TIMEOUT_MS` | 150000 | 1000-300000 | Per-call Krea condensation cap; condensation fails open. Models marked Slow model use at least 420000. |
 | `H3_IMAGE_EXPAND_TIMEOUT_MS` | 120000 | 1000-300000 | Per-call cap on expanding a MiniMax H3 Image prompt under 60 words; expansion fails open and renders the original. Models marked Slow model use at least 420000. |
@@ -793,5 +794,15 @@ The text-call resilience layer wraps every upstream call in Cockatiel retry, cir
 | `QUOTA_MIN_RETRY_AFTER_MS` | 300000 | 30000-3600000 | A `429` counts as budget exhaustion (non-retriable, breaker-exempt) only when its `Retry-After` is at least this floor or the body names a token budget. |
 | `SWAG_PROXY_READ_TIMEOUT_MS` | 600000 | 60000-3600000 | Mirrors the proxy's `proxy_read_timeout`. |
 | `INFER_DIMENSIONS_BATCH_CONCURRENCY` | 12 | 1-16 | Concurrent per-list calls during two-pass infer. |
+| `INFER_TAXONOMY_TIMEOUT_MS` | 180000 | 70000-300000 | Shared wall-time envelope of the taxonomy pass (pass 1) of two-pass infer, which reasons over the whole library in one call. Counted in the `INFER_TOTAL_BUDGET_MS` check. |
+| `INFER_DIMENSIONS_MAX_SNAPSHOT_TOKENS` | 12000 | positive | Estimated library snapshot size (characters / 4) above which infer switches to two-pass. |
+| `INFER_DIMENSIONS_MAX_OUTPUT_BUDGET_TOKENS` | 4000 | positive | Projected tagging output above which infer switches to two-pass, so per-list batches stay fast. |
+| `IMAGE_RETRY_MAX_ATTEMPTS` | 3 | 1-6 | Total GPT Image upstream invocations per image call, including the first. |
+| `IMAGE_RETRY_INITIAL_BACKOFF_MS` | 1000 | 100-10000 | GPT Image retry backoff base. |
+| `IMAGE_RETRY_MAX_BACKOFF_MS` | 8000 | 500-60000 | GPT Image retry backoff ceiling. |
+| `IMAGE_BREAKER_THRESHOLD` | 5 | 2-32 | Consecutive transient GPT Image failures before its breaker opens. While it is open, the pool's queue pauses dequeuing instead of failing the backlog fast. |
+| `IMAGE_BREAKER_HALF_OPEN_MS` | 15000 | 2000-120000 | Cooldown before an open image breaker lets one probe request through. |
+| `IMAGE_BREAKER_MAX_PAUSE_MS` | 300000 | 30000-1800000 | Longest a pool's queue stays paused behind an open image breaker; then its queued batches fail as service unavailable. |
+| `SEQUENCE_STITCH_TIMEOUT_MS` | 120000 | positive | Time limit for stitching a video sequence's master file, for a 124-frame master; it scales linearly with longer masters. |
 
 `loadConfig` cross-validates the infer waves, retry backoff and headroom against `INFER_TOTAL_BUDGET_MS`, and enforces `total_budget + 60 s <= SWAG_PROXY_READ_TIMEOUT_MS`; startup fails with a precise message if either is violated. Breakers are per capability and per container. Telemetry events: `infer_dimensions_upstream`, `infer_dimensions_failed_after_retry`, `infer_dimensions_breaker_skipped_wave2`.

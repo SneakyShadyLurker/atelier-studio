@@ -150,6 +150,25 @@ describe('createIDBPersister', () => {
     expect(await get<PersistedClient>(IDB_KEY)).toEqual(persistedClient('five'));
   });
 
+  test('a write dropped while the tab is hidden does not suppress the same state once visible', async () => {
+    const persister = createIDBPersister('scope-a');
+    const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      await persister.persistClient(persistedClient('hidden-change'));
+      // The debounced write fires while hidden and drops the buffered client.
+      await new Promise((resolve) => setTimeout(resolve, 1_050));
+      expect(await get<PersistedClient>(IDB_KEY)).toBeUndefined();
+    } finally {
+      if (visibility) Object.defineProperty(document, 'visibilityState', visibility);
+      else Reflect.deleteProperty(document, 'visibilityState');
+    }
+
+    await persister.persistClient(persistedClient('hidden-change'));
+    await flushPersisterForTests();
+    expect(await get<PersistedClient>(IDB_KEY)).toEqual(persistedClient('hidden-change'));
+  });
+
   test('removeClient cancels pending write', async () => {
     const persister = createIDBPersister('scope-a');
     await persister.persistClient(persistedClient('pending'));

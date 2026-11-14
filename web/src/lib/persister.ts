@@ -353,7 +353,10 @@ export function createIDBPersister(cacheScope: string): Persister {
           // pagehide/visibilitychange flush captures the last frame before
           // the tab actually leaves the foreground, so dropping here is
           // safe and avoids racing the foreground tab on shared IDB rows.
+          // Forget its signature too, so the same state persists once the
+          // tab is visible again instead of being skipped as already written.
           latestClient = undefined;
+          if (lastPersistedSignature === signature) lastPersistedSignature = undefined;
           return;
         }
         void flushLatestClient();

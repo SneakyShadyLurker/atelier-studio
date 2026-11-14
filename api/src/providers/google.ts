@@ -10,6 +10,7 @@ import {
 import { sniffImage } from '../storage/imageSniff';
 import { downscaleRefForGemini, RefDownscaleError } from '../storage/refDownscale';
 import { readBytesBounded } from './_http';
+import { errorTypeOf } from '../observability/logger';
 import type { Provider, ProviderRequest, ProviderResult } from './types';
 import type { ProviderErrorReason } from './types';
 
@@ -41,6 +42,38 @@ interface RefPartsState {
 // aggregate check is the belt-and-braces guard for pathological inputs whose
 // final downscale attempt still overshoots the per-ref target.
 const MAX_INLINE_PAYLOAD_BYTES = 18_000_000;
+
+export type GoogleKeyProbeResult =
+  | { readonly ok: true }
+  | {
+    readonly ok: false;
+    /** `auth`: Google refused the key. `unavailable`: rate limit, 5xx or no answer. */
+    readonly reason: 'auth' | 'unavailable';
+    /** Upstream HTTP status, or null when no response arrived. */
+    readonly status: number | null;
+    /** Class name of the transport error when no response arrived. */
+    readonly errorType?: string;
+  };
+
+/**
+ * Asks Google whether an API key is accepted (a one-model list call). The
+ * result carries only a status and an error class for the caller to log; the
+ * key and the upstream body never leave this function.
+ */
+export async function probeGoogleKey(apiKey: string, timeoutMs: number): Promise<GoogleKeyProbeResult> {
+  try {
+    const res = await fetch(`${GOOGLE_BASE_URL}/models?pageSize=1`, {
+      headers: { [GOOGLE_AUTH_HEADER]: apiKey },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const { ok, status } = res;
+    await res.body?.cancel();
+    if (ok) return { ok: true };
+    return { ok: false, reason: status === 429 || status >= 500 ? 'unavailable' : 'auth', status };
+  } catch (error) {
+    return { ok: false, reason: 'unavailable', status: null, errorType: errorTypeOf(error) };
+  }
+}
 
 export interface GoogleProviderConfig {
   apiKey: string;

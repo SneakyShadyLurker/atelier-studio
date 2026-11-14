@@ -10,6 +10,14 @@ import { isSunburstModel } from '../prompts/gptSystemPrompt';
 // (the legacy text config, `buildChatBody`, `TEXT_BACKEND_*` in shared) are
 // gone, and this record must outlive them.
 
+// GLM 5.3's catalog `max_output_tokens` is 131,072, but reasoning spends from
+// the completion budget and the slow stream drain is sized to emit the whole
+// budget at the measured throughput, so its migrated row asks for 32,768 on
+// every call: a count-12 brainstorm used 21,067 tokens on the earlier GLM
+// Flash route. Named only so the row tests can assert it; like every value in
+// this record it is frozen and must not track a live constant.
+export const GLM_ABLITERATED_MAX_COMPLETION_TOKENS = 32_768;
+
 /** One of the seven fixed backend keys a migrated model row remembers. */
 export type LegacyTextKey =
   | 'kimi'
@@ -161,7 +169,7 @@ export const LEGACY_SEED: LegacySeed = {
         structuredOutput: 'none',
         reasoningLevels: ['low', 'high', 'max'],
         reasoningDefault: 'low',
-        fixedOutputTokens: 32_768,
+        fixedOutputTokens: GLM_ABLITERATED_MAX_COMPLETION_TOKENS,
         latencyProfile: 'slow',
       },
       screenRequests: false,

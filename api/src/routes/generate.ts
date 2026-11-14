@@ -24,6 +24,7 @@ import {
   acquireForPool,
   createReservationReleaser,
   releaseForPool,
+  waitsOnGlobalCapAlone,
 } from '../orchestrator/concurrency';
 import { needsQueuedPromptPreparation, prepareQueuedPrompts } from '../orchestrator/queuedPromptPreparation';
 import {
@@ -409,10 +410,18 @@ export const generateRoutes = new Hono<AppEnv>().post('/generate', async (c) => 
     );
     // Every pool keeps this user's accepted queue order even if a newer,
     // smaller request could acquire capacity before its queued predecessor.
+    // Pools with a global cap also hold freed capacity for the entry the
+    // scheduler dispatches next when only that cap blocks it: otherwise a
+    // multi-tile head starves while small requests take each freed slot. A
+    // head that still waits on its owner's per-user cap reserves nothing, so
+    // other users keep their free slots.
     const hasQueuedPredecessor = queue.entries(pool).some((entry) => entry.userId === userId);
-    const acquired = hasQueuedPredecessor || needsPreparation || isPaused(pool) || isStorageSealed()
+    const nextQueued = queue.peekNext(pool);
+    const headReserved = nextQueued !== undefined
+      && waitsOnGlobalCapAlone(pool, nextQueued.userId, nextQueued.count, caps);
+    const acquired = hasQueuedPredecessor || headReserved || needsPreparation || isPaused(pool) || isStorageSealed()
       ? ({ ok: false, reason: 'global' } as const)
-      : acquireForPool(pool, userId, acquireCount, capsForPool(c.var.config, pool));
+      : acquireForPool(pool, userId, acquireCount, caps);
     let queued = false;
     if (acquired.ok) {
       try {

@@ -15,7 +15,13 @@ import type {
   TextTask,
   TextTokenField,
 } from '@atelier/shared';
-import { TEXT_REASONING_EFFORT_VALUES, TEXT_TASKS, validateTextProviderBaseUrl } from '@atelier/shared';
+import {
+  TEXT_DISPLAY_NAME_MAX_CHARS,
+  TEXT_MODEL_ID_MAX_CHARS,
+  TEXT_REASONING_EFFORT_VALUES,
+  TEXT_TASKS,
+  validateTextProviderBaseUrl,
+} from '@atelier/shared';
 import {
   ByokNotConfiguredError,
   type SealedTextSecret,
@@ -37,8 +43,8 @@ export function currentTextConfigRevision(): number {
   return textConfigRevision;
 }
 
-/** For writes outside the store that change a provider's effective config (env-credential rotation at boot). */
-export function bumpTextConfigRevision(): void {
+/** Test hook: invalidates cached text config as a write outside the store would. No production code calls it. */
+export function bumpTextConfigRevisionForTests(): void {
   textConfigRevision += 1;
 }
 
@@ -337,7 +343,9 @@ function invalid(message: string): never {
 
 function checkName(name: string): void {
   const length = name.trim().length;
-  if (length < 1 || name.length > 60) invalid('Provider name must be 1 to 60 characters.');
+  if (length < 1 || name.length > TEXT_DISPLAY_NAME_MAX_CHARS) {
+    invalid(`Provider name must be 1 to ${TEXT_DISPLAY_NAME_MAX_CHARS} characters.`);
+  }
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -348,9 +356,11 @@ function normalizeBaseUrl(baseUrl: string): string {
 
 /** Cross-field rules the DB CHECKs cannot express. */
 function checkModel(model: TextModelCapabilities & { modelId: string; displayName: string }): void {
-  if (model.modelId.length < 1 || model.modelId.length > 200) invalid('Model id must be 1 to 200 characters.');
-  if (model.displayName.trim().length < 1 || model.displayName.length > 60) {
-    invalid('Display name must be 1 to 60 characters.');
+  if (model.modelId.length < 1 || model.modelId.length > TEXT_MODEL_ID_MAX_CHARS) {
+    invalid(`Model id must be 1 to ${TEXT_MODEL_ID_MAX_CHARS} characters.`);
+  }
+  if (model.displayName.trim().length < 1 || model.displayName.length > TEXT_DISPLAY_NAME_MAX_CHARS) {
+    invalid(`Display name must be 1 to ${TEXT_DISPLAY_NAME_MAX_CHARS} characters.`);
   }
   if (new Set(model.reasoningLevels).size !== model.reasoningLevels.length) invalid('Reasoning levels must not repeat.');
   // Empty levels = fixed effort: users cannot pick one, any default is sent as is.
@@ -474,11 +484,24 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
           invalid('This provider reads its key from the server environment; it cannot be changed here.');
         }
       };
+      // Credentials are write-only: a key must never follow its provider to a
+      // host the key was not entered for. A new scheme, host or port needs the
+      // key entered again (or removed); an env-sourced key cannot move at all.
+      const rejectKeyedHostChange = (row: ProviderRow, baseUrl: string): void => {
+        if (row.auth_mode === 'none' || new URL(baseUrl).origin === new URL(row.base_url).origin) return;
+        if (row.auth_mode === 'env') {
+          invalid('This provider reads its key from the server environment, so its address cannot move to another host. Add a new provider for the new address.');
+        }
+        if (patch.apiKey === undefined) {
+          invalid('Enter the API key again to move this provider to another host, or remove the key first.');
+        }
+      };
       const before = readProvider(id);
       if (!before) return null;
       if (patch.name !== undefined) checkName(patch.name);
       const patchedBaseUrl = patch.baseUrl === undefined ? undefined : normalizeBaseUrl(patch.baseUrl);
       rejectEnvKeyChange(before);
+      if (patchedBaseUrl !== undefined) rejectKeyedHostChange(before, patchedBaseUrl);
       // Encrypt first; the read-modify-write below is one synchronous
       // transaction, so a PATCH landing during the await is not overwritten.
       const sealed = typeof patch.apiKey === 'string' ? await requireSecrets().seal(id, patch.apiKey) : null;
@@ -489,6 +512,7 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
           const current = readProvider(id);
           if (!current) return false;
           rejectEnvKeyChange(current);
+          if (patchedBaseUrl !== undefined) rejectKeyedHostChange(current, patchedBaseUrl);
           const baseUrl = patchedBaseUrl ?? current.base_url;
           db.run(
             `UPDATE text_providers
@@ -559,7 +583,7 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
         const merged = {
           ...MODEL_DEFAULTS,
           ...model,
-          displayName: model.displayName ?? model.modelId.slice(0, 60),
+          displayName: model.displayName ?? model.modelId.slice(0, TEXT_DISPLAY_NAME_MAX_CHARS),
         };
         checkModel(merged);
         return { ...merged, id: randomUUID() };

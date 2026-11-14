@@ -4,14 +4,14 @@ import type {
   ConnectionReport,
   ListedModel,
   TestReport,
-  TextModelCapabilities,
-  TextModelHints,
-  TextProtocol,
+  TextModelCreateEntry,
+  TextModelPatchRequest,
   TextProviderConnectionTestRequest,
+  TextProviderCreateRequest,
+  TextProviderPatchRequest,
   TextRoutingResponse,
   TextTask,
-  TextTokenField,
-  TextWriterMode,
+  TextWriterPutRequest,
 } from '@atelier/shared';
 import { queryOptions } from '@tanstack/react-query';
 import { ApiError, apiPath, requestJson } from './client';
@@ -60,45 +60,10 @@ function jsonInit(method: string, body?: unknown): RequestInit {
     : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-export interface ProviderCreateBody {
-  readonly name: string;
-  readonly protocol: TextProtocol;
-  readonly baseUrl: string;
-  readonly preset?: string;
-  readonly apiKey?: string;
-  readonly tokenField?: TextTokenField;
-  readonly listModels?: boolean;
-}
-
-export interface ProviderPatchBody {
-  readonly name?: string;
-  readonly protocol?: TextProtocol;
-  readonly baseUrl?: string;
-  readonly preset?: string | null;
-  /** A string replaces the stored key; null removes it. */
-  readonly apiKey?: string | null;
-  readonly tokenField?: TextTokenField;
-  readonly listModels?: boolean;
-  readonly enabled?: boolean;
-}
-
-export interface ModelPatchBody extends Partial<TextModelCapabilities> {
-  readonly displayName?: string;
-  readonly enabled?: boolean;
-  readonly screenRequests?: boolean;
-  readonly sortOrder?: number;
-}
-
-export interface NewModelBody {
-  readonly modelId: string;
-  readonly displayName?: string;
-  readonly hints?: TextModelHints;
-}
-
-export const createProvider = (body: ProviderCreateBody) =>
+export const createProvider = (body: TextProviderCreateRequest) =>
   requestJson<AdminProvider>('/text-providers', jsonInit('POST', body));
 
-export const patchProvider = (id: string, body: ProviderPatchBody) =>
+export const patchProvider = (id: string, body: TextProviderPatchRequest) =>
   requestJson<AdminProvider>(apiPath('/text-providers/:id', { id }), jsonInit('PATCH', body));
 
 export const deleteProvider = (id: string) =>
@@ -122,10 +87,10 @@ export const listAvailableModels = (id: string) =>
     apiPath('/text-providers/:id/models/available', { id }),
   );
 
-export const addModels = (id: string, models: readonly NewModelBody[]) =>
+export const addModels = (id: string, models: readonly TextModelCreateEntry[]) =>
   requestJson<readonly AdminModel[]>(apiPath('/text-providers/:id/models', { id }), jsonInit('POST', { models }));
 
-export const patchModel = (id: string, mid: string, body: ModelPatchBody) =>
+export const patchModel = (id: string, mid: string, body: TextModelPatchRequest) =>
   requestJson<AdminModel>(apiPath('/text-providers/:id/models/:mid', { id, mid }), jsonInit('PATCH', body));
 
 export const deleteModel = (id: string, mid: string) =>
@@ -137,12 +102,5 @@ export const testModel = (id: string, mid: string) =>
 export const putRoutingDefault = (scope: 'default' | TextTask, modelId: string | null) =>
   requestJson<TextRoutingResponse>(apiPath('/text-routing/defaults/:scope', { scope }), jsonInit('PUT', { modelId }));
 
-export interface WriterBody {
-  /** null clears the writer. */
-  readonly modelId: string | null;
-  /** Omitted = the server default, 'prefer'. */
-  readonly mode?: TextWriterMode;
-}
-
-export const putRoutingWriter = (imageModelId: string, body: WriterBody) =>
+export const putRoutingWriter = (imageModelId: string, body: TextWriterPutRequest) =>
   requestJson<TextRoutingResponse>(apiPath('/text-routing/writers/:imageModelId', { imageModelId }), jsonInit('PUT', body));

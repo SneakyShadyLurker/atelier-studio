@@ -10,6 +10,8 @@ import * as artifactFiles from './storage/files';
 import { ensureThumbnail } from './storage/thumbnail';
 import { setFfmpegRunnerForTests } from './storage/posterFrame';
 import { runBatchPipeline } from './orchestrator';
+import { UserCanceledError } from './orchestrator/cancellation';
+import { getBatchForUser } from './orchestrator/registry';
 import { createBatch } from './orchestrator/createBatch';
 import { adoptStandaloneBatch, appendSegment, autoUnlinkBatch } from './db/sequences';
 import { buildQueuedRequestForBatch } from './orchestrator/dispatch';
@@ -304,6 +306,73 @@ describe('orchestrator i2v', () => {
         .toBe(expectedContext);
     });
   }
+
+  test('canceling a batch stops a context extraction that is still running', async () => {
+    const { db, config, logger } = testRuntime();
+    const firstBatch = crypto.randomUUID();
+    const firstTile = crypto.randomUUID();
+    const sourceUpload = crypto.randomUUID();
+    seedUploadRow(db, 'alice', sourceUpload, 'png', 'image/png', sourceBytes.byteLength);
+    db.query(
+      `INSERT INTO batches (id, user_id, prompt, ratio, model_id, model_label, created_at, status, pool, duration_frames)
+       VALUES (?, 'alice', 'first', '16:9', 'minimax-h3-i2v', 'MiniMax H3', 1, 'done', 'local', 124)`,
+    ).run(firstBatch);
+    db.query(
+      `INSERT INTO tiles (id, batch_id, user_id, tile_index, seed, status, ext, mime, completed_at)
+       VALUES (?, ?, 'alice', 0, 1, 'done', 'mp4', 'video/mp4', 1)`,
+    ).run(firstTile, firstBatch);
+    db.query('UPDATE uploads SET source_tile_id = ? WHERE id = ?').run(firstTile, sourceUpload);
+    await writeAtomic(config.DATA_DIR, 'images', 'alice', firstTile, 'mp4', mp4Bytes);
+    await writeAtomic(config.DATA_DIR, 'uploads', 'alice', sourceUpload, 'png', sourceBytes);
+    let providerCalls = 0;
+    const provider: Provider = {
+      id: 'mock-i2v', backend: 'local',
+      async *generate(request): AsyncIterable<ProviderResult> {
+        await Promise.resolve();
+        providerCalls += 1;
+        yield { status: 'ready', bytes: mp4Bytes, ext: 'mp4', mime: 'video/mp4', seed: request.seed, index: 0 };
+      },
+    };
+    const registryEntry = i2vRegistryEntry(provider);
+    const prepared = createBatch(db, 'alice', {
+      prompt: 'continue', modelId: 'minimax-h3-i2v', ratio: '16:9' as const, count: 1,
+      i2vSourceUploadId: sourceUpload, durationFrames: 124 as const, extendsTileId: firstTile,
+    }, registryEntry);
+    const adopted = adoptStandaloneBatch(db, 'alice', firstBatch);
+    if (adopted.status !== 'ok') throw new Error('expected adoption');
+    expect(appendSegment(db, logger, 'alice', adopted.sequenceId, firstBatch, prepared.batch.id).status).toBe('ok');
+    const request = buildQueuedRequestForBatch(db, prepared, registryEntry.model);
+    db.query("UPDATE batches SET status = 'running' WHERE id = ?").run(prepared.batch.id);
+    // An extraction that only ends when its signal aborts: without the batch
+    // signal it would hold the pipeline until the 30 s ffmpeg bound.
+    let tailStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => { tailStarted = resolve; });
+    let tailAborted = false;
+    setVideoTailRunnerForTests((_args, signal) => new Promise((_resolve, reject) => {
+      tailStarted();
+      signal.addEventListener('abort', () => {
+        tailAborted = true;
+        reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'));
+      }, { once: true });
+    }));
+    let syncFailures = 0;
+    const pipeline = runBatchPipeline(prepared, {
+      db, config, logger, text: testTextServices(db, config), userId: 'alice', request, registryEntry, boundProvider: provider,
+      disconnectSignal: new AbortController().signal,
+      onTileSettled: () => undefined, onSyncFailure: () => { syncFailures += 1; },
+    });
+    await started;
+    getBatchForUser(prepared.batch.id, 'alice')?.batchController.abort(new UserCanceledError());
+
+    const settled = await Promise.race([
+      pipeline.then(() => 'settled' as const),
+      new Promise<'hung'>((resolve) => { setTimeout(() => { resolve('hung'); }, 2000); }),
+    ]);
+    expect(settled).toBe('settled');
+    expect(tailAborted).toBe(true);
+    expect(providerCalls).toBe(0);
+    expect(syncFailures).toBe(1);
+  });
 
   for (const contextFrames of [22, 0]) {
     test(`non-batched video commits rendered context ${contextFrames} for extend and stitch consumers`, async () => {

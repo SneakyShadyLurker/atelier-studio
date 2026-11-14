@@ -109,7 +109,7 @@ describe('BatchView save-to-templates button', () => {
     for (const name of ['Pin batch']) {
       const item = screen.getByRole('menuitem', { name: new RegExp(name, 'i') });
       if (!(item instanceof HTMLButtonElement)) throw new Error(`expected button for ${name}`);
-      expect(item.disabled).toBe(true);
+      expect(item.getAttribute('aria-disabled')).toBe('true');
     }
 
     fireEvent.click(screen.getByLabelText('Archive batch'));

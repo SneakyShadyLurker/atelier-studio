@@ -8,6 +8,7 @@ import type { AppLogger } from '../observability/logger';
 import * as queue from '../orchestrator/queue';
 import { finalizeBatch } from '../orchestrator/finalize';
 import { autoUnlinkBatch, markStitchQueued } from '../db/sequences';
+import { pruneStoriesWithoutBatches } from '../db/stories';
 import {
   applySequenceMutationEffect,
   preparePermanentBatchDeletion,
@@ -150,28 +151,35 @@ export function startupReconcile(
     )
     .all();
   if (interruptedLoading.length > 0) {
-    db.query(
-      `UPDATE tiles
-          SET status = 'failed', error = 'interrupted', completed_at = ?
-        WHERE status = 'loading'
-          AND EXISTS (
-            SELECT 1 FROM batches
-             WHERE batches.id = tiles.batch_id
-               AND batches.user_id = tiles.user_id
-               AND batches.status = 'running'
-          )`,
-    )
-      .run(now);
-    logger.warn({ count: interruptedLoading.length }, 'reconciled interrupted loading tiles');
     const interruptedBatches = new Map(
       interruptedLoading.map((row) => [row.batch_id, row.user_id] as const),
     );
-    for (const [batchId, userId] of interruptedBatches) {
-      const unlinked = autoUnlinkBatch(db, userId, batchId, now);
-      if (unlinked.status === 'dissolved') {
-        deleteSequenceMaster(dataDir, unlinked.sequence.userId, unlinked.sequence.id, logger);
+    // One transaction: this block finds its work by `loading` tiles, so a
+    // crash between the flip and the unlinks would leave failed segments
+    // linked with nothing left to find them by on the next boot.
+    const dissolved = db.transaction(() => {
+      db.query(
+        `UPDATE tiles
+            SET status = 'failed', error = 'interrupted', completed_at = ?
+          WHERE status = 'loading'
+            AND EXISTS (
+              SELECT 1 FROM batches
+               WHERE batches.id = tiles.batch_id
+                 AND batches.user_id = tiles.user_id
+                 AND batches.status = 'running'
+            )`,
+      )
+        .run(now);
+      const sequences: { userId: string; id: string }[] = [];
+      for (const [batchId, userId] of interruptedBatches) {
+        const unlinked = autoUnlinkBatch(db, userId, batchId, now);
+        if (unlinked.status === 'dissolved') sequences.push({ userId: unlinked.sequence.userId, id: unlinked.sequence.id });
       }
-    }
+      return sequences;
+    }).immediate();
+    logger.warn({ count: interruptedLoading.length }, 'reconciled interrupted loading tiles');
+    // File work stays outside the transaction: it cannot roll back.
+    for (const sequence of dissolved) deleteSequenceMaster(dataDir, sequence.userId, sequence.id, logger);
   }
   const completedRunning = db
     .query(
@@ -556,7 +564,7 @@ export function startupReconcile(
   // where a crash could leave a tile-less archived batch across a boot.
   // The file-unlink loop stays OUTSIDE the txn — fs work can't roll back.
   const sequenceEffects: SequenceMutationEffect[] = [];
-  const { deletedTiles, batchesPurged, purgedUploads } = db.transaction(() => {
+  const { deletedTiles, batchesPurged, purgedUploads, storiesPurged } = db.transaction(() => {
     const expiringBatchIds = db.query<{ batch_id: string }, [number]>(
       `SELECT DISTINCT batch_id FROM tiles
         WHERE archived_at IS NOT NULL AND archived_at < ?`,
@@ -583,7 +591,11 @@ export function startupReconcile(
     }
     const deleted = tileDeleteStmt.all(cutoff);
     const batchResult = batchDeleteStmt.run(cutoff);
-    return { deletedTiles: deleted, batchesPurged: batchResult.changes, purgedUploads: uploadsByUser };
+    // Unscoped on purpose: boot also clears finished stories whose clips were
+    // removed by a path that could not prune them (a cancel-by-delete settles
+    // the story only after its batch is gone).
+    const stories = pruneStoriesWithoutBatches(db);
+    return { deletedTiles: deleted, batchesPurged: batchResult.changes, purgedUploads: uploadsByUser, storiesPurged: stories };
   })();
   for (const [userId, uploadIds] of purgedUploads) {
     releaseUploads({ db, dataDir, logger, userId, uploadIds });
@@ -608,8 +620,8 @@ export function startupReconcile(
       logger.warn({ err: error, tileId: tile.id }, 'archive purge: thumb unlink failed; will be reaped at next boot');
     }
   }
-  if (deletedTiles.length > 0 || batchesPurged > 0) {
-    logger.info({ tilesPurged: deletedTiles.length, batchesPurged }, 'archive purge complete');
+  if (deletedTiles.length > 0 || batchesPurged > 0 || storiesPurged > 0) {
+    logger.info({ tilesPurged: deletedTiles.length, batchesPurged, storiesPurged }, 'archive purge complete');
   }
 
   // Reclaim the WAL space + FTS5 tombstones the bulk purge above leaves behind.

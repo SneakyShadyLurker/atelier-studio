@@ -464,7 +464,7 @@ describe('loadConfig', () => {
 
   test('legacy MAX_CONCURRENT_BATCHES env throws ConfigError naming the rename', () => {
     // Migration guard: silently ignoring the old name would let operators boot
-    // with the new default of 4 instead of their configured limit.
+    // with the new default of 5 instead of their configured limit.
     let caught: unknown = null;
     try {
       loadConfig({ ...validEnv(), MAX_CONCURRENT_BATCHES: '1' });
@@ -517,6 +517,25 @@ describe('loadConfig', () => {
       });
       expect(cfg.TRUSTED_PROXY_KEY).toBe(longKey);
       expect(cfg.BYOK_ENCRYPTION_KEY).toBe(byokKey);
+    });
+
+    test('mock-provider and CSRF defaults follow the NODE_ENV of the env being loaded', () => {
+      const prodEnv = {
+        ...validEnv(),
+        NODE_ENV: 'production',
+        TRUSTED_PROXY_KEY: longKey,
+        BYOK_ENCRYPTION_KEY: byokKey,
+        STORAGE_ROOT_RECIPIENT: 'age1pq1testrecipient',
+      };
+      const production = loadConfig(prodEnv);
+      expect([production.ENABLE_MOCK_PROVIDER, production.CSRF_PROTECT]).toEqual([false, true]);
+      const development = loadConfig({ ...validEnv(), NODE_ENV: 'development' });
+      expect([development.ENABLE_MOCK_PROVIDER, development.CSRF_PROTECT]).toEqual([true, false]);
+      // An explicit value wins in either mode; an unreadable one keeps the default.
+      const explicit = loadConfig({ ...prodEnv, ENABLE_MOCK_PROVIDER: 'true', CSRF_PROTECT: 'off' });
+      expect([explicit.ENABLE_MOCK_PROVIDER, explicit.CSRF_PROTECT]).toEqual([true, false]);
+      const unreadable = loadConfig({ ...prodEnv, ENABLE_MOCK_PROVIDER: 'maybe', CSRF_PROTECT: '' });
+      expect([unreadable.ENABLE_MOCK_PROVIDER, unreadable.CSRF_PROTECT]).toEqual([false, true]);
     });
 
     test('production without TRUSTED_PROXY_KEY fails', () => {

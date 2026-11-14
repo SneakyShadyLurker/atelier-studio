@@ -1,15 +1,11 @@
-import type { Batch, VideoSequenceSummary } from '@atelier/shared';
+import type { Batch, HandoffFrameResponse, VideoSequenceSummary } from '@atelier/shared';
+import { HandoffFrameResponseSchema } from '@atelier/shared/wire-schemas';
 import { apiPath, apiUrl, requestJsonValidated, requestNoContent } from './client';
 import { downloadArtifact, sequenceDownloadFilename } from './images';
-import { isRecord } from '../lib/guards';
 import { mediaUrl } from './mediaUrl';
 
-interface HandoffFrameResponse {
-  readonly uploadId: string;
-}
-
 function isHandoffFrameResponse(value: unknown): value is HandoffFrameResponse {
-  return isRecord(value) && typeof value.uploadId === 'string';
+  return HandoffFrameResponseSchema.safeParse(value).success;
 }
 
 export function createHandoffFrame(tileId: string, signal?: AbortSignal): Promise<HandoffFrameResponse> {

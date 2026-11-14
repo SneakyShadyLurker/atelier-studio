@@ -134,6 +134,13 @@ Cloud providers need an API key and charge per request. Set
 encrypts the key, never sends it to the browser, and shows only its last four
 characters afterwards.
 
+A saved key stays with the address it was entered for. To move a provider with
+a saved key to a different scheme, host or port in **Edit provider**, enter the
+key again in the same save, or remove the key first. Changing only the path on
+the same host keeps the key. A provider whose key comes from the server
+environment cannot move to another host at all: add a new provider for the new
+address instead.
+
 ### OpenRouter
 
 OpenRouter sells access to models from many companies with one key, and its

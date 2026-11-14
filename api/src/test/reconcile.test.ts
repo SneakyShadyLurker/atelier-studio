@@ -406,6 +406,35 @@ describe('startup reconciliation', () => {
     expect(logs.join('')).toContain('queue_rebuild_failed');
   });
 
+  test('an interrupted segment is failed and unlinked together, or not at all', () => {
+    const { db, config, logger } = testRuntime();
+    const seeded = seedReconcileSequence(db, config.DATA_DIR, -1);
+    const batchId = seeded.batchIds[2] ?? '';
+    const tileId = seeded.tileIds[2] ?? '';
+    db.query("UPDATE batches SET status = 'running' WHERE id = ?").run(batchId);
+    db.query("UPDATE tiles SET status = 'loading', ext = NULL, mime = NULL, completed_at = NULL WHERE id = ?").run(tileId);
+    const reconcile = () => {
+      startupReconcile(db, config.DATA_DIR, logger, {
+        uploadTtlMs: config.UPLOAD_TTL_MS, orphanThreshold: 1, force: false, dbIntegrityOk: true,
+        enqueueSequenceStitch: () => undefined,
+      });
+    };
+    const state = () => ({
+      tile: db.query<{ status: string }, [string]>('SELECT status FROM tiles WHERE id = ?').get(tileId)?.status,
+      linked: db.query<{ sequence_id: string | null }, [string]>('SELECT sequence_id FROM batches WHERE id = ?').get(batchId)?.sequence_id !== null,
+    });
+
+    // The unlink fails mid-boot: the tile must stay `loading`, because that
+    // status is the only thing the next boot looks for.
+    db.run("CREATE TEMP TRIGGER fail_unlink BEFORE UPDATE OF sequence_id ON batches BEGIN SELECT RAISE(ABORT, 'unlink failed'); END");
+    expect(reconcile).toThrow('unlink failed');
+    expect(state()).toEqual({ tile: 'loading', linked: true });
+
+    db.run('DROP TRIGGER fail_unlink');
+    reconcile();
+    expect(state()).toEqual({ tile: 'failed', linked: false });
+  });
+
   test('purges archived rows older than 30 days and removes artifacts', () => {
     const { db, config, logger } = testRuntime();
     const now = Date.now();
@@ -429,6 +458,22 @@ describe('startup reconciliation', () => {
     writeFileSync(join(dir, `${expiredTile}.png`), 'old');
     writeFileSync(join(dir, `${freshTile}.png`), 'fresh');
 
+    const insertStory = db.query(
+      `INSERT INTO stories
+        (id, user_id, status, outline, logline, continuity_bible, ratio, eta_ms, created_at, updated_at)
+       VALUES (?, 'u', ?, 'outline', 'logline', 'bible', '16:9', 1000, 1, 1)`,
+    );
+    const insertSegment = db.query(
+      `INSERT INTO story_segments (story_id, user_id, idx, beat, duration_frames, batch_id, attempts)
+       VALUES (?, 'u', 0, 'beat', 124, ?, 1)`,
+    );
+    insertStory.run('story-expired', 'done');
+    insertSegment.run('story-expired', expiredBatch);
+    insertStory.run('story-fresh', 'done');
+    insertSegment.run('story-fresh', freshBatch);
+    insertStory.run('story-rendering', 'rendering');
+    insertSegment.run('story-rendering', null);
+
     startupReconcile(db, config.DATA_DIR, logger, { uploadTtlMs: config.UPLOAD_TTL_MS, orphanThreshold: config.RECONCILE_ORPHAN_THRESHOLD, force: true, dbIntegrityOk: true });
 
     expect(db.query('SELECT id FROM tiles WHERE id = ?').get(expiredTile)).toBeNull();
@@ -437,6 +482,11 @@ describe('startup reconciliation', () => {
     expect(db.query('SELECT id FROM tiles WHERE id = ?').get(freshTile)).toBeTruthy();
     expect(db.query('SELECT id FROM batches WHERE id = ?').get(freshBatch)).toBeTruthy();
     expect(existsSync(join(dir, `${freshTile}.png`))).toBe(true);
+    // The purge takes the plan text of stories whose clips it removed.
+    expect(db.query<{ id: string }, []>('SELECT id FROM stories ORDER BY id').all().map((row) => row.id))
+      .toEqual(['story-fresh', 'story-rendering']);
+    expect(db.query<{ story_id: string }, []>('SELECT story_id FROM story_segments ORDER BY story_id').all().map((row) => row.story_id))
+      .toEqual(['story-fresh', 'story-rendering']);
   });
 
   test('reaps orphan upload artifacts at boot', () => {

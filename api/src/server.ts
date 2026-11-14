@@ -15,6 +15,7 @@ import { importHmacKey } from './crypto/fingerprint';
 import { createKeyStore, type KeyStore } from './keystore';
 import { KeystoreProofError, verifyOrSeedKeystoreProof } from './keystore/proof';
 import { StorageIntegrityError, StorageRootMismatchError, StorageSealedError } from './storage/crypto';
+import { storageSealedResponse } from './routes/_http';
 import {
   DEFAULT_UNSEAL_SOCKET,
   DataVolumeMarkerMissingError,
@@ -250,7 +251,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     // storage (storage/crypto.ts). Transient: the client retries.
     if (err instanceof StorageSealedError) {
       c.var.logger.warn({ path: c.req.path }, 'artifact read while storage sealed');
-      return c.json({ error: 'storage sealed' }, 503, { 'Retry-After': '5' });
+      return storageSealedResponse(c);
     }
     if (err instanceof StorageIntegrityError) {
       c.var.logger.error({ err, path: c.req.path }, 'artifact_integrity_error');

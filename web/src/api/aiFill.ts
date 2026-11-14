@@ -8,7 +8,7 @@ import type {
 import { ApiError, apiFetch, extractApiError, responseRequestId } from './client';
 import { consumeSseResult, parseTerminalSseErrorFromData } from './sse';
 import { classifyQueueFull, delay, jitterRetryDelayMs, MAX_QUEUE_FULL_RETRIES, QueueFullError } from './queueFullRetry';
-import { isRecord, isStringArray } from '../lib/guards';
+import { AiFillBackendFrameSchema, AiFillBatchResultSchema, AiFillResultSchema } from '@atelier/shared/wire-schemas';
 
 // Derived from the shared wire union so the client result type can't drift
 // from what the api's `result` frame actually carries.
@@ -16,30 +16,21 @@ export type AiFillResolved = Extract<AiFillSseEvent, { event: 'result' }>['data'
 export type AiFillBatchResolved = Extract<AiFillBatchSseEvent, { event: 'result' }>['data'];
 
 function isAiFillResult(value: unknown): value is AiFillResolved {
-  return isRecord(value)
-    && typeof value.prompt === 'string'
-    && isStringArray(value.fills);
+  return AiFillResultSchema.safeParse(value).success;
 }
 
 function isAiFillBatchResult(value: unknown): value is AiFillBatchResolved {
-  if (!isRecord(value) || !Array.isArray(value.items)) return false;
-  return value.items.every((item) => {
-    if (!isRecord(item) || typeof item.ok !== 'boolean') return false;
-    if (!item.ok) return true;
-    return typeof item.prompt === 'string' && isStringArray(item.fills);
-  });
+  return AiFillBatchResultSchema.safeParse(value).success;
 }
 
 /** The text model a fill announced: its row id and display name. */
 export type AiFillModel = Pick<AiFillBackendFrame, 'modelId' | 'label'>;
 
-// Advisory frame: a malformed one is dropped, never thrown. Any model id is
-// accepted.
+// Advisory frame: a malformed one is dropped, never thrown. Any non-empty
+// model id is accepted.
 function backendFrameModel(data: unknown): AiFillModel | null {
-  if (!isRecord(data) || typeof data.modelId !== 'string' || data.modelId === '' || typeof data.label !== 'string') {
-    return null;
-  }
-  return { modelId: data.modelId, label: data.label };
+  const frame = AiFillBackendFrameSchema.safeParse(data);
+  return frame.success ? { modelId: frame.data.modelId, label: frame.data.label } : null;
 }
 
 // Resolves {{ai-fill}} blanks via the SSE endpoint. The server streams 15s

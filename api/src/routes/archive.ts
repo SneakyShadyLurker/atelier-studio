@@ -1,18 +1,19 @@
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 import { z } from 'zod';
 import type { ArchivedTile, ArchivePage, MediaExt, MediaMime, Ratio } from '@atelier/shared';
 import type { AppEnv } from '../server-env';
-import { deleteArtifact } from '../storage/files';
 import { ArchiveQuerySchema, ArchiveTileParamSchema } from './archive.schema';
 import { ThreadDeleteQuerySchema } from './history.schema';
 import { uploadIdsForBatchScope } from '../storage/uploadStore';
 import { releaseRequestUploads } from './_uploads';
+import { unlinkTileArtifactsBestEffort } from './_tileArtifacts';
 import { parseDeleteKeepUploads } from './_deleteUploads';
 import { refImageIdsByTile } from '../orchestrator/refImages';
 import { tileArtifactUrls } from '../orchestrator/tileEvents';
 import { decodeCursor, encodeCursor } from './_cursor';
 import { invalidFieldResponse, parseParams, parseQuery } from './_http';
 import { ARCHIVE_VISIBLE_PREDICATE } from '../db/predicates';
+import { pruneStoriesWithoutBatches } from '../db/stories';
 import {
   applySequenceMutationEffect,
   preparePermanentBatchDeletion,
@@ -34,18 +35,6 @@ interface ArchivedTileRow {
   archived_at: number;
 }
 
-function unlinkArtifactBestEffort(c: Context<AppEnv>, userId: string, tileId: string, ext: MediaExt): void {
-  try {
-    deleteArtifact(c.var.config.DATA_DIR, 'images', userId, tileId, ext);
-  } catch (error) {
-    c.var.logger.warn({ err: error, userId, tileId, ext }, 'archive delete: artifact unlink failed; will be reaped at next boot');
-  }
-  try {
-    deleteArtifact(c.var.config.DATA_DIR, 'thumbs', userId, tileId, 'webp');
-  } catch (error) {
-    c.var.logger.warn({ err: error, userId, tileId }, 'thumb unlink failed; will be reaped at next boot');
-  }
-}
 
 function toArchivedTileWithRefs(row: ArchivedTileRow, refImageIds: readonly string[]): ArchivedTile {
   const provenance = refImageIds.length > 0 ? { refImageIds } : {};
@@ -273,8 +262,11 @@ export const archiveRoutes = new Hono<AppEnv>()
       c.var.db.transaction(() => {
         c.var.db.query('UPDATE tiles SET archived_at = NULL WHERE id = ? AND user_id = ?')
           .run(params.value.tileId, c.var.userId);
+        // The IS NOT NULL guard keeps an already-live batch out of the UPDATE:
+        // naming archived_at fires the search-index trigger even when the
+        // value does not change.
         c.var.db.query(
-          'UPDATE batches SET archived_at = NULL WHERE user_id = ? AND id = (SELECT batch_id FROM tiles WHERE id = ? AND user_id = ?)',
+          'UPDATE batches SET archived_at = NULL WHERE user_id = ? AND archived_at IS NOT NULL AND id = (SELECT batch_id FROM tiles WHERE id = ? AND user_id = ?)',
         )
           .run(c.var.userId, params.value.tileId, c.var.userId);
       })();
@@ -320,11 +312,12 @@ export const archiveRoutes = new Hono<AppEnv>()
              AND NOT EXISTS (SELECT 1 FROM tiles WHERE user_id = ? AND batch_id = ?)`,
         )
           .run(c.var.userId, row.batch_id, c.var.userId, row.batch_id);
+        pruneStoriesWithoutBatches(c.var.db, c.var.userId);
       }
       return row;
     })();
     applySequenceMutationEffect(c.var.config, c.var.logger, sequenceEffect);
-    if (deleted?.ext) unlinkArtifactBestEffort(c, c.var.userId, params.value.tileId, deleted.ext);
+    if (deleted?.ext) unlinkTileArtifactsBestEffort(c, c.var.userId, params.value.tileId, deleted.ext);
     releaseRequestUploads(c, releasedUploadIds, keepUploads.value);
     return c.body(null, 204);
   })
@@ -375,6 +368,7 @@ export const archiveRoutes = new Hono<AppEnv>()
            AND NOT EXISTS (SELECT 1 FROM tiles WHERE tiles.user_id = batches.user_id AND tiles.batch_id = batches.id)`,
       )
         .run(c.var.userId);
+      pruneStoriesWithoutBatches(c.var.db, c.var.userId);
       return removed;
     })();
     const dissolved = new Set(
@@ -384,7 +378,7 @@ export const archiveRoutes = new Hono<AppEnv>()
       if (effect.kind === 'restitch' && dissolved.has(effect.sequenceId)) continue;
       applySequenceMutationEffect(c.var.config, c.var.logger, effect);
     }
-    for (const artifact of artifacts) unlinkArtifactBestEffort(c, c.var.userId, artifact.id, artifact.ext);
+    for (const artifact of artifacts) unlinkTileArtifactsBestEffort(c, c.var.userId, artifact.id, artifact.ext);
     releaseRequestUploads(c, releasedUploadIds, keepUploads.value);
     return c.body(null, 204);
   });

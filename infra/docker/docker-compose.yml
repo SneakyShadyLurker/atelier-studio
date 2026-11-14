@@ -27,7 +27,9 @@ services:
       NODE_ENV: production
       ENABLE_MOCK_PROVIDER: "false"
       UV_THREADPOOL_SIZE: "16"
-      ENHANCE_OPEN_TIMEOUT_MS: "60000"
+      # Overridable default: compose reads `.env` in this directory for the
+      # interpolation, so ENHANCE_OPEN_TIMEOUT_MS there replaces the 60000.
+      ENHANCE_OPEN_TIMEOUT_MS: ${ENHANCE_OPEN_TIMEOUT_MS:-60000}
     volumes:
       # `:?` makes compose hard-fail at substitution time when DATA_DIR is
       # unset or empty. Without it, an empty interpolation silently mounts
@@ -62,9 +64,11 @@ services:
     logging: *default-logging
     healthcheck:
       # Use bun's HTTP client; the base image (debian:trixie under the
-      # bun binary) has no wget/curl/busybox. Same fetch the Dockerfile
-      # HEALTHCHECK uses; compose's healthcheck overrides Dockerfile's
-      # when both are defined, so they MUST match.
+      # bun binary) has no wget/curl/busybox. This deliberately differs from
+      # the Dockerfile HEALTHCHECK and overrides it: the Dockerfile probes the
+      # unauthenticated liveness route /api/health, while compose probes the
+      # authenticated readiness route /api/ready (SQLite ping) with the
+      # injected Remote-User and X-Atelier-Proxy-Key headers.
       test:
         - CMD-SHELL
         - bun -e "fetch('http://127.0.0.1:8787/api/ready',{headers:{'Remote-User':'healthcheck','X-Atelier-Proxy-Key':process.env.TRUSTED_PROXY_KEY||''}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { getBatchForUser, registerBatch, __registryTest, resetRegistryForTests } from '../orchestrator/registry';
 const { registerTile } = __registryTest;
 import * as bus from '../orchestrator/bus';
@@ -15,6 +17,16 @@ afterEach(() => {
   bus.resetForTests();
   queue.resetQueueForTests();
 });
+
+function seedArtifactFiles(dataDir: string, userId: string, tileId: string): { image: string; thumb: string } {
+  const image = join(dataDir, 'images', userId, `${tileId}.png`);
+  const thumb = join(dataDir, 'thumbs', userId, `${tileId}.webp`);
+  mkdirSync(join(dataDir, 'images', userId), { recursive: true });
+  mkdirSync(join(dataDir, 'thumbs', userId), { recursive: true });
+  writeFileSync(image, 'image');
+  writeFileSync(thumb, 'thumb');
+  return { image, thumb };
+}
 
 describe('DELETE cancel behavior', () => {
   test('per-tile DELETE aborts a loading tile and hard-deletes the empty batch', async () => {
@@ -316,8 +328,8 @@ describe('DELETE cancel behavior', () => {
     expect(byokTilesInFlight('alice')).toBe(0);
   });
 
-  test('per-tile DELETE hard-deletes a done row when a tile cancel intent exists', async () => {
-    const { app, db } = testRuntime();
+  test('per-tile DELETE hard-deletes a done row and its files when a tile cancel intent exists', async () => {
+    const { app, db, config } = testRuntime();
     const batchId = '11111111-1111-4111-8111-111111111111';
     const tileId = '22222222-2222-4222-8222-222222222222';
     db.query('INSERT INTO users (id, created_at) VALUES (?, ?)').run('alice', 1);
@@ -327,6 +339,7 @@ describe('DELETE cancel behavior', () => {
       .run(tileId, batchId, 'alice', 0, 1, 'done', 'png', 'image/png', 2);
     registerBatch(batchId, 'alice', new AbortController());
     registerTile(batchId, tileId, new AbortController());
+    const files = seedArtifactFiles(config.DATA_DIR, 'alice', tileId);
 
     const del = await app.fetch(
       new Request(`http://local/api/history/${batchId}/${tileId}`, {
@@ -338,10 +351,56 @@ describe('DELETE cancel behavior', () => {
     expect(del.status).toBe(204);
     expect(db.query('SELECT id FROM tiles WHERE id = ?').get(tileId)).toBeNull();
     expect(db.query('SELECT id FROM batches WHERE id = ?').get(batchId)).toBeNull();
+    expect([existsSync(files.image), existsSync(files.thumb)]).toEqual([false, false]);
+  });
+
+  test('per-batch DELETE removes the files of done tiles it hard-deletes', async () => {
+    const { app, db, config } = testRuntime();
+    const batchId = 'a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1';
+    const doneTileId = 'a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2';
+    const loadingTileId = 'a3a3a3a3-a3a3-4a3a-8a3a-a3a3a3a3a3a3';
+    db.query('INSERT INTO users (id, created_at) VALUES (?, ?)').run('alice', 1);
+    db.query('INSERT INTO batches (id, user_id, prompt, ratio, model_id, model_label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(batchId, 'alice', 'race', '1:1', 'mock-slow', 'Mock Slow', 1);
+    db.query('INSERT INTO tiles (id, batch_id, user_id, tile_index, seed, status, ext, mime, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(doneTileId, batchId, 'alice', 0, 1, 'done', 'png', 'image/png', 2);
+    db.query('INSERT INTO tiles (id, batch_id, user_id, tile_index, seed, status) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(loadingTileId, batchId, 'alice', 1, 2, 'loading');
+    registerBatch(batchId, 'alice', new AbortController());
+    const files = seedArtifactFiles(config.DATA_DIR, 'alice', doneTileId);
+
+    const del = await app.fetch(
+      new Request(`http://local/api/history/${batchId}`, { method: 'DELETE', headers: { 'Remote-User': 'alice' } }),
+    );
+
+    expect(del.status).toBe(204);
+    expect(db.query('SELECT id FROM tiles WHERE batch_id = ?').all(batchId)).toEqual([]);
+    expect([existsSync(files.image), existsSync(files.thumb)]).toEqual([false, false]);
+  });
+
+  test('a plain per-batch DELETE archives done tiles and keeps their files', async () => {
+    const { app, db, config } = testRuntime();
+    const batchId = 'b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1';
+    const tileId = 'b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2';
+    db.query('INSERT INTO users (id, created_at) VALUES (?, ?)').run('alice', 1);
+    db.query('INSERT INTO batches (id, user_id, prompt, ratio, model_id, model_label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(batchId, 'alice', 'settled', '1:1', 'mock-slow', 'Mock Slow', 1);
+    db.query('INSERT INTO tiles (id, batch_id, user_id, tile_index, seed, status, ext, mime, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(tileId, batchId, 'alice', 0, 1, 'done', 'png', 'image/png', 2);
+    const files = seedArtifactFiles(config.DATA_DIR, 'alice', tileId);
+
+    const del = await app.fetch(
+      new Request(`http://local/api/history/${batchId}`, { method: 'DELETE', headers: { 'Remote-User': 'alice' } }),
+    );
+
+    expect(del.status).toBe(204);
+    expect(typeof db.query<{ archived_at: number | null }, [string]>('SELECT archived_at FROM tiles WHERE id = ?').get(tileId)?.archived_at)
+      .toBe('number');
+    expect([existsSync(files.image), existsSync(files.thumb)]).toEqual([true, true]);
   });
 
   test('clear-all DELETE hard-deletes done rows in just-canceled in-flight batches only', async () => {
-    const { app, db } = testRuntime();
+    const { app, db, config } = testRuntime();
     const inFlightBatchId = '33333333-3333-4333-8333-333333333333';
     const doneTileId = '44444444-4444-4444-8444-444444444444';
     const loadingTileId = '55555555-5555-4555-8555-555555555555';
@@ -359,6 +418,8 @@ describe('DELETE cancel behavior', () => {
     db.query('INSERT INTO tiles (id, batch_id, user_id, tile_index, seed, status, ext, mime, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(settledTileId, settledBatchId, 'alice', 0, 1, 'done', 'png', 'image/png', 3);
     registerBatch(inFlightBatchId, 'alice', new AbortController());
+    const canceledFiles = seedArtifactFiles(config.DATA_DIR, 'alice', doneTileId);
+    const settledFiles = seedArtifactFiles(config.DATA_DIR, 'alice', settledTileId);
 
     const del = await app.fetch(
       new Request('http://local/api/history', {
@@ -373,6 +434,8 @@ describe('DELETE cancel behavior', () => {
       .query<{ archived_at: number | null }, [string]>('SELECT archived_at FROM tiles WHERE id = ?')
       .get(settledTileId);
     expect(typeof settled?.archived_at).toBe('number');
+    expect([existsSync(canceledFiles.image), existsSync(canceledFiles.thumb)]).toEqual([false, false]);
+    expect([existsSync(settledFiles.image), existsSync(settledFiles.thumb)]).toEqual([true, true]);
   });
 
   test('clear-all DELETE cancels multiple registered running batches beyond queued admission cap', async () => {

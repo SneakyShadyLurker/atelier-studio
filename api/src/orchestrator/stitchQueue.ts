@@ -215,6 +215,12 @@ async function runStitch(
       () => markReady(configured.db, sequenceId, snapshot?.revision ?? -1, completedAt),
     );
     if (publishedPath === null) {
+      if (!sequenceExists(configured.db, sequenceId)) {
+        // Dissolved while publishing: the rejected commit put the previous
+        // master back at a path no row points at any more. Remove it.
+        deleteSequenceMaster(configured.config.DATA_DIR, snapshot.userId, sequenceId, configured.logger);
+        return;
+      }
       if (snapshot.previousReadyPublication !== null) {
         restorePreviousReadyPublication(configured.db, sequenceId, snapshot.previousReadyPublication);
       }
@@ -293,6 +299,10 @@ async function runStitch(
       }
     }
   }
+}
+
+function sequenceExists(db: Database, sequenceId: string): boolean {
+  return db.query('SELECT 1 FROM video_sequences WHERE id = ?').get(sequenceId) !== null;
 }
 
 function snapshotSequence(configured: StitchQueueRuntime, sequenceId: string): StitchSnapshot | null {

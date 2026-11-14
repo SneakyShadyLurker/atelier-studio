@@ -81,6 +81,32 @@ describe('ByokDialog present state', () => {
 });
 
 describe('ByokDialog save flow', () => {
+  test('a pending save keeps keyboard focus on Save Key and ignores a second press', async () => {
+    let puts = 0;
+    const pending = Promise.withResolvers<Response>();
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      if (requestUrl(input).endsWith('/keys/google') && init?.method === 'PUT') {
+        puts += 1;
+        return pending.promise;
+      }
+      return Response.json({ present: false });
+    }) as unknown as typeof fetch;
+
+    render(<ByokDialog />, { wrapper: wrapper() });
+    await waitFor(() => { expect(screen.getByPlaceholderText(/AIza/i)).toBeTruthy(); });
+    fireEvent.change(screen.getByPlaceholderText(/AIza/i), { target: { value: `AIza${'x'.repeat(35)}` } });
+    const save = screen.getByRole<HTMLButtonElement>('button', { name: /save key/i });
+    save.focus();
+    fireEvent.click(save);
+    await waitFor(() => { expect(save.getAttribute('aria-busy')).toBe('true'); });
+    expect(save.getAttribute('aria-disabled')).toBe('true');
+    expect(save.disabled).toBe(false);
+    expect(document.activeElement === save).toBe(true);
+    fireEvent.click(save);
+    expect(puts).toBe(1);
+    pending.resolve(new Response(null, { status: 204 }));
+  });
+
   test('shows inline error on GOOGLE_AUTH_FAILED', async () => {
     globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
       const method = init?.method ?? 'GET';

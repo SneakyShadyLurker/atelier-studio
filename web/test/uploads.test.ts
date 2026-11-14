@@ -155,3 +155,21 @@ describe('uploads API client', () => {
     expect(await rejectedValue(deleteRefImage('upload-2'))).toBeInstanceOf(UploadStillReferencedError);
   });
 });
+
+describe('upload response validation', () => {
+  const valid = { id: 'u1', mime: 'image/png', ext: 'png', sizeBytes: 12, width: 1, height: 1, createdAt: 123 } as const;
+
+  test('accepts a reference-image upload and returns only its public fields', async () => {
+    globalThis.fetch = mock(() => Response.json({ ...valid, extra: 'dropped' })) as unknown as typeof fetch;
+    expect(await copyTileToUpload('tile-1')).toEqual(valid);
+  });
+
+  test('rejects an upload whose media type is not a tile format or whose size is missing', async () => {
+    for (const body of [{ ...valid, mime: 'video/mp4' }, { ...valid, ext: 'mp4' }, { ...valid, sizeBytes: undefined }]) {
+      globalThis.fetch = mock(() => Response.json(body)) as unknown as typeof fetch;
+      const error = await rejectedValue(copyTileToUpload('tile-1'));
+      expect(error).toBeInstanceOf(UploadFailedError);
+      expect((error as Error).message).toBe('invalid upload response');
+    }
+  });
+});

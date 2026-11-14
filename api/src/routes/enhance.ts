@@ -15,7 +15,7 @@ import { EnhancePromptRequestSchema } from './enhance.schema';
 import { parseBody } from './_http';
 import { loadRefImages, refImageByteTotal } from '../orchestrator/refImages';
 import { downscaleForVision } from '../storage/downscaleForVision';
-import { findModel, localModelsAllowed } from '../providers/registry';
+import { findModelForUser, localModelsAllowed } from '../providers/registry';
 import {
   H3_IMAGE_EDIT_ENHANCE_SYSTEM_PROMPT,
   H3_IMAGE_ENHANCE_SYSTEM_PROMPT,
@@ -47,11 +47,11 @@ export const enhanceRoutes = new Hono<AppEnv>().post('/enhance-prompt', async (c
   // Motion and local formats keep their existing prompts. Only the exact
   // registered Sunburst model receives its dedicated enhancement contract.
   const modelId = parsed.value.modelId;
-  const entry = modelId !== undefined ? findModel(modelId, c.var.config) : null;
+  // A local row resolves as unknown for a user outside LOCAL_MODELS_USERS, so
+  // neither its prompt format nor its prompt writer applies to them.
+  const entry = modelId !== undefined ? findModelForUser(modelId, c.var.config, userId) : null;
   const localModelsEnabledForUser = localModelsAllowed(c.var.config, userId);
-  const promptFormat = entry && (entry.model.pool !== 'local' || localModelsEnabledForUser)
-    ? entry.model.promptFormat
-    : undefined;
+  const promptFormat = entry?.model.promptFormat;
   const wantsMotion = promptFormat === 'h3-motion';
 
   let systemPrompt: string | undefined;

@@ -196,7 +196,7 @@ export async function rewriteBatchPrompt(
     prompt,
     systemPrompt: spec.systemPrompt,
     images: spec.images ?? [],
-    routing: imageModelRouting(deps.config, modelId),
+    routing: imageModelRouting(deps.config, modelId, deps.userId),
     timeoutMs: spec.timeoutMs,
   });
   if (outcome.type === 'skipped') return skip(outcome);

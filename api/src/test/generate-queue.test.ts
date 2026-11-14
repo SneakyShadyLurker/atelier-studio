@@ -96,6 +96,73 @@ test('POST /api/generate returns 201 status=queued when caps are full', async ()
   expect(body.queueLengthAhead).toBe(0);
 });
 
+test('a shared head blocked on the global cap reserves freed slots against other users\' direct submissions', async () => {
+  resetConcurrencyForTests();
+  queue.resetQueueForTests();
+  const runtime = testRuntime({
+    MOCK_PROVIDER_DELAY_MS: '50',
+    MAX_CONCURRENT_TILES: '5',
+    MAX_CONCURRENT_TILES_PER_USER: '4',
+  });
+  // Another user's running work holds 2 of 5 global slots.
+  expect(acquireTiles('holder', 2, 5, 4).ok).toBe(true);
+
+  const head = await jsonRequest(runtime.app, '/api/generate', {
+    prompt: 'four tiles', modelId: 'mock-slow', ratio: '1:1', count: 4,
+  }, 'alice', 'application/json');
+  const headBody = await head.json() as { batchId: string; status: string };
+  expect(headBody.status).toBe('queued');
+
+  // One tile would fit in the free global slots, but taking it would keep the
+  // queued head starved; it waits behind the head instead.
+  const small = await jsonRequest(runtime.app, '/api/generate', {
+    prompt: 'one tile', modelId: 'mock-slow', ratio: '1:1', count: 1,
+  }, 'bob', 'application/json');
+  const smallBody = await small.json() as { batchId: string; status: string };
+  expect(smallBody.status).toBe('queued');
+  expect(tilesInFlight()).toBe(2);
+  expect(queue.entries('shared').map((entry) => entry.batchId)).toEqual([headBody.batchId, smallBody.batchId]);
+
+  releaseTiles('holder', 2);
+  kickQueues({ ...runtime, healthSnapshot: () => new Map() });
+  const startedAt = (id: string) => runtime.db
+    .query<{ started_at: number | null }, [string]>('SELECT started_at FROM batches WHERE id = ?').get(id)?.started_at ?? null;
+  await waitFor(() => {
+    const rows = runtime.db
+      .query<{ status: string }, [string, string]>('SELECT status FROM batches WHERE id IN (?, ?)')
+      .all(headBody.batchId, smallBody.batchId);
+    return rows.length === 2 && rows.every((row) => row.status === 'done') ? rows : null;
+  });
+  const headStarted = startedAt(headBody.batchId);
+  const smallStarted = startedAt(smallBody.batchId);
+  expect(headStarted).not.toBeNull();
+  expect(smallStarted).not.toBeNull();
+  expect(headStarted ?? 0).toBeLessThanOrEqual(smallStarted ?? 0);
+});
+
+test('a head blocked only by its owner\'s per-user cap leaves free slots to other users\' direct submissions', async () => {
+  resetConcurrencyForTests();
+  queue.resetQueueForTests();
+  const { app } = testRuntime({
+    MOCK_PROVIDER_DELAY_MS: '50',
+    MAX_CONCURRENT_TILES: '5',
+    MAX_CONCURRENT_TILES_PER_USER: '2',
+  });
+  // Alice's running work holds her whole per-user share; 3 global slots stay free.
+  expect(acquireTiles('alice', 2, 5, 2).ok).toBe(true);
+
+  const head = await jsonRequest(app, '/api/generate', {
+    prompt: 'alice waits', modelId: 'mock-slow', ratio: '1:1', count: 2,
+  }, 'alice', 'application/json');
+  expect((await head.json() as { status: string }).status).toBe('queued');
+
+  const other = await jsonRequest(app, '/api/generate', {
+    prompt: 'bob starts', modelId: 'mock-slow', ratio: '1:1', count: 1,
+  }, 'bob', 'application/json');
+  expect((await other.json() as { status: string }).status).toBe('running');
+  releaseTiles('alice', 2);
+});
+
 test('POST /api/generate returns JSON 201 queued regardless of Accept header', async () => {
   resetConcurrencyForTests();
   queue.resetQueueForTests();

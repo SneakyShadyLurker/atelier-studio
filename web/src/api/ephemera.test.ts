@@ -1,6 +1,7 @@
 import type { CharacterCardPhase } from '@atelier/shared';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { createCharacterCard } from './ephemera';
+import { QueryClient } from '@tanstack/react-query';
+import { createCharacterCard, ephemeraStatusOpts } from './ephemera';
 
 const originalFetch = globalThis.fetch;
 const tileId = '7b0c9a8e-3f43-4d0f-9d4a-6c1f1f2b9e10';
@@ -77,5 +78,48 @@ describe('createCharacterCard', () => {
     const ended = await rejectedValue(createCharacterCard(tileId, characterId, '', 'subject', () => undefined));
     expect(ended).toBeInstanceOf(Error);
     expect((ended as Error).message).toBe('character card stream ended');
+  });
+});
+
+describe('createCharacterCard result frame', () => {
+  test('rejects a result frame missing the character url', async () => {
+    globalThis.fetch = mock(() => Promise.resolve(sseResponse(
+      'event: result\ndata: {"characterId":"c-1","name":"Mara Voss"}\n\n',
+    ))) as unknown as typeof fetch;
+    const error = await rejectedValue(createCharacterCard(tileId, characterId, '', 'subject', () => undefined));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('invalid character card result');
+  });
+});
+
+describe('ephemeraStatusOpts', () => {
+  function fetchStatus(body: unknown): Promise<unknown> {
+    globalThis.fetch = mock(() => Promise.resolve(Response.json(body))) as unknown as typeof fetch;
+    return new QueryClient({ defaultOptions: { queries: { retry: false } } }).query(ephemeraStatusOpts());
+  }
+
+  test('accepts the integration status', async () => {
+    expect(await fetchStatus({ origin: 'https://ephemera.example', timeoutMs: 120_000 }))
+      .toEqual({ origin: 'https://ephemera.example', timeoutMs: 120_000 });
+  });
+
+  test('rejects a status without a numeric timeout', async () => {
+    const error = await rejectedValue(fetchStatus({ origin: 'https://ephemera.example', timeoutMs: '120000' }));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('invalid response shape');
+  });
+});
+
+describe('createCharacterCard status frames', () => {
+  test('reports known phases and skips unknown or malformed ones', async () => {
+    globalThis.fetch = mock(() => Promise.resolve(sseResponse([
+      'event: status\ndata: {"phase":"thinking"}\n\n',
+      'event: status\ndata: {"phase":7}\n\n',
+      'event: status\ndata: {"phase":"rewriting"}\n\n',
+      'event: result\ndata: {"characterId":"c-1","name":"Mara Voss","url":"https://ephemera.example/characters/c-1"}\n\n',
+    ].join('')))) as unknown as typeof fetch;
+    const phases: CharacterCardPhase[] = [];
+    await createCharacterCard(tileId, characterId, '', 'subject', (phase) => { phases.push(phase); });
+    expect(phases).toEqual(['rewriting']);
   });
 });

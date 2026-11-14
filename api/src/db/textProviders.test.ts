@@ -206,6 +206,53 @@ describe('text provider store: providers', () => {
       .toBeInstanceOf(TextConfigValidationError);
   });
 
+  test('updateProvider does not send a saved key to a new host', async () => {
+    const { store } = setup();
+    const created = await provider(store, 'Cloud', 'sk-old');
+
+    const moved = await store.updateProvider(created.id, { baseUrl: 'https://other.example.com/v1' }).catch((e: unknown) => e);
+    expect(moved).toBeInstanceOf(TextConfigValidationError);
+    const downgraded = await store.updateProvider(created.id, { baseUrl: 'http://localhost:9999/v1' }).catch((e: unknown) => e);
+    expect(downgraded).toBeInstanceOf(TextConfigValidationError);
+    const unchanged = present(store.getProvider(created.id));
+    expect(unchanged.baseUrl).toBe('http://localhost:11434/v1');
+    expect(await store.resolveCredential(unchanged)).toBe('sk-old');
+
+    // A path change stays on the host that already holds the key.
+    const repathed = present(await store.updateProvider(created.id, { baseUrl: 'http://localhost:11434/api/v2' }));
+    expect(repathed.baseUrl).toBe('http://localhost:11434/api/v2');
+    expect(await store.resolveCredential(repathed)).toBe('sk-old');
+
+    // Moving is allowed once the key is entered again or removed.
+    const rekeyed = present(await store.updateProvider(created.id, { baseUrl: 'https://other.example.com/v1', apiKey: 'sk-new' }));
+    expect(rekeyed.baseUrl).toBe('https://other.example.com/v1');
+    expect(await store.resolveCredential(rekeyed)).toBe('sk-new');
+    const keyless = present(await store.updateProvider(created.id, { baseUrl: 'https://third.example.com/v1', apiKey: null }));
+    expect(keyless.auth).toBe('none');
+    expect(keyless.baseUrl).toBe('https://third.example.com/v1');
+  });
+
+  test('updateProvider keeps an env-auth provider on its host', async () => {
+    const { store } = setup({ seed: seed() });
+    const seeded = present(store.listProviders()[0]);
+    const origin = new URL(seeded.baseUrl).origin;
+
+    const moved = await store.updateProvider(seeded.id, { baseUrl: 'https://other.example.com/v1' }).catch((e: unknown) => e);
+    expect(moved).toBeInstanceOf(TextConfigValidationError);
+    expect(present(store.getProvider(seeded.id)).baseUrl).toBe(seeded.baseUrl);
+
+    const repathed = present(await store.updateProvider(seeded.id, { baseUrl: `${origin}/proxy/v1` }));
+    expect(repathed.baseUrl).toBe(`${origin}/proxy/v1`);
+    expect(repathed.auth).toBe('env');
+  });
+
+  test('a keyless provider can move to any host', async () => {
+    const { store } = setup();
+    const created = await provider(store);
+    const moved = present(await store.updateProvider(created.id, { baseUrl: 'https://other.example.com/v1' }));
+    expect(moved.baseUrl).toBe('https://other.example.com/v1');
+  });
+
   test('updateProvider on an unknown id returns null', async () => {
     const { store } = setup();
     expect(await store.updateProvider('missing', { enabled: false })).toBeNull();

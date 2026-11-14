@@ -22,11 +22,11 @@ const AiFillItemSchema = z
     instructions: z.array(z.string().trim().min(1).check(maxUtf16Length(AI_FILL_MAX_INSTRUCTION_CHARS))).min(1).max(AI_FILL_MAX_SLOTS),
   })
   .refine((v) => v.instructions.length === v.staticSegments.length - 1, {
-    message: 'instructions.length must equal staticSegments.length - 1',
+    error: 'instructions.length must equal staticSegments.length - 1',
     path: ['instructions'],
   })
   .refine((v) => staticSegmentsLength(v.staticSegments) < MAX_PROMPT_CHARS, {
-    message: 'prompt already exceeds the maximum length before filling',
+    error: 'prompt already exceeds the maximum length before filling',
     path: ['staticSegments'],
   })
   .refine(
@@ -34,7 +34,7 @@ const AiFillItemSchema = z
       staticSegmentsLength(v.staticSegments)
         + v.instructions.reduce((n, s) => n + s.length, 0)
         < AI_FILL_MAX_INPUT_CHARS,
-    { message: 'total ai-fill input (static + instructions) is too large', path: ['instructions'] },
+    { error: 'total ai-fill input (static + instructions) is too large', path: ['instructions'] },
   );
 
 export const AiFillRequestSchema = AiFillItemSchema.and(
@@ -59,7 +59,7 @@ export const AiFillBatchRequestSchema = z
       0,
     ) < AI_FILL_MAX_INPUT_CHARS,
     {
-      message: 'total ai-fill batch input (static + instructions across all items) is too large',
+      error: 'total ai-fill batch input (static + instructions across all items) is too large',
       path: ['items'],
     },
   );

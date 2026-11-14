@@ -1,4 +1,4 @@
-import type { Batch, HistoryPage } from '@atelier/shared';
+import { MAX_QUERY_KEEP_UPLOADS, type Batch, type HistoryPage } from '@atelier/shared';
 import { infiniteQueryOptions, keepPreviousData, replaceEqualDeep, type InfiniteData } from '@tanstack/react-query';
 import { ApiError, apiImageUrl, isBatchHistoryPage, requestJson, requestJsonValidated, requestNoContent } from './client';
 import type { AppView } from '../store/atelier';
@@ -387,7 +387,6 @@ export function deleteTile(batchId: string, tileId: string): Promise<void> {
 // The server's `?keepUploads=` query cap. Larger hold sets travel as a JSON
 // body instead, so the URL stays small and no hold is ever dropped; the server
 // enforces MAX_DELETE_KEEP_UPLOADS on the merged set.
-const MAX_QUERY_KEEP_UPLOADS = 64;
 
 /** A thread DELETE that sends every held upload (`heldUploadIds`) as `keepUploads`. */
 export function deleteKeepingUploads(path: string, params = new URLSearchParams()): Promise<void> {

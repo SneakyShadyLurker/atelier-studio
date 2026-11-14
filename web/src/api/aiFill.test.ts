@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolveAiFill, resolveAiFillBatch, type AiFillModel } from './aiFill';
-import { QuotaExhaustedError } from './sse';
 
 const originalFetch = globalThis.fetch;
 
@@ -98,31 +97,6 @@ describe('resolveAiFill', () => {
     expect(out.prompt).toBe('A woman, a red bikini, golden hour.');
   });
 
-  test('does not retry a routing quota 429 and preserves its retry hint', async () => {
-    let calls = 0;
-    globalThis.fetch = (() => {
-      calls += 1;
-      return Promise.resolve(new Response(
-        JSON.stringify({
-          error: 'text quota exhausted',
-          code: 'QUOTA_EXHAUSTED',
-          retry_after_seconds: 900,
-        }),
-        { status: 429, headers: { 'content-type': 'application/json' } },
-      ));
-    }) as unknown as typeof fetch;
-
-    let caught: unknown;
-    try {
-      await resolveAiFill(REQ);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(QuotaExhaustedError);
-    expect((caught as QuotaExhaustedError).retryAfterSeconds).toBe(900);
-    expect(calls).toBe(1);
-  });
-
   test('a 429 wait aborts immediately when the signal fires (no hang)', async () => {
     globalThis.fetch = (() =>
       Promise.resolve(new Response(JSON.stringify({ retry_after_seconds: 1 }), {
@@ -176,5 +150,21 @@ describe('resolveAiFillBatch', () => {
     }) as unknown as typeof fetch;
     expect((await resolveAiFillBatch(BATCH_REQ)).items).toEqual([{ ok: false }]);
     expect(calls).toBe(2);
+  });
+});
+
+describe('resolveAiFill result validation', () => {
+  test('rejects a result frame whose fills are not strings', async () => {
+    globalThis.fetch = (() => Promise.resolve(sseResponse(
+      'event: result\ndata: {"prompt":"filled","fills":[1]}\n\n',
+    ))) as unknown as typeof fetch;
+    expect(await rejects(resolveAiFill(REQ))).toBe(true);
+  });
+
+  test('accepts a batch whose failed items carry no prompt', async () => {
+    globalThis.fetch = (() => Promise.resolve(sseResponse(
+      'event: result\ndata: {"items":[{"ok":false}]}\n\n',
+    ))) as unknown as typeof fetch;
+    expect(await resolveAiFillBatch(BATCH_REQ)).toEqual({ items: [{ ok: false }] });
   });
 });

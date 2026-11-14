@@ -16,5 +16,5 @@ export const PatchBatchBody = z.object({
   pinned: z.boolean().optional(),
 }).strict()
   .refine((body) => body.collectionId !== undefined || body.pinned !== undefined, {
-    message: 'at least one of collectionId or pinned required',
+    error: 'at least one of collectionId or pinned required',
   });

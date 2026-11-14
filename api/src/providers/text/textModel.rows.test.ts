@@ -3,7 +3,7 @@ import { setJevSystemOneProviderForTests } from '../jevSystemOne';
 import { restoreFetch } from '../../test/helpers';
 import { genericTextModel, seededTextModel, testTextModelProvider } from '../../test/textModelProvider';
 import type { EnhanceChunk } from './featureHelpers';
-import { GLM_ABLITERATED_MAX_COMPLETION_TOKENS } from './textBudgets';
+import { GLM_ABLITERATED_MAX_COMPLETION_TOKENS } from '../../db/textSeed';
 
 // Row-driven behaviour the legacy provider keyed on backend names: the JEV
 // pre-screen (`screenRequests`), `fixedOutputTokens`, `maxImages`/`vision`,

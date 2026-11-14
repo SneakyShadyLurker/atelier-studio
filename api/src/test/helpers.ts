@@ -9,7 +9,7 @@ import { createApp, createKeyStoreForConfig } from '../server';
 import { openDb } from '../db/client';
 import { createLogger } from '../observability/logger';
 import { migrate, seedLegacyTextProvider } from '../db/migrate';
-import { bumpTextConfigRevision } from '../db/textProviders';
+import { bumpTextConfigRevisionForTests } from '../db/textProviders';
 import { legacyTextSeed, type LegacyTextKey } from '../db/textSeed';
 import type { TextAvailabilityHandle } from '../lifecycle/text-availability';
 import { registryForConfig } from '../providers/registry';
@@ -74,7 +74,7 @@ export function seedLegacyTextConfig(db: Database, config: Config = testConfig()
   const seed = legacyTextSeed(config, registryForConfig(config).map((entry) => entry.model.id));
   if (!seed) throw new Error('seedLegacyTextConfig needs CLIPROXY_BASE_URL');
   seedLegacyTextProvider(db, seed);
-  bumpTextConfigRevision();
+  bumpTextConfigRevisionForTests();
 }
 
 /** Text availability that lists exactly `listed` upstream model ids on every provider. */

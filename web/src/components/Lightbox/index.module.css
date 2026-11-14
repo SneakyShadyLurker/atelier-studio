@@ -380,7 +380,7 @@
     transform: rotate(90deg);
   }
 
-  .nav:hover:not(:disabled) {
+  .nav:hover:not(:disabled, [aria-disabled='true']) {
     background: var(--glass-on-dark-12);
   }
 
@@ -452,7 +452,7 @@
 
 /* Compose with the vertical-centering translate — a bare scale() would
    yank the button off its axis. */
-.nav:active:not(:disabled) {
+.nav:active:not(:disabled, [aria-disabled='true']) {
   transform: translateY(-50%) scale(var(--m-press-icon));
 }
 
@@ -464,7 +464,7 @@
   right: 24px;
 }
 
-.nav:disabled {
+.nav:is(:disabled, [aria-disabled='true']) {
   opacity: 0.4;
   cursor: not-allowed;
 }
@@ -544,7 +544,7 @@
     transform: none;
   }
 
-  .nav:active:not(:disabled) {
+  .nav:active:not(:disabled, [aria-disabled='true']) {
     transform: translateY(-50%);
   }
 

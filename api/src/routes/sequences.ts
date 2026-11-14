@@ -21,7 +21,7 @@ import {
 import { ImageTooLargeError, UnsupportedImageError } from '../storage/normalizeUpload';
 import { TranscodeTimeoutError } from '../storage/heicDecode';
 import { artifactResponseHeaders, artifactStreamResponse } from './_artifact-response';
-import { parseParams } from './_http';
+import { parseParams, storageSealedResponse } from './_http';
 import { HandoffTileParamSchema, SequenceParamSchema } from './sequences.schema';
 import { videoSequencesGate } from './sequences.gate';
 import { UploadQueueFullError, withUploadSlot } from './uploads-runtime';
@@ -92,7 +92,7 @@ export const sequencesRoutes = new Hono<AppEnv>()
       if (isAbortError(error) || c.req.raw.signal.aborted) {
         return new Response(null, { status: 499 });
       }
-      if (error instanceof StorageSealedError) return c.json({ error: 'storage sealed' }, 503, { 'Retry-After': '5' });
+      if (error instanceof StorageSealedError) return storageSealedResponse(c);
       if (
         error instanceof InvalidUploadSizeError
         || error instanceof ImageTooLargeError

@@ -1,7 +1,7 @@
 import { RECOVERY_REQUIRED_ERROR } from '@atelier/shared';
 import type { ApiErrorCode, ByokKeyStatus } from '@atelier/shared';
 import { Hono } from 'hono';
-import { GOOGLE_AUTH_HEADER, GOOGLE_BASE_URL } from '../providers/google.config';
+import { probeGoogleKey } from '../providers/google';
 import type { AppEnv } from '../server-env';
 import { parseBody } from './_http';
 import { PutKeyBody } from './keys.schema';
@@ -14,27 +14,6 @@ const MAX_KEY_PROBES_PER_USER = 1;
 
 let globalKeyProbes = 0;
 const keyProbesByUser = new Map<string, number>();
-
-type GoogleKeyProbeResult =
-  | { ok: true }
-  | { ok: false; reason: 'auth' | 'unavailable' };
-
-async function probeGoogleKey(apiKey: string): Promise<GoogleKeyProbeResult> {
-  try {
-    const res = await fetch(`${GOOGLE_BASE_URL}/models?pageSize=1`, {
-      headers: { [GOOGLE_AUTH_HEADER]: apiKey },
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    const ok = res.ok;
-    const status = res.status;
-    await res.body?.cancel();
-    if (ok) return { ok: true };
-    if (status === 429 || status >= 500) return { ok: false, reason: 'unavailable' };
-    return { ok: false, reason: 'auth' };
-  } catch {
-    return { ok: false, reason: 'unavailable' };
-  }
-}
 
 function acquireKeyProbe(userId: string): boolean {
   const userCount = keyProbesByUser.get(userId) ?? 0;
@@ -91,11 +70,25 @@ export const keysRoutes = new Hono<AppEnv>()
     }
     const probe = await (async () => {
       try {
-        return await probeGoogleKey(parsed.value.key);
+        return await probeGoogleKey(parsed.value.key, PROBE_TIMEOUT_MS);
       } finally {
         releaseKeyProbe(c.var.userId);
       }
     })();
+    if (!probe.ok) {
+      // Both failure kinds reach the user as one of two fixed messages; the
+      // status and error class here are what tells a bad key from an outage.
+      c.var.logger.warn(
+        {
+          event: 'byok_key_probe_failed',
+          provider: 'google',
+          failureKind: probe.reason,
+          upstreamStatus: probe.status,
+          ...(probe.errorType === undefined ? {} : { errorType: probe.errorType }),
+        },
+        'google key probe failed',
+      );
+    }
     if (!probe.ok && probe.reason === 'unavailable') {
       return c.json(
         { error: 'google unreachable' as const, code: 'GOOGLE_UNAVAILABLE' satisfies ApiErrorCode },

@@ -83,3 +83,17 @@ describe('draftVariableList', () => {
     expect(init?.signal).toBe(controller.signal);
   });
 });
+
+describe('draftVariableList payload validation', () => {
+  test('rejects a done payload whose entries are not strings', async () => {
+    globalThis.fetch = sseFetch(doneFrame({ kind: 'entries', entries: [1, 2] })) as unknown as typeof fetch;
+    let caught: unknown;
+    try {
+      await draftVariableList('list-1', { name: 'L', existing: [] });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as Error).message).toBe('invalid draft list payload');
+  });
+});

@@ -12,14 +12,29 @@
 
 export * from './sse-error';
 import type { SseTerminalError } from './sse-error';
-import type { GptModerationNotice } from './moderation';
-import type { BatchWire, DimensionTagWire, PromptLibraryResponseWire, PromptTemplateWire, StorySummaryWire, TagDimensionWire, TileWire, VariableListWire, VariableOptionWire, VideoSequenceSummaryWire } from './wireSchemas';
+import type {
+  AiFillBackendFrameWire, AiFillBatchResultWire, AiFillResultWire, BrainstormDoneWire, BrainstormPromptWire, CharacterCardStatusWire, EnhanceDeltaWire, StoryPlanStatusWire, StoryPlanWire, ArchivedTileWire, ArchivePageWire, BatchEventWire, BatchTileDescriptorWire, BatchWire,
+  CancelStoryResponseWire, CharacterCardResultWire, CollectionsResponseWire, CollectionWire, ConflictingPairWire,
+  CoverageLowListWire, CoverageMissingDimensionWire, CoverageOrphanTagWire, CoverageUntaggedGroupWire, DimensionTagWire,
+  DoneEventWire, EphemeraStatusWire, HandoffFrameResponseWire, LibraryCoverageResponseWire, LibraryDiagnosisEntryWire,
+  LibraryDiagnosisResponseWire, LibrarySummaryWire, ModelAvailabilityWire, ModelWire, PromptLibraryResponseWire,
+  PromptTemplateWire, QueueEventWire, SessionResponseWire, StorySegmentPlanWire, StorySummaryWire, TagDimensionWire,
+  TileEventWire, TileWire, UploadRefWire, VariableListWire, VariableOptionWire, VideoSequenceSummaryWire,
+} from './wireSchemas';
+import type {
+  BundleCommonWire, CoherenceWarningWire, CoverageWarningWire, DiagnoseSelectionResponseWire, DimensionBundleWire,
+  DimensionProposalWire, DraftTemplateResponseWire, DraftVariableListResponseWire, InferDimensionsResponseWire,
+  InferPhaseEventWire, InferProgressEventWire, RejectedOpWire, RescueBundleWire, RescueDonePayloadWire,
+  RescueFailedPayloadWire, TemplateConflictWire,
+} from './promptToolSchemas';
 export { GPT_MODERATION_REASONS, GptModerationNoticeSchema, GptModerationCategoriesSchema } from './moderation';
 export type { GptModerationNotice, GptModerationReason, GptModerationCategory } from './moderation';
 
 // Bounded request policy for upload holds on history/archive DELETEs.
-// Large lists travel in JSON; the legacy query remains limited to 64 ids.
+// Large lists travel in JSON; the legacy `?keepUploads=` query remains limited
+// to MAX_QUERY_KEEP_UPLOADS ids.
 export const MAX_DELETE_KEEP_UPLOADS = 8192;
+export const MAX_QUERY_KEEP_UPLOADS = 64;
 
 // ─── Enums (string literal unions) ──────────────────────────────────────
 
@@ -274,9 +289,6 @@ export const API_ERROR_CODES = [
   // Motion-prompt enhancement is off (I2V_MOTION_ENHANCE). Client catches
   // the 409 and submits the raw motion prompt (best-effort) — no user-facing copy.
   'MOTION_ENHANCE_UNAVAILABLE',
-  // A text-provider quota was exhausted before an SSE stream could open.
-  // The envelope may carry retry_after_seconds.
-  'QUOTA_EXHAUSTED',
   // The request carried the previous account's session scope (account switch
   // behind the edge). The web locks the session and reloads.
   'SESSION_CHANGED',
@@ -286,6 +298,9 @@ export const API_ERROR_CODES = [
   'TEXT_MODEL_NOT_CONFIGURED',
   'TEXT_MODEL_NO_VISION',
   'TEXT_MODEL_UNAVAILABLE',
+  // Artifact storage is still sealed after a restart (503 with Retry-After).
+  // Transient: the read succeeds once the host agent has unsealed it.
+  'STORAGE_SEALED',
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -299,6 +314,9 @@ export const RETRY_AFTER_FIELD = 'retry_after_seconds';
 // Per-account cache scope echoed by the api and pinned by the SPA on every
 // request; a mismatch answers 409 SESSION_CHANGED.
 export const SESSION_SCOPE_HEADER = 'X-Atelier-Session-Scope';
+
+/** `GET /api/session` body: the scope the SPA pins on every request. */
+export type SessionResponse = SessionResponseWire;
 
 // Correlation id: the web sends one per request, the api echoes (or mints) it.
 export const REQUEST_ID_HEADER = 'X-Request-Id';
@@ -349,105 +367,7 @@ export interface ModelGate {
  * Wire-public projection of a registry entry. Adapter / provider names live
  * server-side only — the frontend sees `id` and chooses by it.
  */
-export interface Model extends ModelGate {
-  id: string;
-  name: string;
-  backend: Backend;
-  /**
-   * Free-form locator for the chip's tag. Cloud models carry a provider/region
-   * hint ("google", "us-central1"); local models carry their host tag
-   * ("comfyui"), which the client maps to a display name.
-   */
-  tag: string;
-  latency: LatencyClass;
-  /** Optional tooltip metadata such as "SDXL 1.0" or "9:16 max 2K". */
-  size?: string;
-  /** Per-model — composer's ratio chip filters from this. */
-  supportedRatios: readonly Ratio[];
-  /** Preferred initial ratio. The Composer resolves to it whenever the draft
-   * carries no explicit ratio choice. Must be a member of `supportedRatios`. */
-  defaultRatio?: Ratio;
-  supportsReferenceImages?: boolean;
-  /**
-   * Server-defined upper bound on reference images per generation, when
-   * `supportsReferenceImages` is true. Authoritative for the client's
-   * composer cap; the server re-checks against the resolved registry entry.
-   */
-  maxRefImages?: number;
-  /**
-   * Effective raw on-disk reference-image byte budget for one generation
-   * batch. Present when `supportsReferenceImages` is true; derived from the
-   * frozen API config so client preflight matches route-side enforcement.
-   */
-  maxRefBytesPerBatch?: number;
-  /**
-   * Server-defined per-user concurrent tile cap that applies to this model.
-   * Authoritative — the client reads this for display, never enforces it.
-   * The server's per-pool semaphore is the only gate.
-   */
-  concurrencyCapPerUser: number;
-  /**
-   * Maximum tile count the server can ever acquire for one batch in this
-   * model's pool. The Composer uses it to keep the count chip within a
-   * dequeue-able range; the route still validates authoritatively.
-   */
-  maxCountPerBatch: number;
-  /**
-   * When true, the provider supports multi-image batch generation natively
-   * (e.g. ComfyUI `batch_size`). The orchestrator issues a single
-   * `generate(count=N)` call instead of N individual calls.
-   */
-  batched?: boolean;
-  /**
-   * Suggested initial count for batched models. The Composer snaps to this
-   * value when the user selects a batched model that has a preferred count.
-   */
-  defaultCount?: number;
-  /**
-   * Clip lengths this model can render, in frames. Present only on video
-   * models; the composer's duration chip filters from it and the server
-   * re-validates the submitted value against this same set.
-   */
-  supportedDurations?: readonly VideoDurationFrames[];
-  /**
-   * Preferred initial clip length. The Composer resolves to it whenever the
-   * draft carries no explicit duration. Must be a member of
-   * `supportedDurations`.
-   */
-  defaultDuration?: VideoDurationFrames;
-  /** True when this model animates a still image into a video artifact. */
-  supportsI2V?: boolean;
-  /**
-   * True when this model's artifact is a video (mp4). Broader than
-   * `supportsI2V`: a text-to-video model outputs video without requiring a
-   * source still. Drives video loading chrome and the shared per-user
-   * in-flight video cap.
-   */
-  outputsVideo?: boolean;
-  /**
-   * Which server-side semaphore charges this model. The client attributes its
-   * own in-flight observations to the right pool when displaying counts.
-   * Survives the `requiresKey` strip in `publicModelsForUser` — Composer
-   * gating uses `requiresKey`, but pool identity is needed even after a key
-   * is configured.
-   */
-  pool: Pool;
-  /**
-   * Server-declared prompt format this model is trained on. When set, the
-   * client auto-formats the FINAL resolved prompt (post {{var}}/{{random}}/
-   * ai-fill) through `/enhance-prompt` at the submit chokepoint before firing
-   * `/api/generate`. Absent → prompts fire as-is.
-   */
-  promptFormat?: 'h3-motion';
-  /**
-   * Last known liveness of the upstream host. Populated only for entries the
-   * server probes (currently `pool: 'local'`); omitted for entries we treat
-   * as always-available (cloud + mock). When present and `ok: false`, the
-   * Composer renders the chip disabled with the reason in the tooltip, and
-   * `/api/generate` returns 503 if the user races a stale snapshot.
-   */
-  availability?: ModelAvailability;
-}
+export type Model = ModelWire;
 
 /**
  * Closed vocabulary for `ModelAvailability.reason`. The only operational
@@ -462,17 +382,7 @@ export interface Model extends ModelGate {
 export const MODEL_AVAILABILITY_REASONS = ['unavailable', 'timed out'] as const;
 export type ModelAvailabilityReason = (typeof MODEL_AVAILABILITY_REASONS)[number];
 
-export interface ModelAvailability {
-  ok: boolean;
-  /** Epoch ms — when the snapshot value was recorded. */
-  checkedAt: number;
-  /**
-   * Operational category when `ok: false`; absent when `ok: true` and also
-   * absent before the first probe round completes after boot. Closed union
-   * so a future addition forces an api + web change in lockstep.
-   */
-  reason?: ModelAvailabilityReason;
-}
+export type ModelAvailability = ModelAvailabilityWire;
 
 // ─── Tile (public) ──────────────────────────────────────────────────────
 
@@ -503,35 +413,32 @@ export type VideoSequenceMasterStatus = VideoSequenceSummary['masterStatus'];
 export type StoryStatus = StorySummary['status'];
 
 /** Plan-time shape of one story segment (also the POST /api/stories `plan` frame). */
-export interface StorySegmentPlan {
-  readonly beat: string;
-  readonly durationFrames: VideoDurationFrames;
-}
+export type StorySegmentPlan = StorySegmentPlanWire;
 
 /** Per-batch story decoration riding history payloads (mirrors `sequence`). */
 export type StorySummary = StorySummaryWire;
 
 export type StoryPlanSseEvent =
-  | { event: 'status'; data: { phase: 'planning' } }
-  | {
-      event: 'plan';
-      data: {
-        storyId: string;
-        logline: string;
-        segments: readonly StorySegmentPlan[];
-        etaMs: number;
-      };
-    }
+  | { event: 'status'; data: StoryPlanStatusWire }
+  | { event: 'plan'; data: StoryPlanWire }
   | { event: 'error'; data: SseTerminalError };
+
+/** `POST /api/stories` body. */
+export interface TellStoryRequest {
+  readonly outline: string;
+  readonly sourceUploadId?: string;
+  readonly extendsTileId?: string;
+  readonly sourcePrompt?: string;
+  readonly ratio?: Ratio;
+}
+
+/** `POST /api/stories/:id/cancel` answer; the segment batch still rendering, if any. */
+export type CancelStoryResponse = CancelStoryResponseWire;
 
 // ─── Ephemera character cards (public) ─────────────────────────────────
 
 /** `GET /api/ephemera` body; the route is a leak-safe 404 when disabled. */
-export interface EphemeraStatus {
-  origin: string;
-  /** The server's character-card SSE lifetime (`EPHEMERA_CARD_TIMEOUT_MS`). */
-  timeoutMs: number;
-}
+export type EphemeraStatus = EphemeraStatusWire;
 
 /**
  * Terminal error codes of `POST /api/tiles/:tileId/character-card`. The
@@ -569,12 +476,14 @@ export const CHARACTER_CARD_DIRECTION_MAX_CHARS = 2000;
 export const CHARACTER_CARD_KINDS = ['subject', 'group', 'scenario'] as const;
 export type CharacterCardKind = (typeof CHARACTER_CARD_KINDS)[number];
 
-export type CharacterCardPhase = 'reading' | 'writing' | 'rewriting' | 'saving';
+export type CharacterCardPhase = CharacterCardStatusWire['phase'];
 
 export type CharacterCardSseEvent =
-  | { event: 'status'; data: { phase: CharacterCardPhase } }
-  | { event: 'result'; data: { characterId: string; name: string; url: string } }
+  | { event: 'status'; data: CharacterCardStatusWire }
+  | { event: 'result'; data: CharacterCardResult }
   | { event: 'error'; data: SseTerminalError };
+
+export type CharacterCardResult = CharacterCardResultWire;
 
 /** Planner segment-count ceiling; deliberately below MAX_SEQUENCE_SEGMENTS. */
 export const STORY_MAX_SEGMENTS = 6;
@@ -582,25 +491,13 @@ export const STORY_MIN_SEGMENTS = 2;
 export const STORY_OUTLINE_MAX_CHARS = 4000;
 
 export type VideoSequenceSummary = VideoSequenceSummaryWire;
+export type HandoffFrameResponse = HandoffFrameResponseWire;
 
 // ─── Collections (public) ──────────────────────────────────────────────
 
 // Collection metadata exposed to the frontend. userId is server-internal and
 // never re-exported here (mirrors Batch / Tile).
-export interface Collection {
-  readonly id: string;
-  readonly name: string;
-  /** Batches in this collection; server-computed and excludes archived. */
-  readonly count: number;
-  /**
-   * Archived **tiles** (not batches) currently surfaced in the Archive view
-   * whose parent batch belongs to this collection. Mirrors the visibility
-   * predicate of `/api/archive` (done/ext/mime/completed_at) so a row's count
-   * matches what the Archive view actually shows.
-   */
-  readonly archivedCount: number;
-  readonly createdAt: number;
-}
+export type Collection = CollectionWire;
 
 // Global rail counters returned alongside the collections list so the rail can
 // render conditional rows without scanning paginated history. `*Count` fields
@@ -608,19 +505,9 @@ export interface Collection {
 // over the Archive view's visibility predicate, so rail counts agree with the
 // scoped feed even when archive state is partial (some tiles archived, others
 // still live).
-export interface LibrarySummary {
-  readonly totalCount: number;
-  readonly pinnedCount: number;
-  readonly unsortedCount: number;
-  readonly archivedTotalCount: number;
-  readonly archivedPinnedCount: number;
-  readonly archivedUnsortedCount: number;
-}
+export type LibrarySummary = LibrarySummaryWire;
 
-export interface CollectionsResponse {
-  readonly items: readonly Collection[];
-  readonly summary: LibrarySummary;
-}
+export type CollectionsResponse = CollectionsResponseWire;
 
 // ─── Prompt library (public) ────────────────────────────────────────────
 
@@ -637,64 +524,24 @@ export type PromptLibraryResponse = PromptLibraryResponseWire;
 // templateSatisfiable over the live library with zero proposed bundles —
 // any template flagged here is structurally broken right now in prod.
 
-export interface ConflictingPair {
-  readonly listA: string;
-  readonly listB: string;
-  readonly dimensionName: string;
-}
+export type ConflictingPair = ConflictingPairWire;
 
-export interface LibraryDiagnosisEntry {
-  readonly templateName: string;
-  /** null means the bounded solver could not establish a verdict. */
-  readonly satisfiable: boolean | null;
-  readonly reason?: string;
-  readonly conflictingPairs?: readonly ConflictingPair[];
-}
+export type LibraryDiagnosisEntry = LibraryDiagnosisEntryWire;
 
 export const DIAGNOSIS_VERSION_HEADER = 'X-Atelier-Diagnosis-Version';
 export const DIAGNOSIS_VERSION = '2';
 
-export interface LibraryDiagnosisResponse {
-  readonly templates: readonly LibraryDiagnosisEntry[];
-  readonly librarySnapshotHash: string;
-  readonly templatesDigest: string;
-  /** Legacy boolean-only responses name every omitted inconclusive template. */
-  readonly incompleteTemplateNames?: readonly string[];
-}
+export type LibraryDiagnosisResponse = LibraryDiagnosisResponseWire;
 
-export interface CoverageUntaggedGroup {
-  readonly listId: string;
-  readonly listName: string;
-  readonly dim: string;
-  readonly untaggedCount: number;
-}
+export type CoverageUntaggedGroup = CoverageUntaggedGroupWire;
 
-export interface CoverageLowList {
-  readonly listName: string;
-  readonly dim: string;
-  readonly coverage: number;
-  readonly taggedCount: number;
-  readonly totalCount: number;
-}
+export type CoverageLowList = CoverageLowListWire;
 
-export interface CoverageOrphanTag {
-  readonly dim: string;
-  readonly label: string;
-}
+export type CoverageOrphanTag = CoverageOrphanTagWire;
 
-export interface CoverageMissingDimension {
-  readonly listName: string;
-  readonly dim: string;
-}
+export type CoverageMissingDimension = CoverageMissingDimensionWire;
 
-export interface LibraryCoverageResponse {
-  readonly untaggedByList: readonly CoverageUntaggedGroup[];
-  readonly lowCoverageLists: readonly CoverageLowList[];
-  readonly orphanTags: readonly CoverageOrphanTag[];
-  readonly missingDimensions: readonly CoverageMissingDimension[];
-  readonly librarySnapshotHash: string;
-  readonly templatesDigest: string;
-}
+export type LibraryCoverageResponse = LibraryCoverageResponseWire;
 
 // ─── Pagination ─────────────────────────────────────────────────────────
 
@@ -709,33 +556,9 @@ export interface HistoryPage<T> {
 
 // ─── Archive (public) ──────────────────────────────────────────────────
 
-export interface ArchivedTile {
-  id: string;
-  batchId: string;
-  prompt: string;
-  modelLabel: string;
-  seed: number;
-  status: 'done';
-  refImageIds?: readonly string[];
-  url: string;
-  thumbUrl?: string;
-  ext: MediaExt;
-  mime: MediaMime;
-  ratio: Ratio;
-  completedAt: number;
-  archivedAt: number;
-}
+export type ArchivedTile = ArchivedTileWire;
 
-export interface ArchivePage {
-  items: readonly ArchivedTile[];
-  nextCursor: string | null;
-  // Total archived done tiles for the current scope filter (collectionId /
-  // pinned), regardless of pagination. Present (a number) ONLY on the first
-  // page (request without a cursor); `null` on every subsequent page so the
-  // server skips a redundant COUNT(*) per scroll. The client carries the
-  // freshest non-null value forward (see web useArchiveQuery).
-  total: number | null;
-}
+export type ArchivePage = ArchivePageWire;
 
 // ─── Generate request (client → server) ─────────────────────────────────
 
@@ -799,127 +622,13 @@ export interface GenerateResponse {
 // Every event lands as the `data` payload of a named SSE frame:
 //   event: batch | tile | done
 
-/**
- * Per-tile descriptor inside the initial `batch` event. `tileIndex` is the
- * grid display order; `tileId` is the persistence key used for downstream
- * DELETE / GET /api/img/* calls.
- */
-export interface BatchTileDescriptor {
-  tileId: string;
-  tileIndex: number;
-  seed: number;
-}
-
-export interface BatchEvent {
-  batchId: string;
-  /**
-   * Server-authoritative createdAt in ms. The client uses this for the
-   * optimistic batch's createdAt so the cache stays in canonical
-   * `created_at DESC` order — without it, an SSE arrival order that
-   * diverges from server creation order causes a visible reorder when
-   * any refetch lands.
-   */
-  createdAt: number;
-  /** Dispatch time, present once the batch is running (see Batch.startedAt). */
-  startedAt?: number;
-  status?: BatchStatus;
-  /** Projected dispatch position (0 = next). Not monotonic: on the local pool it can rise when later same-model work is scheduled ahead. */
-  queueLengthAhead?: number;
-  tiles: readonly BatchTileDescriptor[];
-  refImageIds?: readonly string[];
-}
-
-export interface QueueEvent {
-  batchId: string;
-  status: 'running';
-  /** Dispatch time (see Batch.startedAt). */
-  startedAt?: number;
-}
-
-export interface UploadRef {
-  id: string;
-  mime: TileMime;
-  ext: TileExt;
-  sizeBytes: number;
-  width: number;
-  height: number;
-  createdAt: number;
-}
-
-interface TileEventDoneShape {
-  tileId: string;
-  tileIndex: number;
-  status: 'done';
-  url: string;
-  thumbUrl?: string;
-  ext: MediaExt;
-  mime: MediaMime;
-  completedAt: number;
-}
-
-interface TileEventFailedShape {
-  tileId: string;
-  tileIndex: number;
-  status: 'failed';
-  error: TileErrorCategory;
-  moderation?: GptModerationNotice;
-  completedAt: number;
-}
-
-interface TileEventPartialShape {
-  tileId: string;
-  tileIndex: number;
-  status: 'partial';
-  /** `data:` URL of the in-flight preview frame. */
-  preview: string;
-  /** Monotonic ordinal of this partial within the tile (cliproxy `partial_image_index`). */
-  index: number;
-}
-
-interface TileEventProgressShape {
-  tileId: string;
-  tileIndex: number;
-  status: 'progress';
-  /** Overall weighted 0..1 fraction across every sampler pass; monotonic within a tile. */
-  progress: number;
-  /** Raw graph node id of the sampler (or other node) that reported progress. */
-  phase?: string;
-  /** 1-based current step within the active sampler pass (≤ `totalSteps`). */
-  step?: number;
-  /** Step count of the active sampler pass, as reported at run time. */
-  totalSteps?: number;
-  /** 1-based sampler pass in execution order (≤ `passCount`). */
-  pass?: number;
-  /** Number of sampler passes in the submitted graph. */
-  passCount?: number;
-}
-
-interface TileEventCanceledShape {
-  tileId: string;
-  tileIndex: number;
-  status: 'canceled';
-  completedAt: number;
-}
-
-/**
- * Emitted as the tile progresses. `partial` may fire 0..N times (based on
- * `partial_images` request param + upstream behavior); the tile finally
- * reaches a terminal state with one `done`, `failed`, or `canceled`. Consumers MUST
- * tolerate a tile that never sees a `partial` (when upstream skips them or
- * `partial_images=0`) and MUST treat a later terminal event as authoritative
- * over any preview already shown. `canceled` is wire-only and is never
- * persisted in the public Tile union.
- */
-export type TileEvent =
-  | TileEventDoneShape
-  | TileEventFailedShape
-  | TileEventPartialShape
-  | TileEventProgressShape
-  | TileEventCanceledShape;
-
-export interface DoneEvent {
-  batchId: string;
-}
+// Shapes and field docs live with their schemas in ./wireSchemas.
+export type BatchTileDescriptor = BatchTileDescriptorWire;
+export type BatchEvent = BatchEventWire;
+export type QueueEvent = QueueEventWire;
+export type UploadRef = UploadRefWire;
+export type TileEvent = TileEventWire;
+export type DoneEvent = DoneEventWire;
 
 export interface MotionEnhanceExtendContext {
   /** Final enhanced motion prompt from the preceding sequence segment. */
@@ -956,7 +665,7 @@ export interface EnhancePromptRequest {
 }
 
 export type EnhanceSseEvent =
-  | { event: 'delta'; data: { text: string } }
+  | { event: 'delta'; data: EnhanceDeltaWire }
   | { event: 'done'; data: Record<string, never> }
   // `code: 'refusal'` when the finished rewrite is refusal prose.
   | { event: 'error'; data: SseTerminalError };
@@ -1049,6 +758,11 @@ export type TextProtocol = (typeof TEXT_PROTOCOLS)[number];
 /** Request field carrying the output budget; OpenAI-compatible providers only. */
 export const TEXT_TOKEN_FIELDS = ['max_completion_tokens', 'max_tokens'] as const;
 export type TextTokenField = (typeof TEXT_TOKEN_FIELDS)[number];
+
+/** Longest text provider name or text model display name (API, store, UI). */
+export const TEXT_DISPLAY_NAME_MAX_CHARS = 60;
+/** Longest upstream model id of a text model row (API, store, UI). */
+export const TEXT_MODEL_ID_MAX_CHARS = 200;
 
 /** Where a provider's credential comes from. 'env' is set only by the migration/seed. */
 export const TEXT_PROVIDER_AUTH_MODES = ['none', 'stored', 'env'] as const;
@@ -1226,6 +940,63 @@ export interface TextProviderConnectionTestRequest {
   readonly probeModelId?: string;
 }
 
+/** `POST /api/text-providers`. */
+export interface TextProviderCreateRequest {
+  readonly name: string;
+  readonly protocol: TextProtocol;
+  readonly baseUrl: string;
+  readonly preset?: string | null;
+  readonly apiKey?: string;
+  readonly tokenField?: TextTokenField;
+  readonly listModels?: boolean;
+}
+
+/** `PATCH /api/text-providers/:id`. */
+export interface TextProviderPatchRequest {
+  readonly name?: string;
+  readonly protocol?: TextProtocol;
+  readonly baseUrl?: string;
+  readonly preset?: string | null;
+  /** A string replaces the stored key; null removes it. */
+  readonly apiKey?: string | null;
+  readonly tokenField?: TextTokenField;
+  readonly listModels?: boolean;
+  readonly enabled?: boolean;
+}
+
+/** One entry of `POST /api/text-providers/:id/models`. */
+export interface TextModelCreateEntry {
+  /** Upstream model id. */
+  readonly modelId: string;
+  readonly displayName?: string;
+  /** List hints, used as the starting capability values. */
+  readonly hints?: TextModelHints;
+}
+
+/** `PATCH /api/text-providers/:id/models/:mid`. */
+export interface TextModelPatchRequest extends Partial<TextModelCapabilities> {
+  readonly displayName?: string;
+  readonly enabled?: boolean;
+  readonly screenRequests?: boolean;
+  readonly sortOrder?: number;
+}
+
+/** `PUT /api/text-routing/writers/:imageModelId`. */
+export interface TextWriterPutRequest {
+  /** null clears the writer. */
+  readonly modelId: string | null;
+  /** Omitted = the server default, 'prefer'. */
+  readonly mode?: TextWriterMode;
+}
+
+/** `PUT /api/text-models/tasks/:task`. */
+export interface TextModelTaskPutRequest {
+  /** null clears the pick (back to the admin's default). */
+  readonly modelId: string | null;
+  /** Omitted keeps a stored effort the model still accepts; null resets it. */
+  readonly effort?: TextReasoningEffort | null;
+}
+
 /** Verdict of a provider connection test. */
 export interface ConnectionReport {
   readonly ok: boolean;
@@ -1306,27 +1077,16 @@ export interface ModelResolutionPutRequest {
 }
 
 /** Advisory leading ai-fill frame naming the text model serving the fill. */
-export interface AiFillBackendFrame {
-  readonly modelId: string;
-  readonly label: string;
-}
+export type AiFillBackendFrame = AiFillBackendFrameWire;
 
 export type AiFillSseEvent =
   | { event: 'backend'; data: AiFillBackendFrame }
-  | { event: 'result'; data: { prompt: string; fills: readonly string[] } }
+  | { event: 'result'; data: AiFillResultWire }
   | { event: 'error'; data: { message: string; code?: string } };
 
 export type AiFillBatchSseEvent =
   | { event: 'backend'; data: AiFillBackendFrame }
-  | {
-      event: 'result';
-      data: {
-        items: readonly (
-          | { readonly ok: true; readonly prompt: string; readonly fills: readonly string[] }
-          | { readonly ok: false }
-        )[];
-      };
-    }
+  | { event: 'result'; data: AiFillBatchResultWire }
   | { event: 'error'; data: { message: string; code?: string } };
 
 // Brainstorm Characters — auto-generated character-idea image prompts.
@@ -1366,8 +1126,8 @@ export interface BrainstormCharactersRequest {
 }
 
 export type BrainstormSseEvent =
-  | { event: 'prompt'; data: { index: number; text: string } }
-  | { event: 'done'; data: { count: number } }
+  | { event: 'prompt'; data: BrainstormPromptWire }
+  | { event: 'done'; data: BrainstormDoneWire }
   | { event: 'error'; data: { message: string } };
 
 export interface DraftVariableListRequest {
@@ -1377,9 +1137,7 @@ export interface DraftVariableListRequest {
   description?: string;
 }
 
-export type DraftVariableListResponse =
-  | { kind: 'entries'; entries: string[] }
-  | { kind: 'clarify'; question: string };
+export type DraftVariableListResponse = DraftVariableListResponseWire;
 
 export interface DraftTemplateRequest {
   readonly modelId?: string;
@@ -1395,33 +1153,13 @@ export interface DraftTemplateRequest {
   description?: string;
 }
 
-export type DraftTemplateResponse =
-  | { kind: 'body'; body: string; warnings: readonly string[] }
-  | { kind: 'clarify'; question: string };
+export type DraftTemplateResponse = DraftTemplateResponseWire;
 
-export interface BundleCommon {
-  readonly key: string;
-  readonly title: string;
-  readonly detail: string;
-  readonly impact?: string;
-  readonly destructive: boolean;
-  readonly defaultChecked: boolean;
-  readonly dependsOn: readonly string[];
-}
+export type BundleCommon = BundleCommonWire;
 
-export interface DimensionBundle extends BundleCommon {
-  readonly kind: 'create' | 'extend' | 'merge' | 'rename';
-  readonly dimensionName: string;
-  readonly optionCount: number;
-  readonly listCount: number;
-}
+export type DimensionBundle = DimensionBundleWire;
 
-export interface RescueBundle extends BundleCommon {
-  readonly kind: 'rescue';
-  readonly listName: string;
-  readonly optionValue: string;
-  readonly templateName: string;
-}
+export type RescueBundle = RescueBundleWire;
 
 export type DimensionChangeBundle = DimensionBundle | RescueBundle;
 
@@ -1431,88 +1169,21 @@ export interface RescueDimensionsRequest {
   readonly templateName: string;
 }
 
-/**
- * `rescue-failed` terminal frame of POST /api/prompts/dimensions/rescue. A
- * provider failure or crash also carries the shared terminal error's `code`
- * and `retryAfterSeconds` (see SseTerminalError); older servers omit them and
- * `conflicts`.
- */
-export interface RescueFailedPayload {
-  readonly reason: string;
-  readonly conflicts?: readonly TemplateConflict[];
-  readonly code?: string;
-  readonly retryAfterSeconds?: number;
-  readonly moderation?: GptModerationNotice;
-}
+export type RescueFailedPayload = RescueFailedPayloadWire;
+/** `done` terminal frame of POST /api/prompts/dimensions/rescue. */
+export type RescueDonePayload = RescueDonePayloadWire;
 
-export interface RejectedOp {
-  readonly reason: string;
-  readonly count: number;
-}
+export type RejectedOp = RejectedOpWire;
 
-export interface TemplateConflict {
-  readonly templateName: string;
-  readonly reason: string;
-  readonly culpritBundleKeys: readonly string[];
-  readonly rescueAttempted: boolean;
-  readonly culpritKind: 'local' | 'non-local';
-  readonly inBranch?: number;
-  readonly totalBranches?: number;
-}
+export type TemplateConflict = TemplateConflictWire;
 
-export interface CoherenceWarning {
-  readonly templateName: string;
-  readonly detail: string;
-}
+export type CoherenceWarning = CoherenceWarningWire;
 
-// Coverage warnings surfaced by the AI inference review. These are
-// non-blocking — the user can still apply the proposal — but they flag the
-// two failure modes that produce silent wildcards in production: tags
-// created without any option assignment, and name-implied lists where the
-// post-proposal coverage on the implied dimension stays below the prompt's
-// ≥90% target. A third kind, `missingDimension`, fires when a list's name
-// strongly implies a dimension that simply doesn't exist after the
-// proposal.
-export type CoverageWarning =
-  | {
-      readonly kind: 'orphanTag';
-      readonly dim: string;
-      readonly label: string;
-      readonly detail: string;
-    }
-  | {
-      readonly kind: 'lowCoverage';
-      readonly listName: string;
-      readonly dim: string;
-      readonly coverage: number;
-      readonly taggedCount: number;
-      readonly totalCount: number;
-      readonly detail: string;
-    }
-  | {
-      readonly kind: 'missingDimension';
-      readonly listName: string;
-      readonly dim: string;
-      readonly detail: string;
-    };
+export type CoverageWarning = CoverageWarningWire;
 
-export interface DimensionProposal {
-  readonly bundles: readonly DimensionChangeBundle[];
-}
+export type DimensionProposal = DimensionProposalWire;
 
-export interface InferDimensionsResponse {
-  readonly proposalId: string;
-  readonly proposal: DimensionProposal;
-  readonly baseSnapshotHash: string;
-  readonly warnings: readonly CoherenceWarning[];
-  readonly coverage: readonly CoverageWarning[];
-  readonly rejected: readonly RejectedOp[];
-  readonly conflicts: readonly TemplateConflict[];
-  // Non-fatal coverage notices (e.g. "N lists couldn't be fully analyzed —
-  // re-run to fill the gaps") surfaced when the run finalized with partial
-  // coverage after some chunks failed. Optional for wire back/forward compat.
-  readonly notices?: readonly string[];
-}
+export type InferDimensionsResponse = InferDimensionsResponseWire;
 
 
 // Live SAT recheck of a dimension proposal against the user's current bundle
@@ -1523,19 +1194,11 @@ export interface DiagnoseSelectionRequest {
   readonly acceptedBundleKeys: readonly string[];
 }
 
-export interface DiagnoseSelectionResponse {
-  readonly conflicts: readonly TemplateConflict[];
-}
+export type DiagnoseSelectionResponse = DiagnoseSelectionResponseWire;
 
-export interface InferPhaseEvent {
-  readonly phase: 'taxonomy' | 'chunks' | 'retry-gaps' | 'finalize';
-}
+export type InferPhaseEvent = InferPhaseEventWire;
 
-export interface InferProgressEvent {
-  readonly done: number;
-  readonly total: number;
-  readonly wave: 1 | 2;
-}
+export type InferProgressEvent = InferProgressEventWire;
 
 export interface ApplyDimensionsRequest {
   readonly proposalId: string;
@@ -1575,6 +1238,10 @@ type _NoUserIdOnVideoSequenceSummary = _Assert<_NoUserIdOn<VideoSequenceSummary>
 type _NoUserIdOnStorySummary = _Assert<_NoUserIdOn<StorySummary>>;
 type _NoUserIdOnStorySegmentPlan = _Assert<_NoUserIdOn<StorySegmentPlan>>;
 type _NoUserIdOnEphemeraStatus = _Assert<_NoUserIdOn<EphemeraStatus>>;
+type _NoUserIdOnCharacterCardResult = _Assert<_NoUserIdOn<CharacterCardResult>>;
+type _NoUserIdOnCancelStoryResponse = _Assert<_NoUserIdOn<CancelStoryResponse>>;
+type _NoUserIdOnSessionResponse = _Assert<_NoUserIdOn<SessionResponse>>;
+type _NoUserIdOnHandoffFrameResponse = _Assert<_NoUserIdOn<HandoffFrameResponse>>;
 type _NoUserIdOnCharacterCardSseEvent = _Assert<_NoUserIdOn<CharacterCardSseEvent>>;
 type _NoUserIdOnGenerateResponse = _Assert<_NoUserIdOn<GenerateResponse>>;
 type _NoUserIdOnQueueEvent = _Assert<_NoUserIdOn<QueueEvent>>;
@@ -1622,6 +1289,8 @@ type _NoUserIdOnRescueDimensionsRequest = _Assert<_NoUserIdOn<RescueDimensionsRe
 type _NoUserIdOnAnyBundleVariant = _Assert<_NoUserIdOn<DimensionChangeBundle>>;
 type _NoUserIdOnRejectedOp = _Assert<_NoUserIdOn<RejectedOp>>;
 type _NoUserIdOnTemplateConflict = _Assert<_NoUserIdOn<TemplateConflict>>;
+type _NoUserIdOnRescueDonePayload = _Assert<_NoUserIdOn<RescueDonePayload>>;
+type _NoUserIdOnRescueFailedPayload = _Assert<_NoUserIdOn<RescueFailedPayload>>;
 
 type _NoUserIdOnDiagnoseSelectionRequest = _Assert<_NoUserIdOn<DiagnoseSelectionRequest>>;
 type _NoUserIdOnDiagnoseSelectionResponse = _Assert<_NoUserIdOn<DiagnoseSelectionResponse>>;
@@ -1699,6 +1368,8 @@ export type _NoUserIdInWire = [
     _NoUserIdOnAnyBundleVariant,
     _NoUserIdOnRejectedOp,
     _NoUserIdOnTemplateConflict,
+    _NoUserIdOnRescueDonePayload,
+    _NoUserIdOnRescueFailedPayload,
     _NoUserIdOnCoherenceWarning,
     _NoUserIdOnCoverageWarning,
     _NoUserIdOnDimensionProposal,
@@ -1741,6 +1412,10 @@ export type _NoUserIdInWire = [
     _NoUserIdOnStorySegmentPlan,
     _NoUserIdOnEphemeraStatus,
     _NoUserIdOnCharacterCardSseEvent,
+    _NoUserIdOnCharacterCardResult,
+    _NoUserIdOnCancelStoryResponse,
+    _NoUserIdOnSessionResponse,
+    _NoUserIdOnHandoffFrameResponse,
   ];
 };
 

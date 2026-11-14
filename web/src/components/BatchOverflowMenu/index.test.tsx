@@ -117,8 +117,8 @@ describe('BatchOverflowMenu', () => {
     renderMenu(makeBatch({ pinned: false }), { readOnlyActions: true });
     const rerollBtn = screen.getByRole('menuitem', { name: /save to templates/i });
     const copyBtn = screen.getByRole('menuitem', { name: /copy prompt/i });
-    expect((rerollBtn as HTMLButtonElement).disabled).toBe(true);
-    expect((copyBtn as HTMLButtonElement).disabled).toBe(false);
+    expect(rerollBtn.getAttribute('aria-disabled')).toBe('true');
+    expect(copyBtn.getAttribute('aria-disabled')).toBeNull();
   });
 
   it('closes on Escape from inside the menu', async () => {

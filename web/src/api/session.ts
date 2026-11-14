@@ -1,13 +1,16 @@
-import { isRecord } from '../lib/guards';
+import type { SessionResponse } from '@atelier/shared';
+import { SessionResponseSchema } from '@atelier/shared/wire-schemas';
 import { requestJsonValidated } from './client';
 import { bindSessionScope, isSessionLocked, SESSION_SCOPE_PATTERN } from '../lib/sessionScope';
 
-export interface SessionResponse {
-  readonly cacheScope: string;
-}
+export type { SessionResponse };
 
+// Stricter than the wire type on purpose: the scope must also have the opaque
+// UUID form bindSessionScope accepts, so a malformed one fails here as an
+// invalid response instead of later as a bind error.
 function isSessionResponse(value: unknown): value is SessionResponse {
-  return isRecord(value) && typeof value.cacheScope === 'string' && SESSION_SCOPE_PATTERN.test(value.cacheScope);
+  const parsed = SessionResponseSchema.safeParse(value);
+  return parsed.success && SESSION_SCOPE_PATTERN.test(parsed.data.cacheScope);
 }
 
 export function fetchSession(signal?: AbortSignal): Promise<SessionResponse> {

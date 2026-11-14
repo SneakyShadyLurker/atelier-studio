@@ -23,6 +23,7 @@
     "scripts/media-cache-browser-fixture.ts",
     "../infra/docker/rehearse-migrations.ts",
     "../infra/docker/deploy-lock.test.ts",
-    "../infra/docker/bun-version.test.ts"
+    "../infra/docker/bun-version.test.ts",
+    "../infra/docker/compose.test.ts"
   ]
 }

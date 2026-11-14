@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import type { MediaExt } from '@atelier/shared';
 import { hotStatements } from './preparedStatements';
 
 // Single source of truth for the soft-archive / hard-delete tombstone policy
@@ -29,6 +30,29 @@ export const SQL_TOMBSTONE_DELETE_STATUSES = "status IN ('loading', 'failed')";
 const SQL_TOMBSTONE_CANCEL_DELETE_STATUSES = "status IN ('loading', 'failed', 'done')";
 export const SQL_LOADING_GUARD = "status = 'loading'";
 
+/** A hard-deleted `done` tile whose artifact files the caller unlinks after commit. */
+export interface RemovedTileArtifact {
+  readonly id: string;
+  readonly ext: MediaExt;
+}
+
+export interface TombstoneResult {
+  /** True when the batch row itself was hard-deleted. */
+  readonly batchDeleted: boolean;
+  /** Finished tiles a cancel hard-deleted; their files are now unreferenced. */
+  readonly removedArtifacts: readonly RemovedTileArtifact[];
+}
+
+interface DeletedTileRow {
+  id: string;
+  status: string;
+  ext: MediaExt | null;
+}
+
+function removedArtifactsOf(rows: readonly DeletedTileRow[]): RemovedTileArtifact[] {
+  return rows.flatMap((row) => row.status === 'done' && row.ext !== null ? [{ id: row.id, ext: row.ext }] : []);
+}
+
 // Returns true when this call hard-deleted the batch row.
 function dropOrArchiveBatchIfEmpty(
   db: Database,
@@ -48,18 +72,21 @@ function dropOrArchiveBatchIfEmpty(
 // Per-batch tombstone. The CALLER owns the surrounding `db.transaction(...)()`
 // and the post-commit AbortController dispatch (abort listeners fire
 // synchronously and must never run inside the txn callback). Behaviour is
-// identical to the former inline body in DELETE /history/:batchId. Returns
-// true when the batch row itself was hard-deleted.
+// identical to the former inline body in DELETE /history/:batchId. The
+// caller also unlinks `removedArtifacts` after commit: a hard-deleted `done`
+// tile leaves files no row points at.
 export function softArchiveOrDeleteBatch(
   db: Database,
   userId: string,
   batchId: string,
   opts: { cancelIntent: boolean; now: number },
-): boolean {
+): TombstoneResult {
+  let removedArtifacts: RemovedTileArtifact[] = [];
   if (opts.cancelIntent) {
-    db.query(
-      `DELETE FROM tiles WHERE user_id = ? AND batch_id = ? AND ${SQL_TOMBSTONE_CANCEL_DELETE_STATUSES} AND archived_at IS NULL`,
-    ).run(userId, batchId);
+    removedArtifacts = removedArtifactsOf(db.query<DeletedTileRow, [string, string]>(
+      `DELETE FROM tiles WHERE user_id = ? AND batch_id = ? AND ${SQL_TOMBSTONE_CANCEL_DELETE_STATUSES} AND archived_at IS NULL
+       RETURNING id, status, ext`,
+    ).all(userId, batchId));
   } else {
     db.query(
       `DELETE FROM tiles WHERE user_id = ? AND batch_id = ? AND ${SQL_TOMBSTONE_DELETE_STATUSES} AND archived_at IS NULL`,
@@ -68,30 +95,32 @@ export function softArchiveOrDeleteBatch(
       "UPDATE tiles SET archived_at = ? WHERE user_id = ? AND batch_id = ? AND status = 'done' AND archived_at IS NULL",
     ).run(opts.now, userId, batchId);
   }
-  return dropOrArchiveBatchIfEmpty(db, userId, batchId, opts.now);
+  return { batchDeleted: dropOrArchiveBatchIfEmpty(db, userId, batchId, opts.now), removedArtifacts };
 }
 
 // Per-tile tombstone with cascade to the parent batch. CALLER owns the
 // transaction + post-commit abort. Behaviour is identical to the former
-// inline body in DELETE /history/:batchId/:tileId. Returns true when the
-// cascade hard-deleted the parent batch row.
+// inline body in DELETE /history/:batchId/:tileId. `batchDeleted` is true
+// when the cascade hard-deleted the parent batch row.
 export function softArchiveOrDeleteTile(
   db: Database,
   userId: string,
   batchId: string,
   tileId: string,
   opts: { cancelIntent: boolean; now: number },
-): boolean {
+): TombstoneResult {
   const row = db
     .query<{ status: string }, [string, string, string]>(
       'SELECT status FROM tiles WHERE user_id = ? AND batch_id = ? AND id = ? AND archived_at IS NULL',
     )
     .get(userId, batchId, tileId);
-  if (!row) return false;
+  if (!row) return { batchDeleted: false, removedArtifacts: [] };
+  let removedArtifacts: RemovedTileArtifact[] = [];
   if (row.status === 'loading' || row.status === 'failed' || (row.status === 'done' && opts.cancelIntent)) {
-    db.query(
-      'DELETE FROM tiles WHERE user_id = ? AND batch_id = ? AND id = ? AND archived_at IS NULL',
-    ).run(userId, batchId, tileId);
+    removedArtifacts = removedArtifactsOf(db.query<DeletedTileRow, [string, string, string]>(
+      `DELETE FROM tiles WHERE user_id = ? AND batch_id = ? AND id = ? AND archived_at IS NULL
+       RETURNING id, status, ext`,
+    ).all(userId, batchId, tileId));
   } else {
     db.query(
       'UPDATE tiles SET archived_at = ? WHERE user_id = ? AND batch_id = ? AND id = ? AND archived_at IS NULL',
@@ -102,5 +131,6 @@ export function softArchiveOrDeleteTile(
       'SELECT COUNT(*) AS count FROM tiles WHERE user_id = ? AND batch_id = ? AND archived_at IS NULL',
     )
     .get(userId, batchId);
-  return (liveCount?.count ?? 0) === 0 && dropOrArchiveBatchIfEmpty(db, userId, batchId, opts.now);
+  const batchDeleted = (liveCount?.count ?? 0) === 0 && dropOrArchiveBatchIfEmpty(db, userId, batchId, opts.now);
+  return { batchDeleted, removedArtifacts };
 }

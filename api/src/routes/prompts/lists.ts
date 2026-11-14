@@ -41,7 +41,7 @@ const OptionsReplaceV2 = OptionsReplace.extend({
       const ids = options.flatMap((option) => option.id === undefined ? [] : [option.id]);
       return new Set(ids).size === ids.length;
     },
-    { message: 'option ids must be unique' },
+    { error: 'option ids must be unique' },
   ),
 });
 const OptionPatchV2 = z.object({
@@ -366,7 +366,7 @@ export const listsRoutes = new Hono<AppEnv>()
 
     const logger = c.var.logger;
     const userId = c.var.userId;
-    const resolved = c.var.text.resolve({ userId, task: 'list-draft', ...imageModelRouting(c.var.config, parsed.value.modelId) });
+    const resolved = c.var.text.resolve({ userId, task: 'list-draft', ...imageModelRouting(c.var.config, parsed.value.modelId, userId) });
     if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
     const textModel = resolved.model;
     return withLlmSlot(c, draftPool, userId, 30, () => {

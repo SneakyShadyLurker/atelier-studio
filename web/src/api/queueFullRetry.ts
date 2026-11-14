@@ -1,7 +1,6 @@
 import { RETRY_AFTER_FIELD } from '@atelier/shared';
 import type { ApiErrorCode } from '@atelier/shared';
 import { isRecord } from '../lib/guards';
-import { QuotaExhaustedError } from './sse';
 
 // Bound automatic queue admission retries; untouched work remains saved for
 // an explicit Generate/Resume after this idle budget.
@@ -65,9 +64,9 @@ export function nextBackpressureDelayMs(
 }
 
 // Classifies a 429 by its WIRE code, reading the body exactly ONCE. Returns the
-// clamped retry delay for a genuine QUEUE_FULL admission rejection, throws the
-// typed quota signal for QUOTA_EXHAUSTED, or returns null for any other 429
-// (e.g. VIDEO_BUSY). Status alone is too coarse.
+// clamped retry delay for a genuine QUEUE_FULL admission rejection, or null for
+// any other 429 (e.g. VIDEO_BUSY). Quota exhaustion never arrives as a 429: it
+// is the SSE terminal error `quota-exhausted`, handled by the stream parser. Status alone is too coarse.
 export async function classifyQueueFull(res: Response): Promise<number | null> {
   let body: unknown;
   try {
@@ -79,12 +78,6 @@ export async function classifyQueueFull(res: Response): Promise<number | null> {
     return null;
   }
   const code = isRecord(body) && typeof body.code === 'string' ? body.code : undefined;
-  if (code === ('QUOTA_EXHAUSTED' satisfies ApiErrorCode)) {
-    const retryAfter = isRecord(body) && typeof body[RETRY_AFTER_FIELD] === 'number'
-      ? body[RETRY_AFTER_FIELD]
-      : null;
-    throw new QuotaExhaustedError(retryAfter);
-  }
   if (code !== ('QUEUE_FULL' satisfies ApiErrorCode)) return null;
   const retryAfter = isRecord(body) && typeof body[RETRY_AFTER_FIELD] === 'number' ? body[RETRY_AFTER_FIELD] : undefined;
   return clampRetryAfterMs(retryAfter);

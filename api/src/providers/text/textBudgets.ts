@@ -5,26 +5,20 @@ import type { Config } from '../../config';
 // model row's latency profile where slow models need longer ones.
 
 export const KIMI_LOW_REASONING_OVERHEAD_TOKENS = 4000;
-// GLM 5.3's catalog `max_output_tokens` is 131,072, but reasoning spends from
-// the completion budget and the stream drain below is sized to emit the whole
-// budget at the measured throughput, so its migrated row asks for 32,768 on
-// every call: a count-12 brainstorm used 21,067 tokens on the earlier GLM
-// Flash route.
-export const GLM_ABLITERATED_MAX_COMPLETION_TOKENS = 32_768;
 
-// GLM's longer deadlines were sized on a GLM 5.3 Flash route at 'high'
-// effort. Real Atelier prompts through the proxy,
+// Floors applied to every row whose latency profile is 'slow'. They were sized
+// on a GLM 5.3 Flash route at 'high' effort. Real Atelier prompts through the proxy,
 // uncapped: a 7-slot ai-fill took 197s (2,531 completion tokens), a 4-item
 // batch 137s, a 528-word Krea condense 248s, a six-beat story plan 240s and a
 // count-12 brainstorm 1,259s (21,067 tokens), at 13–17 tokens/s and up to ~55
 // SSE bytes per completion token. Stock GLM 5.3 measured 50–70 tokens/s
 // (2026-10-30; the earlier uncensored build ~20), so they stay generous ceilings. The stream drain covers emitting
-// the whole 32,768-token budget at the slowest rate. Every other backend keeps
-// its configured deadline.
-export const GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS = 360_000;
-export const GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS = 420_000;
-export const GLM_ABLITERATED_STREAM_DRAIN_MS = 2_700_000;
-export const GLM_ABLITERATED_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+// the whole 32,768-token budget at the slowest rate. A standard row keeps its
+// configured deadline.
+export const SLOW_PER_ATTEMPT_FLOOR_MS = 360_000;
+export const SLOW_REWRITE_FLOOR_MS = 420_000;
+export const SLOW_STREAM_DRAIN_FLOOR_MS = 2_700_000;
+export const SLOW_MAX_RESPONSE_BYTES_FLOOR = 4 * 1024 * 1024;
 
 /**
  * Per-attempt timeout of a policy-wrapped text call: the configured knob on a
@@ -33,7 +27,7 @@ export const GLM_ABLITERATED_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
  */
 export function textPerAttemptTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
   return profile === 'slow'
-    ? Math.max(configuredMs, GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS)
+    ? Math.max(configuredMs, SLOW_PER_ATTEMPT_FLOOR_MS)
     : configuredMs;
 }
 
@@ -75,7 +69,7 @@ export function textPolicyRouteTimeoutMs(
 
 /** Drain budget of one enhance, storytelling-planner or brainstorm stream. */
 export function textStreamDrainMs(profile: TextLatencyProfile, cloudTimeoutMs: number): number {
-  return profile === 'slow' ? Math.max(cloudTimeoutMs, GLM_ABLITERATED_STREAM_DRAIN_MS) : cloudTimeoutMs;
+  return profile === 'slow' ? Math.max(cloudTimeoutMs, SLOW_STREAM_DRAIN_FLOOR_MS) : cloudTimeoutMs;
 }
 
 // A slow row may think for minutes before its first byte when the upstream
@@ -87,10 +81,10 @@ export function textStreamIdleMs(profile: TextLatencyProfile, baseMs: number): n
   return profile === 'slow' ? Math.max(baseMs, SLOW_STREAM_IDLE_FLOOR_MS) : baseMs;
 }
 
-/** Deadline of a queued prompt rewrite (Krea condense, H3 Image expand); both fail open, so a short one silently skips them. */
+/** Deadline of a queued prompt rewrite (Krea condense, MOSS and H3 Image expand); each fails open, so a short one silently skips it. */
 export function promptRewriteTimeoutMs(profile: TextLatencyProfile, configuredMs: number): number {
   return profile === 'slow'
-    ? Math.max(configuredMs, GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS)
+    ? Math.max(configuredMs, SLOW_REWRITE_FLOOR_MS)
     : configuredMs;
 }
 
@@ -115,7 +109,7 @@ export function pinnedEffortMaxResponseBytes(
 
 /** Raw SSE byte cap; slow models' long streams would exhaust the shared 1 MiB cap first. */
 export function textMaxResponseBytes(profile: TextLatencyProfile, configuredBytes: number): number {
-  return profile === 'slow' ? Math.max(configuredBytes, GLM_ABLITERATED_MAX_RESPONSE_BYTES) : configuredBytes;
+  return profile === 'slow' ? Math.max(configuredBytes, SLOW_MAX_RESPONSE_BYTES_FLOOR) : configuredBytes;
 }
 
 // Output-token budgets of the text calls (`maxOutputTokens`; a row's

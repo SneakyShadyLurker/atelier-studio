@@ -23,6 +23,7 @@ import {
 import { INFER_DIMENSIONS_SYSTEM_PROMPT } from './inferDimensionsSystemPrompt';
 import { motionEnhanceSystemPrompt } from './motionEnhanceSystemPrompt';
 import { RESCUE_DIMENSION_SYSTEM_PROMPT } from './rescueSystemPrompt';
+import { REWORK_TEMPLATE_SYSTEM_PROMPT } from './reworkTemplateSystemPrompt';
 import { storyPlannerSystemPrompt } from './storyPlannerSystemPrompt';
 import { storyT2vSystemPrompt } from './storyT2vSystemPrompt';
 
@@ -43,9 +44,11 @@ const prompts: Record<string, string> = {
   'enhance-sunburst': SUNBURST_ENHANCE_SYSTEM_PROMPT,
   'fill-sunburst': SUNBURST_FILL_RULES,
   'image-authoring': imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, 'gpt-image-2.6-sunburst'),
+  'image-authoring-rework': imageAuthoringSystemPrompt(REWORK_TEMPLATE_SYSTEM_PROMPT, 'gpt-image-2.6-sunburst'),
   'infer-dimensions': INFER_DIMENSIONS_SYSTEM_PROMPT,
   'motion-enhance': motionEnhanceSystemPrompt(),
   'rescue-dimension': RESCUE_DIMENSION_SYSTEM_PROMPT,
+  'rework-template': REWORK_TEMPLATE_SYSTEM_PROMPT,
   'story-planner': storyPlannerSystemPrompt('t2v'),
   'story-t2v': storyT2vSystemPrompt(),
 };

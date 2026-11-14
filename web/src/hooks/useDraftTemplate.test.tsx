@@ -3,6 +3,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { ApiError } from '../api/client';
+import type { TemplateReview } from '../components/PromptManager/templateReview';
 import { useDraftTemplate } from './useDraftTemplate';
 import { useAtelierStore } from '../store/atelier';
 
@@ -39,12 +40,14 @@ function harness(options: { body?: string; commitChoice?: () => Promise<void> } 
   let body = options.body ?? 'some existing body';
   const onBody = mock((_: string) => { return; });
   const onWarnings = mock((_: readonly string[]) => { return; });
+  const onReview = mock((_: TemplateReview) => { return; });
   const commitChoice = mock(options.commitChoice ?? (() => Promise.resolve()));
   const view = renderHook(
     () => useDraftTemplate({
       name: 'My Template',
       getCurrentBody: () => body,
       onBody,
+      onReview,
       onWarnings,
       commitChoice,
     }),
@@ -53,6 +56,7 @@ function harness(options: { body?: string; commitChoice?: () => Promise<void> } 
   return {
     view,
     onBody,
+    onReview,
     onWarnings,
     commitChoice,
     setBody: (next: string) => { body = next; },
@@ -113,7 +117,7 @@ describe('useDraftTemplate', () => {
     expect(h.commitChoice).not.toHaveBeenCalled();
   });
 
-  test('a rework submit saves the choice first, then sends the trimmed body with the change instructions', async () => {
+  test('a rework submit saves the choice first, then sends the body untrimmed with the change instructions', async () => {
     const order: string[] = [];
     const f = mock((_url: unknown, _init?: RequestInit) => {
       order.push('draft');
@@ -126,7 +130,7 @@ describe('useDraftTemplate', () => {
     await waitFor(() => { expect(h.view.result.current.status).toBe('drafting'); });
     await waitFor(() => { expect(h.view.result.current.status).toBe('done'); });
     expect(order).toEqual(['commit', 'draft']);
-    expect(sentBodies(f)).toEqual([{ name: 'My Template', existingBody: 'some body text', description: 'moodier lighting' }]);
+    expect(sentBodies(f)).toEqual([{ name: 'My Template', existingBody: '  some body text  ', description: 'moodier lighting' }]);
     expect(h.onBody).toHaveBeenCalledWith('revised');
   });
 
@@ -217,5 +221,90 @@ describe('useDraftTemplate', () => {
     await waitFor(() => { expect(globalThis.fetch).toHaveBeenCalledTimes(1); });
     h.view.unmount();
     await waitFor(() => { expect(aborted).toBe(true); });
+  });
+
+  test('a blank body is sent as an empty string', async () => {
+    const f = jsonFetch(200, { kind: 'body', body: 'seeded', warnings: [] });
+    globalThis.fetch = f as unknown as typeof fetch;
+    const h = harness({ body: '  \n  ' });
+    act(() => { h.view.result.current.draft(); });
+    expect(h.view.result.current.dialogMode).toBe('seed');
+    act(() => { h.view.result.current.submitDescription('a portrait'); });
+    await waitFor(() => { expect(h.view.result.current.status).toBe('done'); });
+    expect(sentBodies(f)).toEqual([{ name: 'My Template', existingBody: '', description: 'a portrait' }]);
+    expect(h.onBody).toHaveBeenCalledWith('seeded');
+    expect(h.onReview).not.toHaveBeenCalled();
+  });
+});
+
+describe('useDraftTemplate changes payload', () => {
+  const base = 'A red coat in soft light.\n';
+  const changes = (overrides: Record<string, unknown> = {}) => ({
+    kind: 'changes',
+    baseLength: base.length,
+    changes: [{ id: 0, start: 2, end: 5, replace: 'blue', why: 'Bluer.' }],
+    unplaced: [],
+    summary: 'Cooler.',
+    warnings: [],
+    ...overrides,
+  });
+
+  async function submit(response: unknown) {
+    globalThis.fetch = jsonFetch(200, response) as unknown as typeof fetch;
+    const h = harness({ body: base });
+    act(() => { h.view.result.current.draft(); });
+    act(() => { h.view.result.current.submitDescription(' bluer '); });
+    await waitFor(() => { expect(['done', 'rework-prompt']).toContain(h.view.result.current.status); });
+    return h;
+  }
+
+  test('placed changes become a review with the description as instructions', async () => {
+    const h = await submit(changes());
+    expect(h.view.result.current.status).toBe('done');
+    expect(h.view.result.current.dialogMode).toBeNull();
+    expect(h.onBody).not.toHaveBeenCalled();
+    expect(h.onWarnings).not.toHaveBeenCalled();
+    expect(h.onReview).toHaveBeenCalledTimes(1);
+    expect(h.onReview.mock.calls[0]?.[0]).toEqual({
+      base,
+      changes: [{ id: 0, start: 2, end: 5, replace: 'blue', why: 'Bluer.' }],
+      unplaced: [],
+      summary: 'Cooler.',
+      instructions: 'bluer',
+      rejected: [],
+    });
+  });
+
+  test('warnings of a changes payload reach onWarnings', async () => {
+    const h = await submit(changes({ warnings: ['Removed {{x}}.'] }));
+    expect(h.onWarnings).toHaveBeenCalledWith(['Removed {{x}}.']);
+    expect(h.onReview).toHaveBeenCalledTimes(1);
+  });
+
+  test('no changes and nothing unplaced keeps the dialog open with the summary', async () => {
+    const h = await submit(changes({ changes: [], summary: 'Already moody.' }));
+    expect(h.view.result.current.status).toBe('rework-prompt');
+    expect(h.view.result.current.dialogMode).toBe('rework');
+    expect(h.view.result.current.notice).toBe('Already moody.');
+    expect(h.onReview).not.toHaveBeenCalled();
+    expect(h.onBody).not.toHaveBeenCalled();
+  });
+
+  test('no changes, nothing unplaced and no summary shows the nothing-to-change note', async () => {
+    const h = await submit(changes({ changes: [], summary: null }));
+    expect(h.view.result.current.notice).toBe('The model found nothing to change.');
+  });
+
+  test('no changes with unplaced edits shows the did-not-line-up note', async () => {
+    const h = await submit(changes({
+      changes: [],
+      summary: 'Bluer.',
+      unplaced: [{ find: 'velvet', replace: 'silk', why: '', reason: 'missing' }],
+      warnings: ['w'],
+    }));
+    expect(h.view.result.current.notice).toBe("The model's edits did not line up with the template text. Try again, or pick another model.");
+    expect(h.view.result.current.dialogMode).toBe('rework');
+    expect(h.onWarnings).toHaveBeenCalledWith(['w']);
+    expect(h.onReview).not.toHaveBeenCalled();
   });
 });

@@ -179,6 +179,7 @@ describe('design system drift guards', () => {
       'web/src/components/MovePopover/index.module.css',
       'web/src/components/PromptManager/CoverageCard/index.module.css',
       'web/src/components/PromptManager/DimensionProposal/index.module.css',
+      'web/src/components/PromptManager/TemplateReview/index.module.css',
       'web/src/components/PromptManager/index.module.css',
       'web/src/components/PromptPicker/index.module.css',
       'web/src/components/SaveTemplateDialog/index.module.css',
@@ -219,6 +220,9 @@ describe('design system drift guards', () => {
     const allowed: Record<string, readonly string[]> = {
       'web/src/styles/type.module.css': ['.kbd'],
       'web/src/components/StateView/index.module.css': ['.state code', '.state kbd'],
+      // The rework review's sheet is the template body; an unplaced
+      // suggestion's proposed text is template text too.
+      'web/src/components/PromptManager/TemplateReview/index.module.css': ['.sheet', '.proposed'],
       'web/src/components/PromptManager/index.module.css': [
         '.microcopy code',
         '.monoArea',

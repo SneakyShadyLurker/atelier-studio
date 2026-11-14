@@ -65,8 +65,12 @@ describe('useAiDraftWithClarify error surface', () => {
 });
 
 describe('useAiDraftWithClarify rework mode', () => {
-  function reworkHarness(base: string[], run = mock((): Promise<Resolved> => Promise.reject(new ApiError(502, 'upstream unavailable')))) {
-    const onResolve = mock((_result: Resolved) => undefined);
+  function reworkHarness(
+    base: string[],
+    run = mock((): Promise<Resolved> => Promise.reject(new ApiError(502, 'upstream unavailable'))),
+    resolve: (result: Resolved) => { notice: string } | undefined = () => undefined,
+  ) {
+    const onResolve = mock((result: Resolved, _request: { base: string[]; description: string | undefined }) => resolve(result));
     const view = renderHook(
       () => useAiDraftWithClarify<string[], Resolved>({
         captureBase: () => base,
@@ -105,7 +109,7 @@ describe('useAiDraftWithClarify rework mode', () => {
     act(() => { view.result.current.submitDescription('  bluer  '); });
     await waitFor(() => { expect(view.result.current.status).toBe('done'); });
     expect(run.mock.calls[0]?.slice(0, 2) as unknown).toEqual([['red'], 'bluer']);
-    expect(onResolve).toHaveBeenCalledWith({ kind: 'entries', entries: ['x'] });
+    expect(onResolve).toHaveBeenCalledWith({ kind: 'entries', entries: ['x'] }, { base: ['red'], description: 'bluer' });
     expect(view.result.current.dialogMode).toBeNull();
   });
 
@@ -132,5 +136,115 @@ describe('useAiDraftWithClarify rework mode', () => {
     await act(async () => { resolveRun({ kind: 'entries', entries: ['late'] }); await Promise.resolve(); });
     expect(onResolve).not.toHaveBeenCalled();
     expect(view.result.current.status).toBe('idle');
+  });
+
+  describe('notice outcome', () => {
+    const noticeFor = (result: Resolved) => (result.entries.length === 0 ? { notice: 'Nothing to change.' } : undefined);
+
+    test('keeps the dialog open with the notice and returns to its prompt status', async () => {
+      const run = mock((): Promise<Resolved> => Promise.resolve({ kind: 'entries', entries: [] }));
+      const { view, onResolve } = reworkHarness(['red'], run, noticeFor);
+      act(() => { view.result.current.draft(); });
+      act(() => { view.result.current.submitDescription('bluer'); });
+      await waitFor(() => { expect(view.result.current.notice).toBe('Nothing to change.'); });
+      expect(onResolve).toHaveBeenCalledTimes(1);
+      expect(view.result.current.dialogMode).toBe('rework');
+      expect(view.result.current.status).toBe('rework-prompt');
+      expect(view.result.current.error).toBeNull();
+      expect(useAtelierStore.getState().toasts).toHaveLength(0);
+    });
+
+    test('the next submit clears the notice', async () => {
+      let resolveRun: (value: Resolved) => void = () => undefined;
+      const run = mock((): Promise<Resolved> => new Promise<Resolved>((resolve) => { resolveRun = resolve; }));
+      const { view } = reworkHarness(['red'], run, noticeFor);
+      act(() => { view.result.current.draft(); });
+      act(() => { view.result.current.submitDescription('bluer'); });
+      await waitFor(() => { expect(run).toHaveBeenCalledTimes(1); });
+      await act(async () => { resolveRun({ kind: 'entries', entries: [] }); await Promise.resolve(); });
+      await waitFor(() => { expect(view.result.current.notice).toBe('Nothing to change.'); });
+      act(() => { view.result.current.submitDescription('greener'); });
+      expect(view.result.current.notice).toBeNull();
+      expect(view.result.current.status).toBe('drafting');
+      await waitFor(() => { expect(run).toHaveBeenCalledTimes(2); });
+      await act(async () => { resolveRun({ kind: 'entries', entries: ['x'] }); await Promise.resolve(); });
+      await waitFor(() => { expect(view.result.current.status).toBe('done'); });
+      expect(view.result.current.notice).toBeNull();
+      expect(view.result.current.dialogMode).toBeNull();
+    });
+
+    test('cancel clears the notice', async () => {
+      const run = mock((): Promise<Resolved> => Promise.resolve({ kind: 'entries', entries: [] }));
+      const { view } = reworkHarness(['red'], run, noticeFor);
+      act(() => { view.result.current.draft(); });
+      act(() => { view.result.current.submitDescription('bluer'); });
+      await waitFor(() => { expect(view.result.current.notice).toBe('Nothing to change.'); });
+      act(() => { view.result.current.cancelDialog(); });
+      expect(view.result.current.notice).toBeNull();
+      expect(view.result.current.dialogMode).toBeNull();
+      expect(view.result.current.status).toBe('idle');
+    });
+
+    test('a notice from a clarify answer keeps the clarify dialog', async () => {
+      const responses: (Resolved | { kind: 'clarify'; question: string })[] = [
+        { kind: 'clarify', question: 'Which red?' },
+        { kind: 'entries', entries: [] },
+      ];
+      const empty: Resolved = { kind: 'entries', entries: [] };
+      const run = mock(() => Promise.resolve(responses.shift() ?? empty));
+      const view = renderHook(
+        () => useAiDraftWithClarify<string[], Resolved>({
+          captureBase: () => [],
+          isEmptyBase: (value) => value.length === 0,
+          run,
+          onResolve: noticeFor,
+          errorFallback: 'Could not draft.',
+        }),
+        { wrapper: wrapper() },
+      );
+      act(() => { view.result.current.draft(); });
+      act(() => { view.result.current.submitDescription('reds'); });
+      await waitFor(() => { expect(view.result.current.status).toBe('clarifying'); });
+      act(() => { view.result.current.submitDescription('crimson'); });
+      await waitFor(() => { expect(view.result.current.notice).toBe('Nothing to change.'); });
+      expect(view.result.current.dialogMode).toBe('clarify');
+      expect(view.result.current.status).toBe('clarifying');
+      expect(view.result.current.clarifyQuestion).toBe('Which red?');
+    });
+
+    test('with no dialog mounted the notice is a soft toast and the draft is done', async () => {
+      const run = mock((): Promise<Resolved> => Promise.resolve({ kind: 'entries', entries: [] }));
+      const view = renderHook(
+        () => useAiDraftWithClarify<string[], Resolved>({
+          captureBase: () => ['red'],
+          isEmptyBase: (value) => value.length === 0,
+          run,
+          onResolve: noticeFor,
+          errorFallback: 'Could not draft.',
+        }),
+        { wrapper: wrapper() },
+      );
+      act(() => { view.result.current.draft(); });
+      await waitFor(() => { expect(view.result.current.status).toBe('done'); });
+      expect(view.result.current.notice).toBeNull();
+      expect(view.result.current.dialogMode).toBeNull();
+      const toasts = useAtelierStore.getState().toasts;
+      expect(toasts.map((toast) => [toast.text, toast.tone])).toEqual([['Nothing to change.', 'soft']]);
+    });
+
+    test('a notice that lands after cancel is dropped', async () => {
+      let resolveRun: (value: Resolved) => void = () => undefined;
+      const run = mock((): Promise<Resolved> => new Promise<Resolved>((resolve) => { resolveRun = resolve; }));
+      const { view, onResolve } = reworkHarness(['red'], run, noticeFor);
+      act(() => { view.result.current.draft(); });
+      act(() => { view.result.current.submitDescription('bluer'); });
+      await waitFor(() => { expect(run).toHaveBeenCalledTimes(1); });
+      act(() => { view.result.current.cancelDialog(); });
+      await act(async () => { resolveRun({ kind: 'entries', entries: [] }); await Promise.resolve(); });
+      expect(onResolve).not.toHaveBeenCalled();
+      expect(view.result.current.notice).toBeNull();
+      expect(view.result.current.dialogMode).toBeNull();
+      expect(view.result.current.status).toBe('idle');
+    });
   });
 });

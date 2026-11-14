@@ -7,6 +7,7 @@ import {
   type DraftTemplateResponse,
   type DraftVariableListResponse,
 } from '@atelier/shared';
+import { placeTemplateOperations, type PlaceOptions, type TemplateOperation } from '@atelier/shared/template-rework';
 import { findTokens, VAR_TOKEN_ANCHORED } from '@atelier/shared/template-tokens';
 import { BrokenCircuitError, TaskCancelledError, type IPolicy } from 'cockatiel';
 import { z } from 'zod';
@@ -206,6 +207,8 @@ export type DraftTemplateProviderInput = DraftTemplateRequest & {
   readonly library: LibraryOverview;
   /** User-pinned effort; replaces the model's default effort. */
   readonly reasoningEffort?: TextReasoningEffort;
+  /** The body's UTF-8 byte limit for a rework's placed changes; TEMPLATE_BODY_HARD_MAX when absent. */
+  readonly maxBodyBytes?: number;
 };
 
 export type DraftTemplateResult =
@@ -465,6 +468,14 @@ function stripUnknownTokens(
   return { body: cleaned, warnings };
 }
 
+/** The token rules for one rework replacement (spec R3.4), as the placement's sanitize option. */
+export function templateTokenSanitizer(knownNames: ReadonlySet<string>, existingBody: string): PlaceOptions['sanitize'] {
+  return (replacement) => {
+    const { body, warnings } = stripUnknownTokens(replacement, knownNames, existingBody);
+    return { text: body, warnings };
+  };
+}
+
 // The two answers of a template draft as one object: OpenAI strict schemas
 // and Anthropic's forced json tool both need an object at the root, so the
 // union lives in `kind` and the field the other answer does not use is null.
@@ -478,6 +489,17 @@ const { $schema: _draftTemplateDialect, ...draftTemplateSchema } = z.toJSONSchem
 export const DRAFT_TEMPLATE_RESPONSE_FORMAT = {
   type: 'json_schema',
   json_schema: { name: 'template_draft', strict: true, schema: draftTemplateSchema },
+} as const;
+
+// A rework's answer: find/replace edits of the body sent, each with its reason.
+const ReworkTemplateAnswerSchema = z.object({
+  changes: z.array(z.object({ why: z.string(), find: z.string(), replace: z.string() }).strict()),
+  summary: z.string(),
+}).strict();
+const { $schema: _reworkTemplateDialect, ...reworkTemplateSchema } = z.toJSONSchema(ReworkTemplateAnswerSchema, { target: 'draft-7', io: 'output' });
+export const REWORK_TEMPLATE_RESPONSE_FORMAT = {
+  type: 'json_schema',
+  json_schema: { name: 'template_rework', strict: true, schema: reworkTemplateSchema },
 } as const;
 
 const UNPARSEABLE_DRAFT = 'unparseable draft response';
@@ -527,6 +549,68 @@ export function draftTemplateResultFromContent(
   return {
     type: 'ok',
     payload: { kind: 'body', body: cleaned, warnings: [...truncationWarnings, ...stripWarnings] },
+  };
+}
+
+/** Spec R2.3: at most this many operations of a rework answer are read. */
+const MAX_REWORK_OPERATIONS = 100;
+
+/** R2.3/R2.4: the answer's operations, or null when it has neither a changes array nor a string body. */
+function reworkOperations(parsed: object): TemplateOperation[] | null {
+  const { changes, body } = parsed as { changes?: unknown; body?: unknown };
+  if (!Array.isArray(changes)) {
+    return typeof body === 'string' ? [{ why: '', find: '', replace: body }] : null;
+  }
+  const operations: TemplateOperation[] = [];
+  for (const entry of changes as unknown[]) {
+    if (operations.length === MAX_REWORK_OPERATIONS) break;
+    if (typeof entry !== 'object' || entry === null) continue;
+    const { why, find, replace } = entry as { why?: unknown; find?: unknown; replace?: unknown };
+    if (typeof find !== 'string' || typeof replace !== 'string') continue;
+    operations.push({ why: typeof why === 'string' ? why.trim() : '', find, replace });
+  }
+  return operations;
+}
+
+/**
+ * Turns a rework answer into placed changes against `existingBody` (spec
+ * template-rework-review R1, R2): parses the JSON leniently, reads the
+ * operations (a bare body is one whole operation) and places them with the
+ * user's token rules and the length limits. No text is truncated.
+ */
+export function reworkTemplateResultFromContent(
+  content: string,
+  knownNames: ReadonlySet<string>,
+  existingBody: string,
+  maxBodyBytes: number,
+): DraftTemplateResult {
+  const parsed = parseModelJsonObject(content);
+  if (!parsed || typeof parsed !== 'object') return unparseableFailure(UNPARSEABLE_DRAFT);
+  const operations = reworkOperations(parsed);
+  if (!operations) return unparseableFailure(UNPARSEABLE_DRAFT);
+
+  const placement = placeTemplateOperations(existingBody, operations, {
+    sanitize: templateTokenSanitizer(knownNames, existingBody),
+    maxGrowthChars: MAX_DRAFT_RAW_BODY_CHARS,
+    maxBodyBytes,
+  });
+
+  const rawSummary = (parsed as { summary?: unknown }).summary;
+  const modelSummary = typeof rawSummary === 'string' ? rawSummary.trim() : '';
+  const { wholeWhy } = placement;
+  const lead = wholeWhy !== null && wholeWhy !== modelSummary ? wholeWhy : '';
+  const summary = [lead, modelSummary].filter((part) => part !== '').join(' ');
+
+  return {
+    type: 'ok',
+    payload: {
+      kind: 'changes',
+      baseLength: existingBody.length,
+      changes: placement.changes,
+      unplaced: placement.unplaced,
+      summary: summary === '' ? null : summary,
+      warnings: placement.warnings,
+    },
   };
 }
 

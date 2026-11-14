@@ -103,7 +103,7 @@ describe('POST /api/prompts/templates/draft', () => {
       () => Promise.resolve({ type: 'ok', payload: expectedPayload }),
     ));
     const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
-    const res = await draftTemplate(app, { name: 'Portrait', existingBody: 'A portrait.', description: 'warmer light' });
+    const res = await draftTemplate(app, { name: 'Portrait', existingBody: '', description: 'warmer light' });
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
     expect(done).toEqual(expectedPayload);
@@ -271,22 +271,88 @@ describe('POST /api/prompts/templates/draft', () => {
     expect(res.status).toBe(200);
   });
 
-  test('rework: the change instructions reach the provider and the revised body passes through whole', async () => {
-    // The answer to a rework is the complete revised body; the editor replaces
-    // its body with it, so the route relays it unchanged.
+  test('rework: the change instructions and the configured byte limit reach the provider, and the changes pass through whole', async () => {
     const existingBody = 'A portrait in golden hour light.';
-    const revised = 'A portrait in moody blue-hour light.';
-    const captured: { existingBody: string; description?: string }[] = [];
+    const changes: DraftTemplateResponse = {
+      kind: 'changes',
+      baseLength: existingBody.length,
+      changes: [{ id: 0, start: 14, end: 25, replace: 'blue hour', why: 'Moodier light.' }],
+      unplaced: [],
+      summary: 'Cooler light.',
+      warnings: [],
+    };
+    const captured: { existingBody: string; description?: string; maxBodyBytes?: number }[] = [];
     setTextModelProviderForTests(fakeProvider((input) => {
-      captured.push({ existingBody: input.existingBody, ...(input.description !== undefined ? { description: input.description } : {}) });
-      return Promise.resolve({ type: 'ok', payload: { kind: 'body', body: revised, warnings: [] } });
+      captured.push({
+        existingBody: input.existingBody,
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.maxBodyBytes !== undefined ? { maxBodyBytes: input.maxBodyBytes } : {}),
+      });
+      return Promise.resolve({ type: 'ok', payload: changes });
     }));
-    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice' });
+    const { app } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', MAX_TEMPLATE_BODY_BYTES: '4096' });
     const res = await draftTemplate(app, { name: 'Portrait', existingBody, description: 'make the lighting moodier' });
     expect(res.status).toBe(200);
     const { done } = await readDraft(res);
-    expect(done).toEqual({ kind: 'body', body: revised, warnings: [] });
-    expect(captured).toEqual([{ existingBody, description: 'make the lighting moodier' }]);
+    expect(done).toEqual(changes);
+    expect(captured).toEqual([{ existingBody, description: 'make the lighting moodier', maxBodyBytes: 4096 }]);
+  });
+
+  test('rework: the model answer is placed, and one log event counts it without template text', async () => {
+    const existingBody = 'A portrait in golden hour light.';
+    let system: unknown;
+    const up = serve(async (req) => {
+      const sent = await req.json() as { messages: { role: string; content: unknown }[] };
+      system = sent.messages.find((m) => m.role === 'system')?.content;
+      const content = JSON.stringify({
+        changes: [
+          { why: 'Moodier light.', find: 'golden hour', replace: 'blue hour' },
+          { why: 'Not there.', find: 'SECRET-FIND-1', replace: 'SECRET-REPLACE-1' },
+          { why: 'Not there either.', find: 'SECRET-FIND-2', replace: 'SECRET-REPLACE-2' },
+          { why: 'Same passage.', find: 'golden', replace: 'pale' },
+        ],
+        summary: 'Cooler light.',
+      });
+      const frame = JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: 'stop' }] });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
+    });
+    const { app, logs } = testRuntime({
+      seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', CLIPROXY_BASE_URL: up, CLIPROXY_TOKEN: 'sk-x', LOG_LEVEL: 'info',
+    });
+    const res = await draftTemplate(app, { name: 'Portrait', existingBody, description: 'moodier' });
+    expect(res.status).toBe(200);
+    const { done } = await readDraft(res);
+    expect(done).toMatchObject({
+      kind: 'changes',
+      baseLength: existingBody.length,
+      changes: [{ id: 0, start: 14, end: 25, replace: 'blue hour', why: 'Moodier light.' }],
+      summary: 'Cooler light.',
+    });
+    expect(typeof system === 'string' && system.startsWith('Role: You edit a reusable image-prompt template')).toBe(true);
+    const events = logs
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((entry) => entry.event === 'draft_template_rework');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      userId: 'alice',
+      placed: 1,
+      unplaced: 3,
+      unplacedReasons: { missing: 2, overlap: 1 },
+    });
+    expect(typeof events[0]?.textModelId).toBe('string');
+    const logged = JSON.stringify(events[0]);
+    for (const text of ['golden', 'blue hour', 'SECRET', 'Cooler', 'Moodier']) expect(logged).not.toContain(text);
+  });
+
+  test('seed: a blank body still answers with a body and logs no rework event', async () => {
+    setTextModelProviderForTests(fakeProvider(
+      () => Promise.resolve({ type: 'ok', payload: { kind: 'body', body: 'drafted', warnings: [] } }),
+    ));
+    const { app, logs } = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'info' });
+    const res = await draftTemplate(app, { name: 'Portrait', existingBody: '', description: 'a portrait' });
+    const { done } = await readDraft(res);
+    expect(done).toEqual({ kind: 'body', body: 'drafted', warnings: [] });
+    expect(logs.join('\n')).not.toContain('draft_template_rework');
   });
 
   test('a description over TEMPLATE_DESCRIPTION_MAX_CHARS → 400, one at the limit is accepted', async () => {

@@ -140,14 +140,14 @@ export const INFER_DIMENSIONS_MAX_OUTPUT_TOKENS = 32000 + KIMI_LOW_REASONING_OVE
 // low-reasoning overhead.
 export const DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS = 1500 + KIMI_LOW_REASONING_OVERHEAD_TOKENS;
 
-/** Tokens a rework's answer spends carrying the revised body back: about one per three characters. */
+/** Tokens a rework's answer may spend quoting and replacing passages of the body: about one per three characters. */
 function reworkBodyTokens(existingBody: string): number {
   return Math.ceil(Array.from(existingBody).length / 3);
 }
 
 /**
- * Output budget of one template draft. A rework answers with the whole revised
- * body, so the existing body adds its tokens; an effort above low (the effort
+ * Output budget of one template draft. A rework quotes the passages it changes
+ * and may rewrite the body whole, so the existing body adds its tokens; an effort above low (the effort
  * actually sent) reasons through at least the enhance budget.
  */
 export function draftTemplateMaxOutputTokens(

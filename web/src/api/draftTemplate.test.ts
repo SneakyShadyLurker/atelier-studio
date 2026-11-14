@@ -87,3 +87,49 @@ describe('draftTemplate payload validation', () => {
     expect((caught as Error).message).toBe('invalid draft template payload');
   });
 });
+
+describe('draftTemplate changes payload (R1.7)', () => {
+  const base = 'A red coat in soft light.';
+  const change = (id: number, start: number, end: number, replace: string) => ({ id, start, end, replace, why: 'asked' });
+  const payload = (overrides: Record<string, unknown> = {}) => ({
+    kind: 'changes',
+    baseLength: base.length,
+    changes: [change(0, 2, 5, 'blue'), change(1, 14, 18, 'hard')],
+    unplaced: [],
+    summary: null,
+    warnings: [],
+    ...overrides,
+  });
+
+  async function caught(response: unknown): Promise<unknown> {
+    globalThis.fetch = sseFetch(doneFrame(response)) as unknown as typeof fetch;
+    try {
+      await draftTemplate({ name: 'X', existingBody: base, description: 'bluer' });
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  }
+
+  test('accepts changes placed against the body it sent', async () => {
+    globalThis.fetch = sseFetch(doneFrame(payload())) as unknown as typeof fetch;
+    expect(await draftTemplate({ name: 'X', existingBody: base, description: 'bluer' })).toEqual(payload() as never);
+  });
+
+  test('accepts an empty change set', async () => {
+    globalThis.fetch = sseFetch(doneFrame(payload({ changes: [] }))) as unknown as typeof fetch;
+    expect(await draftTemplate({ name: 'X', existingBody: base, description: 'bluer' })).toEqual(payload({ changes: [] }) as never);
+  });
+
+  test.each([
+    ['a base length that differs from the sent body', payload({ baseLength: base.length + 1 })],
+    ['overlapping changes', payload({ changes: [change(0, 2, 8, 'x'), change(1, 6, 10, 'y')] })],
+    ['touching changes', payload({ changes: [change(0, 2, 5, 'x'), change(1, 5, 10, 'y')] })],
+    ['unsorted changes', payload({ changes: [change(0, 14, 18, 'hard'), change(1, 2, 5, 'blue')] })],
+    ['a change past the end of the body', payload({ changes: [change(0, 20, base.length + 1, 'x')] })],
+  ])('rejects %s with the ordinary draft error', async (_label, response) => {
+    const error = await caught(response);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as Error).message).toBe('invalid draft template payload');
+  });
+});

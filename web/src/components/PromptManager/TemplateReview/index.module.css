@@ -1,0 +1,482 @@
+/* Template rework review: the body as a proof sheet with the AI's
+   corrections marked in it (spec template-rework-review, Design plan).
+   The sheet takes the body textarea's own box; the accent means "the AI
+   wrote this", as it does on the AI button. Decisions repaint in place and
+   never move text: only colour, background, box-shadow and decoration
+   colour transition. */
+
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  animation: global(atelier-fade-in) var(--dur-view) var(--ease-out) backwards;
+}
+
+/* Header row: label, summary, then decisions and navigation at the end. */
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.label {
+  composes: label from '../../../styles/type.module.css';
+}
+
+.summary {
+  flex: 1 1 260px;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* Text actions: a verb set in ink with a quiet underline. */
+.textAction,
+.act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: var(--line-control);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-out),
+    text-decoration-color var(--dur-hover) var(--ease-out);
+}
+
+.textAction:focus-visible,
+.act:focus-visible,
+.fold:focus-visible,
+.unplacedToggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.nav {
+  border-color: var(--line-control);
+  color: var(--ink-2);
+}
+
+.nav[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.up {
+  transform: rotate(180deg);
+}
+
+.count {
+  composes: numeral from '../../../styles/type.module.css';
+  min-width: 44px;
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+/* The sheet: the body textarea's box (.monoArea), read-only. */
+.sheet {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg-sunk);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A change: a focusable group. The current one carries a hairline frame. */
+.change {
+  border-radius: var(--radius-control);
+  outline: 1px solid transparent;
+  outline-offset: 3px;
+}
+
+.change[data-current='true'] {
+  outline-color: var(--ink);
+}
+
+.change:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+/* Insertion: ink on the accent wash with an accent underline. The resting
+   transparent line-through lets a rejection ease its strike in. */
+.ins {
+  padding-block: 1px;
+  border-radius: var(--radius-control);
+  background-color: var(--accent-soft);
+  box-shadow: inset 0 -2px var(--accent);
+  color: var(--ink);
+  text-decoration: line-through 1px transparent;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  transition: color var(--dur-hover) var(--ease-out),
+    background-color var(--dur-hover) var(--ease-out),
+    box-shadow var(--dur-hover) var(--ease-out),
+    text-decoration-color var(--dur-hover) var(--ease-out);
+}
+
+/* Deletion: struck --ink-3. */
+.del {
+  color: var(--ink-3);
+  text-decoration: line-through 1px var(--ink-3);
+  transition: color var(--dur-hover) var(--ease-out),
+    text-decoration-color var(--dur-hover) var(--ease-out);
+}
+
+/* The painted span draws the mark; the semantic element inside adds none. */
+.ins ins,
+.del del {
+  text-decoration: none;
+}
+
+/* Rejected: the original returns to ink, the proposal stays as struck --ink-3. */
+.change[data-decision='rejected'] .ins {
+  background-color: transparent;
+  box-shadow: inset 0 -2px transparent;
+  color: var(--ink-3);
+  text-decoration-color: var(--ink-3);
+}
+
+.change[data-decision='rejected'] .del {
+  color: var(--ink);
+  text-decoration-color: transparent;
+}
+
+.gap {
+  display: inline-block;
+  width: 0.5ch;
+}
+
+/* The change number, tying a change to its note. */
+.key {
+  margin-left: 2px;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums lining-nums;
+  line-height: 1;
+  vertical-align: super;
+}
+
+/* Note row: number, reason, decision. */
+.note {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 4px 0 6px;
+  padding: 5px 0 5px 10px;
+  border-left: 1px solid var(--line-2);
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+  transition: border-color var(--dur-hover) var(--ease-out);
+}
+
+.note[data-current='true'] {
+  padding-left: 9px;
+  border-left: 2px solid var(--ink);
+}
+
+.num {
+  flex: none;
+  min-width: 12px;
+  color: var(--accent);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.why {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+.state {
+  color: var(--ink-3);
+  transition: opacity var(--dur-hover) var(--ease-out);
+}
+
+.state[data-shown='false'] {
+  opacity: 0;
+}
+
+/* Both labels share one cell, so the control keeps its width when it flips. */
+.act {
+  flex: none;
+  display: inline-grid;
+  margin-block: -6px;
+}
+
+.act > span {
+  grid-area: 1 / 1;
+}
+
+.act > span[data-shown='false'] {
+  visibility: hidden;
+}
+
+/* Fold: a full-width quiet row; once opened, the text returns inline. */
+.fold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 6px 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--ink-3);
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  line-height: 1.3;
+  text-align: start;
+  white-space: normal;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-out);
+}
+
+.fold svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.revealed {
+  animation: global(atelier-fade-in) var(--dur-view) var(--ease-out) backwards;
+}
+
+.revealed:focus-visible {
+  outline: none;
+}
+
+/* Block form: the removed passage and the proposal apart, the note last. */
+.block {
+  display: block;
+  margin: 8px 0;
+  padding: 8px 0 0 10px;
+  border-top: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line-2);
+  border-radius: 0;
+}
+
+.blockLabel {
+  composes: label from '../../../styles/type.module.css';
+  display: block;
+  margin-bottom: 2px;
+  white-space: normal;
+}
+
+.blockText {
+  margin-bottom: 8px;
+}
+
+.block .textAction {
+  margin: 0 0 4px -8px;
+}
+
+.block .note {
+  margin-bottom: 4px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+/* Unplaced suggestions: a disclosure below the sheet. */
+.unplacedToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-out);
+}
+
+.caret {
+  display: inline-flex;
+  transition: transform var(--dur-transform) var(--ease-out);
+}
+
+.caret[data-open='true'] {
+  transform: rotate(180deg);
+}
+
+.unplacedList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 6px 0 0 6px;
+  list-style: none;
+}
+
+.unplacedItem {
+  display: grid;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line-2);
+}
+
+.unplacedItem p {
+  margin: 0;
+}
+
+.unplacedWhy {
+  color: var(--ink);
+}
+
+.proposed {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cause {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+/* The shortcut hint, for keyboards beside a pointer that hovers. */
+.hint {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.kbd {
+  composes: kbd from '../../../styles/type.module.css';
+}
+
+@media (hover: hover) {
+  .hint {
+    display: flex;
+  }
+
+  .textAction:hover,
+  .act:hover {
+    text-decoration-color: var(--ink);
+  }
+
+  .fold:hover,
+  .unplacedToggle:hover {
+    color: var(--ink);
+  }
+
+  /* At an end the step is aria-disabled and keeps its resting look. */
+  .nav[aria-disabled='true']:hover {
+    border-color: var(--line-control);
+    background: transparent;
+    color: var(--ink-2);
+  }
+}
+
+@media (width >= 768px) {
+  .review {
+    flex: 1 0 auto;
+  }
+
+  /* As the textarea: at least six lines, growing with the text while the
+     editor panel scrolls. */
+  .sheet {
+    flex: 1 0 auto;
+    min-height: var(--template-body-min-h);
+  }
+}
+
+@media (width < 768px) {
+  .head {
+    gap: 4px 8px;
+  }
+
+  .summary {
+    flex-basis: 100%;
+    order: 1;
+  }
+
+  .tools {
+    flex-wrap: wrap;
+  }
+
+  .sheet {
+    font-size: var(--text-base);
+  }
+}
+
+@media (hover: none), (any-pointer: coarse) {
+  .textAction,
+  .act,
+  .unplacedToggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .act {
+    margin-block: 0;
+  }
+
+  .fold {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    transition: none;
+  }
+}

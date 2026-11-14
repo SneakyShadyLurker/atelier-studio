@@ -4,6 +4,7 @@ import { buildBrainstormSystemPrompt, assembleBrainstormCharacterPrompt, BRAINST
 import { ENHANCE_SYSTEM_PROMPT } from './enhanceSystemPrompt';
 import { DRAFT_TEMPLATE_SYSTEM_PROMPT } from './draftTemplateSystemPrompt';
 import { DRAFT_LIST_SYSTEM_PROMPT } from './draftListSystemPrompt';
+import { REWORK_TEMPLATE_SYSTEM_PROMPT } from './reworkTemplateSystemPrompt';
 import { SKIN_MARKING_BAN, WET_LOOK_BAN } from './skinRenderRules';
 import { imageAuthoringSystemPrompt, isSunburstModel, SUNBURST_ENHANCE_SYSTEM_PROMPT, SUNBURST_PROMPT_RULES } from './gptSystemPrompt';
 import { USER_PROVIDED_AGE_RULE } from './subjectControl';
@@ -20,6 +21,7 @@ describe('Sunburst prompt contract', () => {
       buildAiFillBatchSystemPrompt({ modelId, items: [args] }),
       buildBrainstormSystemPrompt({ modelId, count: 2 }),
       imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, modelId),
+      imageAuthoringSystemPrompt(REWORK_TEMPLATE_SYSTEM_PROMPT, modelId),
       imageAuthoringSystemPrompt(DRAFT_LIST_SYSTEM_PROMPT, modelId),
     ];
     for (const prompt of prompts) {
@@ -51,6 +53,7 @@ describe('Sunburst prompt contract', () => {
     for (const other of ['gpt-6.1-sol', 'gpt-image-2.6-flare', 'gemini-3-pro-image-preview']) {
       expect(isSunburstModel(other)).toBe(false);
       expect(imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, other)).toBe(DRAFT_TEMPLATE_SYSTEM_PROMPT);
+      expect(imageAuthoringSystemPrompt(REWORK_TEMPLATE_SYSTEM_PROMPT, other)).toBe(REWORK_TEMPLATE_SYSTEM_PROMPT);
       expect(buildAiFillSystemPrompt({ modelId: other, slotCount: 1, perSlotWordBudget: 20 })).not.toContain(SUNBURST_PROMPT_RULES);
       expect(buildBrainstormSystemPrompt({ modelId: other, count: 1 })).not.toContain(SUNBURST_PROMPT_RULES);
     }

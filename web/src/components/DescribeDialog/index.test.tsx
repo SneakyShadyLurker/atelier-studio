@@ -13,7 +13,7 @@ afterEach(() => {
   mock.restore();
 });
 
-function renderDialog() {
+function renderDialog(props: { error?: string | null; notice?: string | null } = {}) {
   const onSubmit = mock((_description: string) => undefined);
   const onCancel = mock(() => undefined);
   render(
@@ -25,6 +25,7 @@ function renderDialog() {
       maxLength={500}
       submitLabel="Draft list"
       busy={false}
+      {...props}
       onSubmit={onSubmit}
       onCancel={onCancel}
     />,
@@ -62,5 +63,31 @@ describe('DescribeDialog', () => {
     const icon = submit.querySelector('svg');
     expect(icon).not.toBeNull();
     expect(icon?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  test('a notice is a polite status that describes the field', () => {
+    renderDialog({ notice: 'The model found nothing to change.' });
+    const notice = screen.getByText('The model found nothing to change.');
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(notice.getAttribute('aria-live')).toBe('polite');
+    const field = screen.getByLabelText('Description');
+    expect((field.getAttribute('aria-describedby') ?? '').split(' ')).toContain(notice.id);
+    expect(field.getAttribute('aria-invalid')).toBeNull();
+  });
+
+  test('an error wins over a notice', () => {
+    renderDialog({ error: 'Upstream failed.', notice: 'The model found nothing to change.' });
+    expect(screen.queryByText('The model found nothing to change.')).toBeNull();
+    const error = screen.getByText('Upstream failed.');
+    const field = screen.getByLabelText('Description');
+    expect((field.getAttribute('aria-describedby') ?? '').split(' ')).toContain(error.id);
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+  });
+
+  test('no notice and no error leaves only the hint in aria-describedby', () => {
+    renderDialog();
+    const field = screen.getByLabelText('Description');
+    expect((field.getAttribute('aria-describedby') ?? '').split(' ')).toHaveLength(1);
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });

@@ -164,11 +164,36 @@ open, including its unsaved draft.
 
 **Draft Template** in the template editor asks a text model to write the body.
 On an empty template it asks what to draft, such as the subject, mood and
-style. On a template that already has a body it asks what to change: the text model rewrites the whole
-body, applies your instructions and keeps everything else as written, your
-tokens included. The rewrite replaces the body in the editor, and **Undo** in
-the "Template reworked" message brings the previous body back. Nothing is saved
-until you press **Save template**. The dialog also shows the **Model** and
+style, and the draft fills the body. On a template that already has a body it
+asks what to change. The text model proposes edits to the passages your
+instructions touch, and everything else, your tokens included, stays as
+written.
+
+The proposed edits open as a review in place of the body. Text the model
+added is underlined on a tinted background; text it would remove is struck
+through. Each edit carries a small number that matches a note row below it,
+with the reason for the edit and a **Reject** button. A rewrite of a long
+passage shows the passage under **Removed** and the new text under
+**Proposed**. Long stretches the model left alone fold behind **Show N
+unchanged words**. Every edit starts accepted: **Reject** turns an edit off
+and **Accept** turns it back on, and nothing moves on the page when you
+decide. **Reject all** and **Accept all** above the text decide every edit at
+once. **Previous** and **Next** step through the edits, with a count such as
+"2 / 4" between them. On a keyboard, **J** and **K** move to the next and
+previous edit, **A** accepts and **R** rejects the current edit and moves on,
+and **Cmd+Enter** on macOS / **Ctrl+Enter** elsewhere applies.
+
+**Apply N changes** writes the accepted edits into the body; **Discard** leaves
+the body as it was. Both show a message with **Undo**, which brings the review
+back with your decisions, as long as you have not edited the body since.
+**Rework again** opens the dialog with your last instructions and replaces the
+review with the new answer. When the model suggested an edit it could not line
+up with the template text, the review lists it under "1 suggestion could not
+be placed" with the reason. If the model finds nothing to change, the dialog
+stays open with its note and your instructions. Applying does not save the
+template: nothing is saved until you press **Save template**.
+
+The dialog also shows the **Model** and
 **Reasoning** level that write the draft. They are your **Template drafts**
 setting in **Settings**, so a change made in the dialog stays for later drafts.
 If an admin locked the prompt writer for the image model selected in the

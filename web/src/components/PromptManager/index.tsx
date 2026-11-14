@@ -323,6 +323,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
       deleteTemplate.mutateAsync(target.item.id)
         .then(() => {
           draftStore?.deleteTemplate(target.item.id);
+          draftStore?.deleteTemplateReview(target.item.id);
           addToast('Template deleted');
         })
         .catch((error: unknown) => { addToast(describeError(error, "Couldn't delete the template."), 'error'); });

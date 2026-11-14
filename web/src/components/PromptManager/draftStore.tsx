@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { registerUnsavedWork } from '../../lib/preloadRecovery';
+import type { TemplateReview } from './templateReview';
 
 export interface TemplateDraft {
   readonly name: string;
@@ -123,6 +124,10 @@ function sameDraft<T>(a: T | undefined, b: T): boolean {
 /** In-memory drafts scoped to one mounted App/session. Never persisted. */
 export class PromptDraftStore {
   private readonly templates = new Map<string, TemplateDraft>();
+  // Open rework reviews, under the template's draft key. Kept apart from the
+  // template drafts: the editor drops its draft whenever the body is clean,
+  // which a review leaves it (spec R8.3).
+  private readonly templateReviews = new Map<string, TemplateReview>();
   private readonly lists = new Map<string, ListDraft>();
   private readonly dimensions = new Map<string, DimensionDraft>();
   private readonly dimensionEditors = new Map<string, (settlement: DimensionSettlement) => void>();
@@ -167,6 +172,7 @@ export class PromptDraftStore {
   // Editors keep their entries in step with their dirty state, and an entry
   // outlives its editor, so this covers drafts retained off-view as well.
   hasDrafts = (): boolean => this.templates.size > 0
+    || this.templateReviews.size > 0
     || this.lists.size > 0
     || this.dimensions.size > 0
     || this.selection.newTemplateName !== null;
@@ -177,6 +183,9 @@ export class PromptDraftStore {
   clearTemplateIfUnchanged(id: string, submitted: TemplateDraft): void {
     if (sameDraft(this.templates.get(id), submitted)) this.deleteTemplate(id);
   }
+  getTemplateReview(id: string): TemplateReview | undefined { return this.templateReviews.get(id); }
+  setTemplateReview(id: string, review: TemplateReview): void { this.templateReviews.set(id, review); }
+  deleteTemplateReview(id: string): void { this.templateReviews.delete(id); }
   moveTemplate(from: string, to: string): void {
     const draft = this.templates.get(from);
     if (draft) this.templates.set(to, draft);

@@ -328,6 +328,14 @@
   line-height: 1.45;
 }
 
+/* The neutral sibling of .inlineError: an answer that changed nothing. */
+.inlineNotice {
+  margin: -8px 0 14px;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
 .actions {
   display: flex;
   align-items: center;

@@ -161,8 +161,41 @@ export const DraftVariableListResponseSchema = z.union([
 ]);
 export type DraftVariableListResponseWire = JsonFields<z.infer<typeof DraftVariableListResponseSchema>>;
 
+const templateOffset = z.int().check(z.nonnegative());
+
+// One placed rework change: `[start, end)` are UTF-16 offsets into the body
+// the request carried (the base); `id` is the change's index by `start`.
+export const TemplateChangeSchema = z.object({
+  id: templateOffset,
+  start: templateOffset,
+  end: templateOffset,
+  replace: z.string(),
+  why: z.string(),
+});
+export type TemplateChangeWire = JsonFields<z.infer<typeof TemplateChangeSchema>>;
+
+export const UnplacedReasonSchema = z.enum(['missing', 'ambiguous', 'overlap', 'splits_token', 'too_long']);
+export type UnplacedReasonWire = z.infer<typeof UnplacedReasonSchema>;
+
+// A rework operation the server could not place; kept for display only.
+export const UnplacedTemplateChangeSchema = z.object({
+  find: z.string(),
+  replace: z.string(),
+  why: z.string(),
+  reason: UnplacedReasonSchema,
+});
+export type UnplacedTemplateChangeWire = JsonFields<z.infer<typeof UnplacedTemplateChangeSchema>>;
+
 export const DraftTemplateResponseSchema = z.union([
   z.object({ kind: z.literal('body'), body: z.string(), warnings: z.readonly(z.array(z.string())) }),
   z.object({ kind: z.literal('clarify'), question: z.string() }),
+  z.object({
+    kind: z.literal('changes'),
+    baseLength: templateOffset,
+    changes: z.readonly(z.array(TemplateChangeSchema)),
+    unplaced: z.readonly(z.array(UnplacedTemplateChangeSchema)),
+    summary: z.nullable(z.string()),
+    warnings: z.readonly(z.array(z.string())),
+  }),
 ]);
 export type DraftTemplateResponseWire = JsonFields<z.infer<typeof DraftTemplateResponseSchema>>;

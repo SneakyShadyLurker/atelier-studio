@@ -6,7 +6,8 @@
  * inerting without booting the API. Dev-server only — Vite builds `index.html`
  * alone (see build.rollupOptions.input), so nothing here reaches dist.
  */
-import type { Batch, GptModerationNotice, Model } from '@atelier/shared';
+import type { Batch, DraftTemplateRequest, DraftTemplateResponse, GptModerationNotice, Model, TemplateChange, TextModelsResponse } from '@atelier/shared';
+import { TEXT_TASKS } from '@atelier/shared';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -750,6 +751,102 @@ function LibraryCase() {
   );
 }
 
+/* The Prompt Library with a filled template to rework (template rework
+   review, e2e/template-rework-review.spec.ts). The body is long enough to
+   fold and carries every token kind the review keeps whole; the draft server
+   answers a rework from the request's own `existingBody`, so its offsets are
+   always right. `answer=none` answers with no changes (R7.1). */
+const REWORK_BODY = [
+  '{{ai-fill: Write two plain sentences about the quiet weight of an early winter morning, the hour when the street is still wet and the bakery windows are the only warm light for a block.}}',
+  ' A {{var::mood}} portrait of a woman waiting on a tram platform in {{var::place}} while the city behind her is still half asleep, shutters down, a single cyclist crossing the far end of the street.',
+  ' The light is soft and grey, falling evenly across her plain wool coat and the paper cup she holds in both hands.',
+  ' She leans on a cold railing and waits.',
+  '\nShot on {{random::35mm::50mm}} film with a shallow depth of field.',
+  ' The overall feeling should be calm and slightly nostalgic, like a photograph found years later in a drawer, with muted colours, gentle grain and nothing in the frame that pulls attention away from her face or from the quiet stillness of the moment that surrounds her.',
+].join('');
+
+const REWORK_LIBRARY = {
+  ...PROMPT_LIBRARY,
+  templates: [{ id: 'tpl-rework', name: 'Tram platform portrait', body: REWORK_BODY, sortOrder: 0, createdAt: 1, updatedAt: 1 }],
+  variableLists: [
+    ...PROMPT_LIBRARY.variableLists,
+    {
+      id: 'list-outfit',
+      name: 'outfit',
+      sortOrder: 2,
+      createdAt: 1,
+      updatedAt: 1,
+      options: ['a camel overcoat', 'a black parka'].map((value, i) => ({
+        id: `outfit-${i}`, listId: 'list-outfit', value, tagIds: [], sortOrder: i, weight: 1,
+      })),
+    },
+  ],
+};
+
+const REWORK_TEXT_MODELS: TextModelsResponse = {
+  models: [{ id: 'kimi', displayName: 'Kimi K3', providerName: 'CLIProxyAPI', vision: true, reasoningLevels: ['low', 'high'], status: 'available' }],
+  tasks: TEXT_TASKS.map((task) => ({ task, effectiveModelId: 'kimi' })),
+  defaults: { default: 'kimi', byTask: {} },
+  writers: {},
+  lockedWriters: [],
+};
+
+/** The rework's operations, each found in the base by `indexOf`: `within`
+ *  (default `find`) holds `find` and narrows the search; an insertion,
+ *  `find: ''`, lands at the end of `within`. */
+const REWORK_EDITS: readonly { within?: string; find: string; replace: string; why: string }[] = [
+  { within: 'The light is soft', find: 'soft', replace: 'low', why: 'Moodier light, as you asked.' },
+  { find: 'her plain wool coat', replace: '{{var::outfit}}', why: 'Moves the outfit into a variable list.' },
+  { within: 'and waits', find: '', replace: ' for the first tram of the day', why: 'Gives her a reason to wait.' },
+  {
+    find: 'The overall feeling should be calm and slightly nostalgic, like a photograph found years later in a drawer, with muted colours, gentle grain and nothing in the frame that pulls attention away from her face or from the quiet stillness of the moment that surrounds her.',
+    replace: 'Let the frame stay hard and honest: tungsten spill from a kiosk, wet asphalt throwing back streaks of amber, breath hanging in cold air, commuters blurred into motion while she alone stays sharp, tired and unbothered.',
+    why: 'A darker close that matches the new light.',
+  },
+];
+
+function reworkAnswer(base: string, none: boolean): DraftTemplateResponse {
+  const changes: TemplateChange[] = [];
+  if (!none) {
+    for (const edit of REWORK_EDITS) {
+      const anchor = edit.within ?? edit.find;
+      const within = base.indexOf(anchor);
+      if (within < 0) continue;
+      const start = within + (edit.find === '' ? anchor.length : anchor.indexOf(edit.find));
+      changes.push({ id: changes.length, start, end: start + edit.find.length, replace: edit.replace, why: edit.why });
+    }
+  }
+  return {
+    kind: 'changes',
+    baseLength: base.length,
+    changes,
+    unplaced: none ? [] : [{ find: 'a red umbrella', replace: 'a black umbrella', why: 'Keeps the palette dark.', reason: 'missing' }],
+    summary: none ? 'The template already reads the way you asked.' : 'Made the light moodier and moved the outfit into a list.',
+    warnings: [],
+  };
+}
+
+function installReworkServer(): void {
+  const none = new URLSearchParams(window.location.search).get('answer') === 'none';
+  const original = window.fetch.bind(window);
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const serve = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.href);
+    const method = (init?.method ?? 'GET').toUpperCase();
+    if (url.pathname === '/api/text-models' && method === 'GET') return json(REWORK_TEXT_MODELS);
+    // Not a text-provider admin: the gate reads a 404 as "no".
+    if (url.pathname === '/api/text-providers') return json({ error: 'Not found' }, 404);
+    if (url.pathname === '/api/prompts' && method === 'GET') return json(REWORK_LIBRARY);
+    if (url.pathname === '/api/prompts/templates/draft' && method === 'POST') {
+      const request = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as DraftTemplateRequest;
+      const frame = `event: done\ndata: ${JSON.stringify(reworkAnswer(request.existingBody, none))}\n\n`;
+      return new Response(frame, { headers: { 'Content-Type': 'text/event-stream' } });
+    }
+    return original(input, init);
+  };
+  window.fetch = Object.assign(serve, { preconnect: original.preconnect });
+}
+
 /* The character-card dialog with its card-kind picker; `#card-submitted`
    echoes the last submit as `kind:direction`. */
 function CharacterCardCase() {
@@ -881,6 +978,7 @@ const CASES: Record<string, () => React.JSX.Element> = {
   'feed-history': FeedHistoryCase,
   picker: PromptPickerCase,
   library: LibraryCase,
+  'library-rework': LibraryCase,
   edit: EditActionsCase,
   'character-card': CharacterCardCase,
   'frontend-i2v': FrontendI2VCase,
@@ -889,7 +987,7 @@ const CASES: Record<string, () => React.JSX.Element> = {
   'infinite-status': InfiniteStatusCase,
 };
 const Case = (kase === null ? undefined : CASES[kase]) ?? DialogCase;
-const NEEDS_QUERY_CLIENT = new Set(['feed', 'feed-lightbox', 'feed-history', 'tile-actions', 'plate', 'phone-feed', 'picker', 'library', 'edit', 'frontend-i2v', 'frontend-save-template', 'frontend-history-refresh']);
+const NEEDS_QUERY_CLIENT = new Set(['feed', 'feed-lightbox', 'feed-history', 'tile-actions', 'plate', 'phone-feed', 'picker', 'library', 'library-rework', 'edit', 'frontend-i2v', 'frontend-save-template', 'frontend-history-refresh']);
 if (root) {
   const queryClient = new QueryClient();
   if (kase === 'frontend-i2v' || kase === 'frontend-save-template' || kase === 'frontend-history-refresh') useAtelierStore.setState(initialAtelierState, true);
@@ -908,6 +1006,10 @@ if (root) {
   // The picker reads its library through TanStack Query; seeding the cache is
   // how the harness stays API-free.
   if (kase === 'picker' || kase === 'library') queryClient.setQueryData(promptKeys.library(), PROMPT_LIBRARY);
+  if (kase === 'library-rework') {
+    installReworkServer();
+    queryClient.setQueryData(promptKeys.library(), REWORK_LIBRARY);
+  }
   const tree = kase !== null && NEEDS_QUERY_CLIENT.has(kase)
     ? <QueryClientProvider client={queryClient}><Case /></QueryClientProvider>
     : <Case />;

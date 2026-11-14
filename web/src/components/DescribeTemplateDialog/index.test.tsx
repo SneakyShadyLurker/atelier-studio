@@ -121,7 +121,7 @@ describe('DescribeTemplateDialog rework mode and model fields', () => {
     const onSubmit = mock((_: string) => undefined);
     render(<DescribeTemplateDialog mode="rework" question={null} onSubmit={onSubmit} onCancel={noop} busy={false} />);
     expect(screen.getByRole('heading', { name: 'Rework the template' })).toBeTruthy();
-    expect(screen.getByText("Say what should change. The AI rewrites the body and keeps everything you don't mention, your tokens included.")).toBeTruthy();
+    expect(screen.getByText("Say what should change. You review each edit before anything is applied, and everything you don't mention stays as it is.")).toBeTruthy();
     const area = screen.getByLabelText('Change instructions');
     expect(area.getAttribute('placeholder')).toBe('e.g. make the lighting moodier and move the outfit into a variable');
     const primary = screen.getByRole('button', { name: 'Rework template' });
@@ -220,5 +220,45 @@ describe('DescribeTemplateDialog rework mode and model fields', () => {
     expect(screen.getByText('Prompts for this image model are always written by GPT 6.')).toBeTruthy();
     expect(screen.queryByLabelText('Model')).toBeNull();
     expect(screen.queryByLabelText('Reasoning')).toBeNull();
+  });
+});
+
+describe('DescribeTemplateDialog initial text and notice', () => {
+  test('rework mode starts with the initial text', () => {
+    render(
+      <DescribeTemplateDialog
+        mode="rework" question={null} initialText="moodier lighting"
+        onSubmit={noop} onCancel={noop} busy={false}
+      />,
+    );
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('moodier lighting');
+  });
+
+  test('seed and clarify modes ignore the initial text', () => {
+    render(
+      <DescribeTemplateDialog
+        mode="seed" question={null} initialText="moodier lighting"
+        onSubmit={noop} onCancel={noop} busy={false}
+      />,
+    );
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('');
+    cleanup();
+    render(
+      <DescribeTemplateDialog
+        mode="clarify" question="Q" initialText="moodier lighting"
+        onSubmit={noop} onCancel={noop} busy={false}
+      />,
+    );
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('');
+  });
+
+  test.each(['seed', 'rework', 'clarify'] as const)('%s mode shows the notice', (mode) => {
+    render(
+      <DescribeTemplateDialog
+        mode={mode} question="Q" notice="The model found nothing to change."
+        onSubmit={noop} onCancel={noop} busy={false}
+      />,
+    );
+    expect(screen.getByRole('status').textContent).toBe('The model found nothing to change.');
   });
 });

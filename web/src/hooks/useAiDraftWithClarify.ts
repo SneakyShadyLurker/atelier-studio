@@ -35,8 +35,10 @@ interface UseAiDraftWithClarifyArgs<TBase, TResolved extends { kind: string }> {
   nonEmptyBase?: 'draft' | 'rework';
   /** Perform the request. Resolves to the final payload OR a clarify follow-up. */
   run: (base: TBase, description: string | undefined, signal: AbortSignal) => Promise<TResolved | ClarifyResponse>;
-  /** Apply a resolved (non-clarify) payload. */
-  onResolve: (result: TResolved) => void;
+  /** Apply a resolved (non-clarify) payload. Returning `{ notice }` means the
+   *  answer changed nothing: an open dialog stays open and shows the notice
+   *  beside its text; with no dialog the notice is a soft toast. */
+  onResolve: (result: TResolved, request: { base: TBase; description: string | undefined }) => { notice: string } | undefined;
   /** Error copy when the request fails for a non-abort reason. */
   errorFallback: string;
 }
@@ -49,15 +51,23 @@ export interface UseAiDraftWithClarifyResult {
   dialogMode: AiDraftDialogMode;
   clarifyQuestion: string | null;
   error: string | null;
+  /** A neutral note from the last answer, shown in the still-open dialog. */
+  notice: string | null;
 }
 
 interface FireVars<TBase> {
   base: TBase;
   description: string | undefined;
-  /** A seed/rework/clarify dialog is mounted for this request and shows `error`
-   *  inline; the failure then needs no second, duplicate toast. */
-  inlineOwner: boolean;
+  /** The seed/rework/clarify dialog mounted for this request, if any. It shows
+   *  `error` and `notice` inline; the failure then needs no duplicate toast. */
+  dialog: AiDraftDialogMode;
 }
+
+const PROMPT_STATUS: Record<Exclude<AiDraftDialogMode, null>, AiDraftStatus> = {
+  seed: 'seed-prompt',
+  rework: 'rework-prompt',
+  clarify: 'clarifying',
+};
 
 export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>(
   args: UseAiDraftWithClarifyArgs<TBase, TResolved>,
@@ -69,6 +79,7 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
   const [dialogMode, setDialogMode] = useState<AiDraftDialogMode>(null);
   const [clarifyQuestion, setClarifyQuestion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   // The base captured at draft() time, reused on the clarify answer. Wrapped so a
   // legitimately-falsy base ([], '') is distinguishable from "not captured yet".
   const [base, setBase] = useState<{ value: TBase } | null>(null);
@@ -79,7 +90,7 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
       const response = await run(vars.base, vars.description, signal);
       return { response, signal };
     },
-    onSuccess: ({ response, signal }) => {
+    onSuccess: ({ response, signal }, vars) => {
       // cancel-during-resolved race: the request can resolve between the user
       // cancelling (abort) and this callback dispatching. Drop the stale result.
       if (signal.aborted) return;
@@ -89,11 +100,18 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
         setStatus('clarifying');
         return;
       }
+      const outcome = onResolve(response, { base: vars.base, description: vars.description });
+      setError(null);
+      if (outcome !== undefined && vars.dialog !== null) {
+        // Nothing to apply: the dialog stays as it was, with the note beside it.
+        setNotice(outcome.notice);
+        setStatus(PROMPT_STATUS[vars.dialog]);
+        return;
+      }
+      if (outcome !== undefined) addToast(outcome.notice, 'soft');
       setDialogMode(null);
       setClarifyQuestion(null);
-      setError(null);
       setStatus('done');
-      onResolve(response);
     },
     onError: (err, vars) => {
       if (isAbortError(err)) {
@@ -105,7 +123,7 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
       setStatus('error');
       // Shown once: the open dialog owns the error inline; an immediate draft
       // has no dialog, so the toast is its only surface.
-      if (!vars.inlineOwner) addToast(message, 'error');
+      if (vars.dialog === null) addToast(message, 'error');
     },
   });
 
@@ -118,8 +136,9 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
     // dialogMode is already null (its re-entrancy guard), and onSuccess clears
     // it on resolve — so no dialog is shown for a non-seed initial draft.
     setError(null);
+    setNotice(null);
     setStatus('drafting');
-    mutate({ base: value, description, inlineOwner: dialogMode !== null });
+    mutate({ base: value, description, dialog: dialogMode });
   };
 
   const draft = () => {
@@ -130,6 +149,7 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
     setBase({ value: captured });
     setClarifyQuestion(null);
     setError(null);
+    setNotice(null);
     if (isEmptyBase(captured)) {
       setDialogMode('seed');
       setStatus('seed-prompt');
@@ -155,8 +175,9 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
     setDialogMode(null);
     setClarifyQuestion(null);
     setError(null);
+    setNotice(null);
     setStatus('idle');
   };
 
-  return { draft, submitDescription, cancelDialog, status, dialogMode, clarifyQuestion, error };
+  return { draft, submitDescription, cancelDialog, status, dialogMode, clarifyQuestion, error, notice };
 }

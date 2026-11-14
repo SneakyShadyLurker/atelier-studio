@@ -3,6 +3,7 @@ import { cleanup, render } from '@testing-library/react';
 import { useEffect } from 'react';
 import { hasUnsavedWork } from '../../lib/preloadRecovery';
 import { initialAtelierState, useAtelierStore } from '../../store/atelier';
+import type { TemplateReview } from './templateReview';
 import {
   PromptDraftProvider,
   PromptDraftStore,
@@ -135,6 +136,29 @@ describe('PromptDraftStore unsaved work', () => {
     store.setSelection({ templateId: null, listId: null, dimensionId: null, newTemplateName: 'Unsaved' });
     expect(store.hasDrafts()).toBe(true);
     store.setSelection({ templateId: null, listId: null, dimensionId: null, newTemplateName: null });
+    expect(store.hasDrafts()).toBe(false);
+  });
+
+  test('a stored template review counts as unsaved work and outlives the template draft', () => {
+    const store = new PromptDraftStore();
+    const review: TemplateReview = {
+      base: 'A red coat.',
+      changes: [{ id: 0, start: 2, end: 5, replace: 'blue', why: '' }],
+      unplaced: [],
+      summary: null,
+      instructions: 'bluer',
+      rejected: [0],
+    };
+    expect(store.getTemplateReview('tpl')).toBeUndefined();
+    store.setTemplateReview('tpl', review);
+    expect(store.getTemplateReview('tpl') === review).toBe(true);
+    expect(store.hasDrafts()).toBe(true);
+    store.setTemplate('tpl', { name: 'Coat', body: 'A red coat.' });
+    store.deleteTemplate('tpl');
+    expect(store.getTemplateReview('tpl') === review).toBe(true);
+    expect(store.hasDrafts()).toBe(true);
+    store.deleteTemplateReview('tpl');
+    expect(store.getTemplateReview('tpl')).toBeUndefined();
     expect(store.hasDrafts()).toBe(false);
   });
 

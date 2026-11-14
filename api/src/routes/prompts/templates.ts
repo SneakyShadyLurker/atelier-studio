@@ -1,3 +1,4 @@
+import type { UnplacedReason } from '@atelier/shared/template-rework';
 import { Hono } from 'hono';
 import type { AppEnv } from '../../server-env';
 import { ensureUser } from '../../db/users';
@@ -151,6 +152,7 @@ export const templatesRoutes = new Hono<AppEnv>()
               existingBody,
               ...(description !== undefined ? { description } : {}),
               library: overview,
+              maxBodyBytes: c.var.config.MAX_TEMPLATE_BODY_BYTES,
               ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}),
               ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }),
             },
@@ -184,6 +186,22 @@ export const templatesRoutes = new Hono<AppEnv>()
           );
           send('error', { message: SAFE });
           return;
+        }
+
+        if (result.payload.kind === 'changes') {
+          const unplacedReasons: Partial<Record<UnplacedReason, number>> = {};
+          for (const { reason } of result.payload.unplaced) unplacedReasons[reason] = (unplacedReasons[reason] ?? 0) + 1;
+          logger.info(
+            {
+              event: 'draft_template_rework',
+              textModelId: resolved.model.id,
+              userId,
+              placed: result.payload.changes.length,
+              unplaced: result.payload.unplaced.length,
+              unplacedReasons,
+            },
+            'draft template rework placed',
+          );
         }
 
         send('done', result.payload);

@@ -17,6 +17,8 @@ export interface DescribeDialogProps {
   busyLabel?: string;
   busy: boolean;
   error?: string | null;
+  /** A neutral note about the last answer (it changed nothing); `error` wins. */
+  notice?: string | null;
   /** The field may be left blank; submitting then passes ''. */
   optional?: boolean;
   /** Text the field starts with (on mount only). */
@@ -41,6 +43,7 @@ export function DescribeDialog({
   busyLabel = 'Generating…',
   busy,
   error = null,
+  notice = null,
   optional = false,
   initialText = '',
   children,
@@ -53,6 +56,7 @@ export function DescribeDialog({
   const bodyId = useId();
   const labelId = useId();
   const errorId = useId();
+  const noticeId = useId();
   const hintId = useId();
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const [text, setText] = useState(initialText);
@@ -67,6 +71,8 @@ export function DescribeDialog({
     setPrevBody(body);
     setText('');
   }
+  // One inline message at a time: a failure outranks the neutral note.
+  const shownNotice = error ? null : notice;
   const canSubmit = (optional || text.trim().length > 0) && !busy;
 
   // Focus the field on mount and whenever a new question swaps in.
@@ -100,7 +106,7 @@ export function DescribeDialog({
             id={`${labelId}-area`}
             className={styles.fieldTextarea}
             aria-invalid={error ? true : undefined}
-            aria-describedby={error ? `${hintId} ${errorId}` : hintId}
+            aria-describedby={error ? `${hintId} ${errorId}` : shownNotice ? `${hintId} ${noticeId}` : hintId}
             autoComplete="off"
             spellCheck={false}
             placeholder={placeholder}
@@ -120,6 +126,9 @@ export function DescribeDialog({
         {error && (
           // Draft generation can be retried from the same field, so keep it polite.
           <div id={errorId} role="status" aria-live="polite" className={styles.inlineError}>{error}</div>
+        )}
+        {shownNotice && (
+          <div id={noticeId} role="status" aria-live="polite" className={styles.inlineNotice}>{shownNotice}</div>
         )}
 
         <div className={styles.actions}>

@@ -29,7 +29,9 @@ import { INFER_DIMENSIONS_SYSTEM_PROMPT } from '../../prompts/inferDimensionsSys
 import { parseInferPayload, RESCUE_RESPONSE_FORMAT } from '../../prompts/inferParse';
 import type { RawInferOp } from '../../prompts/inferTypes';
 import { isLikelyContentFilterFailure } from '../../prompts/modelOutput';
+import { TEMPLATE_BODY_HARD_MAX } from '../../prompts/limits';
 import { RESCUE_DIMENSION_SYSTEM_PROMPT } from '../../prompts/rescueSystemPrompt';
+import { REWORK_TEMPLATE_SYSTEM_PROMPT } from '../../prompts/reworkTemplateSystemPrompt';
 import { moderateGptInput } from '../../routing/gptModeration';
 import { errorToRawString as detailOf, tryParseJson } from '../_http';
 import { frameDataText } from '../_sse';
@@ -40,6 +42,8 @@ import {
   draftTemplateBrief,
   draftTemplateResultFromContent,
   parseDraftPayload,
+  REWORK_TEMPLATE_RESPONSE_FORMAT,
+  reworkTemplateResultFromContent,
   safeTextDetail,
   textFailureFromError,
   unparseableFailure,
@@ -1114,15 +1118,19 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       signal: AbortSignal,
     ): Promise<DraftTemplateResult> => {
       const knownNames = new Set(input.library.lists.map((l) => l.name));
+      // A filled body is a rework: find/replace changes placed against it.
+      const rework = input.existingBody.trim() !== '';
       try {
         const text = await callWithPolicy(call, draftListPolicy, signal, {
           maxOutputTokens: draftTemplateMaxOutputTokens(input.existingBody, effectiveEffort(model, input.reasoningEffort)),
-          systemPrompt: imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, input.modelId),
+          systemPrompt: imageAuthoringSystemPrompt(rework ? REWORK_TEMPLATE_SYSTEM_PROMPT : DRAFT_TEMPLATE_SYSTEM_PROMPT, input.modelId),
           user: draftTemplateBrief(input),
-          responseFormat: DRAFT_TEMPLATE_RESPONSE_FORMAT,
+          responseFormat: rework ? REWORK_TEMPLATE_RESPONSE_FORMAT : DRAFT_TEMPLATE_RESPONSE_FORMAT,
           ...withUserEffort(input.reasoningEffort),
         }, draftTemplateMaxResponseBytes(responseCap(init.maxResponseBytes, input.reasoningEffort), input.existingBody));
-        return draftTemplateResultFromContent(text, knownNames, input.existingBody);
+        return rework
+          ? reworkTemplateResultFromContent(text, knownNames, input.existingBody, input.maxBodyBytes ?? TEMPLATE_BODY_HARD_MAX)
+          : draftTemplateResultFromContent(text, knownNames, input.existingBody);
       } catch (err) {
         if (signal.aborted) throw err;
         if (isAbortError(err)) throw err;

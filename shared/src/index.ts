@@ -25,7 +25,7 @@ import type {
   BundleCommonWire, CoherenceWarningWire, CoverageWarningWire, DiagnoseSelectionResponseWire, DimensionBundleWire,
   DimensionProposalWire, DraftTemplateResponseWire, DraftVariableListResponseWire, InferDimensionsResponseWire,
   InferPhaseEventWire, InferProgressEventWire, RejectedOpWire, RescueBundleWire, RescueDonePayloadWire,
-  RescueFailedPayloadWire, TemplateConflictWire,
+  RescueFailedPayloadWire, TemplateChangeWire, TemplateConflictWire, UnplacedTemplateChangeWire,
 } from './promptToolSchemas';
 export { GPT_MODERATION_REASONS, GptModerationNoticeSchema, GptModerationCategoriesSchema } from './moderation';
 export type { GptModerationNotice, GptModerationReason, GptModerationCategory } from './moderation';
@@ -1143,17 +1143,27 @@ export interface DraftTemplateRequest {
   readonly modelId?: string;
   /** Template name. */
   name: string;
-  /** body.trim() — empty string when raw body is empty or whitespace-only. */
+  /**
+   * The editor body exactly as it stands, untrimmed, so rework offsets point
+   * into it; empty string when the body is empty or whitespace-only.
+   */
   existingBody: string;
   /**
    * Empty `existingBody`: what to draft (seed prompt and clarify answers).
    * Non-empty `existingBody`: the change instructions for the rework, required;
-   * the answer is then the whole revised body, not a continuation.
+   * the answer is then placed changes against `existingBody`, not a body.
    */
   description?: string;
 }
 
 export type DraftTemplateResponse = DraftTemplateResponseWire;
+
+/** A rework's placed changes (`existingBody` non-blank), reviewed before anything is written. */
+export type DraftTemplateChanges = Extract<DraftTemplateResponse, { kind: 'changes' }>;
+
+export type TemplateChange = TemplateChangeWire;
+
+export type UnplacedTemplateChange = UnplacedTemplateChangeWire;
 
 export type BundleCommon = BundleCommonWire;
 
@@ -1271,6 +1281,8 @@ type _NoUserIdOnDraftListRequest = _Assert<_NoUserIdOn<DraftVariableListRequest>
 type _NoUserIdOnDraftVariableListResponse = _Assert<_NoUserIdOn<DraftVariableListResponse>>;
 type _NoUserIdOnDraftTemplateRequest = _Assert<_NoUserIdOn<DraftTemplateRequest>>;
 type _NoUserIdOnDraftTemplateResponse = _Assert<_NoUserIdOn<DraftTemplateResponse>>;
+type _NoUserIdOnTemplateChange = _Assert<_NoUserIdOn<TemplateChange>>;
+type _NoUserIdOnUnplacedTemplateChange = _Assert<_NoUserIdOn<UnplacedTemplateChange>>;
 type _NoUserIdOnAvailability = _Assert<_NoUserIdOn<ModelAvailability>>;
 type _NoUserIdOnPromptTemplate = _Assert<_NoUserIdOn<PromptTemplate>>;
 type _NoUserIdOnVariableList = _Assert<_NoUserIdOn<VariableList>>;
@@ -1416,6 +1428,11 @@ export type _NoUserIdInWire = [
     _NoUserIdOnCancelStoryResponse,
     _NoUserIdOnSessionResponse,
     _NoUserIdOnHandoffFrameResponse,
+  ];
+  // Nested items of the rework `changes` payload; `_NoUserIdOn` is top-level only.
+  readonly __templateReworkTraps: [
+    _NoUserIdOnTemplateChange,
+    _NoUserIdOnUnplacedTemplateChange,
   ];
 };
 

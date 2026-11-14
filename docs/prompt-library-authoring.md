@@ -271,6 +271,31 @@ A group template has to keep the women **individually distinct** and make the fr
 
 ---
 
+## Art-style (non-photographic) templates
+
+A template that renders as a painting, a drawing, a print or an animation frame draws its medium from one art-style list. The medium is an axis of its own; it is not a variant of the capture-medium axis, which belongs to photographic templates only.
+
+**The art-style list**
+
+- **One value is one medium plus two or three rendering facts**, written as a noun phrase that opens with the medium word: `an ukiyo-e woodblock print, firm black keyline, flat colour blocks and softly graded tone`. Keep values between 8 and 20 words. A finished style paragraph of 40 words or more is a finished picture, breaks the atom rule and spends a fifth of Krea's word budget before the subject is named.
+- **The leading medium word is the list's only grouping.** The picker's option dropdown is a flat list with substring search, so a value that opens with "oil", "ink", "print" or "anime" is found by typing that word. Keep the opening word consistent within a family.
+- **A value names a technique, never a maker.** No artist, studio, production or franchise names: a movement or process name ("Baroque", "linocut", "cel anime") describes the look itself, while a proper name only works where a given model happens to know it, so the same list would render differently on every lane.
+- **No decade numbers and no shot sizes.** The era slot owns the period of what is depicted, and a decade inside a style value contradicts it. "Portrait", "close-up" and "cover" crop or re-lay the frame, and "poster" invites lettering.
+- **Media built from fine repeating marks go on the weight-0 shelf.** Crosshatching, stippling, engraving, halftone, screentone, pixel grids, mosaic and woven textures are the same VAE trap as lace and knit (see Krea 2 above). At weight 0 they stay pinnable and never roll automatically.
+- **When importing an outside vocabulary, rewrite each row to this shape.** Use the source as a category map, drop its names and quality words, and write the rendering facts in your own words.
+- **Tag the list on a medium dimension only when a second list needs it.** A dimension carried by one list is inert. Add it when a styled template also draws a list that holds photography words.
+
+**The template body**
+
+- **Fork a photographic body; do not retrofit it.** Capture vocabulary sits in more places than the opening: the realism stem before the fill, the capture ladder, the exposure and framing blocks, "render her photorealistically", the closing line and any realism suffix after the fill. Static text outside the fill lands verbatim in the image prompt, so a leftover stem or suffix pulls every roll back toward a photograph.
+- **Give the medium its own block inside the fill**, in this order: open the prompt by naming the medium, then carry it through edges, surfaces, modelling and colour as visible facts of that medium, never as a quality label. Forbid photographic words there (negation is safe inside a fill instruction) and say that the medium is the image itself, edge to edge, so the writer does not describe an artwork hanging in a room.
+- **The medium decides rendering, never content.** State that the subject's age, proportions and anatomy stay as conceived, and are not simplified away or made childlike by the style. A list that feeds templates with adult subjects carries no style whose convention is childlike proportions (super-deformed, toy, doll or children's-book looks).
+- **Separate era from medium in the prose.** The era belongs to what is shown (clothes, objects, architecture) and the medium to how the image is made; say so, or the writer reads a period style as a period setting.
+- **Light is still named by its emitter**, and the block states how the medium renders it: graded tone, flat shapes of colour, line alone or bare paper. A monochrome medium describes everything by tone.
+- **Pose lists and action lists are alternatives.** A gaze list and a hand-pose list suit a posed picture; an action list such as `situation` already decides the hands and the eyeline. Draw them in separate `{{random}}` branches, never together: two competing actions is the standard mushy-output failure. Hand-pose values stay prop-free and place-free, and a template with an exposure rule needs every value to keep the arms clear of what it bares.
+
+---
+
 ## Authoring workflow
 
 ### 1. Decide the template type and scope
@@ -347,11 +372,13 @@ HTTP and offline diagnosis divide the remaining allowance equally among template
 
 Two-pass AI inference may recover one transient or malformed-output taxonomy result. Both provider calls share a single `INFER_TAXONOMY_TIMEOUT_MS` deadline plus the original request signal; timeout, disconnect, quota, permanent failure or moderation prevents further recovery. An explicit success racing only the local taxonomy deadline is retained; a parent disconnect or total-budget abort remains authoritative. Operation validation strips extra object fields and converts digit-string indices to nonnegative safe integers. A genuinely invalid operation rejects the complete proposal, preserving dependencies between operations instead of silently dropping suggestions.
 
-Beyond satisfiability, the CLI prints two advisory warning sections; keep both at **0 warnings**: `TAG HYGIENE` (sparse or non-universal tags on siloing dimensions) and `FILL BOUNDARIES` (tagged-dimension pairings that straddle an `{{ai-fill}}` context split). The HTTP equivalent is `POST /api/prompts/library-diagnosis`.
+Beyond satisfiability, the CLI prints two advisory warning sections; keep both at **0 warnings**: `TAG HYGIENE` (sparse or non-universal tags on siloing dimensions) and `FILL BOUNDARIES` (tagged-dimension pairings that straddle an `{{ai-fill}}` context split). `POST /api/prompts/library-diagnosis` is the HTTP form of the satisfiability pass only: it returns no hygiene or fill-boundary warnings, so those two sections always need the CLI.
 
 ### 6. Apply writes safely
 
 **Never run two SQLite writers against a live `atelier.sqlite`.** A host-side or `docker exec` writer beside the running api has desynced its cache and corrupted b-tree pages. Back up the database, stop the api, run the script, check integrity, then start the api again. Read-only inspection can open the file with `readonly: true`.
+
+**Additive changes can go through the HTTP API instead**, on a running api, because the api stays the only writer: `POST /api/prompts/lists`, `PUT /api/prompts/lists/:id/options` and `POST /api/prompts/templates` ([routes](architecture.md)). Make the script idempotent by name, never `PUT` options onto a list that already holds different ones (the call replaces the complete option set: an option the payload omits is deleted, an option matched by `id` or by a unique unchanged value keeps its id, and every other one gets a new id), and compare `GET /api/prompts` before and after so every existing list and template is shown unchanged. Audit this path in two parts: `POST /api/prompts/library-diagnosis` before and after for satisfiability, then the audit CLI against a read-only snapshot of the database for the `TAG HYGIENE` and `FILL BOUNDARIES` sections, which the HTTP diagnosis does not report.
 
 ---
 
@@ -401,7 +428,8 @@ A same-subject diptych locks subject, outfit and setting across panels in prose 
 - [ ] Fully tagged co-occurring lists checked for per-option reachability.
 - [ ] Cloud-lane templates follow the cloud-lane moderation rules.
 - [ ] Audit CLI exits 0 with 0 warnings in both sections.
-- [ ] Writes applied against a stopped api with a backup taken first, and the mutating script removed.
+- [ ] Art-style templates: no capture vocabulary left in static text, the medium block opens the fill, era and medium are separated in prose, and pose lists never co-draw with an action list.
+- [ ] Writes applied against a stopped api with a backup taken first, or additively through the HTTP API with a before/after comparison, and the mutating script removed.
 - [ ] One tile per new template rendered on each relevant model before considering it done.
 
 ---

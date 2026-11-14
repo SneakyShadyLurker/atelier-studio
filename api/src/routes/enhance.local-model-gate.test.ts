@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { TEST_SERVER_HOSTNAME } from '../test/server';
 import { setTextModelProviderForTests } from '../providers/text/registry';
-import { parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds } from '../test/helpers';
+import { legacyTextModelId, parseSse, restoreFetch, testRuntime, legacyTextUpstreamIds } from '../test/helpers';
 import { hostPortProbeResponse, isHostPortProbe } from '../test/hostProbe';
 import {
   type EnhanceChunk,
@@ -105,6 +105,29 @@ describe('POST /api/enhance-prompt local-model allowlist', () => {
     expect(local.status).toBe(200);
     expect(unknown.status).toBe(200);
     expect(await parseSse(local)).toEqual(await parseSse(unknown));
+  });
+
+  test('a prompt writer set on a local row serves only users who may use that row', async () => {
+    restoreFetch();
+    const requests: CapturedRequest[] = [];
+    const upstream = serveCapture(requests);
+    const { app, db, text } = testRuntime({
+      ...VIDEO_ON,
+      CLIPROXY_BASE_URL: upstream,
+      CLIPROXY_TOKEN: 'sk-x',
+      LOCAL_MODELS_USERS: 'alice',
+    });
+    text.store.setWriter('krea-2-gonzalomo', { modelId: legacyTextModelId(db, 'mimo'), mode: 'lock' });
+
+    for (const [userId, modelId] of [['alice', 'krea-2-gonzalomo'], ['bob', 'krea-2-gonzalomo'], ['bob', 'unregistered-model']] as const) {
+      const response = await postEnhance(app, userId, modelId);
+      expect(response.status).toBe(200);
+      expect((await parseSse(response)).at(-1)?.event).toBe('done');
+    }
+
+    // Bob may not use the local row, so its id routes like an unknown one.
+    expect(requests.map((request) => request.model)).toEqual([TEXT_MODELS.mimo, requests[2]?.model, requests[2]?.model]);
+    expect(requests[2]?.model).not.toBe(TEXT_MODELS.mimo);
   });
 
   test('a listed user still reaches the h3-motion kill switch', async () => {

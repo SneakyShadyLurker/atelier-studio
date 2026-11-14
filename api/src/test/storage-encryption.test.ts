@@ -124,6 +124,7 @@ describe('encrypted artifact serving', () => {
     const sealed = await runtime.app.fetch(imageRequest(`/api/img/${tileId}`, 'alice', AbortSignal.timeout(50)));
     expect(sealed.status).toBe(503);
     expect(sealed.headers.get('Retry-After')).toBe('5');
+    expect(await sealed.json()).toEqual({ error: 'storage sealed', code: 'STORAGE_SEALED' });
 
     await restarted.unseal(identity);
     const served = await runtime.app.fetch(imageRequest(`/api/img/${tileId}`, 'alice'));

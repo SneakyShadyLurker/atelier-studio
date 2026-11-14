@@ -4,10 +4,15 @@ import type {
   AdminProvider,
   TestReport as TestReportData,
   TextModelCapabilities,
+  TextModelPatchRequest,
   TextReasoningEffort,
 } from '@atelier/shared';
-import { TEXT_REASONING_EFFORT_LABELS, TEXT_REASONING_EFFORT_VALUES, TEXT_STRUCTURED_OUTPUT_MODES } from '@atelier/shared';
-import type { ModelPatchBody } from '../../api/textProviders';
+import {
+  TEXT_DISPLAY_NAME_MAX_CHARS,
+  TEXT_REASONING_EFFORT_LABELS,
+  TEXT_REASONING_EFFORT_VALUES,
+  TEXT_STRUCTURED_OUTPUT_MODES,
+} from '@atelier/shared';
 import { useExitTransition } from '../../hooks/useExitTransition';
 import { useDeleteModel, useTestModel, useTextProviders, useUpdateModel } from '../../hooks/useTextProviders';
 import { describeError } from '../../lib/errorCopy';
@@ -30,8 +35,6 @@ import TestReport, {
 } from './TestReport';
 import form from './AddProviderDialog.module.css';
 import styles from './ModelDialogs.module.css';
-
-const NAME_MAX = 60;
 
 /** The form: numbers stay text while typed; '' = no setting. */
 interface ModelDraft {
@@ -97,7 +100,7 @@ function parseNumber(text: string, integer: boolean, min: number, max: number): 
 function errorsOf(draft: ModelDraft): DraftErrors {
   const errors: { -readonly [K in keyof DraftErrors]: DraftErrors[K] } = {};
   const name = draft.displayName.trim();
-  if (name.length < 1 || name.length > NAME_MAX) errors.displayName = `Display name must be 1 to ${NAME_MAX} characters.`;
+  if (name.length < 1 || name.length > TEXT_DISPLAY_NAME_MAX_CHARS) errors.displayName = `Display name must be 1 to ${TEXT_DISPLAY_NAME_MAX_CHARS} characters.`;
   const maxImages = parseNumber(draft.maxImages, true, 1, 1000);
   if (maxImages === undefined) errors.maxImages = 'Max images must be a whole number from 1 to 1000.';
   else if (maxImages !== null && !draft.vision) errors.maxImages = 'An image limit needs image input turned on.';
@@ -117,7 +120,7 @@ const sameLevels = (a: readonly TextReasoningEffort[], b: readonly TextReasoning
   a.length === b.length && a.every((level, index) => level === b[index]);
 
 /** Only the fields that changed; call with a draft that has no errors. */
-function patchOf(model: AdminModel, draft: ModelDraft): ModelPatchBody {
+function patchOf(model: AdminModel, draft: ModelDraft): TextModelPatchRequest {
   const name = draft.displayName.trim();
   const maxImages = parseNumber(draft.maxImages, true, 1, 1000) ?? null;
   const temperature = parseNumber(draft.temperature, false, 0, 2) ?? null;
@@ -259,6 +262,7 @@ export default function EditModelDialog({ provider, model, imageLabel, startTest
   };
 
   const runTest = () => {
+    if (busy || test.isPending) return;
     baselineRef.current = draft;
     setChosen(new Set());
     setAppliedNote(null);
@@ -352,7 +356,8 @@ export default function EditModelDialog({ provider, model, imageLabel, startTest
                   id={`${fieldId}-name`}
                   className={form.textInput}
                   value={draft.displayName}
-                  maxLength={NAME_MAX + 20}
+                  // Room past the limit so an over-long paste shows the length error instead of being cut silently.
+                  maxLength={TEXT_DISPLAY_NAME_MAX_CHARS + 20}
                   autoComplete="off"
                   disabled={busy}
                   aria-invalid={errors.displayName === undefined ? undefined : true}
@@ -456,7 +461,16 @@ export default function EditModelDialog({ provider, model, imageLabel, startTest
           </div>
 
           <div className={styles.testRow}>
-            <button type="button" className={btn.secondary} onClick={runTest} disabled={busy || test.isPending}>
+            {/* Busy is aria-disabled with a click guard, never `disabled`: a
+                focused control that becomes disabled drops keyboard focus. */}
+            <button
+              type="button"
+              className={btn.secondary}
+              onClick={runTest}
+              disabled={busy}
+              aria-disabled={test.isPending || undefined}
+              aria-busy={test.isPending || undefined}
+            >
               {test.isPending ? 'Testing…' : 'Test model'}
             </button>
             <span className={styles.testNote}>{tested}</span>
@@ -599,14 +613,28 @@ export default function EditModelDialog({ provider, model, imageLabel, startTest
           {saveError !== null && <p role="alert" className={form.fieldError}>{saveError}</p>}
 
           <div className={`${dialogStyles.actions} ${form.actions}`}>
-            <button type="button" className={btn.danger} onClick={() => { if (!closing) setConfirmDelete(true); }} disabled={busy}>
+            <button
+              type="button"
+              className={btn.danger}
+              onClick={() => { if (!closing && !busy) setConfirmDelete(true); }}
+              disabled={update.isPending}
+              aria-disabled={remove.isPending || undefined}
+              aria-busy={remove.isPending || undefined}
+            >
               Remove model…
             </button>
             <div className={dialogStyles.actionsRight}>
-              <button type="button" className={btn.secondary} onClick={() => { if (!busy) requestClose(); }} disabled={busy}>
+              <button type="button" className={btn.secondary} onClick={() => { if (!busy) requestClose(); }} aria-disabled={busy || undefined}>
                 Cancel
               </button>
-              <button type="button" className={btn.primary} onClick={save} disabled={busy || !dirty || !valid}>
+              <button
+                type="button"
+                className={btn.primary}
+                onClick={save}
+                disabled={remove.isPending || !dirty || !valid}
+                aria-disabled={update.isPending || undefined}
+                aria-busy={update.isPending || undefined}
+              >
                 {update.isPending ? 'Saving…' : 'Save'}
               </button>
             </div>

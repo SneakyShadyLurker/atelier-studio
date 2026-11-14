@@ -150,3 +150,30 @@ describe('rescueDimension api', () => {
     expect((thrown as Error).message).toContain('stream ended');
   });
 });
+
+describe('rescueDimension rescue-failed validation', () => {
+  async function failure(payload: unknown): Promise<unknown> {
+    globalThis.fetch = mock(() => Promise.resolve(sseTextResponse(
+      `event: rescue-failed\ndata: ${JSON.stringify(payload)}\n\n`,
+    ))) as unknown as typeof fetch;
+    try {
+      return await rescueDimension({ proposalId: 'p', templateName: 'portrait' });
+    } catch (err) {
+      return err;
+    }
+  }
+
+  test('rejects a rescue-failed frame without a reason', async () => {
+    expect((await failure({ conflicts: [] }) as Error).message).toBe('invalid rescue-failed SSE payload');
+  });
+
+  test('rejects a rescue-failed frame with malformed conflicts', async () => {
+    expect((await failure({ reason: 'upstream-error', conflicts: [{ templateName: 'portrait' }] }) as Error).message)
+      .toBe('invalid rescue-failed SSE payload');
+  });
+
+  test('ignores the optional terminal-error detail it does not read', async () => {
+    expect(await failure({ reason: 'upstream-error', code: 7, retryAfterSeconds: 'soon', moderation: 'x' }))
+      .toEqual({ type: 'failed', reason: 'upstream-error', conflicts: [] });
+  });
+});

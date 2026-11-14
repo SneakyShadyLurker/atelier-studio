@@ -54,7 +54,7 @@ The Zod schema is `api/src/providers/comfyui/manifest.ts`. Unknown keys are reje
 | `saveImageNodeId` | yes | Terminal output node id; it must exist in every graph. `SaveImageWebsocket` for images, `SaveVideo` for video. |
 | `requiredPlaceholders` | yes | Placeholders the base graph must contain, such as `{{prompt}}`, `{{seed}}`, `{{width}}`, `{{height}}`, `{{count}}` and `{{steps}}`. A reference graph must also contain `{{referenceImage}}`, plus `{{referenceImage2}}` and `{{referenceImage3}}` when `maxReferenceImages` declares those slots; no other graph may contain a reference slot. |
 | `defaultSteps` | yes | Base-sampler steps substituted into `{{steps}}`. Users may override them per model. |
-| `ratioMap` | yes | Name of a render-size map in `api/src/providers/comfyui/ratioMaps.ts`: `krea-2048`, `moss-2mp`, `moss-turbo-1.5mp`, `moss-hires-1.66mp`, `h3image-16mp`, `h3image-8mp`, `h3image-4mp` or `h3-768p`. |
+| `ratioMap` | yes | Name of a render-size map in `api/src/providers/comfyui/ratioMaps.ts`: `krea-2048`, `moss-2mp`, `moss-turbo-1.5mp`, `moss-hires-1.66mp`, `h3image-16mp`, `h3image-8mp`, `h3image-4mp` or `h3-768p`. No built-in row uses `moss-turbo-1.5mp` or `moss-hires-1.66mp`; they exist for custom graphs. |
 | `supportedRatios` | yes | Ratios offered on the wire. |
 | `defaultRatio` | no | Must be a supported ratio. |
 | `supportedDurations`, `defaultDuration` | video only | Clip lengths in frames. Each must be a member of `VIDEO_DURATION_FRAMES` in `shared`; the default must be supported. |

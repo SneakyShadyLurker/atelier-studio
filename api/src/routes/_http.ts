@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
+import type { ApiErrorCode } from '@atelier/shared';
 import type { ExtensionCheck } from '../orchestrator/extendValidation';
 import type { AppEnv } from '../server-env';
 
@@ -45,6 +46,19 @@ function applySafeParse<T>(
     };
   }
   return { ok: true, value: parsed.data };
+}
+
+/**
+ * The one answer for a read that outlived its wait for artifact storage to be
+ * unsealed (storage/crypto.ts): 503 with a short Retry-After, since the client
+ * only has to try again.
+ */
+export function storageSealedResponse(c: Context<AppEnv>): Response {
+  return c.json(
+    { error: 'storage sealed', code: 'STORAGE_SEALED' satisfies ApiErrorCode },
+    503,
+    { 'Retry-After': '5' },
+  );
 }
 
 // Canonical 400 for a single bad field that is validated OUTSIDE a Zod schema

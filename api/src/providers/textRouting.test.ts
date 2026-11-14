@@ -16,9 +16,16 @@ describe('textProviderForResolved', () => {
 describe('imageModelRouting', () => {
   test('only a registered image model selects a prompt writer', () => {
     const { config } = testRuntime();
-    expect(imageModelRouting(config, 'gpt-image-2.6-sunburst')).toEqual({ imageModelId: 'gpt-image-2.6-sunburst' });
-    expect(imageModelRouting(config, 'not-a-model')).toEqual({});
-    expect(imageModelRouting(config, undefined)).toEqual({});
+    expect(imageModelRouting(config, 'gpt-image-2.6-sunburst', 'alice')).toEqual({ imageModelId: 'gpt-image-2.6-sunburst' });
+    expect(imageModelRouting(config, 'not-a-model', 'alice')).toEqual({});
+    expect(imageModelRouting(config, undefined, 'alice')).toEqual({});
+  });
+
+  test('a local image model selects no writer for a user outside LOCAL_MODELS_USERS', () => {
+    const { config } = testRuntime({ COMFYUI_BASE_URL: 'http://127.0.0.1:1', LOCAL_MODELS_USERS: 'alice' });
+    expect(imageModelRouting(config, 'krea-2-gonzalomo', 'alice')).toEqual({ imageModelId: 'krea-2-gonzalomo' });
+    expect(imageModelRouting(config, 'krea-2-gonzalomo', 'bob')).toEqual({});
+    expect(imageModelRouting(config, 'gpt-image-2.6-sunburst', 'bob')).toEqual({ imageModelId: 'gpt-image-2.6-sunburst' });
   });
 });
 

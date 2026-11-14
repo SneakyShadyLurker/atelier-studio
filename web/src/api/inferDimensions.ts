@@ -1,79 +1,20 @@
 import type {
   ApplyDimensionsRequest,
-  DimensionBundle,
-  DimensionChangeBundle,
   InferDimensionsResponse,
   InferPhaseEvent,
   InferProgressEvent,
   PromptLibraryResponse,
-  RescueBundle,
 } from '@atelier/shared';
+import {
+  InferDimensionsResponseSchema,
+  InferPhaseEventSchema,
+  InferProgressEventSchema,
+} from '@atelier/shared/prompt-tool-schemas';
 import { ApiError, apiFetch, extractApiError, isPromptLibraryResponse, requestJsonValidated, responseRequestId } from './client';
 import { parseTerminalSseError, readSseFrames } from './sse';
-import { isBundleCommon, isTemplateConflict } from './bundleGuards';
-import { isRecord } from '../lib/guards';
-
-function isDimensionBundle(value: unknown): value is DimensionBundle {
-  if (!isBundleCommon(value)) return false;
-  return (value.kind === 'create' || value.kind === 'extend' || value.kind === 'merge' || value.kind === 'rename')
-    && typeof value.dimensionName === 'string'
-    && typeof value.optionCount === 'number'
-    && typeof value.listCount === 'number';
-}
-
-function isRescueBundle(value: unknown): value is RescueBundle {
-  if (!isBundleCommon(value)) return false;
-  return value.kind === 'rescue'
-    && typeof value.listName === 'string'
-    && typeof value.optionValue === 'string'
-    && typeof value.templateName === 'string';
-}
-
-function isDimensionChangeBundle(value: unknown): value is DimensionChangeBundle {
-  return isDimensionBundle(value) || isRescueBundle(value);
-}
-
-function isRejectedOp(value: unknown): boolean {
-  return isRecord(value) && typeof value.reason === 'string' && typeof value.count === 'number';
-}
-
-function isCoherenceWarning(value: unknown): boolean {
-  return isRecord(value) && typeof value.templateName === 'string' && typeof value.detail === 'string';
-}
-
-function isCoverageWarning(value: unknown): boolean {
-  if (!isRecord(value) || typeof value.detail !== 'string') return false;
-  if (value.kind === 'orphanTag') {
-    return typeof value.dim === 'string' && typeof value.label === 'string';
-  }
-  if (value.kind === 'lowCoverage') {
-    return typeof value.listName === 'string'
-      && typeof value.dim === 'string'
-      && typeof value.coverage === 'number'
-      && typeof value.taggedCount === 'number'
-      && typeof value.totalCount === 'number';
-  }
-  return value.kind === 'missingDimension'
-    && typeof value.listName === 'string'
-    && typeof value.dim === 'string';
-}
 
 export function isInferDimensionsResponse(value: unknown): value is InferDimensionsResponse {
-  return isRecord(value)
-    && typeof value.proposalId === 'string'
-    && typeof value.baseSnapshotHash === 'string'
-    && isRecord(value.proposal)
-    && Array.isArray(value.proposal.bundles)
-    && value.proposal.bundles.every(isDimensionChangeBundle)
-    && Array.isArray(value.warnings)
-    && value.warnings.every(isCoherenceWarning)
-    && Array.isArray(value.coverage)
-    && value.coverage.every(isCoverageWarning)
-    && Array.isArray(value.rejected)
-    && value.rejected.every(isRejectedOp)
-    && Array.isArray(value.conflicts)
-    && value.conflicts.every(isTemplateConflict)
-    && (value.notices === undefined || (Array.isArray(value.notices) && value.notices.every((n) => typeof n === 'string')));
+  return InferDimensionsResponseSchema.safeParse(value).success;
 }
 
 export interface InferProgressNotification {
@@ -82,20 +23,11 @@ export interface InferProgressNotification {
 }
 
 function isInferPhaseEvent(value: unknown): value is InferPhaseEvent {
-  return isRecord(value)
-    && (
-      value.phase === 'taxonomy' ||
-      value.phase === 'chunks' ||
-      value.phase === 'retry-gaps' ||
-      value.phase === 'finalize'
-    );
+  return InferPhaseEventSchema.safeParse(value).success;
 }
 
 function isInferProgressEvent(value: unknown): value is InferProgressEvent {
-  return isRecord(value)
-    && typeof value.done === 'number'
-    && typeof value.total === 'number'
-    && (value.wave === 1 || value.wave === 2);
+  return InferProgressEventSchema.safeParse(value).success;
 }
 
 export interface InferDimensionsOpts {

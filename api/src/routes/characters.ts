@@ -3,7 +3,7 @@ import type { AppEnv } from '../server-env';
 import { draftPool } from '../orchestrator/llmAdmission';
 import { withLlmSlot } from '../lifecycle/withLlmSlot';
 import { textModelFailureBody, textProviderForResolved } from '../providers/textRouting';
-import { findModel } from '../providers/registry';
+import { findModelForUser } from '../providers/registry';
 import { parseBody } from './_http';
 import { BrainstormCharactersRequestSchema } from './characters.schema';
 import { textFailureToSseError } from '../lifecycle/llm-error';
@@ -20,7 +20,7 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
   const logger = c.var.logger;
   const userId = c.var.userId;
   const text = c.var.text;
-  const entry = findModel(parsed.value.modelId, c.var.config);
+  const entry = findModelForUser(parsed.value.modelId, c.var.config, userId);
   const { textModelId } = parsed.value;
   // The request pin must name an enabled model.
   if (textModelId !== undefined && !text.snapshot.current().models.has(textModelId)) {

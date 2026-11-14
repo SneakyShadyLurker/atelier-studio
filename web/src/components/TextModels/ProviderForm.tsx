@@ -1,6 +1,6 @@
 import { useDeferredValue, useId, useMemo, useState, ViewTransition, type ReactNode } from 'react';
 import type { ConnectionReport, TextProtocol, TextTokenField } from '@atelier/shared';
-import { TEXT_TOKEN_FIELDS, validateTextProviderBaseUrl } from '@atelier/shared';
+import { TEXT_DISPLAY_NAME_MAX_CHARS, TEXT_TOKEN_FIELDS, validateTextProviderBaseUrl } from '@atelier/shared';
 import { ApiError } from '../../api/client';
 import { describeError } from '../../lib/errorCopy';
 import { isRecord } from '../../lib/guards';
@@ -15,7 +15,6 @@ export const BYOK_MISSING_COPY =
   'This server has no BYOK_ENCRYPTION_KEY, so keys cannot be stored. Providers without a key still work.';
 
 const BUSY_COPY = 'Another test is running. Try again in a moment.';
-const NAME_MAX = 60;
 
 export interface ProviderDraft {
   readonly name: string;
@@ -251,7 +250,7 @@ export function ProviderFields({ draft, errors, urlHint, urlHints, keySlot, disa
           <input
             id={nameId}
             className={styles.textInput}
-            maxLength={NAME_MAX}
+            maxLength={TEXT_DISPLAY_NAME_MAX_CHARS}
             autoComplete="off"
             value={draft.name}
             disabled={disabled}

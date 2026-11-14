@@ -443,6 +443,15 @@ export function findModel(modelId: string, config: Config): RegistryEntry | null
   return registryForConfig(config).find((entry) => entry.model.id === modelId) ?? null;
 }
 
+/**
+ * `findModel` as this user sees it: a local row resolves as unknown for a user
+ * outside `LOCAL_MODELS_USERS`, the same answer an unregistered id gets.
+ */
+export function findModelForUser(modelId: string, config: Config, userId: string): RegistryEntry | null {
+  const entry = findModel(modelId, config);
+  return entry && !isLocalModelGated(config, userId, entry) ? entry : null;
+}
+
 // Single source of truth for pool → cap mapping. The `concurrencyCapPerUser`
 // projection on `Model` (above) is the wire-display value; this helper is the
 // route-side enforcement value. They must agree — keeping the derivation in

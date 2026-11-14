@@ -1,12 +1,10 @@
 import type { DiagnoseSelectionRequest, DiagnoseSelectionResponse } from '@atelier/shared';
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
-import { isTemplateConflict } from './bundleGuards';
+import { DiagnoseSelectionResponseSchema } from '@atelier/shared/prompt-tool-schemas';
 import { ApiError, apiFetch, extractApiError, responseRequestId } from './client';
 
 function isDiagnoseSelectionResponse(value: unknown): value is DiagnoseSelectionResponse {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as { conflicts?: unknown };
-  return Array.isArray(v.conflicts) && v.conflicts.every(isTemplateConflict);
+  return DiagnoseSelectionResponseSchema.safeParse(value).success;
 }
 
 // Live SAT recheck against the user's current bundle selection.
@@ -14,8 +12,8 @@ function isDiagnoseSelectionResponse(value: unknown): value is DiagnoseSelection
 //
 // Plain JSON, no SSE — the SAT walk is in-process and fast (no LLM call).
 // We bypass the shared `requestJson` helper so we can validate the response
-// shape via `isTemplateConflict` (matches the strictness of the infer-time
-// response validation rather than trusting an opaque cast).
+// shape against the shared schema (the same TemplateConflict rule the
+// infer-time response uses) rather than trusting an opaque cast).
 export async function diagnoseSelection(
   body: DiagnoseSelectionRequest,
   signal?: AbortSignal,

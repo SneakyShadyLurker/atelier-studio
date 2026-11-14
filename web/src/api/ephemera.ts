@@ -1,14 +1,10 @@
-import type { CharacterCardKind, CharacterCardPhase, EphemeraStatus } from '@atelier/shared';
+import type { CharacterCardKind, CharacterCardPhase, CharacterCardResult, EphemeraStatus } from '@atelier/shared';
+import { CharacterCardResultSchema, CharacterCardStatusSchema, EphemeraStatusSchema } from '@atelier/shared/wire-schemas';
 import { queryOptions } from '@tanstack/react-query';
-import { isRecord } from '../lib/guards';
 import { ApiError, apiPath, requestJsonValidated } from './client';
 import { consumeSseResult, openSseStream, parseTerminalSseErrorFromData } from './sse';
 
-export interface CharacterCardResult {
-  readonly characterId: string;
-  readonly name: string;
-  readonly url: string;
-}
+export type { CharacterCardResult };
 
 /**
  * A terminal `error` frame from the character-card stream. Its message is the
@@ -28,10 +24,7 @@ export const ephemeraKeys = {
 };
 
 function isEphemeraStatus(value: unknown): value is EphemeraStatus {
-  return isRecord(value)
-    && typeof value.origin === 'string'
-    && typeof value.timeoutMs === 'number'
-    && Number.isFinite(value.timeoutMs);
+  return EphemeraStatusSchema.safeParse(value).success;
 }
 
 // Leak-safe 404 means "integration off for this user"; the probe never retries
@@ -47,14 +40,9 @@ export const ephemeraStatusOpts = () =>
     },
   });
 
-const phases: ReadonlySet<string> = new Set<CharacterCardPhase>(['reading', 'writing', 'rewriting', 'saving']);
-const isPhase = (value: unknown): value is CharacterCardPhase => typeof value === 'string' && phases.has(value);
 
 function isCharacterCardResult(value: unknown): value is CharacterCardResult {
-  return isRecord(value)
-    && typeof value.characterId === 'string'
-    && typeof value.name === 'string'
-    && typeof value.url === 'string';
+  return CharacterCardResultSchema.safeParse(value).success;
 }
 
 /**
@@ -95,7 +83,8 @@ export async function createCharacterCard(
     },
   }, 'character card stream ended', {
     status: (data) => {
-      if (isRecord(data) && isPhase(data.phase)) onPhase(data.phase);
+      const status = CharacterCardStatusSchema.safeParse(data);
+      if (status.success) onPhase(status.data.phase);
     },
   });
 }

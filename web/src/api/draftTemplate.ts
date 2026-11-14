@@ -1,11 +1,9 @@
 import type { DraftTemplateRequest, DraftTemplateResponse } from '@atelier/shared';
 import { requestSseResult } from './sse';
-import { isRecord, isStringArray } from '../lib/guards';
+import { DraftTemplateResponseSchema } from '@atelier/shared/prompt-tool-schemas';
 
 function isDraftTemplateResponse(value: unknown): value is DraftTemplateResponse {
-  if (!isRecord(value)) return false;
-  if (value.kind === 'body') return typeof value.body === 'string' && isStringArray(value.warnings);
-  return value.kind === 'clarify' && typeof value.question === 'string';
+  return DraftTemplateResponseSchema.safeParse(value).success;
 }
 
 export async function draftTemplate(

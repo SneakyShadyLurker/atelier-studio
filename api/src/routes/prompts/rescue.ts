@@ -41,7 +41,7 @@ export const rescueRoutes = new Hono<AppEnv>()
     const { proposalId, templateName } = parsed.value;
     const config = c.var.config;
     // Resolved before the slot and the rescue cap, so a call no model can serve spends neither.
-    const resolved = c.var.text.resolve({ userId, task: 'rescue', ...imageModelRouting(config, parsed.value.modelId) });
+    const resolved = c.var.text.resolve({ userId, task: 'rescue', ...imageModelRouting(config, parsed.value.modelId, userId) });
     if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
     const textModel = resolved.model;
     return withLlmSlot(c, rescuePool, userId, 5, () => {

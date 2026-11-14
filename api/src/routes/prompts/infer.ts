@@ -63,7 +63,7 @@ export const inferRoutes = new Hono<AppEnv>()
     const config = c.var.config;
     const logger = c.var.logger;
     const userId = c.var.userId;
-    const resolved = c.var.text.resolve({ userId, task: 'infer', ...imageModelRouting(config, modelId) });
+    const resolved = c.var.text.resolve({ userId, task: 'infer', ...imageModelRouting(config, modelId, userId) });
     if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
     const textModel = resolved.model;
     const inferOptions = resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort };

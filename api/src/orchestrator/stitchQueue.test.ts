@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { Database } from 'bun:sqlite';
-import { fsyncSync, renameSync } from 'node:fs';
-import { adoptStandaloneBatch, appendSegment, bumpStitchRevision, markReady } from '../db/sequences';
+import { existsSync, fsyncSync, readdirSync, renameSync } from 'node:fs';
+import { adoptStandaloneBatch, appendSegment, autoUnlinkBatch, bumpStitchRevision, markReady } from '../db/sequences';
 import { plaintextOf, testRuntime } from '../test/helpers';
 import { setStorageOpsForTests, writeAtomic } from '../storage/files';
 import {
+  deleteSequenceMaster,
   resetStitchQueueForTests,
   enqueueSequenceStitch,
   waitForStitchQueueIdle,
@@ -219,6 +220,45 @@ describe('sequence stitch queue', () => {
     expect(runtime.db.query<{ master_status: string }, [string]>(
       'SELECT master_status FROM video_sequences WHERE id = ?',
     ).get(seeded.sequenceId)?.master_status).toBe('ready');
+  });
+
+  test('a sequence dissolved while its master is being published leaves no master file', async () => {
+    const runtime = testRuntime();
+    const seeded = await seedSequence(runtime.db, runtime.config.DATA_DIR);
+    setSequenceStitchRunnerForTests(() => Promise.resolve(new Uint8Array([1, 2, 3])));
+    enqueueSequenceStitch(seeded.sequenceId, seeded.batchIds[1]);
+    await waitForStitchQueueIdle();
+
+    const masterPath = `${runtime.config.DATA_DIR}/images/alice/${seeded.sequenceId}.mp4`;
+    const tmpPath = `${masterPath}.tmp`;
+    expect(existsSync(masterPath)).toBe(true);
+    let dissolved = false;
+    setStorageOpsForTests({
+      renameSync: (from, to) => {
+        renameSync(from, to);
+        if (!dissolved && from === tmpPath && to === masterPath) {
+          dissolved = true;
+          // What DELETE does when it removes a segment mid-publish: the row
+          // goes, then the master file at the final path.
+          expect(autoUnlinkBatch(runtime.db, 'alice', seeded.batchIds[1]).status).toBe('dissolved');
+          deleteSequenceMaster(runtime.config.DATA_DIR, 'alice', seeded.sequenceId, runtime.logger);
+        }
+      },
+    });
+    let calls = 0;
+    setSequenceStitchRunnerForTests(() => {
+      calls += 1;
+      return Promise.resolve(new Uint8Array([4, 5, 6]));
+    });
+
+    enqueueSequenceStitch(seeded.sequenceId, seeded.batchIds[1]);
+    await waitForStitchQueueIdle();
+
+    expect(dissolved).toBe(true);
+    expect(calls).toBe(1);
+    expect(runtime.db.query('SELECT id FROM video_sequences WHERE id = ?').get(seeded.sequenceId)).toBeNull();
+    expect(readdirSync(`${runtime.config.DATA_DIR}/images/alice`).filter((name) => name.startsWith(seeded.sequenceId)))
+      .toEqual([]);
   });
 
   test('marks ffmpeg failures failed without unlinking segments', async () => {

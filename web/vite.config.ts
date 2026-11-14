@@ -28,8 +28,8 @@ function devInlineStyles(): Plugin {
 // SWAG terminates TLS and routes both `/` and `/api/*` to the same origin,
 // so the SPA only needs a relative `/api` base — no proxy required there.
 //
-// The dev proxy key is hardcoded `/api`. The SPA's runtime API base defaults
-// to `/api` via `import.meta.env`; no env-driven override exists in this file.
+// The dev proxy key is hardcoded `/api`, and so is the SPA's runtime API base
+// (`API_BASE` in src/api/client.ts); neither reads an environment variable.
 export default defineConfig(({ mode }) => ({
   // React Compiler (stable Babel path, default `infer` mode) memoizes
   // components and hooks; `test/setup.ts` applies the same compiler to unit tests.

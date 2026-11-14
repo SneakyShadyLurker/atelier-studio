@@ -176,10 +176,10 @@ export async function runBatchPipeline(prepared: PreparedBatch, ctx: GenerationC
   try {
     request = await resolveRefImagesAfterReservation(ctx, prepared);
     request = await resolveI2vSourceAfterReservation(ctx, prepared, request);
-    request = await resolveI2vContextAfterReservation(ctx, prepared, request);
+    request = await resolveI2vContextAfterReservation(ctx, prepared, request, activeBatchController.signal);
     request = resolveModelSteps(ctx, request);
     request = resolveModelResolution(ctx, request);
-    // Krea condensation and MiniMax H3 Image expansion run before GPU
+    // Krea condensation and the MOSS and MiniMax H3 Image expansions run before GPU
     // admission in the queue preparer (queuedPromptPreparation.ts), which owns
     // the guarded prompt write. /generate queues every batch that needs one,
     // so the pipeline never rewrites a prompt.
@@ -494,10 +494,14 @@ async function resolveI2vSourceAfterReservation(
 const VIDEO_CONTEXT_TAIL_TIMEOUT_MS = 30_000;
 const VIDEO_CONTEXT_TAIL_MAX_BYTES = 16 * 1024 * 1024;
 
+// `signal` is the batch controller's: this runs while the batch holds its GPU
+// slot, so a cancel or shutdown must end the temp-budget wait and the ffmpeg
+// child instead of waiting them out.
 async function resolveI2vContextAfterReservation(
   ctx: GenerationContext,
   prepared: PreparedBatch,
   request: ResolvedGenerateRequest,
+  signal: AbortSignal,
 ): Promise<ResolvedGenerateRequest> {
   if (!shouldLoadI2vSource(ctx.registryEntry)) return request;
   // Membership is persisted before immediate/story/queued dispatch. Handoff
@@ -512,7 +516,7 @@ async function resolveI2vContextAfterReservation(
     const bytes = await withDecryptedArtifactFiles(
       ctx.config.DATA_DIR,
       [{ root: 'images', userId: ctx.userId, artifactId: source.tileId, ext: source.ext }],
-      {},
+      { signal },
       ([path]) => {
         if (path === undefined) throw new Error('decrypted video context source missing');
         return extractVideoTail(path, {
@@ -520,6 +524,7 @@ async function resolveI2vContextAfterReservation(
           contextFrames: VIDEO_CONTEXT_FRAMES,
           timeoutMs: VIDEO_CONTEXT_TAIL_TIMEOUT_MS,
           maxOutputBytes: VIDEO_CONTEXT_TAIL_MAX_BYTES,
+          signal,
         });
       },
     );
@@ -528,6 +533,9 @@ async function resolveI2vContextAfterReservation(
     if (currentSource?.tileId !== source.tileId || currentSource.endFrame !== source.endFrame) return request;
     return { ...request, i2vContext: { bytes, contextFrames: VIDEO_CONTEXT_FRAMES } };
   } catch (error) {
+    // A canceled batch is torn down by the caller's abort check; it is not a
+    // fallback to the still-frame handoff.
+    if (signal.aborted) return request;
     ctx.logger.warn(
       { err: error, i2vSourceUploadId: uploadId },
       'video context tail unavailable; falling back to the still-frame handoff',

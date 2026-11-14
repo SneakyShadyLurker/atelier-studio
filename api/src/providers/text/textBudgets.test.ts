@@ -8,10 +8,10 @@ import {
   draftTemplateMaxResponseBytes,
   MOTION_ENHANCE_MAX_OUTPUT_TOKENS,
   STORY_PLANNER_MAX_OUTPUT_TOKENS,
-  GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS,
-  GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS,
-  GLM_ABLITERATED_MAX_RESPONSE_BYTES,
-  GLM_ABLITERATED_STREAM_DRAIN_MS,
+  SLOW_PER_ATTEMPT_FLOOR_MS,
+  SLOW_REWRITE_FLOOR_MS,
+  SLOW_MAX_RESPONSE_BYTES_FLOOR,
+  SLOW_STREAM_DRAIN_FLOOR_MS,
   aiFillBatchPerAttemptTimeoutMs,
   aiFillPerAttemptTimeoutMs,
   promptRewriteTimeoutMs,
@@ -118,13 +118,13 @@ describe('budgets by latency profile (spec § 11.2 item 2)', () => {
     expect(promptRewriteTimeoutMs('standard', 150_000)).toBe(150_000);
     expect(textMaxResponseBytes('standard', 1024 * 1024)).toBe(1024 * 1024);
 
-    expect(aiFillPerAttemptTimeoutMs('slow', 120_000)).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
-    expect(aiFillBatchPerAttemptTimeoutMs('slow')).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
-    expect(textStreamDrainMs('slow', 300_000)).toBe(GLM_ABLITERATED_STREAM_DRAIN_MS);
-    expect(promptRewriteTimeoutMs('slow', 150_000)).toBe(GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS);
-    expect(textMaxResponseBytes('slow', 1024 * 1024)).toBe(GLM_ABLITERATED_MAX_RESPONSE_BYTES);
+    expect(aiFillPerAttemptTimeoutMs('slow', 120_000)).toBe(SLOW_PER_ATTEMPT_FLOOR_MS);
+    expect(aiFillBatchPerAttemptTimeoutMs('slow')).toBe(SLOW_PER_ATTEMPT_FLOOR_MS);
+    expect(textStreamDrainMs('slow', 300_000)).toBe(SLOW_STREAM_DRAIN_FLOOR_MS);
+    expect(promptRewriteTimeoutMs('slow', 150_000)).toBe(SLOW_REWRITE_FLOOR_MS);
+    expect(textMaxResponseBytes('slow', 1024 * 1024)).toBe(SLOW_MAX_RESPONSE_BYTES_FLOOR);
     // A configured value above the floor still wins.
-    expect(textStreamDrainMs('slow', GLM_ABLITERATED_STREAM_DRAIN_MS + 1)).toBe(GLM_ABLITERATED_STREAM_DRAIN_MS + 1);
+    expect(textStreamDrainMs('slow', SLOW_STREAM_DRAIN_FLOOR_MS + 1)).toBe(SLOW_STREAM_DRAIN_FLOOR_MS + 1);
   });
 
   test('stream idle limit: slow rows get at least 10 min, standard keeps the configured value', () => {
@@ -134,10 +134,10 @@ describe('budgets by latency profile (spec § 11.2 item 2)', () => {
   });
 
   test('the legacy values: 360 s ai-fill, 420 s condense, 2,700 s drain, 4 MiB', () => {
-    expect(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS).toBe(360_000);
-    expect(GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS).toBe(420_000);
-    expect(GLM_ABLITERATED_STREAM_DRAIN_MS).toBe(2_700_000);
-    expect(GLM_ABLITERATED_MAX_RESPONSE_BYTES).toBe(4 * 1024 * 1024);
+    expect(SLOW_PER_ATTEMPT_FLOOR_MS).toBe(360_000);
+    expect(SLOW_REWRITE_FLOOR_MS).toBe(420_000);
+    expect(SLOW_STREAM_DRAIN_FLOOR_MS).toBe(2_700_000);
+    expect(SLOW_MAX_RESPONSE_BYTES_FLOOR).toBe(4 * 1024 * 1024);
   });
 
   test('the seeded GLM row is the only slow one, matching the legacy backend mapping', () => {
@@ -148,7 +148,7 @@ describe('budgets by latency profile (spec § 11.2 item 2)', () => {
 
   test('the ai-fill batch route deadline budgets each profile\'s attempt length', () => {
     expect(aiFillBatchRouteTimeoutMs('slow', 8_000)).toBe(
-      2 * aiFillPolicyEnvelopeMs(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS, 8_000) + AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
+      2 * aiFillPolicyEnvelopeMs(SLOW_PER_ATTEMPT_FLOOR_MS, 8_000) + AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
     );
     expect(aiFillBatchRouteTimeoutMs('standard', 8_000)).toBe(
       2 * aiFillPolicyEnvelopeMs(AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS, 8_000) + AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
@@ -159,13 +159,13 @@ describe('budgets by latency profile (spec § 11.2 item 2)', () => {
 describe('GLM deadlines', () => {
   test('cover the slowest measured GLM call of each workload', () => {
     // Measured uncapped at 'high' through the proxy.
-    expect(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS).toBeGreaterThan(197_000);
-    expect(GLM_ABLITERATED_KREA_CONDENSE_TIMEOUT_MS).toBeGreaterThan(248_000);
-    expect(GLM_ABLITERATED_STREAM_DRAIN_MS).toBeGreaterThan(1_259_000);
+    expect(SLOW_PER_ATTEMPT_FLOOR_MS).toBeGreaterThan(197_000);
+    expect(SLOW_REWRITE_FLOOR_MS).toBeGreaterThan(248_000);
+    expect(SLOW_STREAM_DRAIN_FLOOR_MS).toBeGreaterThan(1_259_000);
     // The full 32,768-token budget at the slowest measured 13 tokens/s.
-    expect(GLM_ABLITERATED_STREAM_DRAIN_MS).toBeGreaterThanOrEqual((32_768 / 13) * 1000);
+    expect(SLOW_STREAM_DRAIN_FLOOR_MS).toBeGreaterThanOrEqual((32_768 / 13) * 1000);
     // The full 32,768-token budget at ~55 bytes per token.
-    expect(GLM_ABLITERATED_MAX_RESPONSE_BYTES).toBeGreaterThan(32_768 * 55);
+    expect(SLOW_MAX_RESPONSE_BYTES_FLOOR).toBeGreaterThan(32_768 * 55);
   });
 });
 
@@ -181,7 +181,7 @@ describe('pinned-effort raw-stream cap', () => {
 describe('policy-wrapped call deadlines (drafts, rescue)', () => {
   test('per attempt: the configured knob on standard rows, at least the slow floor on slow rows', () => {
     expect(textPerAttemptTimeoutMs('standard', 70_000)).toBe(70_000);
-    expect(textPerAttemptTimeoutMs('slow', 70_000)).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS);
+    expect(textPerAttemptTimeoutMs('slow', 70_000)).toBe(SLOW_PER_ATTEMPT_FLOOR_MS);
     expect(textPerAttemptTimeoutMs('slow', 400_000)).toBe(400_000);
   });
 
@@ -195,7 +195,7 @@ describe('policy-wrapped call deadlines (drafts, rescue)', () => {
   });
 
   test('slow rows get a route deadline that covers every slow attempt plus backoff', () => {
-    const slowAttempt = GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS;
+    const slowAttempt = SLOW_PER_ATTEMPT_FLOOR_MS;
     expect(textPolicyRouteTimeoutMs('slow', 300_000, { perAttemptTimeoutMs: 70_000, maxAttempts: 2, maxBackoffMs: 8_000 }))
       .toBe(2 * slowAttempt + 8_000 + TEXT_ROUTE_TIMEOUT_MARGIN_MS);
     expect(textPolicyRouteTimeoutMs('slow', RESCUE_ROUTE_TIMEOUT_MS, { perAttemptTimeoutMs: 70_000, maxAttempts: 1, maxBackoffMs: 8_000 }))
@@ -216,10 +216,10 @@ describe('draft and rescue route deadlines', () => {
     const config = testConfig();
     expect(draftRouteTimeoutMs('slow', config)).toBe(Math.max(
       config.CLOUD_TIMEOUT_MS,
-      GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS * config.RESILIENT_MAX_ATTEMPTS
+      SLOW_PER_ATTEMPT_FLOOR_MS * config.RESILIENT_MAX_ATTEMPTS
         + config.RESILIENT_MAX_BACKOFF_MS * (config.RESILIENT_MAX_ATTEMPTS - 1)
         + TEXT_ROUTE_TIMEOUT_MARGIN_MS,
     ));
-    expect(rescueRouteTimeoutMs('slow', config)).toBe(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS + TEXT_ROUTE_TIMEOUT_MARGIN_MS);
+    expect(rescueRouteTimeoutMs('slow', config)).toBe(SLOW_PER_ATTEMPT_FLOOR_MS + TEXT_ROUTE_TIMEOUT_MARGIN_MS);
   });
 });

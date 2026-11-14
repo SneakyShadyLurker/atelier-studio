@@ -4,6 +4,7 @@ import * as bus from '../orchestrator/bus';
 import * as queue from '../orchestrator/queue';
 import { parseSseText, testRuntime } from './helpers';
 import { encodeSseFrame } from '../lifecycle/sse';
+import { MAX_EVENT_STREAMS_PER_BATCH, setBatchesEventsSnapshotRaceHookForTests } from '../routes/batches.events';
 
 const USER_ID = 'events-user';
 const OTHER_USER_ID = 'other-user';
@@ -299,6 +300,113 @@ test('GET /api/batches/:id/events omits archived tiles from replay', async () =>
   expect((frames[0]?.data as { tiles: { tileId: string; tileIndex: number; seed: number }[] }).tiles).toEqual([
     { tileId: '00000000-0000-4000-8000-000000000502', tileIndex: 1, seed: 101 },
   ]);
+});
+
+test('GET /api/batches/:id/events caps concurrently open streams per batch', async () => {
+  const runtime = testRuntime();
+  const { db } = runtime;
+  seedUser(db, USER_ID);
+  const batchId = '00000000-0000-4000-8000-000000000901';
+  const otherBatchId = '00000000-0000-4000-8000-000000000902';
+  for (const [index, id] of [batchId, otherBatchId].entries()) {
+    insertBatch(db, { id, userId: USER_ID, status: 'running', pool: 'shared', createdAt: 9_000 + index });
+    insertLoadingTile(db, id, USER_ID, `00000000-0000-4000-8000-00000000095${index}`, 0);
+  }
+  const open = (id: string, signal?: AbortSignal) => runtime.fetch(`/api/batches/${id}/events`, {
+    headers: { 'Remote-User': USER_ID },
+    ...(signal ? { signal } : {}),
+  });
+  const controllers = Array.from({ length: 8 }, () => new AbortController());
+  const streams: Response[] = [];
+  try {
+    for (const controller of controllers) {
+      const res = await open(batchId, controller.signal);
+      expect(res.status).toBe(200);
+      streams.push(res);
+    }
+
+    const rejected = await open(batchId);
+    expect(rejected.status).toBe(429);
+    expect(rejected.headers.get('Retry-After')).toBe('5');
+    expect(await rejected.json()).toEqual({
+      error: 'too many event streams',
+      code: 'QUEUE_FULL',
+      retry_after_seconds: 5,
+    });
+
+    // Another batch of the same user keeps its own allowance.
+    const other = await open(otherBatchId);
+    expect(other.status).toBe(200);
+    streams.push(other);
+
+    // A client disconnect frees its slot for a new stream.
+    controllers[0]?.abort();
+    const readmitted = await open(batchId);
+    expect(readmitted.status).toBe(200);
+    streams.push(readmitted);
+    expect((await open(batchId)).status).toBe(429);
+
+    // So does a reader cancel.
+    await streams[1]?.body?.cancel();
+    const afterCancel = await open(batchId);
+    expect(afterCancel.status).toBe(200);
+    streams.push(afterCancel);
+  } finally {
+    for (const controller of controllers) controller.abort();
+    await Promise.all(streams.map(async (res) => { await res.body?.cancel().catch(() => undefined); }));
+  }
+});
+
+test('GET /api/batches/:id/events streams on a terminal batch release their slot when they close', async () => {
+  const runtime = testRuntime();
+  const { db } = runtime;
+  seedUser(db, USER_ID);
+  const batchId = '00000000-0000-4000-8000-000000000903';
+  insertBatch(db, { id: batchId, userId: USER_ID, status: 'done', pool: 'shared', createdAt: 9_100 });
+  insertDoneTile(db, batchId, USER_ID, '00000000-0000-4000-8000-000000000960', 0, 9_200);
+
+  const responses = await Promise.all(Array.from({ length: 12 }, () => runtime.fetch(`/api/batches/${batchId}/events`, {
+    headers: { 'Remote-User': USER_ID },
+  })));
+  for (const res of responses) {
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('event: done');
+  }
+});
+
+test('GET /api/batches/:id/events releases the slot of a stream whose setup fails', async () => {
+  const runtime = testRuntime({ LOG_LEVEL: 'silent' });
+  const { db } = runtime;
+  seedUser(db, USER_ID);
+  const batchId = '00000000-0000-4000-8000-000000000904';
+  insertBatch(db, { id: batchId, userId: USER_ID, status: 'running', pool: 'shared', createdAt: 9_300 });
+  insertLoadingTile(db, batchId, USER_ID, '00000000-0000-4000-8000-000000000970', 0);
+  const open = () => runtime.fetch(`/api/batches/${batchId}/events`, { headers: { 'Remote-User': USER_ID } });
+
+  for (let attempt = 0; attempt < MAX_EVENT_STREAMS_PER_BATCH; attempt += 1) {
+    bus.failNextSubscribeForTests(new Error('synthetic subscribe failure'));
+    expect(await (await open()).text()).toBe('');
+  }
+  setBatchesEventsSnapshotRaceHookForTests(() => { throw new Error('synthetic snapshot failure'); });
+  try {
+    for (let attempt = 0; attempt < MAX_EVENT_STREAMS_PER_BATCH; attempt += 1) {
+      expect((await open()).status).toBe(500);
+    }
+  } finally {
+    setBatchesEventsSnapshotRaceHookForTests(null);
+  }
+
+  const streams: Response[] = [];
+  try {
+    for (let attempt = 0; attempt < MAX_EVENT_STREAMS_PER_BATCH; attempt += 1) {
+      const res = await open();
+      expect(res.status).toBe(200);
+      streams.push(res);
+    }
+    expect((await open()).status).toBe(429);
+  } finally {
+    await Promise.all(streams.map(async (res) => { await res.body?.cancel().catch(() => undefined); }));
+  }
 });
 
 function seedUser(db: Database, userId: string): void {

@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
+import { RETRY_AFTER_FIELD } from '@atelier/shared';
 import type {
+  ApiErrorCode,
   BatchEvent,
   BatchStatus,
   DoneEvent,
@@ -26,6 +28,18 @@ import { refImageIdsForBatch } from '../orchestrator/refImages';
 import { doneTileEvent } from '../orchestrator/tileEvents';
 import { parseParams } from './_http';
 import { UuidParamSchema } from './history.schema';
+
+// Each open stream holds a keepalive timer and a bus subscription. Streams only
+// live while a batch is active, and active batches per user are already
+// bounded, so a per-batch cap also bounds what one user can hold open.
+export const MAX_EVENT_STREAMS_PER_BATCH = 8;
+const openStreamsByBatch = new Map<string, number>();
+
+function releaseStreamSlot(batchId: string): void {
+  const remaining = (openStreamsByBatch.get(batchId) ?? 0) - 1;
+  if (remaining > 0) openStreamsByBatch.set(batchId, remaining);
+  else openStreamsByBatch.delete(batchId);
+}
 
 type SnapshotRaceHook = () => void;
 let snapshotRaceHookForTests: SnapshotRaceHook | null = null;
@@ -67,6 +81,17 @@ export const batchesEventsRoutes = new Hono<AppEnv>().get('/batches/:batchId/eve
     .get(params.value.batchId, c.var.userId);
   if (!batch) return c.body(null, 404);
 
+  const openStreams = openStreamsByBatch.get(batch.id) ?? 0;
+  if (openStreams >= MAX_EVENT_STREAMS_PER_BATCH) {
+    return c.json(
+      { error: 'too many event streams', code: 'QUEUE_FULL' satisfies ApiErrorCode, [RETRY_AFTER_FIELD]: 5 },
+      429,
+      { 'Retry-After': '5' },
+    );
+  }
+  // Released exactly once, by the stream's idempotent `close`.
+  openStreamsByBatch.set(batch.id, openStreams + 1);
+
   // Subscribe to the bus BEFORE taking the DB snapshot, then drain the
   // snapshot through replay, then drain any live frames captured in the
   // subscribe→snapshot window. This closes the race window where the
@@ -79,7 +104,7 @@ export const batchesEventsRoutes = new Hono<AppEnv>().get('/batches/:batchId/eve
 
   let closeStream: () => void = () => undefined;
   const stream = new ReadableStream<Uint8Array>({
-    start: (controller) => {
+    start: closeOnThrow(() => { closeStream(); }, (controller) => {
       let closed = false;
       let keepalive: ReturnType<typeof setInterval> | null = null;
       let unsubscribe: () => void = () => undefined;
@@ -87,6 +112,7 @@ export const batchesEventsRoutes = new Hono<AppEnv>().get('/batches/:batchId/eve
       const close = () => {
         if (closed) return;
         closed = true;
+        releaseStreamSlot(batch.id);
         if (keepalive !== null) clearInterval(keepalive);
         unsubscribe();
         c.req.raw.signal.removeEventListener('abort', close);
@@ -173,6 +199,11 @@ export const batchesEventsRoutes = new Hono<AppEnv>().get('/batches/:batchId/eve
       // the ones the snapshot missed (the actual race-window frames).
       drainingPending = true;
       c.req.raw.signal.addEventListener('abort', close, { once: true });
+      // A client gone before the stream started never fires `abort` again.
+      if (c.req.raw.signal.aborted) {
+        close();
+        return;
+      }
       keepalive = setInterval(() => {
         enqueueOptional(() => encodeSseComment());
       }, KEEPALIVE_MS);
@@ -213,7 +244,7 @@ export const batchesEventsRoutes = new Hono<AppEnv>().get('/batches/:batchId/eve
         }
         close();
       }
-    },
+    }),
     cancel: () => {
       closeStream();
     },
@@ -221,6 +252,22 @@ export const batchesEventsRoutes = new Hono<AppEnv>().get('/batches/:batchId/eve
 
   return c.body(stream, 200, sseHeaders());
 });
+
+// A throw inside `start` fails the request, so the stream's slot and timers
+// must be released before it propagates.
+function closeOnThrow(
+  onThrow: () => void,
+  start: (controller: ReadableStreamDefaultController<Uint8Array>) => void,
+): (controller: ReadableStreamDefaultController<Uint8Array>) => void {
+  return (controller) => {
+    try {
+      start(controller);
+    } catch (error) {
+      onThrow();
+      throw error;
+    }
+  };
+}
 
 function queryTiles(db: AppEnv['Variables']['db'], batch: BatchEventRow): TileEventRow[] {
   return db

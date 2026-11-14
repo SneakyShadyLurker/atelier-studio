@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { TEXT_REASONING_EFFORT_VALUES, TEXT_TASKS } from '@atelier/shared';
+import { TEXT_REASONING_EFFORT_VALUES, TEXT_TASKS, type TextModelTaskPutRequest } from '@atelier/shared';
+import type { AssertWire, MatchesWire } from '../validation/wireBinding';
 
 export const TextModelTaskParam = z.object({
   task: z.enum(TEXT_TASKS),
@@ -12,3 +13,4 @@ export const TextModelTaskPutBody = z.object({
   modelId: z.string().min(1).max(64).nullable(),
   effort: z.enum(TEXT_REASONING_EFFORT_VALUES).nullable().optional(),
 });
+type _TaskPutWire = AssertWire<MatchesWire<typeof TextModelTaskPutBody, TextModelTaskPutRequest>>;

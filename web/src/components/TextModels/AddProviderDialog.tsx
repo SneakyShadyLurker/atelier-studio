@@ -1,8 +1,8 @@
 import { useId, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import type { AdminProvider, TextPreset, TextProviderConnectionTestRequest } from '@atelier/shared';
+import type { AdminProvider, TextPreset, TextProviderConnectionTestRequest, TextProviderCreateRequest } from '@atelier/shared';
 import { TEXT_PRESETS } from '@atelier/shared';
-import { testDraftConnection, type ProviderCreateBody } from '../../api/textProviders';
+import { testDraftConnection } from '../../api/textProviders';
 import { useExitTransition } from '../../hooks/useExitTransition';
 import { useCreateProvider } from '../../hooks/useTextProviders';
 import { describeError } from '../../lib/errorCopy';
@@ -141,6 +141,7 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
   };
 
   const runTest = () => {
+    if (busy || testing) return;
     setShowErrors('test');
     setUrlTouched(true);
     if (Object.keys(draftErrors(draft, true)).length > 0) return;
@@ -156,7 +157,7 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
     setShowErrors('save');
     if (Object.keys(draftErrors(draft, false)).length > 0) return;
     const { apiKey: key, ...connectionBody } = current.body;
-    const body: ProviderCreateBody = {
+    const body: TextProviderCreateRequest = {
       name: draft.name.trim(),
       protocol: connectionBody.protocol,
       baseUrl: connectionBody.baseUrl,
@@ -242,7 +243,16 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
         {saveError !== null && <p role="alert" className={styles.fieldError}>{saveError}</p>}
 
         <div className={`${dialogStyles.actions} ${styles.actions}`}>
-          <button type="button" className={`${btn.secondary} ${styles.testButton}`} onClick={runTest} disabled={busy || testing}>
+          {/* Busy is aria-disabled with a click guard, never `disabled`: a
+              focused control that becomes disabled drops keyboard focus. */}
+          <button
+            type="button"
+            className={`${btn.secondary} ${styles.testButton}`}
+            onClick={runTest}
+            disabled={busy}
+            aria-disabled={testing || undefined}
+            aria-busy={testing || undefined}
+          >
             {testing ? 'Testing…' : 'Test connection'}
           </button>
           <div className={dialogStyles.actionsRight}>
@@ -250,9 +260,19 @@ export default function AddProviderDialog({ byokMissing, onClose, onSaved }: Add
               Cancel
             </button>
             {saveAnyway && (
-              <button type="button" className={btn.secondary} onClick={save} disabled={busy}>Save anyway</button>
+              <button type="button" className={btn.secondary} onClick={save} aria-disabled={busy || undefined} aria-busy={busy || undefined}>
+                Save anyway
+              </button>
             )}
-            <button type="button" className={btn.primary} onClick={save} disabled={busy || !passed} aria-describedby={!passed && !saveAnyway ? saveHintId : undefined}>
+            <button
+              type="button"
+              className={btn.primary}
+              onClick={save}
+              disabled={!passed}
+              aria-disabled={busy || undefined}
+              aria-busy={(busy && passed) || undefined}
+              aria-describedby={!passed && !saveAnyway ? saveHintId : undefined}
+            >
               {busy ? 'Saving…' : 'Save provider'}
             </button>
           </div>

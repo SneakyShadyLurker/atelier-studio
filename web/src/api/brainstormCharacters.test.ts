@@ -21,3 +21,27 @@ describe('parseBrainstormStream', () => {
     ]);
   });
 });
+
+describe('parseBrainstormStream validation', () => {
+  async function failure(body: string): Promise<unknown> {
+    try {
+      await Array.fromAsync(parseBrainstormStream(streamOf(body)));
+      return null;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  test('rejects a prompt frame without a numeric index', async () => {
+    expect((await failure('event: prompt\ndata: {"index":"0","text":"a"}\n\n') as Error).message).toBe('invalid prompt SSE payload');
+  });
+
+  test('rejects a done frame without a count', async () => {
+    expect((await failure('event: done\ndata: {}\n\n') as Error).message).toBe('invalid done SSE payload');
+  });
+
+  test('yields only the documented fields', async () => {
+    const events = await Array.fromAsync(parseBrainstormStream(streamOf('event: prompt\ndata: {"index":0,"text":"a","x":1}\n\n')));
+    expect(events).toEqual([{ event: 'prompt', data: { index: 0, text: 'a' } }]);
+  });
+});

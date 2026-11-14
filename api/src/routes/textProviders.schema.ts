@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
+  TEXT_DISPLAY_NAME_MAX_CHARS,
   TEXT_LATENCY_PROFILES,
+  TEXT_MODEL_ID_MAX_CHARS,
   TEXT_PROMPT_VARIANTS,
   TEXT_PROTOCOLS,
   TEXT_REASONING_EFFORT_VALUES,
@@ -8,7 +10,12 @@ import {
   TEXT_TASKS,
   TEXT_TOKEN_FIELDS,
   validateTextProviderBaseUrl,
+  type TextModelCreateEntry,
+  type TextModelPatchRequest,
   type TextProviderConnectionTestRequest,
+  type TextProviderCreateRequest,
+  type TextProviderPatchRequest,
+  type TextWriterPutRequest,
 } from '@atelier/shared';
 import type { AssertWire, MatchesWire } from '../validation/wireBinding';
 
@@ -18,7 +25,7 @@ import type { AssertWire, MatchesWire } from '../validation/wireBinding';
 
 const rowId = z.string().min(1).max(64);
 
-const providerName = z.string().min(1).max(60);
+const displayName = z.string().min(1).max(TEXT_DISPLAY_NAME_MAX_CHARS);
 
 /** Shared URL rule (spec § 9.2); answers its plain message and yields the normalized form. */
 const baseUrl = z.string().max(2048).transform((value, ctx) => {
@@ -31,14 +38,14 @@ const baseUrl = z.string().max(2048).transform((value, ctx) => {
 });
 
 const apiKey = z.string().min(1).max(4096);
-const upstreamModelId = z.string().min(1).max(200);
+const upstreamModelId = z.string().min(1).max(TEXT_MODEL_ID_MAX_CHARS);
 const effort = z.enum(TEXT_REASONING_EFFORT_VALUES);
 
 export const TextProviderParam = z.object({ id: rowId });
 export const TextModelParam = z.object({ id: rowId, mid: rowId });
 
 export const TextProviderCreateBody = z.object({
-  name: providerName,
+  name: displayName,
   protocol: z.enum(TEXT_PROTOCOLS),
   baseUrl,
   preset: z.string().min(1).max(64).nullable().exactOptional(),
@@ -46,10 +53,11 @@ export const TextProviderCreateBody = z.object({
   tokenField: z.enum(TEXT_TOKEN_FIELDS).exactOptional(),
   listModels: z.boolean().exactOptional(),
 });
+type _ProviderCreateWire = AssertWire<MatchesWire<typeof TextProviderCreateBody, TextProviderCreateRequest>>;
 
 /** `apiKey` replaces the stored key; null removes it. */
 export const TextProviderPatchBody = z.object({
-  name: providerName.exactOptional(),
+  name: displayName.exactOptional(),
   protocol: z.enum(TEXT_PROTOCOLS).exactOptional(),
   baseUrl: baseUrl.exactOptional(),
   preset: z.string().min(1).max(64).nullable().exactOptional(),
@@ -58,6 +66,7 @@ export const TextProviderPatchBody = z.object({
   listModels: z.boolean().exactOptional(),
   enabled: z.boolean().exactOptional(),
 });
+type _ProviderPatchWire = AssertWire<MatchesWire<typeof TextProviderPatchBody, TextProviderPatchRequest>>;
 
 /** Unsaved draft; `probeModelId` is required when `listModels` is false (checked by the probe). */
 export const TextProviderDraftTestBody = z.object({
@@ -87,14 +96,15 @@ const hints = z.object({
 export const TextModelsCreateBody = z.object({
   models: z.array(z.object({
     modelId: upstreamModelId,
-    displayName: z.string().min(1).max(60).exactOptional(),
+    displayName: displayName.exactOptional(),
     /** List hints, used as the starting capability values. */
     hints: hints.exactOptional(),
   })).min(1).max(200),
 });
+type _ModelCreateEntryWire = AssertWire<MatchesWire<typeof TextModelsCreateBody.shape.models.element, TextModelCreateEntry>>;
 
 export const TextModelPatchBody = z.object({
-  displayName: z.string().min(1).max(60).exactOptional(),
+  displayName: displayName.exactOptional(),
   enabled: z.boolean().exactOptional(),
   screenRequests: z.boolean().exactOptional(),
   sortOrder: z.number().int().min(0).max(1_000_000).exactOptional(),
@@ -109,6 +119,7 @@ export const TextModelPatchBody = z.object({
   latencyProfile: z.enum(TEXT_LATENCY_PROFILES).exactOptional(),
   promptVariant: z.enum(TEXT_PROMPT_VARIANTS).exactOptional(),
 });
+type _ModelPatchWire = AssertWire<MatchesWire<typeof TextModelPatchBody, TextModelPatchRequest>>;
 
 export const TextRoutingScopeParam = z.object({
   scope: z.enum(['default', ...TEXT_TASKS]),
@@ -128,3 +139,4 @@ export const TextRoutingWriterBody = z.object({
   modelId: rowId.nullable(),
   mode: z.enum(['lock', 'prefer']).default('prefer'),
 });
+type _WriterPutWire = AssertWire<MatchesWire<typeof TextRoutingWriterBody, TextWriterPutRequest>>;

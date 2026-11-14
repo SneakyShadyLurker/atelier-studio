@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { RENDER_RESOLUTIONS } from '@atelier/shared';
+import { RENDER_RESOLUTIONS, type ModelResolutionPutRequest } from '@atelier/shared';
+import type { AssertWire, MatchesWire } from '../validation/wireBinding';
 
 export const ModelResolutionModelParam = z.object({
   modelId: z.string().min(1).max(200),
@@ -16,5 +17,6 @@ export const ModelResolutionPutBody = z.object({
   downscale: z.boolean().optional(),
 }).strict()
   .refine((body) => body.textToImage !== undefined || body.reference !== undefined || body.downscale !== undefined, {
-    message: 'at least one of textToImage, reference or downscale required',
+    error: 'at least one of textToImage, reference or downscale required',
   });
+type _ModelResolutionPutWire = AssertWire<MatchesWire<typeof ModelResolutionPutBody, ModelResolutionPutRequest>>;

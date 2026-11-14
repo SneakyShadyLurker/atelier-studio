@@ -4,7 +4,7 @@ import {
   AI_FILL_BATCH_MAX_OUTPUT_TOKENS,
   AI_FILL_BATCH_PER_ATTEMPT_TIMEOUT_MS,
   AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
-  GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS,
+  SLOW_PER_ATTEMPT_FLOOR_MS,
   aiFillBatchRouteTimeoutMs,
   aiFillPolicyEnvelopeMs,
   aiFillRouteTimeoutMs,
@@ -166,7 +166,7 @@ describe('aiFill retry policy', () => {
 
     // A GLM batch budgets its own longer per-attempt timeout for both calls.
     expect(aiFillBatchRouteTimeoutMs('slow', 8_000)).toBe(
-      2 * aiFillPolicyEnvelopeMs(GLM_ABLITERATED_AI_FILL_PER_ATTEMPT_TIMEOUT_MS, 8_000) + AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
+      2 * aiFillPolicyEnvelopeMs(SLOW_PER_ATTEMPT_FLOOR_MS, 8_000) + AI_FILL_ROUTE_TIMEOUT_MARGIN_MS,
     );
 
     expect(aiFillRouteTimeoutMs([140_000, 120_000], 8_000)).toBe(

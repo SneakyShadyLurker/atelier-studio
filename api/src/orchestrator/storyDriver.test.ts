@@ -69,23 +69,57 @@ function seedStory(
   db: Database,
   beats: readonly string[],
   status: 'rendering' | 'canceled' = 'rendering',
+  userId = 'alice',
 ): string {
   const storyId = crypto.randomUUID();
-  db.query("INSERT OR IGNORE INTO users (id, created_at) VALUES ('alice', 1)").run();
+  db.query('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, 1)').run(userId);
   db.query(
     `INSERT INTO stories
       (id, user_id, status, outline, logline, continuity_bible, ratio,
        source_upload_id, extends_tile_id, source_prompt, error, eta_ms, created_at, updated_at)
-     VALUES (?, 'alice', ?, 'outline', 'logline', 'bible', '16:9',
+     VALUES (?, ?, ?, 'outline', 'logline', 'bible', '16:9',
              NULL, NULL, NULL, NULL, 1000, 1, 1)`,
-  ).run(storyId, status);
+  ).run(storyId, userId, status);
   const insert = db.query(
     `INSERT INTO story_segments
       (story_id, user_id, idx, beat, duration_frames, batch_id, attempts)
-     VALUES (?, 'alice', ?, ?, 124, NULL, 0)`,
+     VALUES (?, ?, ?, ?, 124, NULL, 0)`,
   );
-  for (const [idx, beat] of beats.entries()) insert.run(storyId, idx, beat);
+  for (const [idx, beat] of beats.entries()) insert.run(storyId, userId, idx, beat);
   return storyId;
+}
+
+// Holds every segment-writing call open until the test releases its beat, so
+// tests can observe which stories are inside their prompt-writing step at once.
+function holdingProvider(): {
+  readonly provider: TestTextFeatureProvider;
+  readonly started: string[];
+  readonly open: () => number;
+  readonly release: (beat: string) => void;
+} {
+  const started: string[] = [];
+  const releases = new Map<string, () => void>();
+  const provider = providerWith(async function* (prompt, _images, signal) {
+    started.push(prompt);
+    await new Promise<void>((resolve, reject) => {
+      releases.set(prompt, resolve);
+      if (signal.aborted) reject(abortReason(signal));
+      else signal.addEventListener('abort', () => { reject(abortReason(signal)); }, { once: true });
+    });
+    releases.delete(prompt);
+    yield { type: 'delta', text: `written ${prompt}` } satisfies EnhanceChunk;
+    yield { type: 'done' } satisfies EnhanceChunk;
+  });
+  return {
+    provider,
+    started,
+    open: () => releases.size,
+    release: (beat) => {
+      const resolve = releases.get(beat);
+      if (!resolve) throw new Error(`beat ${beat} is not being written`);
+      resolve();
+    },
+  };
 }
 
 function configure(
@@ -742,6 +776,82 @@ describe('story driver', () => {
     notifyStoryBatchTerminal(batchId, true); await waitForStoryDriverIdle();
     expect(runtime.db.query('SELECT status FROM stories WHERE id=?').get(id)).toEqual({ status: 'done' });
     expect(countInflightVideoForUser(runtime.db, 'alice', ['minimax-h3-t2v'])).toBe(0);
+  });
+
+  test('another user\'s story advances while one story is held inside its prompt-writing step', async () => {
+    const held = holdingProvider();
+    setTextModelProviderForTests(held.provider);
+    const runtime = testRuntime({ ...VIDEO_ON, LOCAL_MODELS_USERS: 'alice,bob' });
+    configure(runtime);
+    const slow = seedStory(runtime.db, ['slow beat'], 'rendering', 'alice');
+    const quick = seedStory(runtime.db, ['quick beat'], 'rendering', 'bob');
+    try {
+      kickStory(slow);
+      await until(() => held.started.includes('slow beat'));
+      kickStory(quick);
+      await until(() => held.started.includes('quick beat'));
+      held.release('quick beat');
+      await until(() => currentSegment(runtime.db, quick, 0).batch_id !== null);
+      expect(currentSegment(runtime.db, slow, 0)).toEqual({ batch_id: null, attempts: 0 });
+      held.release('slow beat');
+      await within(waitForStoryDriverIdle());
+      expect(currentSegment(runtime.db, slow, 0).attempts).toBe(1);
+    } finally {
+      await within(stopStoryDriver());
+    }
+  });
+
+  test('stories of one user never advance at the same time and keep their order', async () => {
+    const held = holdingProvider();
+    setTextModelProviderForTests(held.provider);
+    const runtime = testRuntime({ ...VIDEO_ON, LOCAL_MODELS_USERS: 'alice,bob' });
+    configure(runtime);
+    const first = seedStory(runtime.db, ['first beat']);
+    const second = seedStory(runtime.db, ['second beat']);
+    const other = seedStory(runtime.db, ['other beat'], 'rendering', 'bob');
+    try {
+      kickStory(first);
+      kickStory(second);
+      kickStory(other);
+      // The other user's story is taken past alice's waiting second story.
+      await until(() => held.started.includes('other beat'));
+      expect(held.started).toEqual(['first beat', 'other beat']);
+      held.release('other beat');
+      await until(() => currentSegment(runtime.db, other, 0).batch_id !== null);
+      expect(held.started).toEqual(['first beat', 'other beat']);
+      held.release('first beat');
+      await until(() => held.started.includes('second beat'));
+      expect(currentSegment(runtime.db, first, 0).batch_id).not.toBeNull();
+      held.release('second beat');
+      await within(waitForStoryDriverIdle());
+      expect(held.started).toEqual(['first beat', 'other beat', 'second beat']);
+      expect(currentSegment(runtime.db, second, 0).attempts).toBe(1);
+    } finally {
+      await within(stopStoryDriver());
+    }
+  });
+
+  test('at most three stories advance at once', async () => {
+    const held = holdingProvider();
+    setTextModelProviderForTests(held.provider);
+    const users = ['alice', 'bob', 'carol', 'dave'];
+    const runtime = testRuntime({ ...VIDEO_ON, LOCAL_MODELS_USERS: users.join(',') });
+    configure(runtime);
+    const stories = users.map((user) => seedStory(runtime.db, [`${user} beat`], 'rendering', user));
+    try {
+      for (const id of stories) kickStory(id);
+      await until(() => held.open() === 3);
+      await Bun.sleep(30);
+      expect(held.started).toEqual(['alice beat', 'bob beat', 'carol beat']);
+      held.release('bob beat');
+      await until(() => held.started.includes('dave beat'));
+      expect(held.open()).toBe(3);
+      for (const user of ['alice', 'carol', 'dave']) held.release(`${user} beat`);
+      await within(waitForStoryDriverIdle());
+      for (const id of stories) expect(currentSegment(runtime.db, id, 0).attempts).toBe(1);
+    } finally {
+      await within(stopStoryDriver());
+    }
   });
 
   test('recovery re-kicks rendering stories', async () => {

@@ -5,7 +5,7 @@ import { MAX_UPLOAD_FILE_BYTES as SHARED_MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_INPUT
 import { TILE_EXTS, TILE_MIMES, type TileExt, type TileMime } from '@atelier/shared';
 import type { AppEnv } from '../server-env';
 import { deleteArtifact, readArtifactBytes, streamArtifact } from '../storage/files';
-import { parseParams } from './_http';
+import { parseParams, storageSealedResponse } from './_http';
 import { UploadParamSchema } from './uploads.schema';
 import { ImageParamSchema } from './images.schema';
 import { selectDoneTile } from '../db/doneTile';
@@ -234,7 +234,7 @@ export const uploadsRoutes = new Hono<AppEnv>()
         c.var.logger.warn({ userId: c.var.userId }, 'upload queue full');
         return c.body(null, 503, { 'Retry-After': '5' });
       }
-      if (error instanceof StorageSealedError) return c.json({ error: 'storage sealed' }, 503, { 'Retry-After': '5' });
+      if (error instanceof StorageSealedError) return storageSealedResponse(c);
       if (!reportIfCorruption(error, c.var.logger, { phase: 'source_upload', tileId })) {
         c.var.logger.error({ err: error, tileId }, 'source upload failed');
       }

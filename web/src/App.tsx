@@ -5,6 +5,7 @@ import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useR
 import { flushSync } from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { HISTORY_WRITE_MUTATION_KEY } from './hooks/historyWrites';
+import { invalidateLibrary } from './hooks/invalidateLibrary';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { resolveActiveBatchId } from './lib/burstFollow';
 import { describeError } from './lib/errorCopy';
@@ -305,10 +306,10 @@ function AppContent() {
     mutationFn: async (storyId: string) => {
       const result = await cancelStoryRequest(storyId);
       if (result.inflightBatchId !== null) await cancelBatchForStory(result.inflightBatchId);
-      await queryClient.invalidateQueries({ queryKey: historyKeys.all() });
     },
     onSuccess: () => { addToast('Story canceled'); },
     onError: (error) => { addToast(describeError(error, "Couldn't cancel the story."), 'error'); },
+    onSettled: () => invalidateLibrary(queryClient),
   }).mutate;
   const deleteBatch = useDeleteBatch({ activeView: view, q: debouncedQ });
   const deleteTile = useDeleteTile({ activeView: view, q: debouncedQ });

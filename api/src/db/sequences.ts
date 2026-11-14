@@ -311,8 +311,9 @@ export function fetchSequenceSummaries(
 ): ReadonlyMap<string, VideoSequenceSummary> {
   const uniqueIds = [...new Set(sequenceIds)];
   if (uniqueIds.length === 0) return new Map();
-  const placeholders = uniqueIds.map(() => '?').join(', ');
-  const rows = db.query<SequenceSummaryRow, string[]>(
+  // One fixed-shape statement for every page: a variable-length IN list
+  // would add a query-cache entry per id count (see preparedStatements.ts).
+  const rows = db.query<SequenceSummaryRow, [string, string]>(
     `SELECT s.id,
             s.master_status,
             s.master_updated_at,
@@ -320,9 +321,9 @@ export function fetchSequenceSummaries(
             COALESCE(SUM(b.duration_frames), 0) AS total_duration_frames
        FROM video_sequences s
        JOIN batches b ON b.sequence_id = s.id AND b.user_id = s.user_id
-      WHERE s.user_id = ? AND s.id IN (${placeholders})
+      WHERE s.user_id = ? AND s.id IN (SELECT value FROM json_each(?))
       GROUP BY s.id, s.master_status, s.master_updated_at`,
-  ).all(userId, ...uniqueIds);
+  ).all(userId, JSON.stringify(uniqueIds));
   return new Map(rows.map((row) => [
     row.id,
     {

@@ -1,12 +1,10 @@
 import type { DraftVariableListRequest, DraftVariableListResponse } from '@atelier/shared';
 import { apiPath } from './client';
 import { requestSseResult } from './sse';
-import { isRecord, isStringArray } from '../lib/guards';
+import { DraftVariableListResponseSchema } from '@atelier/shared/prompt-tool-schemas';
 
 function isDraftVariableListResponse(value: unknown): value is DraftVariableListResponse {
-  if (!isRecord(value)) return false;
-  if (value.kind === 'entries') return isStringArray(value.entries);
-  return value.kind === 'clarify' && typeof value.question === 'string';
+  return DraftVariableListResponseSchema.safeParse(value).success;
 }
 
 export async function draftVariableList(

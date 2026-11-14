@@ -2,17 +2,20 @@ import {
   STORY_OUTLINE_MAX_CHARS,
   videoDurationSeconds,
   type Ratio,
+  type SseTerminalError,
   type StorySegmentPlan,
+  type TellStoryRequest,
 } from '@atelier/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
-import { historyKeys } from '../../api/history';
-import { tellStoryStream, type TellStoryRequest } from '../../api/stories';
+import { parseTerminalSseErrorFromData, QuotaExhaustedError } from '../../api/sse';
+import { tellStoryStream } from '../../api/stories';
+import { reReadHistory } from '../../hooks/invalidateLibrary';
 import { useAbortableMutation } from '../../hooks/useAbortableMutation';
 import { useExitTransition } from '../../hooks/useExitTransition';
 import { describeError } from '../../lib/errorCopy';
 import { runWhenReachable } from '../../lib/focus';
-import { useAtelierStore } from '../../store/atelier';
+import { quotaToastMessage, useAtelierStore } from '../../store/atelier';
 import buttons from '../../styles/buttons.module.css';
 import dialogStyles from '../../styles/dialog.module.css';
 import { DialogShell } from '../DialogShell';
@@ -43,6 +46,13 @@ function sourceLine(mode: StoryDialogSource['mode']): string {
   if (mode === 'i2v') return 'From this image';
   if (mode === 'extend') return 'Continuing this video';
   return 'From scratch';
+}
+
+// The planner fails through the shared terminal SSE error frame, so a quota
+// or moderation stop reads the same as on every other text route.
+function planErrorMessage(data: SseTerminalError): string {
+  const error = parseTerminalSseErrorFromData(data);
+  return error instanceof QuotaExhaustedError ? quotaToastMessage(error.retryAfterSeconds) : error.message;
 }
 
 export default function StoryDialog({ source, onClose, stream = tellStoryStream }: StoryDialogProps) {
@@ -94,7 +104,7 @@ export default function StoryDialog({ source, onClose, stream = tellStoryStream 
       for await (const event of stream(request, signal)) {
         if (event.event === 'status') continue;
         if (event.event === 'error') {
-          setPlanError(event.data.message);
+          setPlanError(planErrorMessage(event.data));
           setState('idle');
           return;
         }
@@ -102,7 +112,7 @@ export default function StoryDialog({ source, onClose, stream = tellStoryStream 
         setPlan(event.data);
         setState('announced');
         setPendingStory({ id: event.data.storyId, until: Date.now() + 5 * 60_000 });
-        void queryClient.invalidateQueries({ queryKey: historyKeys.all() });
+        void reReadHistory(queryClient);
         break;
       }
       if (!announced && !signal.aborted) throw new Error("Couldn't plan the story. Please try again.");

@@ -26,7 +26,7 @@ const numericString = (defaultValue: number) =>
     // One operator-facing message covers every failure mode (NaN from a
     // non-numeric value, a float, zero, or a negative) instead of Zod's terse
     // 'expected int'. ConfigError already prefixes the offending var name.
-    .refine((n) => Number.isInteger(n) && n > 0, { message: 'must be a positive integer' });
+    .refine((n) => Number.isInteger(n) && n > 0, { error: 'must be a positive integer' });
 
 // Treat `''` like `undefined` so an empty .env entry (`AUTH_HEADER_USER=`) or
 // an unset shell variable (`AUTH_HEADER_USER="$NOT_SET"`) falls back to the
@@ -73,17 +73,19 @@ const optionalSecret = z
   .optional()
   .transform((v) => (v === undefined || v === '' ? undefined : v));
 
+function parseBoolish(v: string | undefined, defaultValue: boolean): boolean {
+  if (v === undefined || v === '') return defaultValue;
+  const norm = v.toLowerCase();
+  if (norm === '1' || norm === 'true' || norm === 'yes' || norm === 'on') return true;
+  if (norm === '0' || norm === 'false' || norm === 'no' || norm === 'off') return false;
+  return defaultValue;
+}
+
 const boolish = (defaultValue: boolean) =>
   z
     .string()
     .optional()
-    .transform((v) => {
-      if (v === undefined || v === '') return defaultValue;
-      const norm = v.toLowerCase();
-      if (norm === '1' || norm === 'true' || norm === 'yes' || norm === 'on') return true;
-      if (norm === '0' || norm === 'false' || norm === 'no' || norm === 'off') return false;
-      return defaultValue;
-    });
+    .transform((v) => parseBoolish(v, defaultValue));
 
 // Base URLs are operator-supplied and concatenated with absolute provider
 // paths (`baseUrl + '/v1/...'`). A path / query / hash / credentials segment
@@ -108,7 +110,7 @@ const urlString = z
         return false;
       }
     },
-    { message: 'must be a bare http(s) base URL (no path/query/hash/credentials)' },
+    { error: 'must be a bare http(s) base URL (no path/query/hash/credentials)' },
   );
 
 // Optional base URL: empty or unset means "not configured" (an operator turns
@@ -129,7 +131,7 @@ const optionalOriginString = z
     z
       .string()
       .refine((v) => URL.canParse(v) && new URL(v).origin === v, {
-        message: 'must be an exact origin (scheme://host[:port], no path or trailing slash)',
+        error: 'must be an exact origin (scheme://host[:port], no path or trailing slash)',
       })
       .optional(),
   );
@@ -158,7 +160,7 @@ const ConfigSchema = z.object({
     .transform((v) => (v === undefined || v === '' ? undefined : v))
     .pipe(
       nonEmptyString
-        .refine(isReadableDirectory, { message: 'must be a readable directory' })
+        .refine(isReadableDirectory, { error: 'must be a readable directory' })
         .optional(),
     ),
   // Comma-separated local model ids to enable; empty enables none.
@@ -423,8 +425,9 @@ const ConfigSchema = z.object({
   // previously gated only by `NODE_ENV !== 'production'`. A misconfigured
   // staging environment that forgets to set NODE_ENV would silently expose
   // the mock as a usable model. Now requires explicit opt-in. Default
-  // `true` in dev/test, `false` in production unless explicitly set.
-  ENABLE_MOCK_PROVIDER: boolish(process.env.NODE_ENV !== 'production'),
+  // `true` in dev/test, `false` in production unless explicitly set;
+  // `loadConfig` applies that default from the NODE_ENV of the env it loads.
+  ENABLE_MOCK_PROVIDER: boolish(false),
   VIDEO_MODELS_ENABLED: boolish(false),
   // MiniMax H3 I2V submit-time motion-prompt enhancement (Kimi K3). Default ON;
   // operator kill-switch. Off → the /enhance-prompt h3-motion branch skips and
@@ -480,8 +483,9 @@ const ConfigSchema = z.object({
   // it, the api relies entirely on Authelia's session-cookie SameSite
   // posture, which defaults to Lax (does NOT cover top-level POST CSRF).
   // Default `true` in production, `false` elsewhere so test runtimes don't
-  // need to spoof Origin headers.
-  CSRF_PROTECT: boolish(process.env.NODE_ENV === 'production'),
+  // need to spoof Origin headers; `loadConfig` applies that default from the
+  // NODE_ENV of the env it loads.
+  CSRF_PROTECT: boolish(true),
 });
 
 export type Config = Readonly<z.infer<typeof ConfigSchema>>;
@@ -618,7 +622,7 @@ export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env): Config {
   // Migration guard: MAX_CONCURRENT_BATCHES was renamed to MAX_CONCURRENT_TILES
   // when the cap moved from per-user, per-batch to global, per-tile. Silently
   // ignoring the old name would let an operator who set
-  // `MAX_CONCURRENT_BATCHES=1` boot with the new default of 4, quietly
+  // `MAX_CONCURRENT_BATCHES=1` boot with the new default of 5, quietly
   // increasing upstream concurrency beyond what they configured. Refuse to
   // start until they migrate the env explicitly.
   if (env.MAX_CONCURRENT_BATCHES !== undefined && env.MAX_CONCURRENT_BATCHES !== '') {
@@ -626,7 +630,7 @@ export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env): Config {
       {
         var: 'MAX_CONCURRENT_BATCHES',
         message:
-          'renamed to MAX_CONCURRENT_TILES (default 4). The cap is now global across all users and counts in-flight tiles (one CLIProxyAPI call per tile), not per-user batches. Update your environment.',
+          'renamed to MAX_CONCURRENT_TILES (default 5). The cap is now global across all users and counts in-flight tiles (one CLIProxyAPI call per tile), not per-user batches. Update your environment.',
       },
     ]);
   }
@@ -638,6 +642,12 @@ export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env): Config {
     }));
     throw new ConfigError(issues);
   }
+  // These two defaults depend on the mode of the env being loaded, not on the
+  // process that happens to load it, so a production env gets production
+  // defaults wherever it is parsed.
+  const productionMode = env.NODE_ENV === 'production';
+  parsed.data.ENABLE_MOCK_PROVIDER = parseBoolish(env.ENABLE_MOCK_PROVIDER, !productionMode);
+  parsed.data.CSRF_PROTECT = parseBoolish(env.CSRF_PROTECT, productionMode);
   if (parsed.data.VIDEO_MODELS_ENABLED && !parsed.data.COMFYUI_BASE_URL) {
     throw new ConfigError([{
       var: 'COMFYUI_BASE_URL',

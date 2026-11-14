@@ -1,9 +1,8 @@
-import { MAX_UPLOAD_INPUT_BYTES, TILE_EXTS, TILE_MIMES } from '@atelier/shared';
-import type { TileExt, TileMime, UploadRef } from '@atelier/shared';
+import { MAX_UPLOAD_INPUT_BYTES } from '@atelier/shared';
+import type { UploadRef } from '@atelier/shared';
+import { UploadRefSchema } from '@atelier/shared/wire-schemas';
 import { apiFetch, apiUrl, extractApiError } from './client';
 import { mediaUrl } from './mediaUrl';
-
-type UploadRefJson = Record<string, unknown>;
 
 export class UploadValidationError extends Error {
   constructor(message: string) {
@@ -43,40 +42,11 @@ export class UploadFailedError extends Error {
   }
 }
 
-const tileMimeSet: ReadonlySet<string> = new Set(TILE_MIMES);
-const tileExtSet: ReadonlySet<string> = new Set(TILE_EXTS);
-
-function isTileMime(value: unknown): value is TileMime {
-  return typeof value === 'string' && tileMimeSet.has(value);
-}
-
-function isTileExt(value: unknown): value is TileExt {
-  return typeof value === 'string' && tileExtSet.has(value);
-}
-
 function parseUploadRef(value: unknown): UploadRef {
-  if (!value || typeof value !== 'object') throw new UploadFailedError(200, 'invalid upload response');
-  const json = value as UploadRefJson;
-  if (
-    typeof json.id !== 'string'
-    || !isTileMime(json.mime)
-    || !isTileExt(json.ext)
-    || typeof json.sizeBytes !== 'number'
-    || typeof json.width !== 'number'
-    || typeof json.height !== 'number'
-    || typeof json.createdAt !== 'number'
-  ) {
-    throw new UploadFailedError(200, 'invalid upload response');
-  }
-  return {
-    id: json.id,
-    mime: json.mime,
-    ext: json.ext,
-    sizeBytes: json.sizeBytes,
-    width: json.width,
-    height: json.height,
-    createdAt: json.createdAt,
-  };
+  const parsed = UploadRefSchema.safeParse(value);
+  if (!parsed.success) throw new UploadFailedError(200, 'invalid upload response');
+  // A fresh copy holding only the public upload fields (the schema drops the rest).
+  return parsed.data;
 }
 
 

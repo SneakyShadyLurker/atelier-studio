@@ -75,7 +75,13 @@ type SegmentMode = 't2v' | 'i2v-first' | 'extension';
 
 let runtime: StoryDriverRuntime | null = null;
 let stopping = false;
-let workerRunning = false;
+// Stories of different users advance side by side, so one slow prompt-writing
+// call cannot hold back every other story's bookkeeping. Stories of one user
+// stay serial: the queued-batch cap check and segment submission assume one
+// submitter per user.
+const MAX_CONCURRENT_STORIES = 3;
+let runningWorkers = 0;
+const busyUsers = new Set<string>();
 const pending = new Map<string, PendingStory>();
 const fifo: string[] = [];
 const idleWaiters = new Set<() => void>();
@@ -149,7 +155,7 @@ export function stopStoryDriver(): Promise<void> {
 export function resetStoryDriverForTests(): void {
   unsubscribeQueueChanges?.();
   unsubscribeQueueChanges = undefined;
-  if (workerRunning) throw new Error('cannot reset story driver while running');
+  if (runningWorkers > 0) throw new Error('cannot reset story driver while running');
   stopping = true;
   clearDeferredRetries();
   runtime = null;
@@ -159,7 +165,7 @@ export function resetStoryDriverForTests(): void {
 }
 
 export function waitForStoryDriverIdle(): Promise<void> {
-  if (!workerRunning && fifo.length === 0 && pending.size === 0) return Promise.resolve();
+  if (runningWorkers === 0 && fifo.length === 0 && pending.size === 0) return Promise.resolve();
   return new Promise((resolve) => { idleWaiters.add(resolve); });
 }
 
@@ -185,7 +191,7 @@ export function kickStory(storyId: string): void {
   }
   pending.set(storyId, { running: false, rerun: false });
   fifo.push(storyId);
-  void pump();
+  pump();
 }
 
 export function recoverStories(): void {
@@ -197,19 +203,58 @@ export function recoverStories(): void {
   for (const row of rows) kickStory(row.id);
 }
 
-async function pump(): Promise<void> {
-  if (workerRunning) return;
-  workerRunning = true;
+function storyOwner(configured: StoryDriverRuntime, storyId: string): string | undefined {
   try {
-    for (;;) {
-      const storyId = fifo.shift();
-      if (!storyId) break;
-      const state = pending.get(storyId);
-      const configured = runtime;
-      if (!state || !configured || stopping) continue;
-      state.running = true;
-      await runAdvance(configured, storyId);
-      state.running = false;
+    return configured.db.query<{ user_id: string }, [string]>(
+      'SELECT user_id FROM stories WHERE id = ?',
+    ).get(storyId)?.user_id;
+  } catch {
+    // `runAdvance` repeats the lookup and owns reporting its failure.
+    return undefined;
+  }
+}
+
+// Starts queued stories up to the worker limit, in queue order, passing over
+// stories whose user already has an advance running. Called on every kick and
+// whenever a worker ends, so a passed-over story starts once its user is free.
+function pump(): void {
+  let index = 0;
+  while (runningWorkers < MAX_CONCURRENT_STORIES && index < fifo.length) {
+    const storyId = fifo[index];
+    const state = storyId === undefined ? undefined : pending.get(storyId);
+    const configured = runtime;
+    if (storyId === undefined || !state || !configured || stopping) {
+      fifo.splice(index, 1);
+      continue;
+    }
+    const owner = storyOwner(configured, storyId);
+    if (owner !== undefined && busyUsers.has(owner)) {
+      index += 1;
+      continue;
+    }
+    fifo.splice(index, 1);
+    void runWorker(configured, storyId, state, owner);
+  }
+  if (runningWorkers === 0 && fifo.length === 0 && pending.size === 0) resolveIdleWaiters();
+}
+
+async function runWorker(
+  configured: StoryDriverRuntime,
+  storyId: string,
+  state: PendingStory,
+  owner: string | undefined,
+): Promise<void> {
+  runningWorkers += 1;
+  if (owner !== undefined) busyUsers.add(owner);
+  state.running = true;
+  try {
+    await runAdvance(configured, storyId);
+  } finally {
+    state.running = false;
+    if (owner !== undefined) busyUsers.delete(owner);
+    runningWorkers -= 1;
+    // A stop or reset may have replaced this story's entry meanwhile.
+    if (pending.get(storyId) === state) {
       if (state.rerun && isCurrentRuntime(configured)) {
         state.rerun = false;
         fifo.push(storyId);
@@ -217,10 +262,7 @@ async function pump(): Promise<void> {
         pending.delete(storyId);
       }
     }
-  } finally {
-    workerRunning = false;
-    if (fifo.length > 0) void pump();
-    else if (pending.size === 0) resolveIdleWaiters();
+    pump();
   }
 }
 
@@ -643,8 +685,8 @@ function recordSubmissionFailure(
   if (attempts < 2) kickStory(story.id);
 }
 
-// Foreign keys are OFF on this connection (bun:sqlite default), so removing a
-// just-created batch must delete its child tiles explicitly or they orphan.
+// The tiles go first explicitly; `tiles.batch_id ON DELETE CASCADE` (foreign
+// keys are ON for every connection, db/client.ts) would remove them as well.
 function deletePreparedBatch(db: Database, userId: string, batchId: string): void {
   db.query('DELETE FROM tiles WHERE batch_id = ? AND user_id = ?').run(batchId, userId);
   db.query('DELETE FROM batches WHERE id = ? AND user_id = ?').run(batchId, userId);

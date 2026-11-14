@@ -128,7 +128,7 @@ export const templatesRoutes = new Hono<AppEnv>()
     const SAFE = "Couldn't draft the template. Please try again.";
     const logger = c.var.logger;
     const userId = c.var.userId;
-    const resolved = c.var.text.resolve({ userId, task: 'template-draft', ...imageModelRouting(c.var.config, parsed.value.modelId) });
+    const resolved = c.var.text.resolve({ userId, task: 'template-draft', ...imageModelRouting(c.var.config, parsed.value.modelId, userId) });
     if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
     const provider = textProviderForResolved(c.var.config, c.var.text, resolved.model);
     // SSE (not single-shot JSON): the upstream LLM call can outlive the

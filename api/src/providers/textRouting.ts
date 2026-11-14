@@ -3,7 +3,7 @@ import type { Config } from '../config';
 import type { TextResolveFailure } from '../routing/textModelResolver';
 import type { TextServices } from '../routing/textServices';
 import type { TextModelRecord } from '../db/textProviders';
-import { findModel } from './registry';
+import { findModelForUser } from './registry';
 import { textModelProviderFor } from './text/registry';
 import type { TextModelProvider } from './text/textModel';
 
@@ -21,11 +21,16 @@ export function textProviderForResolved(
 }
 
 /**
- * The resolver's `imageModelId` for a request's image-model id: only a
- * registered model selects a prompt writer; anything else routes without one.
+ * The resolver's `imageModelId` for a request's image-model id: only a model
+ * registered for this user selects a prompt writer; anything else, including
+ * a local row the user may not use, routes without one.
  */
-export function imageModelRouting(config: Config, modelId: string | undefined): { readonly imageModelId?: string } {
-  const entry = modelId === undefined ? null : findModel(modelId, config);
+export function imageModelRouting(
+  config: Config,
+  modelId: string | undefined,
+  userId: string,
+): { readonly imageModelId?: string } {
+  const entry = modelId === undefined ? null : findModelForUser(modelId, config, userId);
   return entry ? { imageModelId: entry.model.id } : {};
 }
 

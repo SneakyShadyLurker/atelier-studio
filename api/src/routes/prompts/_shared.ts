@@ -63,6 +63,15 @@ export function promptLibrary(db: PromptDb, userId: string): PromptLibraryRespon
   };
 }
 
+/**
+ * Version of the `GET /api/prompts` response shape. The revision counter only
+ * moves when a library row changes, so without this a deploy that adds or
+ * renames a response field would keep answering 304 and browsers would keep
+ * their cached pre-deploy body. Bump it with every change to what
+ * `promptLibrary` returns; a test pins the shape to this number.
+ */
+export const PROMPT_LIBRARY_WIRE_VERSION = 1;
+
 export function promptLibraryRevisionTag(db: PromptDb, userId: string): string {
   const revision =
     db
@@ -72,7 +81,7 @@ export function promptLibraryRevisionTag(db: PromptDb, userId: string): string {
           WHERE user_id = ?`,
       )
       .get(userId)?.revision ?? 0;
-  return `${getOrCreateUserCacheScope(db, userId)}:${revision.toString(16).padStart(16, '0')}`;
+  return `v${PROMPT_LIBRARY_WIRE_VERSION}:${getOrCreateUserCacheScope(db, userId)}:${revision.toString(16).padStart(16, '0')}`;
 }
 
 function listTemplates(db: PromptDb, userId: string): PromptTemplate[] {

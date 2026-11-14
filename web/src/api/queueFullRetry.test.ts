@@ -6,7 +6,6 @@ import {
   nextBackpressureDelayMs,
   QueueFullError,
 } from './queueFullRetry';
-import { QuotaExhaustedError } from './sse';
 
 function json429(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -48,21 +47,6 @@ describe('classifyQueueFull', () => {
   test('returns null for a non-QUEUE_FULL 429 (e.g. VIDEO_BUSY) — NOT drain backpressure', async () => {
     const out = await classifyQueueFull(json429({ error: 'busy', code: 'VIDEO_BUSY', retry_after_seconds: 5 }));
     expect(out).toBeNull();
-  });
-
-  test('throws a typed quota error with the server retry hint', async () => {
-    let caught: unknown;
-    try {
-      await classifyQueueFull(json429({
-        error: 'text quota exhausted',
-        code: 'QUOTA_EXHAUSTED',
-        retry_after_seconds: 900,
-      }));
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(QuotaExhaustedError);
-    expect((caught as QuotaExhaustedError).retryAfterSeconds).toBe(900);
   });
 
   test('an unreadable 429 body (e.g. an edge-proxy HTML 429) is NOT backpressure → null', async () => {

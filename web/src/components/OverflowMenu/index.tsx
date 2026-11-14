@@ -1,5 +1,5 @@
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from 'react';
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useId, useRef } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { focusableInside, useFocusTrap } from '../../hooks/useFocusTrap';
 import { useIsPhone } from '../../hooks/useIsPhone';
@@ -51,6 +51,7 @@ export default function OverflowMenu<TAction extends string>({
   const isPhone = useIsPhone();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const portalRootRef = useRef<HTMLDivElement | null>(null);
+  const groupIdPrefix = useId();
   // Dismissals (Esc, outside pointer, backdrop) play the shared exit; item
   // selection stays parent-driven and instant.
   const { closing, requestClose } = useExitTransition(onClose, open);
@@ -98,39 +99,50 @@ export default function OverflowMenu<TAction extends string>({
       onKeyDown={onMenuKeyDown}
     >
       <div className={styles.content} role="menu" aria-label={label} data-overlay-scroll="true">
-      {groups.map((group, groupIndex) => (
-        <div key={group.key} role="none">
-          {group.label !== undefined && <div className={styles.groupLabel}>{group.label}</div>}
-          {group.items.map((item) => (
-            <button
-              key={item.action}
-              type="button"
-              role="menuitem"
-              tabIndex={0}
-              className={styles.row}
-              data-danger={item.danger ? 'true' : undefined}
-              disabled={item.disabled}
-              onClick={() => {
-                // A dismissed menu keeps focus on its row through the exit
-                // fade; Escape then Enter must not fire the action.
-                if (closing) return;
-                // Close first and synchronously: the teardown lifts the
-                // background inert and puts focus back on the trigger, so a
-                // dialog the action opens records the trigger as its opener
-                // and returns focus there. onSelect stays inside the click,
-                // keeping the user activation (clipboard, playback).
-                flushSync(onClose);
-                onSelect(item.action);
-              }}
+      {groups.map((group, groupIndex) => {
+        const labelId = `${groupIdPrefix}-${group.key}`;
+        return (
+          <Fragment key={group.key}>
+            <div
+              role={group.label !== undefined ? 'group' : 'none'}
+              aria-labelledby={group.label !== undefined ? labelId : undefined}
             >
-              <span className={styles.icon} aria-hidden="true">{item.icon}</span>
-              <span className={styles.name}>{item.label}</span>
-              {item.chevron ? <span className={styles.chevron} aria-hidden="true">›</span> : null}
-            </button>
-          ))}
-          {groupIndex < groups.length - 1 ? <div className={styles.divider} /> : null}
-        </div>
-      ))}
+              {group.label !== undefined && <div id={labelId} className={styles.groupLabel}>{group.label}</div>}
+              {group.items.map((item) => (
+                // A disabled item is aria-disabled, not `disabled`: it stays
+                // focusable and in the roving order, so it is announced, and
+                // the click guard keeps it inert.
+                <button
+                  key={item.action}
+                  type="button"
+                  role="menuitem"
+                  tabIndex={0}
+                  className={styles.row}
+                  data-danger={item.danger ? 'true' : undefined}
+                  aria-disabled={item.disabled ? true : undefined}
+                  onClick={() => {
+                    // A dismissed menu keeps focus on its row through the exit
+                    // fade; Escape then Enter must not fire the action.
+                    if (closing || item.disabled) return;
+                    // Close first and synchronously: the teardown lifts the
+                    // background inert and puts focus back on the trigger, so a
+                    // dialog the action opens records the trigger as its opener
+                    // and returns focus there. onSelect stays inside the click,
+                    // keeping the user activation (clipboard, playback).
+                    flushSync(onClose);
+                    onSelect(item.action);
+                  }}
+                >
+                  <span className={styles.icon} aria-hidden="true">{item.icon}</span>
+                  <span className={styles.name}>{item.label}</span>
+                  {item.chevron ? <span className={styles.chevron} aria-hidden="true">›</span> : null}
+                </button>
+              ))}
+            </div>
+            {groupIndex < groups.length - 1 ? <div role="separator" className={styles.divider} /> : null}
+          </Fragment>
+        );
+      })}
       </div>
     </div>
   );

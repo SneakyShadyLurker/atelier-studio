@@ -13,7 +13,7 @@ interface Call {
   readonly body: unknown;
 }
 
-type Answer = () => Response;
+type Answer = () => Response | Promise<Response>;
 
 const PASS: ConnectionReport = {
   ok: true,
@@ -310,6 +310,47 @@ describe('Add provider: connection test and save', () => {
     fireEvent.click(button('Save anyway'));
     await waitFor(() => { expect(onSaved).toHaveBeenCalled(); });
     expect(posts(calls, '/text-providers')[0]?.body).toMatchObject({ name: 'vLLM box', baseUrl: 'http://10.0.0.5:8000/v1', preset: 'custom-openai' });
+  });
+
+  test('Test connection stays focused and inert while its test runs', async () => {
+    const answer = Promise.withResolvers<Response>();
+    const { calls } = setup({ test: () => answer.promise });
+    fireEvent.click(preset('Ollama'));
+    const testButton = button('Test connection');
+    testButton.focus();
+    fireEvent.click(testButton);
+    await waitFor(() => { expect(testButton.getAttribute('aria-busy')).toBe('true'); });
+    expect(testButton.getAttribute('aria-disabled')).toBe('true');
+    expect(testButton.disabled).toBe(false);
+    expect(document.activeElement === testButton).toBe(true);
+    fireEvent.click(testButton);
+    expect(posts(calls, '/text-providers/test')).toHaveLength(1);
+    answer.resolve(Response.json(PASS));
+    await screen.findByRole('status');
+  });
+
+  test('Save provider and Save anyway stay focused and inert while saving', async () => {
+    for (const [report, name] of [[PASS, 'Save provider'], [NO_LIST, 'Save anyway']] as const) {
+      const answer = Promise.withResolvers<Response>();
+      const { calls, onSaved } = setup({ test: () => Response.json(report), create: () => answer.promise });
+      fireEvent.click(preset('Custom OpenAI-compatible'));
+      fill('Name', 'vLLM box');
+      fill('Base URL', 'http://10.0.0.5:8000/v1');
+      fireEvent.click(button('Test connection'));
+      await screen.findByRole(report.ok ? 'status' : 'alert');
+      const save = button(name);
+      save.focus();
+      fireEvent.click(save);
+      await waitFor(() => { expect(save.getAttribute('aria-busy')).toBe('true'); });
+      expect(save.getAttribute('aria-disabled')).toBe('true');
+      expect(save.disabled).toBe(false);
+      expect(document.activeElement === save).toBe(true);
+      fireEvent.click(save);
+      expect(posts(calls, '/text-providers')).toHaveLength(1);
+      answer.resolve(Response.json(adminProvider({ id: 'p-new', name: 'vLLM box' }), { status: 201 }));
+      await waitFor(() => { expect(onSaved).toHaveBeenCalled(); });
+      cleanup();
+    }
   });
 
   test('a test already running answers 429 with a plain explanation', async () => {

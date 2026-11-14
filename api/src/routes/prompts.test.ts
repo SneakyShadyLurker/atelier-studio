@@ -7,6 +7,7 @@ import type {
   VariableOption,
 } from '@atelier/shared';
 import { testRuntime } from '../test/helpers';
+import { PROMPT_LIBRARY_WIRE_VERSION } from './prompts/_shared';
 
 type Runtime = ReturnType<typeof testRuntime>;
 
@@ -957,7 +958,7 @@ describe('prompt library routes', () => {
     const first = await app.fetch(authedReq('/api/prompts'));
     expect(first.status).toBe(200);
     const etag = first.headers.get('etag');
-    expect(etag).toMatch(/^"[0-9a-f-]{36}:[0-9a-f]{16}"$/);
+    expect(etag).toMatch(/^"v\d+:[0-9a-f-]{36}:[0-9a-f]{16}"$/);
     expect(first.headers.get('cache-control')).toBe('private, max-age=0, must-revalidate');
     await first.json();
 
@@ -981,6 +982,64 @@ describe('prompt library routes', () => {
     }));
     expect(afterChange.status).toBe(200);
     expect(afterChange.headers.get('etag')).not.toBe(etag);
+  });
+
+  test('the library response shape is pinned to the ETag wire version', async () => {
+    const { app } = testRuntime({ PROMPT_LIBRARY_USERS: 'alice' });
+    await createTemplate(app, { name: 'Portrait', body: 'p', notes: 'n' });
+    const list = await createList(app, 'subject');
+    const dimension = await createDimension(app, 'era');
+    const tagged = await replaceTags(app, dimension.id, [{ label: 'parent', sortOrder: 0 }, { label: 'child', sortOrder: 1 }]);
+    const [parent, child] = tagged.tags;
+    if (!parent || !child) throw new Error('expected tags');
+    await replaceOptions(app, list.id, [{ value: 'v', tagIds: [child.id], excludeTagIds: [parent.id], sortOrder: 0, weight: 2 }]);
+
+    const body = await expectJson<PromptLibraryResponse>(await app.fetch(authedReq('/api/prompts')), 200);
+    const paths = new Set<string>();
+    const walk = (value: unknown, path: string): void => {
+      if (Array.isArray(value)) {
+        for (const item of value) walk(item, `${path}[]`);
+      } else if (value !== null && typeof value === 'object') {
+        for (const [key, child] of Object.entries(value)) walk(child, path === '' ? key : `${path}.${key}`);
+      } else {
+        paths.add(path);
+      }
+    };
+    walk(body, '');
+
+    // Did this fail because GET /api/prompts returns something new? Bump
+    // PROMPT_LIBRARY_WIRE_VERSION (routes/prompts/_shared.ts) and update the
+    // pin: browsers reuse their cached body on 304 until the ETag changes.
+    expect({ version: PROMPT_LIBRARY_WIRE_VERSION, shape: [...paths].sort() }).toEqual({
+      version: 1,
+      shape: [
+        'dimensions[].id',
+        'dimensions[].name',
+        'dimensions[].tags[].dimensionId',
+        'dimensions[].tags[].id',
+        'dimensions[].tags[].label',
+        'dimensions[].tags[].sortOrder',
+        'templates[].body',
+        'templates[].createdAt',
+        'templates[].id',
+        'templates[].name',
+        'templates[].notes',
+        'templates[].sortOrder',
+        'templates[].updatedAt',
+        'variableLists[].createdAt',
+        'variableLists[].id',
+        'variableLists[].name',
+        'variableLists[].options[].excludeTagIds[]',
+        'variableLists[].options[].id',
+        'variableLists[].options[].listId',
+        'variableLists[].options[].sortOrder',
+        'variableLists[].options[].tagIds[]',
+        'variableLists[].options[].value',
+        'variableLists[].options[].weight',
+        'variableLists[].sortOrder',
+        'variableLists[].updatedAt',
+      ],
+    });
   });
 
   test('GET /prompts conditional 304 does not hydrate the prompt library', async () => {

@@ -99,7 +99,6 @@ export default defineConfig(
     files: ['web/src/**/*.{ts,tsx}'],
     ignores: [
       'web/src/**/*.test.{ts,tsx}',
-      'web/src/components/PromptManager/InlineTitle.tsx',
     ],
     plugins: {
       'atelier-tooltip': {

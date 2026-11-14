@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import type { AdminProvider, TextModelUsage } from '@atelier/shared';
-import { testSavedConnection, type ProviderPatchBody } from '../../api/textProviders';
+import type { AdminProvider, TextModelUsage, TextProviderPatchRequest } from '@atelier/shared';
+import { testSavedConnection } from '../../api/textProviders';
 import { useExitTransition } from '../../hooks/useExitTransition';
 import { useDeleteProvider, useUpdateProvider } from '../../hooks/useTextProviders';
 import { describeError } from '../../lib/errorCopy';
@@ -45,7 +45,7 @@ function draftOf(provider: AdminProvider): ProviderDraft {
 }
 
 /** Only the fields that changed. */
-function patchOf(provider: AdminProvider, draft: ProviderDraft, key: KeyEdit): ProviderPatchBody {
+function patchOf(provider: AdminProvider, draft: ProviderDraft, key: KeyEdit): TextProviderPatchRequest {
   const name = draft.name.trim();
   const baseUrl = normalizedUrl(draft.baseUrl);
   const typed = key.kind === 'replace' ? key.value.trim() : '';

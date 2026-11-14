@@ -1,6 +1,6 @@
 import { useMutation, useMutationState, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { TaskRow, TextModelsResponse, TextTask } from '@atelier/shared';
-import { putTaskPick, textModelKeys, textModelsOpts, type TaskPickBody } from '../api/textModels';
+import type { TaskRow, TextModelTaskPutRequest, TextModelsResponse, TextTask } from '@atelier/shared';
+import { putTaskPick, textModelKeys, textModelsOpts } from '../api/textModels';
 
 export function useTextModels() {
   return useQuery(textModelsOpts());
@@ -12,7 +12,7 @@ export function textModelLabel(id: string) {
     data.models.find((model) => model.id === id)?.displayName;
 }
 
-interface SetTaskPickVars extends TaskPickBody {
+interface SetTaskPickVars extends TextModelTaskPutRequest {
   readonly task: TextTask;
 }
 
@@ -38,7 +38,7 @@ export function usePendingTaskPicks(): ReadonlySet<TextTask> {
 // Mirrors the server closely enough for the optimistic frame; the PUT
 // response replaces it. An effort belongs to the pick and survives a model
 // change only while the new model still accepts it.
-function optimisticRow(prev: TextModelsResponse, row: TaskRow, { modelId, effort }: TaskPickBody): TaskRow {
+function optimisticRow(prev: TextModelsResponse, row: TaskRow, { modelId, effort }: TextModelTaskPutRequest): TaskRow {
   if (modelId === null) {
     // The resolver skips offline models, so the optimistic fallback does too.
     const fallback = [prev.defaults.byTask[row.task], prev.defaults.default].find((id) => {

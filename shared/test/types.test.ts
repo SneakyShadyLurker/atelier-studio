@@ -291,14 +291,15 @@ describe('shared wire types', () => {
     // DimensionProposal, InferDimensionsResponse, InferPhaseEvent,
     // InferProgressEvent, LibraryDiagnosisResponse, LibraryDiagnosisEntry,
     // ConflictingPair, LibraryCoverageResponse, CoverageUntaggedGroup,
-    // CoverageLowList, CoverageOrphanTag, CoverageMissingDimension
+    // CoverageLowList, CoverageOrphanTag, CoverageMissingDimension,
+    // RescueDonePayload, RescueFailedPayload
     const promptTraps = null as unknown as _NoUserIdInWire['__promptLibraryTraps'];
     expectType<readonly [
       unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown,
       unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown,
       unknown, unknown, unknown, unknown, unknown, unknown, unknown,
       unknown, unknown, unknown, unknown, unknown, unknown, unknown,
-      unknown,
+      unknown, unknown, unknown,
     ]>(promptTraps);
   });
 
@@ -310,12 +311,15 @@ describe('shared wire types', () => {
     // BrainstormSseEvent (union-level Extract trap),
     // Batch.provenance (nested), GenerateRequest.provenance (nested),
     // VideoSequenceSummary, Batch.sequence (nested), StorySummary,
-    // StorySegmentPlan, EphemeraStatus, CharacterCardSseEvent.
+    // StorySegmentPlan, EphemeraStatus, CharacterCardSseEvent,
+    // CharacterCardResult, CancelStoryResponse, SessionResponse,
+    // HandoffFrameResponse.
     const followups = null as unknown as _NoUserIdInWire['__wireTrapBatteryFollowups'];
     expectType<readonly [
       unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown,
       unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown,
       unknown, unknown, unknown, unknown, unknown,
+      unknown, unknown, unknown, unknown,
       unknown, unknown, unknown, unknown,
     ]>(followups);
   });

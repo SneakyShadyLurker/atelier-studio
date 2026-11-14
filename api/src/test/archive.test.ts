@@ -163,6 +163,24 @@ describe('archive route', () => {
     ).toEqual({ collection_id: collectionId, pinned: 1 });
   });
 
+  test('restoring a tile only rewrites its batch when the batch was archived', async () => {
+    const { app, db, config } = testRuntime();
+    const live = seedTile(db, config.DATA_DIR, { archivedAt: 100, batchArchivedAt: null });
+    const archived = seedTile(db, config.DATA_DIR, { archivedAt: 100, batchArchivedAt: 100 });
+    db.run('CREATE TEMP TABLE batch_writes (id TEXT)');
+    db.run('CREATE TEMP TRIGGER log_batch_writes AFTER UPDATE OF archived_at ON batches BEGIN INSERT INTO batch_writes VALUES (NEW.id); END');
+    const restore = (tileId: string) => app.fetch(new Request(`http://local/api/archive/${tileId}/restore`, { method: 'POST', headers: { 'Remote-User': 'test' } }));
+
+    expect((await restore(live.tileId)).status).toBe(204);
+    expect((await restore(archived.tileId)).status).toBe(204);
+
+    // An UPDATE that names archived_at fires the search-index trigger even
+    // when the value does not change, so an already-live batch is left alone.
+    expect(db.query<{ id: string }, []>('SELECT id FROM batch_writes').all()).toEqual([{ id: archived.batchId }]);
+    expect(db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM tiles WHERE archived_at IS NOT NULL').get()?.n).toBe(0);
+    expect(db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM batches WHERE archived_at IS NOT NULL').get()?.n).toBe(0);
+  });
+
   test('permanently deletes an archived tile and artifact', async () => {
     const { app, db, config } = testRuntime();
     const { tileId, file } = seedTile(db, config.DATA_DIR, { archivedAt: 100, batchArchivedAt: null });
@@ -234,6 +252,57 @@ describe('archive route', () => {
       const res = await app.fetch(new Request(`http://local/api/archive?${qs}`, { headers: { 'Remote-User': 'test' } }));
       expect(res.status).toBe(400);
     }
+  });
+
+  function seedStory(db: ReturnType<typeof testRuntime>['db'], userId: string, batchIds: readonly string[]): string {
+    const storyId = crypto.randomUUID();
+    db.query(
+      `INSERT INTO stories
+        (id, user_id, status, outline, logline, continuity_bible, ratio, source_prompt, eta_ms, created_at, updated_at)
+       VALUES (?, ?, 'done', 'outline', 'logline', 'bible', '16:9', 'source', 1000, 1, 1)`,
+    ).run(storyId, userId);
+    batchIds.forEach((batchId, idx) => {
+      db.query(
+        `INSERT INTO story_segments (story_id, user_id, idx, beat, duration_frames, batch_id, attempts)
+         VALUES (?, ?, ?, 'beat', 124, ?, 1)`,
+      ).run(storyId, userId, idx, batchId);
+    });
+    return storyId;
+  }
+
+  const storyRows = (db: ReturnType<typeof testRuntime>['db'], storyId: string): number[] => [
+    db.query<{ n: number }, [string]>('SELECT COUNT(*) AS n FROM stories WHERE id = ?').get(storyId)?.n ?? -1,
+    db.query<{ n: number }, [string]>('SELECT COUNT(*) AS n FROM story_segments WHERE story_id = ?').get(storyId)?.n ?? -1,
+  ];
+
+  test('permanently deleting the last clip of a story removes its plan text', async () => {
+    const { app, db, config } = testRuntime();
+    const first = seedTile(db, config.DATA_DIR, { archivedAt: 100, batchArchivedAt: 100 });
+    const second = seedTile(db, config.DATA_DIR, { archivedAt: 100, batchArchivedAt: 100 });
+    const storyId = seedStory(db, 'test', [first.batchId, second.batchId]);
+    const del = (tileId: string) => app.fetch(new Request(`http://local/api/archive/${tileId}`, { method: 'DELETE', headers: { 'Remote-User': 'test' } }));
+
+    expect((await del(first.tileId)).status).toBe(204);
+    expect(storyRows(db, storyId)).toEqual([1, 2]);
+
+    expect((await del(second.tileId)).status).toBe(204);
+    expect(storyRows(db, storyId)).toEqual([0, 0]);
+  });
+
+  test('purge-all removes the stories whose clips it deleted and keeps the rest', async () => {
+    const { app, db, config } = testRuntime();
+    const archived = seedTile(db, config.DATA_DIR, { archivedAt: 100, batchArchivedAt: 100 });
+    const visible = seedTile(db, config.DATA_DIR, { archivedAt: null, batchArchivedAt: null });
+    const other = seedTile(db, config.DATA_DIR, { userId: 'other', archivedAt: 100, batchArchivedAt: 100 });
+    const purged = seedStory(db, 'test', [archived.batchId]);
+    const live = seedStory(db, 'test', [visible.batchId]);
+    const foreign = seedStory(db, 'other', [other.batchId]);
+
+    const res = await app.fetch(new Request('http://local/api/archive', { method: 'DELETE', headers: { 'Remote-User': 'test' } }));
+    expect(res.status).toBe(204);
+    expect(storyRows(db, purged)).toEqual([0, 0]);
+    expect(storyRows(db, live)).toEqual([1, 1]);
+    expect(storyRows(db, foreign)).toEqual([1, 1]);
   });
 
   test('archive mutations are idempotent for missing targets and empty purges', async () => {

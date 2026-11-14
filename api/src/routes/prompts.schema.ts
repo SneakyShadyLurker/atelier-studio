@@ -24,7 +24,7 @@ export const TemplatePatch = z.object({
   notes: z.string().check(maxUtf16Length(4_000)).nullable().optional(),
 }).strict().refine(
   (b) => b.name !== undefined || b.body !== undefined || b.notes !== undefined,
-  { message: 'at least one of name, body, notes required' },
+  { error: 'at least one of name, body, notes required' },
 );
 
 export const ListCreate = z.object({ name: NameSchema }).strict();
@@ -41,7 +41,7 @@ export const OptionsReplace = z.object({
   options: z.array(z.object({
     value: z.string().trim().min(1).check(maxUtf16Length(2_000)),
     tagIds: z.array(z.uuid()).max(50)
-      .refine((a) => new Set(a).size === a.length, { message: 'tagIds must be unique' }),
+      .refine((a) => new Set(a).size === a.length, { error: 'tagIds must be unique' }),
     sortOrder: z.number().int().min(0),
     weight: z.number().int().min(0).max(100).default(1),
   })).max(PROMPT_ARRAY_TRANSPORT_MAX),
@@ -50,13 +50,13 @@ export const OptionsReplace = z.object({
 export const OptionPatch = z.object({
   value: z.string().trim().min(1).check(maxUtf16Length(2_000)).optional(),
   tagIds: z.array(z.uuid()).max(50)
-    .refine((a) => new Set(a).size === a.length, { message: 'tagIds must be unique' })
+    .refine((a) => new Set(a).size === a.length, { error: 'tagIds must be unique' })
     .optional(),
   sortOrder: z.number().int().min(0).optional(),
   weight: z.number().int().min(0).max(100).optional(),
 }).strict().refine(
   (v) => v.value !== undefined || v.tagIds !== undefined || v.sortOrder !== undefined || v.weight !== undefined,
-  { message: 'at least one field must be supplied' },
+  { error: 'at least one field must be supplied' },
 );
 
 export const OptionIdParam = z.object({
@@ -108,7 +108,7 @@ export const DraftTemplateRequestSchema = z.object({
   // A filled body is reworked from the user's change instructions; without them
   // (a stale tab on the old continue-the-body flow) the answer would be a guess.
   (body) => body.existingBody.trim() === '' || body.description !== undefined,
-  { message: 'Say what to change in the template', path: ['description'] },
+  { error: 'Say what to change in the template', path: ['description'] },
 );
 
 // Only modelId provides image context. Server unconditionally recomputes

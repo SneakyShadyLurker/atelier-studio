@@ -141,6 +141,11 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
         '--frame-ratio': fittedRatio.w / fittedRatio.h,
         ...(placeholder.src ? { backgroundImage: `url(${JSON.stringify(placeholder.src)})` } : {}),
       } as CSSProperties;
+  // At either end Previous/Next are aria-disabled, never `disabled`: a focused
+  // control that becomes disabled drops keyboard focus to <body>. This guard
+  // keeps them inert there.
+  const atStart = activeIndex === 0;
+  const atEnd = activeIndex === readyTiles.length - 1;
   const showTileAt = (index: number) => {
     const next = readyTiles[index];
     if (next) setLightboxTile(next.id);
@@ -156,10 +161,10 @@ export default function Lightbox({ batch, modelById, triggerKey, deleteVariant, 
       <button ref={closeRef} className={styles.close} type="button" aria-label="Close lightbox" data-tip="Close" data-tip-place="below" onClick={requestClose}>
         <I.close />
       </button>
-      {!showingMaster && <button className={`${styles.nav} ${styles.prev}`} type="button" aria-label={`Previous ${navNoun(readyTiles[activeIndex - 1] ?? tile)}`} data-tip="Previous" disabled={activeIndex === 0} onClick={() => { showTileAt(activeIndex - 1); }}>
+      {!showingMaster && <button className={`${styles.nav} ${styles.prev}`} type="button" aria-label={`Previous ${navNoun(readyTiles[activeIndex - 1] ?? tile)}`} data-tip="Previous" aria-disabled={atStart || undefined} onClick={() => { if (!atStart) showTileAt(activeIndex - 1); }}>
         <I.chevronLeft width="18" height="18" />
       </button>}
-      {!showingMaster && <button className={`${styles.nav} ${styles.next}`} type="button" aria-label={`Next ${navNoun(readyTiles[activeIndex + 1] ?? tile)}`} data-tip="Next" disabled={activeIndex === readyTiles.length - 1} onClick={() => { showTileAt(activeIndex + 1); }}>
+      {!showingMaster && <button className={`${styles.nav} ${styles.next}`} type="button" aria-label={`Next ${navNoun(readyTiles[activeIndex + 1] ?? tile)}`} data-tip="Next" aria-disabled={atEnd || undefined} onClick={() => { if (!atEnd) showTileAt(activeIndex + 1); }}>
         <I.chevronRight width="18" height="18" />
       </button>}
       {frameMounted && <div ref={setFrameHost} className={styles.frame} data-media={showingVideo ? 'video' : 'image'} style={frameStyle} aria-busy={!bodyReady} onMouseDown={(event) => { event.stopPropagation(); }} />}

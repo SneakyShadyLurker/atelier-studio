@@ -1,7 +1,7 @@
 import { useId, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { AdminProvider, ListedModel, TextModelHints } from '@atelier/shared';
-import { listAvailableModels, textAdminKeys, type NewModelBody } from '../../api/textProviders';
+import { TEXT_MODEL_ID_MAX_CHARS, type AdminProvider, type ListedModel, type TextModelCreateEntry, type TextModelHints } from '@atelier/shared';
+import { listAvailableModels, textAdminKeys } from '../../api/textProviders';
 import { useExitTransition } from '../../hooks/useExitTransition';
 import { useAddModels } from '../../hooks/useTextProviders';
 import { describeError } from '../../lib/errorCopy';
@@ -14,8 +14,6 @@ import { describedBy } from './ProviderForm';
 import { probeFailureCopy } from './TestReport';
 import form from './AddProviderDialog.module.css';
 import styles from './ModelDialogs.module.css';
-
-const MODEL_ID_MAX = 200;
 
 /** List hints as plain words: "image input, JSON, reasoning". */
 export function hintWords(hints: TextModelHints | undefined): string {
@@ -85,8 +83,8 @@ export default function AddModelsDialog({ provider, onClose }: AddModelsDialogPr
   const addManual = () => {
     const id = manualText.trim();
     if (id === '') return;
-    if (id.length > MODEL_ID_MAX) {
-      setManualError(`A model id has at most ${MODEL_ID_MAX} characters.`);
+    if (id.length > TEXT_MODEL_ID_MAX_CHARS) {
+      setManualError(`A model id has at most ${TEXT_MODEL_ID_MAX_CHARS} characters.`);
       return;
     }
     if (added.has(id)) {
@@ -110,7 +108,7 @@ export default function AddModelsDialog({ provider, onClose }: AddModelsDialogPr
     const hintsById = new Map(listed.map((model) => [model.id, model.hints] as const));
     // Listed order first, then the typed ids; the hints let rows start with them.
     const ids = [...new Set([...listed.map((model) => model.id), ...manual])].filter((id) => selected.has(id));
-    const models: NewModelBody[] = ids.map((modelId) => {
+    const models: TextModelCreateEntry[] = ids.map((modelId) => {
       const hints = hintsById.get(modelId);
       return hints === undefined ? { modelId } : { modelId, hints };
     });

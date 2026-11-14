@@ -1,10 +1,8 @@
-import { BACKEND_VALUES, LATENCY_VALUES, MODEL_AVAILABILITY_REASONS, POOL_VALUES, RATIO_VALUES, REQUEST_ID_HEADER, SESSION_SCOPE_HEADER, VIDEO_DURATION_FRAMES } from '@atelier/shared';
+import { REQUEST_ID_HEADER, SESSION_SCOPE_HEADER } from '@atelier/shared';
 import type {
   ApiErrorCode,
   ArchivePage,
-  ArchivedTile,
   Batch,
-  Collection,
   CollectionsResponse,
   HistoryPage,
   Model,
@@ -12,8 +10,14 @@ import type {
 } from '@atelier/shared';
 
 import { removePersistedQueryClient } from '../lib/persister';
-import { isMediaPair, isNumber, isRecord, isStringArray } from '../lib/guards';
-import { BatchHistoryPageSchema, PromptLibraryResponseSchema } from '@atelier/shared/wire-schemas';
+import { isRecord } from '../lib/guards';
+import {
+  ArchivePageSchema,
+  BatchHistoryPageSchema,
+  CollectionsResponseSchema,
+  ModelListSchema,
+  PromptLibraryResponseSchema,
+} from '@atelier/shared/wire-schemas';
 import { invalidateSessionScope, isSessionLocked, sessionBinding } from '../lib/sessionScope';
 import { mediaUrl } from './mediaUrl';
 
@@ -312,121 +316,20 @@ export async function requestNoContent(path: string, init: RequestInit = {}): Pr
   await request(path, init);
 }
 
-function isCollection(value: unknown): value is Collection {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && typeof value.name === 'string'
-    && isNumber(value.count)
-    && isNumber(value.archivedCount)
-    && isNumber(value.createdAt);
-}
-
-function isLibrarySummary(value: unknown): boolean {
-  return isRecord(value)
-    && isNumber(value.totalCount)
-    && isNumber(value.pinnedCount)
-    && isNumber(value.unsortedCount)
-    && isNumber(value.archivedTotalCount)
-    && isNumber(value.archivedPinnedCount)
-    && isNumber(value.archivedUnsortedCount);
-}
-
 export function isCollectionsResponse(value: unknown): value is CollectionsResponse {
-  return isRecord(value)
-    && Array.isArray(value.items)
-    && value.items.every(isCollection)
-    && isLibrarySummary(value.summary);
-}
-
-const backends: ReadonlySet<string> = new Set(BACKEND_VALUES);
-const latencies: ReadonlySet<string> = new Set(LATENCY_VALUES);
-const pools: ReadonlySet<string> = new Set(POOL_VALUES);
-const ratios: ReadonlySet<string> = new Set(RATIO_VALUES);
-const durationFrames: ReadonlySet<unknown> = new Set(VIDEO_DURATION_FRAMES);
-const availabilityReasons: ReadonlySet<string> = new Set(MODEL_AVAILABILITY_REASONS);
-
-function isAvailability(value: unknown): value is Model['availability'] {
-  return isRecord(value)
-    && typeof value.ok === 'boolean'
-    && isNumber(value.checkedAt)
-    && (value.reason === undefined || (typeof value.reason === 'string' && availabilityReasons.has(value.reason)));
-}
-
-function isModel(value: unknown): value is Model {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && typeof value.name === 'string'
-    && typeof value.backend === 'string'
-    && backends.has(value.backend)
-    && typeof value.tag === 'string'
-    && typeof value.latency === 'string'
-    && latencies.has(value.latency)
-    && (value.size === undefined || typeof value.size === 'string')
-    && Array.isArray(value.supportedRatios)
-    && value.supportedRatios.every((ratio) => typeof ratio === 'string' && ratios.has(ratio))
-    && (value.defaultRatio === undefined
-      || (typeof value.defaultRatio === 'string' && value.supportedRatios.includes(value.defaultRatio)))
-    && (value.supportsReferenceImages === undefined || typeof value.supportsReferenceImages === 'boolean')
-    // Mirrors the defaultRatio clause: element membership AND default-in-set.
-    // A duration this bundle has no definition for would otherwise reach
-    // DurationChip and take out the composer.
-    && (value.supportedDurations === undefined
-      || (Array.isArray(value.supportedDurations)
-        && value.supportedDurations.every((frames) => durationFrames.has(frames))))
-    && (value.defaultDuration === undefined
-      || (Array.isArray(value.supportedDurations) && value.supportedDurations.includes(value.defaultDuration)))
-    && (value.supportsI2V === undefined || typeof value.supportsI2V === 'boolean')
-    && (value.maxRefImages === undefined || isNumber(value.maxRefImages))
-    && (value.maxRefBytesPerBatch === undefined || isNumber(value.maxRefBytesPerBatch))
-    && isNumber(value.concurrencyCapPerUser)
-    && isNumber(value.maxCountPerBatch)
-    && (value.batched === undefined || typeof value.batched === 'boolean')
-    && (value.outputsVideo === undefined || typeof value.outputsVideo === 'boolean')
-    && (value.defaultCount === undefined || isNumber(value.defaultCount))
-    && typeof value.pool === 'string'
-    && pools.has(value.pool)
-    && (value.promptFormat === undefined || value.promptFormat === 'h3-motion')
-    && (value.requiresKey === undefined || (isRecord(value.requiresKey) && value.requiresKey.provider === 'google'))
-    && (value.availability === undefined || isAvailability(value.availability));
+  return CollectionsResponseSchema.safeParse(value).success;
 }
 
 export function isModelList(value: unknown): value is readonly Model[] {
-  return Array.isArray(value) && value.every(isModel);
-}
-
-function isHistoryPageOf<T>(value: unknown, itemGuard: (item: unknown) => item is T): value is HistoryPage<T> {
-  return isRecord(value)
-    && Array.isArray(value.items)
-    && value.items.every(itemGuard)
-    && (value.nextCursor === null || typeof value.nextCursor === 'string');
+  return ModelListSchema.safeParse(value).success;
 }
 
 export function isBatchHistoryPage(value: unknown): value is HistoryPage<Batch> {
   return BatchHistoryPageSchema.safeParse(value).success;
 }
 
-function isArchivedTile(value: unknown): value is ArchivedTile {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && typeof value.batchId === 'string'
-    && typeof value.prompt === 'string'
-    && typeof value.modelLabel === 'string'
-    && isNumber(value.seed)
-    && value.status === 'done'
-    && (value.refImageIds === undefined || isStringArray(value.refImageIds))
-    && typeof value.url === 'string'
-    && (value.thumbUrl === undefined || typeof value.thumbUrl === 'string')
-    && isMediaPair(value.ext, value.mime)
-    && typeof value.ratio === 'string'
-    && ratios.has(value.ratio)
-    && isNumber(value.completedAt)
-    && isNumber(value.archivedAt);
-}
-
 export function isArchivePage(value: unknown): value is ArchivePage {
-  return isHistoryPageOf(value, isArchivedTile)
-    && isRecord(value)
-    && (value.total === null || isNumber(value.total));
+  return ArchivePageSchema.safeParse(value).success;
 }
 
 export function isPromptLibraryResponse(value: unknown): value is PromptLibraryResponse {

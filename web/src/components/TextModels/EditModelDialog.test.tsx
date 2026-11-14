@@ -54,7 +54,8 @@ function setup(options: {
   provider?: AdminProvider;
   startTest?: boolean;
   test?: () => Response | Promise<Response>;
-  patch?: () => Response;
+  patch?: () => Response | Promise<Response>;
+  remove?: () => Promise<Response>;
   /** Rendered beside the dialog, inside the query client. */
   probe?: ReactNode;
 } = {}) {
@@ -69,7 +70,7 @@ function setup(options: {
       if (options.patch) return options.patch();
       return Response.json({ ...model, ...(calls.at(-1)?.body as Partial<AdminModel>) });
     }
-    if (method === 'DELETE') return Response.json({ ok: true });
+    if (method === 'DELETE') return options.remove ? options.remove() : Response.json({ ok: true });
     return Response.json({ providers: [] });
   }) as unknown as typeof fetch;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -357,6 +358,62 @@ describe('Edit model: Test model', () => {
   test('an untested model says so', () => {
     setup();
     expect(screen.getByText('Not tested yet. Test to confirm capabilities.')).toBeTruthy();
+  });
+});
+
+describe('Edit model: busy actions keep keyboard focus', () => {
+  test('Test model stays focused and inert while its test runs', async () => {
+    const answer = deferred<Response>();
+    const { calls } = setup({ test: () => answer.promise });
+    const testButton = button('Test model');
+    testButton.focus();
+    fireEvent.click(testButton);
+    await waitFor(() => { expect(testButton.getAttribute('aria-busy')).toBe('true'); });
+    expect(testButton.getAttribute('aria-disabled')).toBe('true');
+    expect(testButton.disabled).toBe(false);
+    expect(document.activeElement === testButton).toBe(true);
+    fireEvent.click(testButton);
+    expect(calls.filter((call) => call.method === 'POST' && call.url.endsWith('/test'))).toHaveLength(1);
+    await act(async () => { answer.resolve(Response.json(REPORT)); await answer.promise; });
+  });
+
+  test('Save stays focused and inert while it saves, and Cancel stays focusable', async () => {
+    const answer = deferred<Response>();
+    const { calls, onClose } = setup({ patch: () => answer.promise });
+    fireEvent.change(field('Display name'), { target: { value: 'Scout' } });
+    const save = button('Save');
+    save.focus();
+    fireEvent.click(save);
+    const saving = await screen.findByRole<HTMLButtonElement>('button', { name: 'Saving…' });
+    expect(saving === save).toBe(true);
+    expect(save.getAttribute('aria-busy')).toBe('true');
+    expect(save.getAttribute('aria-disabled')).toBe('true');
+    expect(save.disabled).toBe(false);
+    expect(document.activeElement === save).toBe(true);
+    fireEvent.click(save);
+    expect(patches(calls)).toHaveLength(1);
+    const cancel = button('Cancel');
+    expect(cancel.disabled).toBe(false);
+    expect(cancel.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(cancel);
+    await act(async () => { answer.resolve(Response.json({ ...SCOUT, displayName: 'Scout' })); await answer.promise; });
+    await waitFor(() => { expect(onClose).toHaveBeenCalledTimes(1); });
+  });
+
+  test('Remove model stays focusable and inert while the removal runs', async () => {
+    const answer = deferred<Response>();
+    const { calls } = setup({ model: { ...KIMI, providerId: 'p-ollama' }, remove: () => answer.promise });
+    const remove = button('Remove model…');
+    fireEvent.click(remove);
+    const confirm = await screen.findByRole('dialog', { name: 'Remove Kimi K3?' });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Remove model' }));
+    await waitFor(() => { expect(remove.getAttribute('aria-busy')).toBe('true'); });
+    expect(remove.getAttribute('aria-disabled')).toBe('true');
+    expect(remove.disabled).toBe(false);
+    fireEvent.click(remove);
+    expect(screen.queryByRole('dialog', { name: 'Remove Kimi K3?' })).toBeNull();
+    expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(1);
+    await act(async () => { answer.resolve(Response.json({ ok: true })); await answer.promise; });
   });
 });
 

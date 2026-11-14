@@ -2,7 +2,7 @@
 // name, ref-image and scope-filter shapes that several routes would otherwise
 // re-declare.
 import { z } from 'zod';
-import { MAX_DELETE_KEEP_UPLOADS } from '@atelier/shared';
+import { MAX_DELETE_KEEP_UPLOADS, MAX_QUERY_KEEP_UPLOADS } from '@atelier/shared';
 import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
 import { maxUtf16Length } from '../validation/stringLength';
 
@@ -39,7 +39,7 @@ export const keepUploadsFilter = z
   .string()
   .optional()
   .transform((value) => (value ? value.split(',') : []))
-  .pipe(z.array(z.uuid()).max(64));
+  .pipe(z.array(z.uuid()).max(MAX_QUERY_KEEP_UPLOADS));
 
 // Optional DELETE bodies carry larger hold sets without growing the URL.
 export const DeleteUploadsBodySchema = z.strictObject({
@@ -59,4 +59,4 @@ export const NameSchema = z.string().trim().min(1).check(maxUtf16Length(PROMPT_L
 export const refImageIdsSchema = z
   .array(z.uuid())
   .max(10)
-  .refine((arr) => new Set(arr).size === arr.length, { message: 'duplicate refImageIds' });
+  .refine((arr) => new Set(arr).size === arr.length, { error: 'duplicate refImageIds' });

@@ -1,3 +1,5 @@
+import type { TellStoryRequest } from '@atelier/shared';
+import type { AssertWire, MatchesWire } from '../validation/wireBinding';
 import { z } from 'zod';
 import { maxUtf16Length } from '../validation/stringLength';
 import { uuidParam } from './_schema';
@@ -10,5 +12,7 @@ export const StoryCreateBodySchema = z.object({
   sourcePrompt: z.string().check(maxUtf16Length(8000)).optional(),
   ratio: z.enum(RATIO_VALUES).optional(),
 });
+
+type _TellStoryRequestWire = AssertWire<MatchesWire<typeof StoryCreateBodySchema, TellStoryRequest>>;
 
 export const StoryIdParamSchema = uuidParam('id');

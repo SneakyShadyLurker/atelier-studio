@@ -1,38 +1,23 @@
 import type {
   RescueBundle,
   RescueDimensionsRequest,
+  RescueDonePayload,
   RescueFailedPayload,
   TemplateConflict,
 } from '@atelier/shared';
+import { RescueDonePayloadSchema, RescueFailedPayloadCoreSchema } from '@atelier/shared/prompt-tool-schemas';
 import { ApiError } from './client';
 import { consumeSseResult, openSseStream, parseTerminalSseErrorFromData } from './sse';
-import { isBundleCommon, isTemplateConflict } from './bundleGuards';
-import { isRecord } from '../lib/guards';
 
-function isRescueBundle(value: unknown): value is RescueBundle {
-  if (!isBundleCommon(value)) return false;
-  return value.kind === 'rescue'
-    && typeof value.listName === 'string'
-    && typeof value.optionValue === 'string'
-    && typeof value.templateName === 'string';
+function isRescueDonePayload(value: unknown): value is RescueDonePayload {
+  return RescueDonePayloadSchema.safeParse(value).success;
 }
 
-function isRescueDonePayload(value: unknown): value is {
-  rescueBundle: RescueBundle;
-  conflicts: readonly TemplateConflict[];
-} {
-  return isRecord(value)
-    && isRescueBundle(value.rescueBundle)
-    && Array.isArray(value.conflicts)
-    && value.conflicts.every(isTemplateConflict);
-}
-
-// Checks only the fields this client reads; the optional `code`,
-// `retryAfterSeconds` and `moderation` pass through unchecked.
+// Deliberately looser than the wire type: checks only the fields this client
+// reads, so the optional `code`, `retryAfterSeconds` and `moderation` pass
+// through unchecked.
 function isRescueFailedPayload(value: unknown): value is RescueFailedPayload {
-  if (!isRecord(value) || typeof value.reason !== 'string') return false;
-  if (value.conflicts === undefined) return true;
-  return Array.isArray(value.conflicts) && value.conflicts.every(isTemplateConflict);
+  return RescueFailedPayloadCoreSchema.safeParse(value).success;
 }
 
 export type RescueResult =

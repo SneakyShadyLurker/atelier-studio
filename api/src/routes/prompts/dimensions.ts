@@ -15,7 +15,7 @@ const DimensionPatchV2 = z.object({
   description: Description.nullable().optional(),
 }).strict().refine(
   (body) => body.name !== undefined || body.description !== undefined,
-  { message: 'at least one of name, description required' },
+  { error: 'at least one of name, description required' },
 );
 const TagV2 = TagsReplace.shape.tags.element.extend({
   parentId: z.uuid().nullable().optional(),

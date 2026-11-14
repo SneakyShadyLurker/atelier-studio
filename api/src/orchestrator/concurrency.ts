@@ -43,6 +43,8 @@ interface CounterPool {
   // `maxTotal`/`maxPerUser` undefined ⇒ that dimension is uncapped for this
   // pool (byok has no global ceiling; local has no per-user component).
   acquire(userId: string, count: number, maxTotal: number | undefined, maxPerUser: number | undefined): AcquireResult;
+  // Same verdict as `acquire`, with no count change.
+  probe(userId: string, count: number, maxTotal: number | undefined, maxPerUser: number | undefined): AcquireResult;
   release(userId: string, count: number): void;
   total(): number;
   user(userId: string): number;
@@ -52,16 +54,22 @@ interface CounterPool {
 function createCounterPool(): CounterPool {
   let inFlightTotal = 0;
   const inFlightByUser = new Map<string, number>();
+  const check = (userId: string, count: number, maxTotal: number | undefined, maxPerUser: number | undefined): AcquireResult => {
+    if (count <= 0) return { ok: true };
+    if (maxTotal !== undefined && inFlightTotal + count > maxTotal) {
+      return { ok: false, reason: 'global' };
+    }
+    const userCount = inFlightByUser.get(userId) ?? 0;
+    if (maxPerUser !== undefined && userCount + count > maxPerUser) {
+      return { ok: false, reason: 'per-user' };
+    }
+    return { ok: true };
+  };
   return {
+    probe: check,
     acquire(userId, count, maxTotal, maxPerUser) {
-      if (count <= 0) return { ok: true };
-      if (maxTotal !== undefined && inFlightTotal + count > maxTotal) {
-        return { ok: false, reason: 'global' };
-      }
-      const userCount = inFlightByUser.get(userId) ?? 0;
-      if (maxPerUser !== undefined && userCount + count > maxPerUser) {
-        return { ok: false, reason: 'per-user' };
-      }
+      const verdict = check(userId, count, maxTotal, maxPerUser);
+      if (!verdict.ok || count <= 0) return verdict;
       inFlightTotal += count;
       incUser(inFlightByUser, userId, count);
       return { ok: true };
@@ -151,22 +159,43 @@ export interface TileCaps {
 // Single owner of the pool -> semaphore dispatch. The per-pool arity (byok =
 // per-user only; local = global only; shared = both) lived in two parallel
 // switch ladders in the generate route; keeping it here means adding a pool is
-// a one-file change.
-export function acquireForPool(pool: Pool, userId: string, count: number, caps: TileCaps): AcquireResult {
+// a one-file change. Acquire and probe share it so their verdicts cannot drift.
+function limitsForPool(pool: Pool, userId: string, caps: TileCaps): {
+  readonly counters: CounterPool;
+  readonly key: string;
+  readonly maxTotal: number | undefined;
+  readonly maxPerUser: number | undefined;
+} {
   switch (pool) {
     case 'byok':
-      return acquireByokTiles(userId, count, caps.perUserCap);
+      return { counters: byokPool, key: userId, maxTotal: undefined, maxPerUser: caps.perUserCap };
     case 'local':
       if (caps.globalCap === null) throw new Error('local pool requires a global cap');
-      return acquireLocalTiles(count, caps.globalCap);
+      return { counters: localPool, key: LOCAL_KEY, maxTotal: caps.globalCap, maxPerUser: undefined };
     case 'shared':
       if (caps.globalCap === null) throw new Error('shared pool requires a global cap');
-      return acquireTiles(userId, count, caps.globalCap, caps.perUserCap);
+      return { counters: sharedPool, key: userId, maxTotal: caps.globalCap, maxPerUser: caps.perUserCap };
     default: {
       const _exhaustive: never = pool;
       throw new Error(`unknown pool: ${String(_exhaustive)}`);
     }
   }
+}
+
+export function acquireForPool(pool: Pool, userId: string, count: number, caps: TileCaps): AcquireResult {
+  const limits = limitsForPool(pool, userId, caps);
+  return limits.counters.acquire(limits.key, count, limits.maxTotal, limits.maxPerUser);
+}
+
+// Whether a waiting entry would start as soon as pool-wide capacity frees: the
+// global cap blocks it and its owner's per-user cap does not. Read-only. An
+// entry that also waits on its owner's own in-flight work answers false, so it
+// holds nothing back from other users until that work ends.
+export function waitsOnGlobalCapAlone(pool: Pool, userId: string, count: number, caps: TileCaps): boolean {
+  const limits = limitsForPool(pool, userId, caps);
+  const verdict = limits.counters.probe(limits.key, count, limits.maxTotal, limits.maxPerUser);
+  if (verdict.ok || verdict.reason !== 'global') return false;
+  return limits.counters.probe(limits.key, count, undefined, limits.maxPerUser).ok;
 }
 
 export function releaseForPool(pool: Pool, userId: string, count: number): void {

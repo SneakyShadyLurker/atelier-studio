@@ -1,9 +1,12 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryObserver } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
-import type { StoryPlanSseEvent } from '@atelier/shared';
-import { initialAtelierState, useAtelierStore } from '../../store/atelier';
+import type { GptModerationNotice, SseTerminalError, StoryPlanSseEvent } from '@atelier/shared';
+import { historyKeys } from '../../api/history';
+import { HISTORY_WRITE_MUTATION_KEY } from '../../hooks/historyWrites';
+import { moderationCopy } from '../../lib/moderationNotice';
+import { initialAtelierState, quotaToastMessage, useAtelierStore } from '../../store/atelier';
 import StoryDialog, { type StoryDialogSource } from './index';
 
 afterEach(() => {
@@ -159,6 +162,78 @@ describe('StoryDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(stream).not.toHaveBeenCalled();
     expect(useAtelierStore.getState().pendingStory).toBeFalsy();
+  });
+
+  test('the announced plan re-reads history only after a pending history write settles', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    let reads = 0;
+    const observer = new QueryObserver(client, {
+      queryKey: historyKeys.list(),
+      queryFn: () => { reads += 1; return Promise.resolve({ pages: [], pageParams: [] }); },
+      staleTime: Infinity,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(reads).toBe(1);
+    const other = Promise.withResolvers<null>();
+    const otherWrite = client.getMutationCache()
+      .build(client, { mutationKey: HISTORY_WRITE_MUTATION_KEY, mutationFn: () => other.promise })
+      .execute(undefined);
+
+    render(
+      <QueryClientProvider client={client}>
+        <StoryDialog source={source('t2v')} onClose={mock()} stream={successfulStream} />
+      </QueryClientProvider>,
+    );
+    fireEvent.change(screen.getByRole('textbox', { name: 'Story outline' }), {
+      target: { value: 'A courier outruns a storm.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Tell Story' }));
+    expect(await screen.findByText('A courier races the storm to deliver one last letter.')).toBeTruthy();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(client.getQueryState(historyKeys.list())?.isInvalidated).toBe(true);
+    expect(reads).toBe(1);
+
+    await act(async () => {
+      other.resolve(null);
+      await otherWrite;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(reads).toBe(2);
+    unsubscribe();
+    client.clear();
+  });
+
+  async function planError(data: SseTerminalError): Promise<string | null> {
+    async function* failedStream(): AsyncGenerator<StoryPlanSseEvent> {
+      await Promise.resolve();
+      yield { event: 'error', data };
+    }
+    const view = render(
+      <StoryDialog source={source('t2v')} onClose={mock()} stream={failedStream} />,
+      { wrapper: wrapper() },
+    );
+    fireEvent.change(screen.getByRole('textbox', { name: 'Story outline' }), { target: { value: 'A short story.' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Tell Story' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const text = (await screen.findByRole('alert')).textContent;
+    view.unmount();
+    return text;
+  }
+
+  test('shows a quota-exhausted planning error with the shared quota copy', async () => {
+    expect(await planError({ message: 'Codex quota exhausted', code: 'quota-exhausted', retryAfterSeconds: 600 }))
+      .toBe(quotaToastMessage(600));
+    expect(await planError({ message: 'Codex quota exhausted', code: 'quota-exhausted' }))
+      .toBe(quotaToastMessage(null));
+  });
+
+  test('shows a moderated planning error with the shared moderation copy', async () => {
+    const moderation: GptModerationNotice = { target: 'text', reason: 'graphic-violence' };
+    expect(await planError({ message: 'blocked', moderation })).toBe(moderationCopy(moderation).explanation);
   });
 
   test('persists the outline in the composer draft', () => {

@@ -109,6 +109,53 @@ describe('OverflowMenu', () => {
     expect(screen.getByRole('menu', { name: 'Actions' })).toBe(menu);
   });
 
+  it('names labelled groups, separates them and keeps a disabled item focusable but inert', async () => {
+    const onSelect = mock();
+    const onClose = mock();
+    function Grouped() {
+      const triggerRef = useRef<HTMLButtonElement | null>(null);
+      return (
+        <>
+          <button ref={triggerRef} type="button">More</button>
+          <OverflowMenu
+            label="Actions"
+            anchorRef={triggerRef}
+            open
+            groups={[
+              { key: 'generate', label: 'Generate', items: [{ action: 'reroll', label: 'Re-roll', icon: null }] },
+              { key: 'organize', label: 'Organize', items: [
+                { action: 'pin', label: 'Pin batch', icon: null, disabled: true },
+                { action: 'move', label: 'Move', icon: null },
+              ] },
+            ]}
+            onSelect={onSelect}
+            onClose={onClose}
+          />
+        </>
+      );
+    }
+    render(<Grouped />);
+    await flush();
+    const generate = screen.getByRole('group', { name: 'Generate' });
+    const organize = screen.getByRole('group', { name: 'Organize' });
+    expect(generate.contains(screen.getByRole('menuitem', { name: 'Re-roll' }))).toBe(true);
+    expect(organize.contains(screen.getByRole('menuitem', { name: 'Move' }))).toBe(true);
+    expect(screen.getAllByRole('separator')).toHaveLength(1);
+
+    const pin = screen.getByRole<HTMLButtonElement>('menuitem', { name: 'Pin batch' });
+    expect(pin.disabled).toBe(false);
+    expect(pin.getAttribute('aria-disabled')).toBe('true');
+    // It stays in the roving order.
+    const reroll = screen.getByRole('menuitem', { name: 'Re-roll' });
+    reroll.focus();
+    fireEvent.keyDown(reroll, { key: 'ArrowDown' });
+    expect(document.activeElement === pin).toBe(true);
+    fireEvent.click(pin);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('menu', { name: 'Actions' })).toBeTruthy();
+  });
+
   it('returns focus to its trigger when an action opens a dialog that then closes', async () => {
     render(<Harness />);
     const trigger = screen.getByRole('button', { name: 'More' });

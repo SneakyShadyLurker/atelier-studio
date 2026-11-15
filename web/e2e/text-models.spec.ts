@@ -32,6 +32,38 @@ async function box(locator: Locator) {
   return rect;
 }
 
+/** Every feature row of Shared setup puts its controls under the label, full width, with nothing scrolling sideways. */
+async function expectStackedRows(page: Page) {
+  await page.goto(ADMIN);
+  const features = page.getByRole('region', { name: 'Features', exact: true });
+  await expect(features.getByRole('button', { name: 'Default model, currently Atlas', exact: true })).toBeVisible();
+  const triggers = page.getByRole('tabpanel').getByRole('button', { name: /^(Default model|Model for .+|Prompt writer for .+), currently / });
+  // Default model, eleven features and two image models.
+  await expect(triggers).toHaveCount(14);
+  const rows = await triggers.evaluateAll((buttons) => buttons.map((button) => {
+    // Model chip → its slot → the controls grid → the feature row.
+    const controls = button.parentElement?.parentElement;
+    const row = controls?.parentElement;
+    const main = row?.firstElementChild;
+    if (!controls || !row || !main || main === controls) throw new Error('missing feature row');
+    const label = button.getAttribute('aria-label') ?? '';
+    const [controlsBox, mainBox, rowBox] = [controls, main, row].map((node) => node.getBoundingClientRect());
+    if (!controlsBox || !mainBox || !rowBox) throw new Error('missing feature row box');
+    return {
+      label,
+      below: controlsBox.top >= mainBox.bottom - 0.5,
+      fullWidth: Math.abs(controlsBox.width - rowBox.width) <= 1,
+      inside: controlsBox.right <= rowBox.right + 0.5 && controls.scrollWidth <= controls.clientWidth + 1,
+    };
+  }));
+  for (const row of rows) {
+    expect(row, row.label).toEqual({ label: row.label, below: true, fullWidth: true, inside: true });
+  }
+  expect(await noHorizontalOverflow(page)).toBe(true);
+  expect(await view(page).evaluate((element) => [...element.querySelectorAll('[data-zone]')]
+    .every((node) => node.scrollWidth <= node.clientWidth + 1))).toBe(true);
+}
+
 test.describe('Text models for someone who is not a text admin', () => {
   test('shows Your picks alone, without tabs, and leaves out a gated Prompt Library', async ({ page }) => {
     await page.goto(`${PERSON}&libraryGated=1`);
@@ -202,34 +234,43 @@ test.describe('Text models for a text admin', () => {
     test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
     test('Shared setup stacks each row with its controls below the label and never scrolls sideways', async ({ page }) => {
+      await expectStackedRows(page);
+    });
+  });
+
+  test.describe('in a narrow content column', () => {
+    // Just past the phone breakpoint: the phone rules do not apply, and the
+    // view's own column is under 720px with or without the sidebar.
+    test.use({ viewport: { width: 780, height: 1000 } });
+
+    test('Shared setup stacks its rows by the space the view has, not by the viewport', async ({ page }) => {
+      await expectStackedRows(page);
+    });
+  });
+
+  test.describe('on a wide window', () => {
+    test.use({ viewport: { width: 1440, height: 900 } });
+
+    test('Shared setup keeps label and controls on one line, the chips in one column', async ({ page }) => {
       await page.goto(ADMIN);
       const features = page.getByRole('region', { name: 'Features', exact: true });
-      await expect(features.getByRole('button', { name: 'Default model, currently Atlas', exact: true })).toBeVisible();
-      const triggers = page.getByRole('tabpanel').getByRole('button', { name: /^(Default model|Model for .+|Prompt writer for .+), currently / });
-      // Default model, eleven features and two image models.
-      await expect(triggers).toHaveCount(14);
-      const rows = await triggers.evaluateAll((buttons) => buttons.map((button) => {
-        // Model chip → its slot → the controls grid → the feature row.
+      const defaultChip = features.getByRole('button', { name: 'Default model, currently Atlas', exact: true });
+      await expect(defaultChip).toBeVisible();
+      const chips = features.getByRole('button', { name: /^(Default model|Model for .+), currently / });
+      await expect(chips).toHaveCount(12);
+      const geometry = await chips.evaluateAll((buttons) => buttons.map((button) => {
         const controls = button.parentElement?.parentElement;
-        const row = controls?.parentElement;
-        const main = row?.firstElementChild;
-        if (!controls || !row || !main || main === controls) throw new Error('missing feature row');
-        const label = button.getAttribute('aria-label') ?? '';
-        const [controlsBox, mainBox, rowBox] = [controls, main, row].map((node) => node.getBoundingClientRect());
-        if (!controlsBox || !mainBox || !rowBox) throw new Error('missing feature row box');
-        return {
-          label,
-          below: controlsBox.top >= mainBox.bottom - 0.5,
-          fullWidth: Math.abs(controlsBox.width - rowBox.width) <= 1,
-          inside: controlsBox.right <= rowBox.right + 0.5 && controls.scrollWidth <= controls.clientWidth + 1,
-        };
+        const main = controls?.parentElement?.firstElementChild;
+        if (!controls || !main) throw new Error('missing feature row');
+        const chipBox = button.getBoundingClientRect();
+        const mainBox = main.getBoundingClientRect();
+        return { left: Math.round(chipBox.left), width: Math.round(chipBox.width), beside: chipBox.left >= mainBox.right - 0.5 };
       }));
-      for (const row of rows) {
-        expect(row, row.label).toEqual({ label: row.label, below: true, fullWidth: true, inside: true });
-      }
-      expect(await noHorizontalOverflow(page)).toBe(true);
-      expect(await view(page).evaluate((element) => [...element.querySelectorAll('[data-zone]')]
-        .every((node) => node.scrollWidth <= node.clientWidth + 1))).toBe(true);
+      const first = geometry[0];
+      if (!first) throw new Error('no chips');
+      for (const chip of geometry) expect(chip).toEqual({ left: first.left, width: first.width, beside: true });
+      // Wide enough for a long model name behind the inherited-value arrow.
+      expect(first.width).toBeGreaterThanOrEqual(220);
     });
   });
 });

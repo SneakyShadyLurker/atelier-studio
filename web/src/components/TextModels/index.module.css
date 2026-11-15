@@ -225,12 +225,30 @@
   margin-top: 6px;
 }
 
+/* The model slot is wide enough for a long display name behind the
+   inherited-value arrow ("GLM 5.3 Flash Uncensored"); longer ones truncate. */
 .featureControls {
   flex-shrink: 0;
   display: grid;
-  grid-template-columns: 168px 132px;
+  grid-template-columns: 224px 132px;
   gap: 8px;
   align-items: center;
+}
+
+/* A narrow content column (an open sidebar on a tablet-width window) stacks
+   the row before the label is squeezed: the container decides, not the
+   viewport. The phone block below keeps its own geometry. */
+@container text-models (width < 720px) {
+  .featureRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .featureControls {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }
 
 .slot {

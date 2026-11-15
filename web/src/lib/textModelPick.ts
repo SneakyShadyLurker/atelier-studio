@@ -1,10 +1,11 @@
 import type { PublicTextModel, TaskRow, TextModelsResponse, TextReasoningEffort } from '@atelier/shared';
 import { TEXT_REASONING_EFFORT_LABELS } from '@atelier/shared';
 
-// The selection rules of a per-task text-model pick, shared by Settings →
-// "Your text models" and the template draft dialog.
+// The selection rules and vocabulary of text-model picks, shared by Text
+// models (Your picks and Shared setup) and the template draft dialog.
 
-// Model ids are never empty, so '' stands for "Use default".
+// Model ids are never empty, so '' stands for "follow the shared setup" on a
+// personal pick (and for "no model" on a shared assignment).
 export const DEFAULT_PICK = '';
 export type EffortValue = 'default' | TextReasoningEffort;
 
@@ -32,14 +33,58 @@ export function groupModelsByProvider(models: readonly PublicTextModel[]): reado
   return [...byProvider].map(([providerName, group]) => ({ providerName, models: group }));
 }
 
-export function defaultPickLabel(defaultName: string | undefined): string {
-  return defaultName === undefined ? 'Use default' : `Use default (${defaultName})`;
+/** Menu option of an unset personal pick: it follows the shared setup. */
+export function sharedSetupLabel(inheritedName: string | undefined): string {
+  return inheritedName === undefined ? 'Shared setup' : `Shared setup (${inheritedName})`;
+}
+
+/** Menu option of an unset shared feature assignment: it follows the default model. */
+export function defaultModelLabel(defaultName: string | undefined): string {
+  return defaultName === undefined ? 'Default model' : `Default model (${defaultName})`;
+}
+
+export const NO_DEFAULT_LABEL = 'No default';
+export const NO_WRITER_LABEL = 'No writer';
+export const EFFORT_FIXED_LABEL = 'Effort fixed by the model';
+
+/**
+ * What a model chip shows. An inherited value is quiet and, when it names a
+ * model, leads with a decorative ↳; `text` is the visible words only.
+ */
+export interface ChipValue {
+  readonly text: string;
+  readonly quiet: boolean;
+  readonly inherited: boolean;
+}
+
+/** Chip of an unset personal pick: the inherited model, or "Shared setup" when nothing resolves. */
+export function personalUnsetChip(inheritedName: string | undefined): ChipValue {
+  return inheritedName === undefined
+    ? { text: 'Shared setup', quiet: true, inherited: false }
+    : { text: inheritedName, quiet: true, inherited: true };
+}
+
+/** Chip of an unset shared feature: the default model, or "No model" when no default is set. */
+export function sharedUnsetChip(defaultName: string | undefined): ChipValue {
+  return defaultName === undefined
+    ? { text: 'No model', quiet: true, inherited: false }
+    : { text: defaultName, quiet: true, inherited: true };
+}
+
+/** Chip text of an effort: "Default effort" or "<Level> effort". */
+export function effortChipLabel(effort: EffortValue): string {
+  return effort === 'default' ? 'Default effort' : `${TEXT_REASONING_EFFORT_LABELS[effort]} effort`;
+}
+
+/** A stored effort counts only while the model still offers it; otherwise it shows as Default effort. */
+export function offeredEffort(levels: readonly TextReasoningEffort[], stored: TextReasoningEffort | undefined): EffortValue {
+  return stored !== undefined && levels.includes(stored) ? stored : 'default';
 }
 
 // Offline models stay listed but dimmed, since the server refuses to save them.
-export function modelOptions(models: readonly PublicTextModel[], defaultName: string | undefined): readonly PickOption<string>[] {
+export function modelOptions(models: readonly PublicTextModel[], inheritedName: string | undefined): readonly PickOption<string>[] {
   return [
-    { value: DEFAULT_PICK, label: defaultPickLabel(defaultName) },
+    { value: DEFAULT_PICK, label: sharedSetupLabel(inheritedName) },
     ...groupModelsByProvider(models).flatMap(({ providerName, models: group }) => group.map((model) => (model.status === 'offline'
       ? { value: model.id, label: model.displayName, group: providerName, hint: 'offline', disabled: true }
       : { value: model.id, label: model.displayName, group: providerName }))),
@@ -48,7 +93,7 @@ export function modelOptions(models: readonly PublicTextModel[], defaultName: st
 
 export function effortOptions(levels: readonly TextReasoningEffort[]): readonly PickOption<EffortValue>[] {
   return [
-    { value: 'default', label: 'Default' },
+    { value: 'default', label: 'Default effort' },
     ...levels.map((value) => ({ value, label: TEXT_REASONING_EFFORT_LABELS[value] })),
   ];
 }
@@ -59,7 +104,7 @@ function usable(byId: ReadonlyMap<string, PublicTextModel>, id: string | undefin
 }
 
 /**
- * The model "Use default" resolves to. With an image model whose listed writer
+ * The model an unset personal pick inherits ("Shared setup"). With an image model whose listed writer
  * is online, that writer (the resolver's next step after the user's pick).
  * Without a usable pick the server's effective model already is the default
  * (after its own fallbacks); otherwise the first listed fallback that is not
@@ -93,8 +138,6 @@ export function rowPick(row: TaskRow, byId: ReadonlyMap<string, PublicTextModel>
   const picked = row.pick === undefined ? undefined : byId.get(row.pick);
   const offlinePick = picked !== undefined && row.pickState === 'offline';
   const activePick = picked !== undefined && !offlinePick ? picked : undefined;
-  const effort: EffortValue = activePick !== undefined && row.effort !== undefined && activePick.reasoningLevels.includes(row.effort)
-    ? row.effort
-    : 'default';
+  const effort: EffortValue = activePick === undefined ? 'default' : offeredEffort(activePick.reasoningLevels, row.effort);
   return { picked, offlinePick, activePick, effort };
 }

@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import type { TaskModelChoice } from '../../hooks/useTaskModelChoice';
-import { DEFAULT_PICK, defaultPickLabel, effortOptions, type EffortValue } from '../../lib/textModelPick';
+import { DEFAULT_PICK, sharedSetupLabel, effortOptions, type EffortValue } from '../../lib/textModelPick';
 import { I } from '../icons/I';
 import styles from './ModelFields.module.css';
 
@@ -40,7 +40,7 @@ export function ModelFields({ choice, disabled }: ModelFieldsProps) {
             disabled={disabled || unavailable}
             onChange={(event) => { choice.setModelId(event.currentTarget.value); }}
           >
-            <option value={DEFAULT_PICK}>{defaultPickLabel(unavailable ? undefined : choice.defaultName)}</option>
+            <option value={DEFAULT_PICK}>{sharedSetupLabel(unavailable ? undefined : choice.defaultName)}</option>
             {choice.groups.map((group) => (
               <optgroup key={group.providerName} label={group.providerName}>
                 {group.models.map((model) => (

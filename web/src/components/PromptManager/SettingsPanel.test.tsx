@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import type {
   ModelResolutionPutRequest,
@@ -9,10 +9,9 @@ import type {
   TaskRow,
   TextModelsResponse,
 } from '@atelier/shared';
-import { TEXT_TASK_LABELS, TEXT_TASKS } from '@atelier/shared';
+import { TEXT_TASKS } from '@atelier/shared';
 import { promptKeys } from '../../api/prompts';
 import { textModelKeys } from '../../api/textModels';
-import { textAdminKeys } from '../../api/textProviders';
 import { useAtelierStore, type PromptManagerTab } from '../../store/atelier';
 import PromptManager from './index';
 import SettingsPanel from './SettingsPanel';
@@ -47,22 +46,6 @@ function wrapper(client: QueryClient) {
   };
 }
 
-function renderPanel(response: TextModelsResponse = settings(), putStatus = 200, admin: 'yes' | 'no' | 'unknown' = 'no') {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    if (urlOf(input).endsWith('/text-providers')) {
-      if (admin === 'unknown') return new Promise<Response>(() => undefined);
-      return admin === 'yes' ? Response.json({ providers: [] }) : Response.json({ error: 'not found' }, { status: 404 });
-    }
-    if (urlOf(input).includes('/text-models')) {
-      if (init?.method === 'PUT' && putStatus !== 200) return Response.json({ error: 'That model is offline.' }, { status: putStatus });
-      return Response.json(response);
-    }
-    return Response.json({});
-  }) as unknown as typeof fetch;
-  return { ...render(<SettingsPanel />, { wrapper: wrapper(client) }), client };
-}
-
 function renderManagerOnSettingsTab() {
   const onBack = mock(() => undefined);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -70,10 +53,20 @@ function renderManagerOnSettingsTab() {
   client.setQueryData(textModelKeys.all(), settings());
   globalThis.fetch = mock((input: RequestInfo | URL) => {
     if (urlOf(input).includes('/text-models')) return Response.json(settings());
+    // Model steps renders the panel's zones now that no text-model section does.
+    if (urlOf(input).includes('/settings/model-steps')) return Response.json({ models: STEPS_MODELS, min: 1, max: 100 });
     return Response.json(emptyLibrary);
   }) as unknown as typeof fetch;
   useAtelierStore.setState({ promptManagerTab: 'settings' as PromptManagerTab });
   return render(<PromptManager onBack={onBack} />, { wrapper: wrapper(client) });
+}
+
+// The client of the last renderSteps/renderResolution, so a test can wait
+// for its reads to settle before asserting that a section stayed hidden.
+let renderedClient: QueryClient | undefined;
+
+async function settled(): Promise<void> {
+  await waitFor(() => { expect(renderedClient?.isFetching()).toBe(0); });
 }
 
 function putCalls(fetchMock: ReturnType<typeof mock>) {
@@ -87,319 +80,6 @@ afterEach(() => {
   useAtelierStore.setState({ promptManagerTab: 'templates', toasts: [] });
 });
 
-describe('SettingsPanel text models', () => {
-  for (const admin of ['yes', 'no', 'unknown'] as const) {
-    test(`zero-model wording respects ${admin} admin scope and clears on query refresh`, async () => {
-      const { client } = renderPanel({ ...settings(), models: [], tasks: [], defaults: { byTask: {} } }, 200, admin);
-      const copy = admin === 'yes'
-        ? 'No text models are connected yet. Add one in Text models.'
-        : 'Ask your admin to connect a text model.';
-      expect(await screen.findByText(copy)).toBeTruthy();
-      expect(screen.queryByText(admin === 'yes' ? 'Ask your admin to connect a text model.' : 'No text models are connected yet. Add one in Text models.')).toBeNull();
-      expect(screen.getAllByRole('button', { name: /^Text model for / })).toHaveLength(TEXT_TASKS.length);
-      for (const row of screen.getAllByRole('button', { name: /^Text model for / })) expect(row.hasAttribute('disabled')).toBe(false);
-      expect(screen.queryByRole('button', { name: /^Reasoning effort for / })).toBeNull();
-      expect(screen.queryByRole('link')).toBeNull();
-      await act(async () => { client.setQueryData(textModelKeys.all(), settings()); await Promise.resolve(); });
-      expect(await screen.findByText('Choose which model writes for you in each feature. Default follows the shared setup.')).toBeTruthy();
-      expect(screen.queryByText(copy)).toBeNull();
-    });
-  }
-
-  test('an unsettled admin probe updates through the existing snapshot', async () => {
-    const { client } = renderPanel({ ...settings(), models: [], tasks: [], defaults: { byTask: {} } }, 200, 'unknown');
-    expect(await screen.findByText('Ask your admin to connect a text model.')).toBeTruthy();
-    await act(async () => { client.setQueryData(textAdminKeys.providers(), { providers: [] }); await Promise.resolve(); });
-    expect(await screen.findByText('No text models are connected yet. Add one in Text models.')).toBeTruthy();
-    expect(screen.queryByText('Ask your admin to connect a text model.')).toBeNull();
-  });
-
-  test('introduces the section and renders a row for every task on its default', async () => {
-    renderPanel();
-
-    expect(await screen.findByRole('heading', { level: 2, name: 'Your text models' })).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Your text model settings' })).toBeTruthy();
-    expect(screen.getByText('Choose which model writes for you in each feature. Default follows the shared setup.')).toBeTruthy();
-    for (const task of TEXT_TASKS) {
-      expect(screen.getByRole('button', { name: `Text model for ${TEXT_TASK_LABELS[task]}, currently Default (Kimi K3)` })).toBeTruthy();
-    }
-    expect(screen.getAllByRole('button', { name: /^Text model for / })).toHaveLength(TEXT_TASKS.length);
-  });
-
-  test('zero models keeps every row and asks the admin to connect a model', async () => {
-    renderPanel({ ...settings(), models: [], tasks: [], defaults: { byTask: {} } });
-    expect(await screen.findByRole('heading', { name: 'Your text models' })).toBeTruthy();
-    expect(screen.getByText('Ask your admin to connect a text model.')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: /^Text model for .*currently Default$/ })).toHaveLength(TEXT_TASKS.length);
-    expect(screen.queryByRole('link')).toBeNull();
-  });
-
-  test('lists the default first, then models grouped by provider, offline ones disabled', async () => {
-    renderPanel();
-
-    fireEvent.click(await screen.findByRole('button', { name: /^Text model for AI fill/ }));
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
-      'Use default (Kimi K3)',
-      'Kimi K3',
-      'Grok 4.7',
-      'GLM 5.3offline',
-      'Llama 4 Scout',
-    ]);
-    // Provider headers sit above their models, the default above both.
-    expect(screen.getByRole('listbox').textContent).toBe(
-      'Use default (Kimi K3)CLIProxyAPIKimi K3Grok 4.7GLM 5.3offlineOllama on this MacLlama 4 Scout',
-    );
-    // 'unknown' status still routes, so only 'offline' is disabled.
-    expect(screen.getByRole('option', { name: /^GLM 5\.3/ }).getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getByRole('option', { name: /^Llama 4 Scout/ }).getAttribute('aria-disabled')).toBeNull();
-  });
-
-  test('names the default the task would fall back to', async () => {
-    renderPanel({ ...settings({ brainstorm: { effectiveModelId: 'grok' } }), defaults: { default: 'kimi', byTask: { brainstorm: 'grok' } } });
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Text model for Brainstorm, currently Default (Grok 4.7)' }));
-    expect(screen.getByRole('option', { name: 'Use default (Grok 4.7)' })).toBeTruthy();
-  });
-
-  test('the default label skips an offline task assignment, as the resolver does', async () => {
-    renderPanel({
-      ...settings({ enhance: { pick: 'grok', effectiveModelId: 'grok', pickState: 'active' } }),
-      defaults: { default: 'kimi', byTask: { enhance: 'glm' } },
-    });
-
-    fireEvent.click(await screen.findByRole('button', { name: /^Text model for Enhance/ }));
-    expect(screen.getByRole('option', { name: 'Use default (Kimi K3)' })).toBeTruthy();
-  });
-
-  test('selecting a model saves the pick for that task', async () => {
-    renderPanel();
-    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof mock>;
-
-    fireEvent.click(await screen.findByRole('button', { name: /^Text model for Brainstorm/ }));
-    fireEvent.click(screen.getByRole('option', { name: /^Grok 4\.7/ }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/text-models/tasks/brainstorm',
-        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ modelId: 'grok' }) }),
-      );
-    });
-  });
-
-  test('selecting the default clears the pick', async () => {
-    renderPanel(settings({ 'ai-fill': { pick: 'grok', effectiveModelId: 'grok', pickState: 'active' } }));
-    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof mock>;
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Text model for AI fill, currently Grok 4.7' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Use default (Kimi K3)' }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/text-models/tasks/ai-fill',
-        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ modelId: null }) }),
-      );
-    });
-  });
-
-  test('an offline model is not selectable', async () => {
-    renderPanel();
-    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof mock>;
-
-    fireEvent.click(await screen.findByRole('button', { name: /^Text model for Enhance/ }));
-    fireEvent.click(screen.getByRole('option', { name: /^GLM 5\.3/ }));
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(putCalls(fetchMock)).toHaveLength(0);
-  });
-
-  test('an offline pick says the task is using the default', async () => {
-    renderPanel(settings({ storytelling: { pick: 'glm', effectiveModelId: 'kimi', pickState: 'offline' } }));
-
-    expect(await screen.findByText('GLM 5.3 is offline right now; Story planner is using the default.')).toBeTruthy();
-    expect(screen.getAllByText(/is offline right now/)).toHaveLength(1);
-  });
-
-  test('a failed save rolls back and shows an error toast', async () => {
-    renderPanel(settings(), 400);
-
-    fireEvent.click(await screen.findByRole('button', { name: /^Text model for Enhance/ }));
-    fireEvent.click(screen.getByRole('option', { name: /^Grok 4\.7/ }));
-
-    await waitFor(() => {
-      expect(useAtelierStore.getState().toasts.some((toast) => toast.tone === 'error')).toBe(true);
-    });
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Text model for Enhance, currently Default (Kimi K3)' })).toBeTruthy();
-    });
-  });
-
-  test('a failed background refetch keeps the rows on screen', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-    const current = settings({ enhance: { pick: 'grok', effectiveModelId: 'grok', pickState: 'active' } });
-    globalThis.fetch = mock((input: RequestInfo | URL) => Response.json(urlOf(input).includes('/text-models') ? current : {})) as unknown as typeof fetch;
-    render(<SettingsPanel />, { wrapper: wrapper(client) });
-    expect(await screen.findByRole('button', { name: 'Text model for Enhance, currently Grok 4.7' })).toBeTruthy();
-
-    globalThis.fetch = mock(() => Response.json({ error: 'upstream down' }, { status: 502 })) as unknown as typeof fetch;
-    await client.refetchQueries({ queryKey: textModelKeys.all() });
-    await waitFor(() => { expect(client.getQueryState(textModelKeys.all())?.status).toBe('error'); });
-
-    expect(screen.getByRole('button', { name: 'Text model for Enhance, currently Grok 4.7' })).toBeTruthy();
-    expect(screen.queryByText('Couldn’t load the text model settings.')).toBeNull();
-  });
-
-  test('a failed first load offers a retry', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-    // 400 is not retryable, so the first load fails without backoff.
-    globalThis.fetch = mock((input: RequestInfo | URL) => (urlOf(input).includes('/text-models')
-      ? Response.json({ error: 'bad request' }, { status: 400 })
-      : Response.json({}))) as unknown as typeof fetch;
-    render(<SettingsPanel />, { wrapper: wrapper(client) });
-
-    expect(await screen.findByText('Couldn’t load the text model settings.')).toBeTruthy();
-    globalThis.fetch = mock((input: RequestInfo | URL) => Response.json(urlOf(input).includes('/text-models') ? settings() : {})) as unknown as typeof fetch;
-    fireEvent.click(screen.getByRole('button', { name: /Retry/ }));
-    expect(await screen.findByRole('button', { name: /^Text model for Enhance/ })).toBeTruthy();
-  });
-});
-
-describe('SettingsPanel reasoning effort', () => {
-  test('keeps inactive and offline effort slots mounted, hidden and inert without a tip', async () => {
-    const { container } = renderPanel(settings({ brainstorm: { pick: 'glm', effort: 'high', effectiveModelId: 'kimi', pickState: 'offline' } }));
-    await screen.findByRole('heading', { name: 'Your text models' });
-    for (const label of ['AI fill', 'Brainstorm']) {
-      const button = container.querySelector(`button[aria-label="Reasoning effort for ${label}, currently Default effort"]`);
-      expect(button).toBeTruthy();
-      expect(button?.hasAttribute('disabled')).toBe(true);
-      expect(button?.hasAttribute('data-tip')).toBe(false);
-      expect(button?.parentElement?.style.visibility).toBe('hidden');
-      expect(button?.parentElement?.hasAttribute('inert')).toBe(true);
-      expect(button?.parentElement?.getAttribute('aria-hidden')).toBe('true');
-    }
-    expect(screen.queryByRole('button', { name: /^Reasoning effort for / })).toBeNull();
-    expect(screen.getByText('GLM 5.3 is offline right now; Brainstorm is using the default.')).toBeTruthy();
-  });
-
-  test('saving and clearing a usable pick reveals and hides the same mounted effort slot', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-    let current = settings();
-    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
-      if (!urlOf(input).includes('/text-models')) return Response.json({});
-      if (init?.method === 'PUT') {
-        const body = JSON.parse(init.body as string) as { modelId: string | null };
-        current = body.modelId === null ? settings() : settings({ 'ai-fill': { pick: body.modelId, effectiveModelId: body.modelId, pickState: 'active' } });
-      }
-      return Response.json(current);
-    }) as unknown as typeof fetch;
-    const { container } = render(<SettingsPanel />, { wrapper: wrapper(client) });
-    const model = await screen.findByRole('button', { name: /^Text model for AI fill/ });
-    const effort = container.querySelector<HTMLButtonElement>('button[aria-label="Reasoning effort for AI fill, currently Default effort"]');
-    if (!effort) throw new Error('expected mounted effort control');
-    const slot = effort.parentElement;
-    fireEvent.click(model);
-    await act(() => Bun.sleep(0));
-    fireEvent.click(screen.getByRole('option', { name: 'Kimi K3' }));
-    await act(() => Bun.sleep(300));
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^Reasoning effort for AI fill/ }) === effort).toBe(true);
-      expect(model.hasAttribute('disabled')).toBe(false);
-    });
-    expect(slot?.hasAttribute('inert')).toBe(false);
-    expect(slot?.hasAttribute('aria-hidden')).toBe(false);
-    expect(slot?.style.visibility).toBe('');
-    expect(screen.queryByRole('listbox') === null).toBe(true);
-    fireEvent.click(model);
-    fireEvent.click(screen.getByRole('option', { name: 'Use default (Kimi K3)' }));
-    await waitFor(() => { expect(slot?.hasAttribute('inert')).toBe(true); });
-    expect(slot?.style.visibility).toBe('hidden');
-    expect(slot?.contains(effort)).toBe(true);
-    expect(screen.queryByRole('button', { name: /^Reasoning effort for AI fill/ })).toBeNull();
-    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof mock>;
-    expect(putCalls(fetchMock).map(([, init]) => JSON.parse((init as RequestInit).body as string) as unknown)).toEqual([{ modelId: 'kimi' }, { modelId: null }]);
-  });
-
-  test('offers only the levels the picked model accepts and shows the stored one', async () => {
-    renderPanel(settings({ enhance: { pick: 'kimi', effort: 'max', effectiveModelId: 'kimi', pickState: 'active' } }));
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort for Enhance, currently Max effort' }));
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Default', 'Low', 'High', 'Max']);
-  });
-
-  test('an effort the picked model no longer offers shows as the default', async () => {
-    renderPanel(settings({ enhance: { pick: 'kimi', effort: 'medium', effectiveModelId: 'kimi', pickState: 'active' } }));
-
-    expect(await screen.findByRole('button', { name: 'Reasoning effort for Enhance, currently Default effort' })).toBeTruthy();
-  });
-
-  test('each model offers its own levels', async () => {
-    renderPanel(settings({ condense: { pick: 'grok', effectiveModelId: 'grok', pickState: 'active' } }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort for Krea condense, currently Default effort' }));
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Default', 'Low', 'Medium', 'High', 'Extra high']);
-  });
-
-  test('a fixed-effort model shows text instead of an effort control', async () => {
-    renderPanel(settings({ 'list-draft': { pick: 'scout', effectiveModelId: 'scout', pickState: 'active' } }));
-
-    expect(await screen.findByText('Effort fixed by the model')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^Reasoning effort for List drafts/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /^Reasoning effort for / })).toBeNull();
-    expect(document.querySelectorAll('button[aria-label^="Reasoning effort for "]')).toHaveLength(TEXT_TASKS.length - 1);
-  });
-
-  test('selecting an effort saves it with the pick; Default sends null', async () => {
-    renderPanel(settings({ storytelling: { pick: 'grok', effort: 'low', effectiveModelId: 'grok', pickState: 'active' } }));
-    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof mock>;
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort for Story planner, currently Low effort' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Extra high' }));
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/text-models/tasks/storytelling',
-        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ modelId: 'grok', effort: 'xhigh' }) }),
-      );
-    });
-
-    fireEvent.click(await screen.findByRole('button', { name: /^Reasoning effort for Story planner/ }));
-    fireEvent.click(screen.getByRole('option', { name: 'Default' }));
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/text-models/tasks/storytelling',
-        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ modelId: 'grok', effort: null }) }),
-      );
-    });
-  });
-});
-
-describe('SettingsPanel save ordering', () => {
-  test('locks a row until its save settles so a later choice cannot be overwritten', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-    let releasePut: (() => void) | undefined;
-    const current = settings({ enhance: { pick: 'kimi', effectiveModelId: 'kimi', pickState: 'active' } });
-    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
-      if (!urlOf(input).includes('/text-models')) return Promise.resolve(Response.json({}));
-      if (init?.method !== 'PUT') return Promise.resolve(Response.json(current));
-      return new Promise<Response>((resolve) => {
-        releasePut = () => { resolve(Response.json(current)); };
-      });
-    }) as unknown as typeof fetch;
-    render(<SettingsPanel />, { wrapper: wrapper(client) });
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort for Enhance, currently Default effort' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Max' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^Text model for Enhance/ }).hasAttribute('disabled')).toBe(true);
-    });
-    expect(screen.getByRole('button', { name: /^Reasoning effort for Enhance/ }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: /^Text model for AI fill/ }).hasAttribute('disabled')).toBe(false);
-
-    releasePut?.();
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^Text model for Enhance/ }).hasAttribute('disabled')).toBe(false);
-    });
-  });
-});
-
 describe('PromptManager settings tab', () => {
   test('exposes a fourth tab and switching to it renders the panel', async () => {
     renderManagerOnSettingsTab();
@@ -408,10 +88,22 @@ describe('PromptManager settings tab', () => {
     expect(tab.getAttribute('aria-controls')).toBe('tabpanel-settings');
     const panel = screen.getByRole('tabpanel', { name: 'Settings' });
     expect(panel.getAttribute('id')).toBe('tabpanel-settings');
-    expect(panel.querySelector('[data-zone="head"]')).toBeTruthy();
+    await waitFor(() => { expect(panel.querySelector('[data-zone="head"]')).toBeTruthy(); });
     expect(panel.querySelector('[data-zone="body"]')).toBeTruthy();
     // The create affordances of the other tabs never appear here.
     expect(screen.queryByRole('button', { name: 'New' })).toBeNull();
+  });
+
+  test('holds no text-model section; text-model picks live in the Text models view', async () => {
+    renderManagerOnSettingsTab();
+    const panel = await screen.findByRole('tabpanel', { name: 'Settings' });
+    expect(await screen.findByText('Model steps')).toBeTruthy();
+    expect(panel.querySelector('[data-zone="body"]')).toBeTruthy();
+    expect(screen.queryByText('Your text models')).toBeNull();
+    expect(screen.queryByText('Your picks')).toBeNull();
+    expect(screen.queryByRole('region', { name: /text model/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Text model for / })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Reasoning effort for / })).toBeNull();
   });
 });
 
@@ -442,6 +134,7 @@ function renderSteps(models: readonly unknown[] = STEPS_MODELS, putStatus = 200)
     }
     return Response.json({});
   }) as unknown as typeof fetch;
+  renderedClient = client;
   render(<SettingsPanel />, { wrapper: wrapper(client) });
   return globalThis.fetch as unknown as ReturnType<typeof mock>;
 }
@@ -564,10 +257,10 @@ describe('SettingsPanel model steps', () => {
 
   test('is hidden when the user has no models', async () => {
     renderSteps([]);
-    expect(await screen.findByText('Your text models')).toBeTruthy();
     await waitFor(() => {
       expect((globalThis.fetch as unknown as ReturnType<typeof mock>).mock.calls.some(([url]) => String(url).includes('/settings/model-steps'))).toBe(true);
     });
+    await settled();
     expect(screen.queryByText('Model steps')).toBeNull();
   });
 });
@@ -608,6 +301,7 @@ function renderResolution(models: readonly ModelResolutionSetting[] = RESOLUTION
     }
     return Response.json({});
   }) as unknown as typeof fetch;
+  renderedClient = client;
   render(<SettingsPanel />, { wrapper: wrapper(client) });
   return globalThis.fetch as unknown as ReturnType<typeof mock>;
 }
@@ -739,10 +433,10 @@ describe('SettingsPanel render resolution', () => {
 
   test('is hidden when the endpoint lists no models', async () => {
     renderResolution([]);
-    expect(await screen.findByText('Your text models')).toBeTruthy();
     await waitFor(() => {
       expect((globalThis.fetch as unknown as ReturnType<typeof mock>).mock.calls.some(([url]) => String(url).includes('/settings/model-resolution'))).toBe(true);
     });
+    await settled();
     expect(screen.queryByText('Render resolution')).toBeNull();
   });
 });

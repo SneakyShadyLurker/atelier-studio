@@ -64,8 +64,8 @@ After the restart, sign in as one of the admins. A **Text models** row (a
 chip icon) appears near the bottom of the sidebar, between **Prompt Library**
 and **Archive**. Click it to open the Text models view. The
 [Admin guide](admin-guide.md#2-open-the-admin-panel) shows where with a
-screenshot. With nothing connected yet it shows "No text
-model yet" and an **Add provider** button.
+screenshot. With nothing connected yet it opens on the **Providers** tab,
+which shows "No text model yet" and an **Add provider** button.
 
 ## Connect a local model
 
@@ -267,51 +267,50 @@ on reference images per request), **JSON output**, **Reasoning levels** and
 
 ## Choose which model writes what
 
-The **Routing for everyone** panel beside your providers decides which model each feature
-uses. In a narrow window it sits below them.
+The **Shared setup** tab of Text models decides which model each feature
+uses for everyone. Each model choice has an effort chip beside it for models
+with reasoning levels.
 
-1. **Default model**: every task uses it unless assigned below. Set this first.
-   One default is enough to switch on every text feature.
-2. **Task assignments**: give a single task its own model. The tasks are
-   Enhance, Motion writer, AI fill, Brainstorm, Krea condense, Story planner,
-   Story segments, Dimension inference, Dimension rescue, List drafts and
-   Template drafts. **Use default** clears an assignment.
-3. **Prompt writers**: pick a model to write every prompt for one image model.
-   After you pick one, choose how firmly it applies:
-   - **Always use this model** (lock). This model writes every prompt for
-     that image model, and people's own picks do not apply. If it is turned off or
-     cannot take an attached image, the request fails instead of quietly
-     moving to another model.
-   - **Use unless the person picked their own** (prefer). This model replaces
-     the task assignment and the default for that image model, but a person's
-     own pick in Settings still wins.
+1. **Default model**, at the top of the **Features** panel: every feature
+   uses it unless one is assigned below. Set this first. One default is
+   enough to switch on every text feature.
+2. **Feature assignments**: give a single feature its own model. The
+   features are grouped under **Composer** (Enhance, Motion writer, Krea
+   condense), **Stories** (Story planner, Story segments) and **Prompt
+   Library** (AI fill, Brainstorm, Template drafts, List drafts, Dimension
+   inference, Dimension rescue). An unassigned feature shows the default
+   model after a ↳; **Default model (…)** in the menu clears an assignment.
+3. **Prompt writers**, in the **Image models** panel: pick a model to write
+   every prompt for one image model. After you pick one, choose how firmly
+   it applies:
+   - **Always** (lock). This model writes every prompt for that image model,
+     and people's own picks do not apply. If it is turned off or cannot take
+     an attached image, the request fails instead of quietly moving to
+     another model.
+   - **Unless someone picked their own** (prefer). This model replaces the
+     feature assignment and the default for that image model, but a person's
+     own pick under **Your picks** still wins.
 
-For each request, Atelier walks this order and uses the first model that is
-switched on, not offline, and able to read images when the request carries
-some:
-
-1. A locked prompt writer for the selected image model.
-2. The person's own pick for the task in Settings.
-3. A preferred prompt writer for the selected image model.
-4. The task assignment.
-5. The default model.
-
-If nothing qualifies, the feature reports "No text model is set up" or, when
-images are attached, "None of the available text models accepts images".
+The [Admin guide](admin-guide.md#5-optional-fine-tuning) lists the full
+order Atelier follows for each request and which effort applies. If nothing
+qualifies, the feature reports "No text model is set up" or, when images are
+attached, "None of the available text models accepts images".
 
 ## Let people pick their own model
 
-Everyone with the Prompt Library can open **Prompt Library**, then the
-**Settings** tab. The **Your text models** section lists every task with a model
-menu. "Use default" follows what the admin set, and the menu shows which model
-that is. A person can pick any model that is switched on and not offline, and
-for models with reasoning levels, a reasoning effort. Models without levels
-show "Effort fixed by the model".
+Once a model is connected, everyone sees **Text models** in the sidebar and
+can set their own model per feature there, under **Your picks** (admins open
+that tab; everyone else sees only that page). A feature left alone follows
+the shared setup and shows the model it inherits after a ↳; **Shared setup
+(…)** in its menu goes back to that. The Prompt Library features are listed
+only for people with Prompt Library access. A person can pick any model that
+is switched on and not offline, and for models with reasoning levels, a
+reasoning effort. Models without levels show "Effort fixed by the model".
 
 The picked effort applies only while the picked model actually serves the
-task. If a picked model goes offline, Settings says so and the task uses the
-default until it is back. Admins see how many people picked a model before
-they remove it.
+feature. If a picked model goes offline, **Your picks** says so and the
+feature uses the shared setup until it is back. Admins see how many people
+picked a model before they remove it.
 
 ## Screen requests first
 
@@ -351,7 +350,7 @@ another model, it only picks one that screens at least as strictly. Leave the sw
 | "The server refused the image" during **Test model** | The model cannot read images. Atelier turns **Image input** off. Use another model for Enhance or the motion writer with reference images. |
 | "The server refused both JSON modes" | The model has no JSON mode. Atelier turns **JSON output** off and asks for JSON in the prompt instead, which works less reliably. Prefer a model that passed this check for the Prompt Library helpers. |
 | Requests to a model time out or replies are cut off | Turn on **Slow model** under **Advanced** for models that think for minutes, or choose a lower reasoning effort. |
-| "No text model is set up. An admin can add one under Text models." (HTTP 409) | Set a **Default model** in the Routing panel, and check that the model and its provider are switched on. |
+| "No text model is set up. An admin can add one under Text models." (HTTP 409) | Set a **Default model** under **Shared setup**, and check that the model and its provider are switched on. |
 | "None of the available text models accepts images. Remove the reference images or ask an admin to enable image input on a model." (HTTP 409) | Remove the reference images, or connect a model that can read images, test it and make sure **Image input** is on. |
 | "The text model set for this image model is turned off or unavailable." (HTTP 409) | A locked prompt writer cannot serve. Turn the model back on, or change the writer to another model or to **No writer**. |
 | A screened model refuses every request | Set `OPENROUTER_API_KEY`, or set **Screen requests first** to **Off** for that model. |

@@ -191,6 +191,15 @@ async function openPicker(page: Page): Promise<void> {
   await expect(page.getByRole('button', { name: /^Advanced/ })).toBeVisible();
 }
 
+// A text admin with a provider lands on Shared setup; the provider inventory
+// is its own tab.
+async function openTextProviders(page: Page): Promise<void> {
+  await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+  const tab = page.getByRole('tab', { name: 'Providers', exact: true });
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+}
+
 const AXIS_MENU = '[role="dialog"][data-axis-menu="true"]';
 // The lazy Archive view's module request on the Vite dev server.
 const ARCHIVE_CHUNK = /\/src\/components\/Archive\/index\.tsx(?:\?.*)?$/;
@@ -273,7 +282,7 @@ test.describe('motion polish continuity', () => {
   test('Add provider preset hints grow the centred dialog through intermediate heights', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+    await openTextProviders(page);
     await page.getByRole('button', { name: 'Add provider', exact: true }).first().click();
     const dialog = page.getByRole('dialog', { name: 'Add a provider' });
     await expect(dialog).toBeVisible();
@@ -815,7 +824,7 @@ test.describe('reduced motion holds every leak site still', () => {
   });
 
   test('the Text models switch thumb jumps without travel', async ({ page }) => {
-    await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+    await openTextProviders(page);
     const toggle = page.getByRole('switch', { name: 'Use Preview writer' });
     await expect(toggle).toBeVisible();
     await toggle.evaluate((element) => { element.querySelector('span')?.setAttribute('id', 'motion-thumb'); });
@@ -2248,7 +2257,7 @@ test.describe('layout stability (T9)', () => {
   test('switching between two preset hints interpolates the open hint height', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+    await openTextProviders(page);
     await page.getByRole('button', { name: 'Add provider', exact: true }).first().click();
     const dialog = page.getByRole('dialog', { name: 'Add a provider' });
     await expect(dialog).toBeVisible();

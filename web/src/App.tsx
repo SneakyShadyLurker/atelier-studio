@@ -35,7 +35,7 @@ import { PromptDraftProvider } from './components/PromptManager/draftStore';
 import { LazyFallback } from './components/LazyFallback';
 import { I } from './components/icons/I';
 import { usePromptLibrary } from './hooks/usePromptLibrary';
-import { useTextProviders } from './hooks/useTextProviders';
+import { useTextModelsEntry } from './hooks/useTextModelsAccess';
 import { useArchiveQuery } from './hooks/useArchiveQuery';
 import { useClearAll, clearAllConfirmCopy } from './hooks/useClearAll';
 import { useCollections } from './hooks/useCollections';
@@ -157,8 +157,8 @@ function AppContent() {
   const hamburgerRef = useRef<HTMLButtonElement | null>(null);
   const promptLibrary = usePromptLibrary();
   const promptsEnabled = promptLibrary.enabled;
-  const textAdmin = useTextProviders();
-  useUrlState(promptLibrary.gated, textAdmin.gated);
+  const textModelsEnabled = useTextModelsEntry();
+  useUrlState(promptLibrary.gated);
   const draft = useAtelierStore((state) => state.draft);
   const activeBatchId = useAtelierStore((state) => state.activeBatchId);
   const lightbox = useAtelierStore((state) => state.lightbox);
@@ -755,7 +755,7 @@ function AppContent() {
         historyQ={debouncedQ}
         archivedCount={archivedCount}
         promptsEnabled={promptsEnabled}
-        textModelsEnabled={textAdmin.enabled}
+        textModelsEnabled={textModelsEnabled}
         theme={theme}
         error={historyError}
         historyReadOnly={isFeedStale || isViewPending}
@@ -829,7 +829,7 @@ function AppContent() {
             <ErrorBoundary fallback={viewErrorFallback}>
                 <PromptManager onBack={onManagedViewBack} />
             </ErrorBoundary>
-          ) : view.kind === 'text-models' && !textAdmin.gated ? (
+          ) : view.kind === 'text-models' ? (
             <ErrorBoundary fallback={viewErrorFallback}>
               <TextModels onBack={onManagedViewBack} />
             </ErrorBoundary>

@@ -9,6 +9,7 @@ import type {
   TextProviderConnectionTestRequest,
   TextProviderCreateRequest,
   TextProviderPatchRequest,
+  TextDefaultPutRequest,
   TextRoutingResponse,
   TextTask,
   TextWriterPutRequest,
@@ -99,8 +100,8 @@ export const deleteModel = (id: string, mid: string) =>
 export const testModel = (id: string, mid: string) =>
   requestJson<TestReport>(apiPath('/text-providers/:id/models/:mid/test', { id, mid }), jsonInit('POST'));
 
-export const putRoutingDefault = (scope: 'default' | TextTask, modelId: string | null) =>
-  requestJson<TextRoutingResponse>(apiPath('/text-routing/defaults/:scope', { scope }), jsonInit('PUT', { modelId }));
+export const putRoutingDefault = (scope: 'default' | TextTask, body: TextDefaultPutRequest) =>
+  requestJson<TextRoutingResponse>(apiPath('/text-routing/defaults/:scope', { scope }), jsonInit('PUT', body));
 
 export const putRoutingWriter = (imageModelId: string, body: TextWriterPutRequest) =>
   requestJson<TextRoutingResponse>(apiPath('/text-routing/writers/:imageModelId', { imageModelId }), jsonInit('PUT', body));

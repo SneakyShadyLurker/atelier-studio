@@ -152,8 +152,8 @@ New installations do not include the operator's personal Prompt Library.
 - **Templates** hold reusable prompt text.
 - **Variable lists** provide alternatives for parts of a template.
 - **Dimensions** group tags that keep related choices coherent.
-- **Settings** picks which text model writes for each task, and its reasoning
-  effort where the model offers one.
+- **Settings** holds the Model steps and Render resolution options. Which text
+  model writes for you is under **Text models** in the sidebar (see below).
 
 Start with a simple reusable template, then add variables as you need them.
 The **Library** chip in the composer opens the picker. A roll queue lets
@@ -195,7 +195,8 @@ template: nothing is saved until you press **Save template**.
 
 The dialog also shows the **Model** and
 **Reasoning** level that write the draft. They are your **Template drafts**
-setting in **Settings**, so a change made in the dialog stays for later drafts.
+pick under **Text models**, **Your picks**, so a change made in the dialog
+stays for later drafts and shows there too.
 If an admin locked the prompt writer for the image model selected in the
 Composer, the dialog names that model instead and there is nothing to pick.
 
@@ -212,16 +213,24 @@ for the queue, and `{{ai-fill: instruction}}` asks a text model to fill a part
 of a template at generation time. These actions need a text model connected by
 an admin. A working image provider or local GPU alone does not provide one.
 
-In **Settings**, **Your text models** lists each task (Enhance, AI fill,
-Brainstorm and the rest) with a model menu. **Use default** follows the shared
-setup and names the inherited model.
-Pick another model to use it for that task, and choose a reasoning effort if
-the model offers levels. A model that is offline right now cannot be picked,
-and if your pick goes offline, the task uses the default until it is back. An
-admin can also choose a text model to write the prompts for a particular image
-model. If they lock that choice, your pick does not apply there and the result
-can come from a different model than the one you chose. Otherwise your pick
-still wins.
+Once a text model is connected, **Text models** appears in the sidebar. Its
+**Your picks** page (a tab of that name for admins) lists each feature with a
+model menu, grouped under **Composer**, **Stories** and, if you have the
+Prompt Library, **Prompt Library**. A feature you leave alone follows the
+shared setup your admin chose: its chip shows the model it uses after a ↳,
+and **Shared setup (…)** in the menu, with that model's name, brings a
+feature back to it. Pick another model to use it for that feature, then
+choose a reasoning effort if the model offers levels: the chip reads
+**Default effort** until you do, and models without levels show "Effort fixed
+by the model". A model that is offline right now cannot be picked, and if
+your pick goes offline, the feature uses the shared setup until it is back.
+
+<img src="assets/your-picks.webp" alt="The Your picks page of Text models: a note naming image models with their own prompt writer, then the Composer and Stories features, one with its own model and effort and the rest showing the inherited model after a ↳" width="900">
+
+An admin can also choose a text model to write the prompts for a particular
+image model. A note above your picks names each one. If it is always used,
+your pick does not apply to that image model and the result can come from a
+different model than the one you chose. Otherwise your pick still wins.
 
 On **MiniMax H3 Image** and **MOSS**, a prompt under 60 words is expanded
 automatically before it renders, because those models draw very short prompts

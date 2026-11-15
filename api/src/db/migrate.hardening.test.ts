@@ -59,6 +59,7 @@ const MIGRATION_STATEMENT_COUNTS: Readonly<Record<string, number>> = {
   '0060_user_model_resolution.sql': 1,
   '0061_user_model_resolution_downscale.sql': 1,
   '0062_text_models_screen_policy.sql': 1,
+  '0063_text_routing_effort.sql': 2,
 };
 
 const CORPUS_BOOTSTRAP_SQL = `

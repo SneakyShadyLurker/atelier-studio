@@ -189,6 +189,9 @@ export interface ReplaceRefImageResult {
 
 export type PromptManagerTab = 'templates' | 'lists' | 'dimensions' | 'settings';
 
+/** Text models tabs a text admin sees; everyone else sees Your picks alone. */
+export type TextModelsTab = 'shared' | 'picks' | 'providers';
+
 export interface PromptPickerDraft {
   templateId: string | null;
   pins: Readonly<Record<string, string>>;
@@ -334,6 +337,9 @@ interface SaveTemplateSlice {
 interface PromptLibraryUiSlice {
   promptManagerTab: PromptManagerTab;
   setPromptManagerTab: (tab: PromptManagerTab) => void;
+  /** null until a tab is chosen this session; the view then picks its default. */
+  textModelsTab: TextModelsTab | null;
+  setTextModelsTab: (tab: TextModelsTab) => void;
   promptPickerDraft: PromptPickerDraft;
   setPickerTemplate: (templateId: string | null) => void;
   setPickerPin: (listId: string, optionId: string) => void;
@@ -771,6 +777,8 @@ const createSaveTemplateSlice: StateCreator<AtelierState, [], [], SaveTemplateSl
 const createPromptLibraryUiSlice: StateCreator<AtelierState, [], [], PromptLibraryUiSlice> = (set) => ({
   promptManagerTab: 'templates',
   setPromptManagerTab: (tab) => { set({ promptManagerTab: tab }); },
+  textModelsTab: null,
+  setTextModelsTab: (tab) => { set({ textModelsTab: tab }); },
   promptPickerDraft: initialPromptPickerDraft,
   setPickerTemplate: (templateId) => {
     set((state) => {

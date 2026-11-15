@@ -6,7 +6,10 @@ import type { TextConfigSnapshot } from './textConfigSnapshot';
 // Which configured text model serves a call (spec § 7). Precedence, first
 // eligible wins: locked prompt writer, request pin, user pick, preferred
 // prompt writer, task assignment, default model. A locked writer never falls
-// through; every other step skips an ineligible candidate. Config comes from
+// through; every other step skips an ineligible candidate. The effort is the
+// winning step's stored effort when the served model offers it, else the
+// user's own effort when their pick names the served model and it is offered,
+// else none (the model's default); a request pin carries none. Config comes from
 // the in-memory snapshot, availability live from the poller; the only DB read
 // is the user's picks.
 
@@ -44,7 +47,7 @@ export type ResolvedTextModel =
       readonly ok: true;
       readonly model: TextModelRecord;
       readonly provider: TextProviderRecord;
-      /** The user's effort; absent means the model's `reasoningDefault` applies. */
+      /** The winning step's effort, else the user's same-model effort; absent means the model's `reasoningDefault` applies. */
       readonly effort?: TextReasoningEffort;
       readonly source: TextModelSource;
       readonly pickState?: TextPickState;
@@ -71,35 +74,38 @@ export function resolveTextModel(deps: TextModelResolverDeps, input: ResolveText
   const pickState: TextPickState | undefined = pick ? (check(pick.modelId) === 'eligible' ? 'active' : 'offline') : undefined;
   const withPick = pickState ? { pickState } : {};
 
-  const serve = (modelId: string, source: TextModelSource): ResolvedTextModel => {
+  // `ownEffort` is the winning step's stored effort; an unoffered one is ignored (R4.6).
+  const serve = (modelId: string, source: TextModelSource, ownEffort: TextReasoningEffort | null | undefined): ResolvedTextModel => {
     const model = config.models.get(modelId);
     const provider = model && config.providers.get(model.providerId);
     // check() admitted the model, so both are present.
     if (!model || !provider) return { ok: false, reason: 'not-configured', ...withPick };
-    const effort = pick?.modelId === modelId && pick.effort !== null && model.reasoningLevels.includes(pick.effort)
-      ? pick.effort
-      : undefined;
+    const offered = (effort: TextReasoningEffort | null | undefined): effort is TextReasoningEffort =>
+      effort !== undefined && effort !== null && model.reasoningLevels.includes(effort);
+    const personal = pick?.modelId === modelId ? pick.effort : undefined;
+    const effort = offered(ownEffort) ? ownEffort : offered(personal) ? personal : undefined;
     return { ok: true, model, provider, source, ...(effort ? { effort } : {}), ...withPick };
   };
 
   const writer = input.imageModelId === undefined ? undefined : config.writers[input.imageModelId];
   if (writer?.mode === 'lock') {
     return check(writer.modelId, true) === 'eligible'
-      ? serve(writer.modelId, 'writer')
+      ? serve(writer.modelId, 'writer', writer.effort)
       : { ok: false, reason: 'pin-unavailable', ...withPick };
   }
 
-  const candidates: readonly (readonly [string | undefined, TextModelSource])[] = [
-    [input.requestPin, 'request'],
-    [pick?.modelId, 'user'],
-    [writer?.modelId, 'writer'],
-    [config.defaults.byTask[input.task], 'task'],
-    [config.defaults.default, 'default'],
+  // Each step with the effort it brings; a request pin brings none.
+  const candidates: readonly (readonly [string | undefined, TextModelSource, TextReasoningEffort | null | undefined])[] = [
+    [input.requestPin, 'request', undefined],
+    [pick?.modelId, 'user', pick?.effort],
+    [writer?.modelId, 'writer', writer?.effort],
+    [config.defaults.byTask[input.task], 'task', config.defaultEfforts.byTask[input.task]],
+    [config.defaults.default, 'default', config.defaultEfforts.default],
   ];
   let visionBlocked = false;
-  for (const [modelId, source] of candidates) {
+  for (const [modelId, source, ownEffort] of candidates) {
     const eligibility = check(modelId);
-    if (modelId !== undefined && eligibility === 'eligible') return serve(modelId, source);
+    if (modelId !== undefined && eligibility === 'eligible') return serve(modelId, source, ownEffort);
     if (eligibility === 'vision-only') visionBlocked = true;
   }
   return { ok: false, reason: visionBlocked ? 'no-vision-model' : 'not-configured', ...withPick };

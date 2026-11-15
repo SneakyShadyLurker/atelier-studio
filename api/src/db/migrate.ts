@@ -10,7 +10,7 @@ import { namedArtifactDir, namedArtifactRoot } from '../storage/files';
 import type { AppLogger } from '../observability/logger';
 import { LEGACY_SEED, type TextSeed } from './textSeed';
 
-export const BINARY_SCHEMA_VERSION = 62;
+export const BINARY_SCHEMA_VERSION = 63;
 
 export class MigrationError extends Error {
   constructor(message: string) {
@@ -612,6 +612,20 @@ const migration61Sql = loadMigration('0061_user_model_resolution_downscale.sql')
 // Per-text-model screen policy (2026-11-15): 'minors' screens only for sexual
 // content involving minors or unestablished ages. Existing rows keep 'full'.
 const migration62Sql = loadMigration('0062_text_models_screen_policy.sql');
+// Shared reasoning effort on the default, task assignments and prompt writers
+// (2026-11-15). NULL means none; existing rows migrate with none.
+const migration63Sql = loadMigration('0063_text_routing_effort.sql');
+
+// Two plain ADD COLUMNs, each guarded on its own table so a replay or a
+// partial schema adds only what is missing.
+function migration63Run(db: Database): void {
+  const [defaultsSql, writersSql, ...rest] = splitSqlStatements(migration63Sql);
+  if (defaultsSql === undefined || writersSql === undefined || rest.length > 0) {
+    throw new MigrationError('migration v63 expected 2 SQL statements');
+  }
+  addColumnIfMissing(db, 'text_defaults', 'effort', defaultsSql);
+  addColumnIfMissing(db, 'image_model_writers', 'effort', writersSql);
+}
 
 // Wraps migration 19 with a conditional `tile_ref_images` rebuild and the
 // SQLite-recommended foreign-key dance for ALTER-table-style rebuilds.
@@ -1754,6 +1768,7 @@ const migrations: readonly Migration[] = [
   { version: 60, sql: migration60Sql },
   { version: 61, fn: (db) => { addColumnIfMissing(db, 'user_model_resolution', 'downscale', migration61Sql); } },
   { version: 62, fn: (db) => { addColumnIfMissing(db, 'text_models', 'screen_policy', migration62Sql); } },
+  { version: 63, fn: migration63Run },
 ];
 
 export function migrate(

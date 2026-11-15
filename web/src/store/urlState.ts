@@ -85,10 +85,10 @@ function viewCollectionId(view: AppView): string | null {
 }
 
 /**
- * `promptsGated` / `textModelsGated`: the server answered 404 for that
- * surface, so its URL falls back to Unsorted.
+ * `promptsGated`: the server answered 404 for the Prompt Library, so its URL
+ * falls back to Unsorted. Text models opens for every signed-in person.
  */
-export function useUrlState(promptsGated = false, textModelsGated = false): void {
+export function useUrlState(promptsGated = false): void {
   const view = useAtelierStore((state) => state.view);
   const referencedCollectionId = viewCollectionId(view);
   const collectionsQuery = useCollections({ enabled: referencedCollectionId !== null });
@@ -127,8 +127,7 @@ export function useUrlState(promptsGated = false, textModelsGated = false): void
 
   useEffect(() => {
     if (view.kind === 'prompts' && promptsGated) replaceUrlState(APP_VIEW_UNSORTED, '');
-    if (view.kind === 'text-models' && textModelsGated) replaceUrlState(APP_VIEW_UNSORTED, '');
-  }, [promptsGated, textModelsGated, view.kind]);
+  }, [promptsGated, view.kind]);
 
   useEffect(() => {
     if (referencedCollectionId === null || !collectionsLoaded) return;

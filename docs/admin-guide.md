@@ -17,9 +17,9 @@ installation that is usually you as well. Those settings are summarised in
 |---|---|---|
 | [Make yourself an admin](#1-make-yourself-an-admin) | Environment file | Seeing the admin panel at all |
 | [Open the admin panel](#2-open-the-admin-panel) | Sidebar, **Text models** | Everything below |
-| [Connect a provider and add models](#3-connect-a-text-model) | Text models view | Every text feature |
-| [Set a default model](#4-set-a-default-model) | **Routing** panel | Every text feature. Adding models alone does not choose one |
-| [Fine-tune](#5-optional-fine-tuning) | **Routing** panel and **Edit model** | Optional |
+| [Connect a provider and add models](#3-connect-a-text-model) | **Providers** tab | Every text feature |
+| [Set a default model](#4-set-a-default-model) | **Shared setup** tab | Every text feature. Adding models alone does not choose one |
+| [Fine-tune](#5-optional-fine-tuning) | **Shared setup** tab and **Edit model** | Optional |
 
 ## 1. Make yourself an admin
 
@@ -54,15 +54,29 @@ of the left sidebar, between **Prompt Library** and **Archive**. Click it.
 - **On a phone**, tap the menu button at the top left (**Open menu**), then
   **Text models**.
 - **Row missing?** Your username is not in `TEXT_PROVIDER_ADMINS` exactly as
-  written, or the API was not restarted. People who are not admins never see
-  this row, and the admin pages answer them with "not found".
+  written, or the API was not restarted.
+
+Everyone else sees the same **Text models** row once at least one text model
+is connected, but only with their own picks. Admins get three tabs in the
+header:
+
+- **Shared setup**: which model each feature uses for everyone, and the
+  prompt writer of each image model.
+- **Your picks**: your own model per feature, the same page everyone else
+  sees.
+- **Providers**: the providers and their models. **Add provider** is the
+  first row.
+
+People who are not admins never see the **Shared setup** or **Providers**
+tab, and the admin pages answer them with "not found".
 
 The cog at the bottom of the sidebar opens **API keys**. That is each
 person's own Google key for Gemini, not an admin setting.
 
-On a fresh installation, the Text models view is empty:
+On a fresh installation, Text models opens on the empty **Providers** tab.
+Once a provider exists, it opens on **Shared setup**.
 
-<img src="assets/admin-panel.webp" alt="The Text models view on a fresh installation, showing 'No text model yet' and an Add provider button" width="900">
+<img src="assets/admin-panel.webp" alt="The Text models view on a fresh installation: Shared setup, Your picks and Providers tabs in the header, and the empty Providers tab showing 'No text model yet' and an Add provider button" width="900">
 
 Click **Back to Unsorted** at the top to return to your images.
 
@@ -94,13 +108,16 @@ preset, the Docker networking rules and each model setting.
 
 This is the step people most often miss. Adding models does not choose one
 for anybody. Until you set a default, text features work only for people who
-pick their own model in their settings.
+pick their own model under **Your picks**.
 
-In the **Routing** panel beside your providers (below them in a narrow
-window), pick a **Default model**. That one choice switches on every text
-feature for everyone. The default is the fallback: Atelier uses it whenever
-nothing more specific applies, such as a task assignment or a person's own
-pick.
+Open the **Shared setup** tab and pick the **Default model** at the top of
+the **Features** panel. That one choice switches on every text feature for
+everyone. The default is the fallback: Atelier uses it whenever nothing more
+specific applies, such as a feature assignment or a person's own pick. The
+chip beside it sets the reasoning effort the default runs with; **Default
+effort** leaves it to the model.
+
+<img src="assets/admin-shared-setup.webp" alt="The Shared setup tab: the Features panel with the Default model and its effort, then Enhance, Motion writer and the other features grouped under Composer, Stories and Prompt Library, unassigned rows showing the default model after a ↳" width="900">
 
 Pick a model that passed the **Image input** check if people attach
 reference images to Enhance or the video motion writer. Then try **Enhance**
@@ -123,17 +140,40 @@ Everything here is optional. One default model is a complete setup.
 
 | Setting | What it does |
 |---|---|
-| **Task assignments** | Give one task its own model, for example a fast model for AI fill and a stronger one for Brainstorm. **Use default** clears it |
-| **Prompt writers** | Choose which model writes prompts for one image model. **Always use this model** overrides everyone's own pick and never falls back: if that model is off, requests for that image model fail. **Use unless the person picked their own** lets personal picks win and falls back normally |
+| **Feature assignments** | In the **Features** panel, give one feature its own model, for example a fast model for AI fill and a stronger one for Brainstorm. An unassigned feature shows the default model after a ↳; **Default model (…)** in its menu clears an assignment |
+| **Prompt writers** | In the **Image models** panel, choose which model writes prompts for one image model. **Always** overrides everyone's own pick and never falls back: if that model is off, requests for that image model fail. **Unless someone picked their own** lets personal picks win and falls back normally |
+| **Reasoning effort** | The default model, each feature assignment and each prompt writer can carry an effort, set with the chip beside the model. It shows only for models with reasoning levels; other models read "Effort fixed by the model". An effort the model no longer offers is ignored |
 | **Model switch** | Turns a model off without deleting it. Atelier skips it and uses the next model in line, except where it is a locked prompt writer |
 | **Slow model** | Allows longer waits and larger replies, for models that think for minutes |
 | **Screen requests first** | Checks request text before it reaches that model. **Block nudity, minors and graphic violence** blocks explicit nudity (even of adults), sexual content involving minors or people whose age is not clearly adult, and graphic violence. **Block minors only** asks only the age question: adult nudity and graphic violence pass, sexual content whose people are not clearly 18 or older is blocked. Needs `OPENROUTER_API_KEY` on the server |
 
-People can also pick their own model per task under **Prompt Library**,
-**Settings**. Before you remove a model or provider, Atelier tells you what
-depends on it, including how many people picked it. Those uses fall back to
-the next model in line. [Choose which model writes what](connect-a-text-model.md#choose-which-model-writes-what)
-explains the exact order Atelier follows.
+People can also pick their own model and effort per feature under **Text
+models**, **Your picks**. Where you have a pick of your own, the feature's row
+in **Shared setup** says "Your own pick here is …" with **Use the shared
+model**, which clears your pick.
+
+When a feature runs, Atelier takes the first of these that applies:
+
+1. A prompt writer set to **Always** for the image model.
+2. A model the request itself names (an API-only option of character
+   Brainstorm; the app never sends one).
+3. The person's own pick under **Your picks**.
+4. A prompt writer set to **Unless someone picked their own**.
+5. The feature's assignment in **Shared setup**.
+6. The default model.
+
+A step whose model is switched off, offline, or cannot read the images
+attached to the request is skipped. A writer set to **Always** is never
+skipped: Atelier still tries it while it is offline, and the request fails
+when it is switched off or cannot read the images.
+
+The step that wins brings its effort. When it has none, as with a writer set
+to **Always** without an effort, the person's own effort applies if their
+pick is that same model. Otherwise the model's default effort applies.
+
+Before you remove a model or provider, Atelier tells you what depends on it,
+including how many people picked it. Those uses fall back to the next model
+in line.
 
 ## Keeping it healthy
 
@@ -173,6 +213,6 @@ grants nothing else.
 | No **Text models** row | Add your exact username to `TEXT_PROVIDER_ADMINS` and restart the API |
 | "Could not reach the server" | Check the address and port. Under Docker, replace `localhost` |
 | "The server refused the key (401)" | Check the key's access and credit, then **Replace key** |
-| Text actions say "No text model is set up" | Set a **Default model** in **Routing** and make sure it and its provider are switched on |
+| Text actions say "No text model is set up" | Set a **Default model** in **Shared setup** and make sure it and its provider are switched on |
 
 The full table is in [Connect a text model](connect-a-text-model.md#troubleshooting).

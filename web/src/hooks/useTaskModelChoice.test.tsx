@@ -58,7 +58,7 @@ describe('useTaskModelChoice', () => {
     };
     const { hook, puts } = setup(offline);
     await waitFor(() => { expect(hook.result.current.state.kind).toBe('ready'); });
-    // Shown as the pick it is, so "Use default" is a different value to choose.
+    // Shown as the pick it is, so "Shared setup" is a different value to choose.
     expect(hook.result.current.modelId).toBe('gone');
     expect(hook.result.current.effortLevels).toBeNull();
     // Unchanged: committing must not clobber the stored offline pick.
@@ -66,7 +66,7 @@ describe('useTaskModelChoice', () => {
     expect(puts()).toEqual([]);
   });
 
-  test("choosing 'Use default' directly over a stored offline pick clears that pick", async () => {
+  test("choosing 'Shared setup' directly over a stored offline pick clears that pick", async () => {
     const offline: TextModelsResponse = {
       ...LISTING,
       tasks: [{ task: 'template-draft', pick: 'gone', effectiveModelId: 'kimi', pickState: 'offline' }],
@@ -79,7 +79,7 @@ describe('useTaskModelChoice', () => {
     expect(puts()).toEqual([{ modelId: null, effort: null }]);
   });
 
-  test("a pick the listing no longer names starts at 'Use default'", async () => {
+  test("a pick the listing no longer names starts at 'Shared setup'", async () => {
     const unlisted: TextModelsResponse = {
       ...LISTING,
       tasks: [{ task: 'template-draft', pick: 'removed', effectiveModelId: 'kimi' }],
@@ -134,7 +134,7 @@ describe('useTaskModelChoice', () => {
     expect(puts()).toEqual([{ modelId: 'grok', effort: 'medium' }]);
   });
 
-  test("'Use default' saves a cleared pick", async () => {
+  test("'Shared setup' saves a cleared pick", async () => {
     const { hook, puts } = setup(LISTING);
     await waitFor(() => { expect(hook.result.current.state.kind).toBe('ready'); });
     act(() => { hook.result.current.setModelId(''); });

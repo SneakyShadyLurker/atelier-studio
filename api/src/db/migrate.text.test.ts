@@ -372,7 +372,7 @@ describe('migration 58 - text providers', () => {
         .toThrow(/CHECK constraint failed/i);
       expect(() => db.query("INSERT INTO text_defaults (scope, text_model_id, updated_at) VALUES ('bogus', ?, 1)").run(modelId ?? ''))
         .toThrow(/CHECK constraint failed/i);
-      expect(() => db.query("INSERT INTO image_model_writers VALUES ('x', ?, 'always', 1)").run(modelId ?? ''))
+      expect(() => db.query("INSERT INTO image_model_writers (image_model_id, text_model_id, mode, updated_at) VALUES ('x', ?, 'always', 1)").run(modelId ?? ''))
         .toThrow(/CHECK constraint failed/i);
       // Auth-mode invariants.
       expect(() => db.run("INSERT INTO text_providers (id, name, protocol, base_url, auth_mode, created_at, updated_at) VALUES ('p', 'P', 'anthropic', 'http://x', 'env', 1, 1)"))
@@ -450,7 +450,7 @@ describe('migration 62 - text model screen policy', () => {
       expect(schemaVersion(db)).toBe(61);
       const before = db.query<{ id: string }, []>('SELECT id FROM text_models').all();
       expect(before.length).toBeGreaterThan(0);
-      migrate(db, dataDir);
+      migrate(db, dataDir, { targetVersion: 62 });
       expect(schemaVersion(db)).toBe(62);
       const rows = db.query<{ id: string; screen_policy: string }, []>('SELECT id, screen_policy FROM text_models').all();
       expect(rows.map((row) => row.id).sort()).toEqual(before.map((row) => row.id).sort());
@@ -459,6 +459,55 @@ describe('migration 62 - text model screen policy', () => {
       db.run("UPDATE text_models SET screen_policy = 'minors' WHERE id = ?", [id]);
       expect(() => db.run("UPDATE text_models SET screen_policy = 'adult' WHERE id = ?", [id]))
         .toThrow(/CHECK constraint failed/i);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe('migration 63 - shared text routing effort', () => {
+  interface DefaultRow { scope: string; text_model_id: string; updated_at: number }
+  interface WriterRow { image_model_id: string; text_model_id: string; mode: string; updated_at: number }
+  interface PickRow { user_id: string; task: string; text_model_id: string; effort: string | null; updated_at: number }
+  const defaults = (db: Database): DefaultRow[] =>
+    db.query<DefaultRow, []>('SELECT scope, text_model_id, updated_at FROM text_defaults ORDER BY scope').all();
+  const writers = (db: Database): WriterRow[] =>
+    db.query<WriterRow, []>('SELECT image_model_id, text_model_id, mode, updated_at FROM image_model_writers ORDER BY image_model_id').all();
+  const picks = (db: Database): PickRow[] =>
+    db.query<PickRow, []>('SELECT user_id, task, text_model_id, effort, updated_at FROM user_text_models ORDER BY user_id, task').all();
+
+  test('existing default, task and writer rows keep their model with no effort; personal picks are untouched', () => {
+    const { db, dataDir } = openV57WithPins();
+    try {
+      migrate(db, dataDir, { textSeed: SEED, targetVersion: 62 });
+      expect(schemaVersion(db)).toBe(62);
+      const models = db.query<{ id: string }, []>('SELECT id FROM text_models ORDER BY id').all().map((row) => row.id);
+      const taskModel = models[0] ?? '';
+      db.run("INSERT INTO text_defaults (scope, text_model_id, updated_at) VALUES ('rescue', ?, 7) ON CONFLICT(scope) DO NOTHING", [taskModel]);
+      const beforeDefaults = defaults(db);
+      const beforeWriters = writers(db);
+      const beforePicks = picks(db);
+      expect(beforeDefaults.some((row) => row.scope === 'default')).toBe(true);
+      expect(beforeDefaults.some((row) => row.scope !== 'default')).toBe(true);
+      expect(beforeWriters.length).toBeGreaterThan(0);
+      expect(beforePicks.some((row) => row.effort !== null)).toBe(true);
+
+      migrate(db, dataDir);
+      expect(schemaVersion(db)).toBe(63);
+      expect(defaults(db)).toEqual(beforeDefaults);
+      expect(writers(db)).toEqual(beforeWriters);
+      expect(picks(db)).toEqual(beforePicks);
+      expect(count(db, 'SELECT COUNT(*) AS count FROM text_defaults WHERE effort IS NOT NULL')).toBe(0);
+      expect(count(db, 'SELECT COUNT(*) AS count FROM image_model_writers WHERE effort IS NOT NULL')).toBe(0);
+      expect(() => db.run("UPDATE text_defaults SET effort = 'loud' WHERE scope = 'rescue'")).toThrow(/CHECK constraint failed/i);
+      expect(() => db.run("UPDATE image_model_writers SET effort = 'loud'")).toThrow(/CHECK constraint failed/i);
+      db.run("UPDATE text_defaults SET effort = 'high' WHERE scope = 'rescue'");
+
+      // Replay is a no-op: both columns are guarded independently.
+      db.run('DELETE FROM schema_versions WHERE version = 63');
+      migrate(db, dataDir);
+      expect(schemaVersion(db)).toBe(63);
+      expect(count(db, "SELECT COUNT(*) AS count FROM text_defaults WHERE effort = 'high'")).toBe(1);
     } finally {
       db.close();
     }

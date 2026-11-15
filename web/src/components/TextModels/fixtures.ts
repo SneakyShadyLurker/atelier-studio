@@ -96,6 +96,7 @@ export const PROVIDERS: readonly AdminProvider[] = [
 
 export const ROUTING: TextRoutingResponse = {
   defaults: { default: 'm-kimi', byTask: { 'ai-fill': 'm-kimi' } },
+  efforts: { byTask: {} },
   writers: {},
   imageModels: [
     { id: 'gpt-image-2.6-sunburst', label: 'GPT Image 2.6 Sunburst' },

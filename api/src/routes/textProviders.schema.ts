@@ -11,6 +11,7 @@ import {
   TEXT_TASKS,
   TEXT_TOKEN_FIELDS,
   validateTextProviderBaseUrl,
+  type TextDefaultPutRequest,
   type TextModelCreateEntry,
   type TextModelPatchRequest,
   type TextProviderConnectionTestRequest,
@@ -131,14 +132,20 @@ export const TextRoutingWriterParam = z.object({
   imageModelId: z.string().min(1).max(200),
 });
 
-/** null clears the assignment. */
+/**
+ * null clears the assignment and its effort. An omitted effort keeps the
+ * stored one while the new model offers it, otherwise none; null clears it.
+ */
 export const TextRoutingDefaultBody = z.object({
   modelId: rowId.nullable(),
+  effort: z.enum(TEXT_REASONING_EFFORT_VALUES).nullable().optional(),
 });
+type _DefaultPutWire = AssertWire<MatchesWire<typeof TextRoutingDefaultBody, TextDefaultPutRequest>>;
 
-/** null clears the writer; `mode` defaults to 'prefer'. */
+/** null clears the writer; `mode` defaults to 'prefer'; `effort` as the default body. */
 export const TextRoutingWriterBody = z.object({
   modelId: rowId.nullable(),
   mode: z.enum(['lock', 'prefer']).default('prefer'),
+  effort: z.enum(TEXT_REASONING_EFFORT_VALUES).nullable().optional(),
 });
 type _WriterPutWire = AssertWire<MatchesWire<typeof TextRoutingWriterBody, TextWriterPutRequest>>;

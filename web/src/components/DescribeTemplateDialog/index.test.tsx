@@ -154,14 +154,14 @@ describe('DescribeTemplateDialog rework mode and model fields', () => {
   test('model options: named default first, provider groups, offline models disabled', () => {
     render(<DescribeTemplateDialog mode="rework" question={null} modelChoice={choice()} onSubmit={noop} onCancel={noop} busy={false} />);
     const { model, effort } = selects();
-    expect(model.options[0]?.textContent).toBe('Use default (Kimi K3)');
+    expect(model.options[0]?.textContent).toBe('Shared setup (Kimi K3)');
     expect([...model.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['CLIProxyAPI', 'Ollama']);
     const offline = [...model.options].find((o) => o.value === 'gone');
     expect(offline?.disabled).toBe(true);
     expect(offline?.textContent).toBe('Gone (offline)');
-    // "Use default": the reasoning select is disabled at Default.
+    // "Shared setup": the reasoning select is disabled at Default effort.
     expect(effort.disabled).toBe(true);
-    expect(effort.selectedOptions[0]?.textContent).toBe('Default');
+    expect(effort.selectedOptions[0]?.textContent).toBe('Default effort');
   });
 
   test('a chosen model offers its levels; picking calls the choice setters', () => {
@@ -170,7 +170,7 @@ describe('DescribeTemplateDialog rework mode and model fields', () => {
     render(<DescribeTemplateDialog mode="rework" question={null} modelChoice={choice({ modelId: 'kimi', effortLevels: ['low', 'high'], setModelId, setEffort })} onSubmit={noop} onCancel={noop} busy={false} />);
     const { model, effort } = selects();
     expect(effort.disabled).toBe(false);
-    expect([...effort.options].map((o) => o.textContent)).toEqual(['Default', 'Low', 'High']);
+    expect([...effort.options].map((o) => o.textContent)).toEqual(['Default effort', 'Low', 'High']);
     fireEvent.change(model, { target: { value: 'scout' } });
     expect(setModelId).toHaveBeenCalledWith('scout');
     fireEvent.change(effort, { target: { value: 'high' } });
@@ -191,19 +191,19 @@ describe('DescribeTemplateDialog rework mode and model fields', () => {
     expect(effort.disabled).toBe(true);
   });
 
-  test('unavailable: both selects disabled at "Use default", submit still works', () => {
+  test('unavailable: both selects disabled at "Shared setup", submit still works', () => {
     const onSubmit = mock((_: string) => undefined);
     render(<DescribeTemplateDialog mode="rework" question={null} modelChoice={choice({ state: { kind: 'unavailable' }, groups: [], defaultName: undefined })} onSubmit={onSubmit} onCancel={noop} busy={false} />);
     const { model, effort } = selects();
     expect(model.disabled).toBe(true);
     expect(effort.disabled).toBe(true);
-    expect(model.selectedOptions[0]?.textContent).toBe('Use default');
+    expect(model.selectedOptions[0]?.textContent).toBe('Shared setup');
     fireEvent.change(screen.getByLabelText('Change instructions'), { target: { value: 'x' } });
     fireEvent.click(screen.getByRole('button', { name: 'Rework template' }));
     expect(onSubmit).toHaveBeenCalledWith('x');
   });
 
-  test("an offline saved pick shows as the selected option, so 'Use default' is a change", () => {
+  test("an offline saved pick shows as the selected option, so 'Shared setup' is a change", () => {
     const setModelId = mock((_: string) => undefined);
     render(<DescribeTemplateDialog mode="rework" question={null} modelChoice={choice({ modelId: 'gone', effortLevels: null, setModelId })} onSubmit={noop} onCancel={noop} busy={false} />);
     const { model, effort } = selects();

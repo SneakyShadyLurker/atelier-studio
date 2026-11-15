@@ -48,15 +48,20 @@ describe('text models URL state', () => {
     expect(serializeUrlState(APP_VIEW_TEXT_MODELS, '')).toBe('?view=text-models');
   });
 
-  test('a gated (non-admin) visit falls back to Unsorted; an admin stays', () => {
+  test('every signed-in person stays on the view, admin or not', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
     installUrl('?view=text-models');
-    const admin = renderHook(() => { useUrlState(false, false); }, { wrapper: wrapper(client) });
+    renderHook(() => { useUrlState(false); }, { wrapper: wrapper(client) });
     expect(useAtelierStore.getState().view).toEqual(APP_VIEW_TEXT_MODELS);
-    admin.unmount();
+    expect(window.location.search).toBe('?view=text-models');
+  });
 
-    renderHook(() => { useUrlState(false, true); }, { wrapper: wrapper(client) });
+  test('a gated Prompt Library visit still falls back to Unsorted', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    installUrl('?view=prompts');
+    renderHook(() => { useUrlState(true); }, { wrapper: wrapper(client) });
     expect(useAtelierStore.getState().view).toEqual(APP_VIEW_UNSORTED);
     expect(window.location.search).toBe('');
   });

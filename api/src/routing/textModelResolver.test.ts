@@ -3,16 +3,22 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { TextModelStatus, TextTask } from '@atelier/shared';
+import fc from 'fast-check';
+import type { TextModelStatus, TextReasoningEffort, TextTask } from '@atelier/shared';
 import { migrate } from '../db/migrate';
 import {
   createTextProviderStore,
   type NewTextModel,
+  type TextDefaultEfforts,
+  type TextDefaults,
   type TextModelRecord,
+  type TextProviderRecord,
   type TextProviderStore,
+  type TextWriterAssignment,
+  type UserTextPick,
 } from '../db/textProviders';
 import { LEGACY_SEED, type LegacyTextKey, type TextSeed } from '../db/textSeed';
-import { createTextConfigSnapshot, type TextConfigSnapshot } from './textConfigSnapshot';
+import { createTextConfigSnapshot, type TextConfig, type TextConfigSnapshot } from './textConfigSnapshot';
 import {
   resolveTextModel,
   type ResolvedTextModel,
@@ -569,5 +575,279 @@ describe('TextConfigSnapshot', () => {
     for (const model of config.models.values()) expect(model).not.toHaveProperty('status');
     await store.updateProvider(providerId, { enabled: false });
     expect(snapshot.current().models.size).toBe(0);
+  });
+});
+
+// Shared effort (R4.4, R4.6): every precedence step brings its own stored effort.
+describe('resolveTextModel - shared effort', () => {
+  const effortOf = (result: ResolvedTextModel): TextReasoningEffort | undefined => (result.ok ? result.effort : undefined);
+
+  test('each source brings its own effort', async () => {
+    const { resolve, store, ids } = await openCustom();
+    store.setDefault('default', ids.alpha, 'low');
+    expect(served(resolve({ task: 'ai-fill' }))).toEqual({ modelId: ids.alpha, source: 'default' });
+    expect(effortOf(resolve({ task: 'ai-fill' }))).toBe('low');
+
+    store.setDefault('enhance', ids.text, 'high');
+    expect(served(resolve({ task: 'enhance' }))).toEqual({ modelId: ids.text, source: 'task' });
+    expect(effortOf(resolve({ task: 'enhance' }))).toBe('high');
+
+    store.setWriter('img', { modelId: ids.alpha, mode: 'prefer', effort: 'high' });
+    expect(served(resolve({ task: 'enhance', imageModelId: 'img' }))).toEqual({ modelId: ids.alpha, source: 'writer' });
+    expect(effortOf(resolve({ task: 'enhance', imageModelId: 'img' }))).toBe('high');
+
+    store.writeUserPick('alice', 'enhance', { modelId: ids.text, effort: 'low' });
+    expect(served(resolve({ task: 'enhance', imageModelId: 'img' }))).toEqual({ modelId: ids.text, source: 'user' });
+    expect(effortOf(resolve({ task: 'enhance', imageModelId: 'img' }))).toBe('low');
+
+    store.setWriter('img', { modelId: ids.alpha, mode: 'lock', effort: 'low' });
+    expect(served(resolve({ task: 'enhance', imageModelId: 'img' }))).toEqual({ modelId: ids.alpha, source: 'writer' });
+    expect(effortOf(resolve({ task: 'enhance', imageModelId: 'img' }))).toBe('low');
+  });
+
+  test('a winning effort the model no longer offers is ignored, never an error', async () => {
+    const { resolve, store, ids } = await openCustom();
+    store.setDefault('default', ids.alpha, 'high');
+    store.setDefault('enhance', ids.text, 'high');
+    store.updateModel(ids.alpha, { reasoningLevels: ['low'], reasoningDefault: 'low' });
+    store.updateModel(ids.text, { reasoningLevels: [], reasoningDefault: null });
+    const fallback = resolve({ task: 'ai-fill' });
+    expect(served(fallback)).toEqual({ modelId: ids.alpha, source: 'default' });
+    expect(effortOf(fallback)).toBeUndefined();
+    const task = resolve({ task: 'enhance' });
+    expect(served(task)).toEqual({ modelId: ids.text, source: 'task' });
+    expect(effortOf(task)).toBeUndefined();
+  });
+
+  test('a locked writer without an effort lets the same-model personal effort through; its own effort wins', async () => {
+    const { resolve, store, ids } = await openCustom();
+    store.setDefault('default', ids.beta);
+    store.writeUserPick('alice', 'enhance', { modelId: ids.alpha, effort: 'high' });
+    store.setWriter('img', { modelId: ids.alpha, mode: 'lock' });
+    expect(served(resolve({ task: 'enhance', imageModelId: 'img' }))).toEqual({ modelId: ids.alpha, source: 'writer' });
+    expect(effortOf(resolve({ task: 'enhance', imageModelId: 'img' }))).toBe('high');
+    store.setWriter('img', { modelId: ids.alpha, mode: 'lock', effort: 'low' });
+    expect(effortOf(resolve({ task: 'enhance', imageModelId: 'img' }))).toBe('low');
+    // The writer's effort leaves the model; the personal one still applies.
+    store.updateModel(ids.alpha, { reasoningLevels: ['high'], reasoningDefault: 'high' });
+    expect(effortOf(resolve({ task: 'enhance', imageModelId: 'img' }))).toBe('high');
+    // A personal pick on another model never lends its effort.
+    store.writeUserPick('alice', 'enhance', { modelId: ids.text, effort: 'high' });
+    expect(effortOf(resolve({ task: 'enhance', imageModelId: 'img' }))).toBeUndefined();
+  });
+
+  test('a request pin carries no effort of its own and behaves as today', async () => {
+    const { resolve, store, ids } = await openCustom();
+    store.setDefault('default', ids.alpha, 'high');
+    store.setDefault('brainstorm', ids.alpha, 'high');
+    const pinned = resolve({ task: 'brainstorm', requestPin: ids.alpha });
+    expect(served(pinned)).toEqual({ modelId: ids.alpha, source: 'request' });
+    expect(effortOf(pinned)).toBeUndefined();
+    store.writeUserPick('alice', 'brainstorm', { modelId: ids.alpha, effort: 'low' });
+    const withPick = resolve({ task: 'brainstorm', requestPin: ids.alpha });
+    expect(served(withPick)).toEqual({ modelId: ids.alpha, source: 'request' });
+    expect(effortOf(withPick)).toBe('low');
+  });
+
+  test('a failover partner runs with the effort its own resolution brings', async () => {
+    const { resolve, store, ids } = await openCustom();
+    store.setDefault('default', ids.beta);
+    store.setDefault('brainstorm', ids.text, 'high');
+    store.writeUserPick('alice', 'brainstorm', { modelId: ids.alpha, effort: 'low' });
+    const partner = resolve({ task: 'brainstorm', excludeModelIds: [ids.alpha] });
+    expect(served(partner)).toEqual({ modelId: ids.text, source: 'task' });
+    expect(effortOf(partner)).toBe('high');
+  });
+});
+
+// R4.4 and R4.5 over generated routing states and request contexts.
+describe('resolveTextModel - properties', () => {
+  const POOL = ['m0', 'm1', 'm2', 'm3'] as const;
+  const REFS = [...POOL, 'ghost'] as const;
+  const LEVELS = ['low', 'medium', 'high'] as const satisfies readonly TextReasoningEffort[];
+  const EFFORTS = [...LEVELS, 'max'] as const satisfies readonly TextReasoningEffort[];
+  const TASKS = ['enhance', 'rescue'] as const satisfies readonly TextTask[];
+  type Ref = (typeof REFS)[number];
+  type Task = (typeof TASKS)[number];
+
+  interface GenModel {
+    readonly present: boolean;
+    readonly status: TextModelStatus;
+    readonly vision: boolean;
+    readonly levels: readonly TextReasoningEffort[];
+  }
+  interface State {
+    readonly models: Readonly<Record<(typeof POOL)[number], GenModel>>;
+    readonly fallback?: { readonly modelId: Ref; readonly effort?: TextReasoningEffort };
+    readonly byTask: Partial<Record<Task, { readonly modelId: Ref; readonly effort?: TextReasoningEffort }>>;
+    readonly writer?: { readonly modelId: Ref; readonly mode: 'lock' | 'prefer'; readonly effort?: TextReasoningEffort };
+    readonly pick?: { readonly modelId: Ref; readonly effort: TextReasoningEffort | null };
+  }
+  interface Context {
+    readonly task: Task;
+    readonly imageModelId?: 'img' | 'other';
+    readonly visionRequired: boolean;
+    readonly requestPin?: Ref;
+    readonly excludeModelIds: readonly Ref[];
+  }
+
+  const refArb = fc.constantFrom(...REFS);
+  // Optional through `requiredKeys`: an absent key is "no effort".
+  const effortArb = fc.constantFrom(...EFFORTS);
+  const assignmentArb = fc.record({ modelId: refArb, effort: effortArb }, { requiredKeys: ['modelId'] });
+  const modelArb: fc.Arbitrary<GenModel> = fc.record({
+    present: fc.boolean(),
+    status: fc.constantFrom<TextModelStatus>('available', 'unknown', 'offline'),
+    vision: fc.boolean(),
+    levels: fc.subarray([...LEVELS]),
+  });
+  const stateArb: fc.Arbitrary<State> = fc.record(
+    {
+      models: fc.record({ m0: modelArb, m1: modelArb, m2: modelArb, m3: modelArb }),
+      fallback: assignmentArb,
+      byTask: fc.record({ enhance: assignmentArb, rescue: assignmentArb }, { requiredKeys: [] }),
+      writer: fc.record(
+        { modelId: refArb, mode: fc.constantFrom<'lock' | 'prefer'>('lock', 'prefer'), effort: effortArb },
+        { requiredKeys: ['modelId', 'mode'] },
+      ),
+      pick: fc.record({ modelId: refArb, effort: fc.option(fc.constantFrom(...EFFORTS), { nil: null }) }),
+    },
+    { requiredKeys: ['models', 'byTask'] },
+  );
+  const contextArb: fc.Arbitrary<Context> = fc.record(
+    {
+      task: fc.constantFrom(...TASKS),
+      imageModelId: fc.constantFrom<'img' | 'other'>('img', 'other'),
+      visionRequired: fc.boolean(),
+      requestPin: refArb,
+      excludeModelIds: fc.subarray([...REFS]),
+    },
+    { requiredKeys: ['task', 'visionRequired', 'excludeModelIds'] },
+  );
+
+  // A real model and provider record as templates: generated models differ only in what routing reads.
+  async function templates(): Promise<{ model: TextModelRecord; provider: TextProviderRecord }> {
+    const { store, ids, providerId } = await openCustom();
+    const provider = store.getProvider(providerId);
+    const model = store.getModel(ids.beta);
+    if (!provider || !model) throw new Error('templates missing');
+    return { model, provider };
+  }
+
+  function configFor(state: State, model: TextModelRecord, provider: TextProviderRecord): TextConfig {
+    const models = new Map<string, TextModelRecord>();
+    for (const id of POOL) {
+      const gen = state.models[id];
+      if (gen.present) {
+        models.set(id, { ...model, id, modelId: id, vision: gen.vision, reasoningLevels: [...gen.levels], reasoningDefault: null });
+      }
+    }
+    const defaults: TextDefaults = {
+      ...(state.fallback ? { default: state.fallback.modelId } : {}),
+      byTask: Object.fromEntries(Object.entries(state.byTask).map(([task, entry]) => [task, entry.modelId])),
+    };
+    const defaultEfforts: TextDefaultEfforts = {
+      ...(state.fallback?.effort ? { default: state.fallback.effort } : {}),
+      byTask: Object.fromEntries(
+        Object.entries(state.byTask).flatMap(([task, entry]) => (entry.effort ? [[task, entry.effort]] : [])),
+      ),
+    };
+    const writers: Record<string, TextWriterAssignment> = state.writer ? { img: state.writer } : {};
+    return { revision: 1, providers: new Map([[provider.id, provider]]), models, defaults, defaultEfforts, writers };
+  }
+
+  function resolveIn(state: State, context: Context, model: TextModelRecord, provider: TextProviderRecord): ResolvedTextModel {
+    const config = configFor(state, model, provider);
+    const picks: Partial<Record<TextTask, UserTextPick>> = state.pick ? { [context.task]: state.pick } : {};
+    return resolveTextModel(
+      {
+        snapshot: { current: () => config },
+        availability: { statusOf: (record) => (record.modelId in state.models ? state.models[record.modelId as (typeof POOL)[number]].status : 'unknown') },
+        store: { readUserPicks: () => picks },
+      },
+      {
+        userId: 'alice',
+        task: context.task,
+        visionRequired: context.visionRequired,
+        excludeModelIds: context.excludeModelIds,
+        ...(context.imageModelId ? { imageModelId: context.imageModelId } : {}),
+        ...(context.requestPin ? { requestPin: context.requestPin } : {}),
+      },
+    );
+  }
+
+  type Selection =
+    | { readonly modelId: string; readonly source: string; readonly pickState?: string }
+    | { readonly fail: string; readonly pickState?: string };
+
+  // Selection-only reference, written from the resolver at base 9e6610a (efforts ignored).
+  function oracle(state: State, context: Context): Selection {
+    const excluded = new Set<string>(context.excludeModelIds);
+    const check = (id: Ref | undefined, ignoreOffline = false): 'eligible' | 'vision-only' | 'ineligible' => {
+      if (id === undefined || id === 'ghost' || excluded.has(id)) return 'ineligible';
+      const gen = state.models[id];
+      if (!gen.present || (!ignoreOffline && gen.status === 'offline')) return 'ineligible';
+      return context.visionRequired && !gen.vision ? 'vision-only' : 'eligible';
+    };
+    const pickState = state.pick ? (check(state.pick.modelId) === 'eligible' ? 'active' : 'offline') : undefined;
+    const withPick = pickState ? { pickState } : {};
+    const writer = context.imageModelId === 'img' ? state.writer : undefined;
+    if (writer?.mode === 'lock') {
+      return check(writer.modelId, true) === 'eligible'
+        ? { modelId: writer.modelId, source: 'writer', ...withPick }
+        : { fail: 'pin-unavailable', ...withPick };
+    }
+    const candidates: readonly (readonly [Ref | undefined, string])[] = [
+      [context.requestPin, 'request'],
+      [state.pick?.modelId, 'user'],
+      [writer?.modelId, 'writer'],
+      [state.byTask[context.task]?.modelId, 'task'],
+      [state.fallback?.modelId, 'default'],
+    ];
+    let visionBlocked = false;
+    for (const [id, source] of candidates) {
+      const eligibility = check(id);
+      if (id !== undefined && eligibility === 'eligible') return { modelId: id, source, ...withPick };
+      if (eligibility === 'vision-only') visionBlocked = true;
+    }
+    return { fail: visionBlocked ? 'no-vision-model' : 'not-configured', ...withPick };
+  }
+
+  // R4.4: the winning pick's effort when offered, else the person's own same-model effort when offered.
+  function expectedEffort(state: State, context: Context, servedId: string, source: string): TextReasoningEffort | undefined {
+    const levels = state.models[servedId as (typeof POOL)[number]].levels;
+    const offered = (effort: TextReasoningEffort | null | undefined): effort is TextReasoningEffort =>
+      effort !== undefined && effort !== null && levels.includes(effort);
+    const winning = {
+      request: undefined,
+      user: state.pick?.effort,
+      writer: state.writer?.effort,
+      task: state.byTask[context.task]?.effort,
+      default: state.fallback?.effort,
+    }[source];
+    if (offered(winning)) return winning;
+    if (state.pick?.modelId === servedId && offered(state.pick.effort)) return state.pick.effort;
+    return undefined;
+  }
+
+  const selection = (result: ResolvedTextModel): Selection => {
+    const withPick = result.pickState ? { pickState: result.pickState } : {};
+    return result.ok ? { modelId: result.model.id, source: result.source, ...withPick } : { fail: result.reason, ...withPick };
+  };
+
+  test('R4.5: the served model or failure reason matches the selection-only reference', async () => {
+    const { model, provider } = await templates();
+    fc.assert(fc.property(stateArb, contextArb, (state, context) => {
+      expect(selection(resolveIn(state, context, model, provider))).toEqual(oracle(state, context));
+    }), { numRuns: 2000 });
+  });
+
+  test('R4.4: the effort follows the winning pick, then the same-model personal pick', async () => {
+    const { model, provider } = await templates();
+    fc.assert(fc.property(stateArb, contextArb, (state, context) => {
+      const result = resolveIn(state, context, model, provider);
+      if (!result.ok) return;
+      expect(result.effort).toBe(expectedEffort(state, context, result.model.id, result.source));
+    }), { numRuns: 2000 });
   });
 });

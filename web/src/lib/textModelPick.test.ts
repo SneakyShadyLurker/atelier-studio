@@ -1,6 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import type { PublicTextModel, TextModelsResponse } from '@atelier/shared';
-import { defaultModelId, groupModelsByProvider, rowPick } from './textModelPick';
+import {
+  defaultModelId,
+  defaultModelLabel,
+  effortChipLabel,
+  effortOptions,
+  groupModelsByProvider,
+  modelOptions,
+  offeredEffort,
+  personalUnsetChip,
+  rowPick,
+  sharedSetupLabel,
+  sharedUnsetChip,
+} from './textModelPick';
 
 function model(id: string, providerName: string, extra: Partial<PublicTextModel> = {}): PublicTextModel {
   return { id, displayName: id.toUpperCase(), providerName, vision: false, reasoningLevels: [], status: 'available', ...extra };
@@ -68,5 +80,36 @@ describe('rowPick', () => {
     expect(pick.offlinePick).toBe(true);
     expect(pick.activePick).toBeUndefined();
     expect(pick.effort).toBe('default');
+  });
+});
+
+describe('vocabulary', () => {
+  test('an unset personal pick follows the shared setup', () => {
+    expect(sharedSetupLabel('Kimi K3')).toBe('Shared setup (Kimi K3)');
+    expect(sharedSetupLabel(undefined)).toBe('Shared setup');
+    expect(personalUnsetChip('Kimi K3')).toEqual({ text: 'Kimi K3', quiet: true, inherited: true });
+    expect(personalUnsetChip(undefined)).toEqual({ text: 'Shared setup', quiet: true, inherited: false });
+    expect(modelOptions(models, 'A')[0]?.label).toBe('Shared setup (A)');
+    expect(modelOptions(models, undefined)[0]?.label).toBe('Shared setup');
+  });
+
+  test('an unset shared feature follows the default model', () => {
+    expect(defaultModelLabel('Kimi K3')).toBe('Default model (Kimi K3)');
+    expect(defaultModelLabel(undefined)).toBe('Default model');
+    expect(sharedUnsetChip('Kimi K3')).toEqual({ text: 'Kimi K3', quiet: true, inherited: true });
+    expect(sharedUnsetChip(undefined)).toEqual({ text: 'No model', quiet: true, inherited: false });
+  });
+
+  test('effort reads "Default effort" unset and "<Level> effort" set; menus list levels bare', () => {
+    expect(effortChipLabel('default')).toBe('Default effort');
+    expect(effortChipLabel('xhigh')).toBe('Extra high effort');
+    expect(effortOptions(['low', 'high']).map((option) => option.label)).toEqual(['Default effort', 'Low', 'High']);
+  });
+
+  test('a stored effort the model no longer offers reads as the default', () => {
+    expect(offeredEffort(['low', 'high'], 'high')).toBe('high');
+    expect(offeredEffort(['low', 'high'], 'max')).toBe('default');
+    expect(offeredEffort([], 'low')).toBe('default');
+    expect(offeredEffort(['low'], undefined)).toBe('default');
   });
 });

@@ -1388,11 +1388,12 @@ test.describe('settings model menus', () => {
 
   test('grows to fit every model when the opposite side has room', async ({ page }) => {
     await page.goto(`${HARNESS}?case=settings`);
-    const trigger = page.getByRole('button', { name: /Text model for AI fill/ });
+    // Enhance is the first row, near the window top, so the menu has room below.
+    const trigger = page.getByRole('button', { name: /Text model for Enhance/ });
     await trigger.click();
     const listbox = page.getByRole('listbox');
     await settle(listbox);
-    // "Use default" plus the harness's six models across two provider groups.
+    // "Shared setup (Kimi K3)" plus the harness's six models across two provider groups.
     await expect(listbox.getByRole('option')).toHaveCount(7);
     expect(await overflows(listbox)).toBe(false);
     for (const option of await listbox.getByRole('option').all()) {

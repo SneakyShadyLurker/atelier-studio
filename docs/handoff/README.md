@@ -631,7 +631,7 @@ Every empty, error and crash surface shows an etched still life in a plate; noth
 | `empty-dimensions` | Prompt Library, no dimensions | 320 / 220 |
 | `empty-picker` | Prompt Picker with no templates | 120 |
 | `empty-brainstorm` | Brainstorm, before any ideas | 280 |
-| `empty-text-models` | Text models, no providers | 220 / 160 |
+| `empty-text-models` | Text models, no provider or no model | 220 / 160 |
 | `state-error` | `ErrorState` (history and library errors) | 160 / 120 (48 in the short actionable row) |
 | `crash` | ErrorBoundary crash card | 320 / 220 |
 

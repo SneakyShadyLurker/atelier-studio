@@ -1,4 +1,4 @@
--- Atelier database schema — cumulative state after migrations 1-62.
+-- Atelier database schema — cumulative state after migrations 1-63.
 -- Reference only (migrate.ts is the runtime source of truth); the version
 -- in this header must track BINARY_SCHEMA_VERSION when migrations are added.
 --
@@ -281,13 +281,18 @@ CREATE TABLE text_models (
 -- name the same upstream model (legacy slots aliased to one id, or two profiles).
 CREATE INDEX idx_text_models_provider ON text_models(provider_id, model_id);
 
+-- effort (v63) on this table and image_model_writers: NULL = no shared
+-- effort, the model's own default applies.
 CREATE TABLE text_defaults (
   scope         TEXT PRIMARY KEY CHECK (scope IN (
     'default', 'enhance', 'motion', 'ai-fill', 'brainstorm', 'condense', 'storytelling',
     'story-segments', 'infer', 'rescue', 'list-draft', 'template-draft'
   )),
   text_model_id TEXT NOT NULL REFERENCES text_models(id) ON DELETE CASCADE,
-  updated_at    INTEGER NOT NULL
+  updated_at    INTEGER NOT NULL,
+  effort        TEXT CHECK (
+    effort IS NULL OR effort IN ('none','minimal','low','medium','high','xhigh','max')
+  )
 );
 
 -- image_model_id is a registry id (code, not a table), so it carries no FK.
@@ -295,7 +300,10 @@ CREATE TABLE image_model_writers (
   image_model_id TEXT PRIMARY KEY,
   text_model_id  TEXT NOT NULL REFERENCES text_models(id) ON DELETE CASCADE,
   mode           TEXT NOT NULL CHECK (mode IN ('lock', 'prefer')),
-  updated_at     INTEGER NOT NULL
+  updated_at     INTEGER NOT NULL,
+  effort         TEXT CHECK (
+    effort IS NULL OR effort IN ('none','minimal','low','medium','high','xhigh','max')
+  )
 );
 
 CREATE TABLE user_text_models (

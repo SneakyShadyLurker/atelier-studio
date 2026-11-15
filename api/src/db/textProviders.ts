@@ -116,11 +116,29 @@ export interface TextWriterAssignment {
   /** text_models row id. */
   readonly modelId: string;
   readonly mode: TextWriterMode;
+  /** Stored shared effort, as stored; absent = none (the model's default). */
+  readonly effort?: TextReasoningEffort;
+}
+
+/**
+ * A writer write. `effort` omitted keeps the stored effort when the model
+ * offers it, otherwise none; null clears it.
+ */
+export interface TextWriterWrite {
+  readonly modelId: string;
+  readonly mode: TextWriterMode;
+  readonly effort?: TextReasoningEffort | null;
 }
 
 export interface TextDefaults {
   readonly default?: string;
   readonly byTask: Partial<Record<TextTask, string>>;
+}
+
+/** Stored shared efforts beside `TextDefaults`, as stored; absent = none. */
+export interface TextDefaultEfforts {
+  readonly default?: TextReasoningEffort;
+  readonly byTask: Partial<Record<TextTask, TextReasoningEffort>>;
 }
 
 export interface UserTextPick {
@@ -149,12 +167,17 @@ export interface TextProviderStore {
    */
   recordModelTest(id: string, report: TestReport, verifiedAt: number | null): TextModelRecord | null;
   readDefaults(): TextDefaults;
-  /** null clears the assignment. */
-  setDefault(scope: TextRoutingScope, modelId: string | null): void;
+  readDefaultEfforts(): TextDefaultEfforts;
+  /**
+   * null clears the assignment and its effort. `effort` omitted keeps the
+   * stored effort when `modelId` offers it, otherwise none; null clears it;
+   * an effort the model does not offer is rejected and nothing is written.
+   */
+  setDefault(scope: TextRoutingScope, modelId: string | null, effort?: TextReasoningEffort | null): void;
   /** Image model id → writer. */
   readWriters(): Record<string, TextWriterAssignment>;
-  /** null clears the writer. */
-  setWriter(imageModelId: string, assignment: TextWriterAssignment | null): void;
+  /** null clears the writer and its effort; effort semantics as `setDefault`. */
+  setWriter(imageModelId: string, assignment: TextWriterWrite | null): void;
   readUserPicks(userId: string): Partial<Record<TextTask, UserTextPick>>;
   /** null clears the pick. Never bumps the revision. */
   writeUserPick(userId: string, task: TextTask, pick: UserTextPick | null): void;
@@ -422,6 +445,22 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
     if (!row) invalid('Unknown text model.');
     if (row.enabled !== 1) invalid('This text model is turned off.');
     return modelFromRow(row);
+  };
+
+  /** A routing write's explicit effort must be one the model offers. */
+  const checkEffort = (model: TextModelRecord, effort: TextReasoningEffort | null | undefined): void => {
+    if (effort !== undefined && effort !== null && !model.reasoningLevels.includes(effort)) {
+      invalid('This text model does not offer that reasoning level');
+    }
+  };
+  /** The effort a routing write stores: omitted keeps `stored` (the persisted row's, read in the same write) while the model offers it. */
+  const nextEffort = (
+    model: TextModelRecord,
+    effort: TextReasoningEffort | null | undefined,
+    stored: string | null | undefined,
+  ): TextReasoningEffort | null => {
+    if (effort !== undefined) return effort;
+    return isReasoningEffort(stored) && model.reasoningLevels.includes(stored) ? stored : null;
   };
 
   const write = <T>(fn: () => T): T => {
@@ -720,28 +759,56 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
       return fallback === undefined ? { byTask } : { default: fallback, byTask };
     },
 
-    setDefault(scope, modelId) {
+    readDefaultEfforts() {
+      const rows = db
+        .query<{ scope: string; effort: string | null }, []>(
+          'SELECT scope, effort FROM text_defaults WHERE effort IS NOT NULL',
+        )
+        .all();
+      const byTask: Partial<Record<TextTask, TextReasoningEffort>> = {};
+      let fallback: TextReasoningEffort | undefined;
+      for (const row of rows) {
+        if (!isReasoningEffort(row.effort)) continue;
+        if (row.scope === 'default') fallback = row.effort;
+        const task = TEXT_TASKS.find((value) => value === row.scope);
+        if (task) byTask[task] = row.effort;
+      }
+      return fallback === undefined ? { byTask } : { default: fallback, byTask };
+    },
+
+    setDefault(scope, modelId, effort) {
       if (modelId === null) {
+        if (effort !== undefined && effort !== null) invalid('A reasoning level needs a text model');
         write(() => db.run('DELETE FROM text_defaults WHERE scope = ?', [scope]));
         return;
       }
-      requireEnabledModel(modelId);
+      const model = requireEnabledModel(modelId);
+      checkEffort(model, effort);
       write(() => {
+        const stored = db
+          .query<{ effort: string | null }, [string]>('SELECT effort FROM text_defaults WHERE scope = ?')
+          .get(scope)?.effort;
         db.run(
-          `INSERT INTO text_defaults (scope, text_model_id, updated_at) VALUES (?, ?, ?)
-           ON CONFLICT(scope) DO UPDATE SET text_model_id = excluded.text_model_id, updated_at = excluded.updated_at`,
-          [scope, modelId, Date.now()],
+          `INSERT INTO text_defaults (scope, text_model_id, effort, updated_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(scope) DO UPDATE SET
+             text_model_id = excluded.text_model_id, effort = excluded.effort, updated_at = excluded.updated_at`,
+          [scope, modelId, nextEffort(model, effort, stored), Date.now()],
         );
       });
     },
 
     readWriters() {
       const rows = db
-        .query<{ image_model_id: string; text_model_id: string; mode: TextWriterMode }, []>(
-          'SELECT image_model_id, text_model_id, mode FROM image_model_writers ORDER BY image_model_id',
+        .query<{ image_model_id: string; text_model_id: string; mode: TextWriterMode; effort: string | null }, []>(
+          'SELECT image_model_id, text_model_id, mode, effort FROM image_model_writers ORDER BY image_model_id',
         )
         .all();
-      return Object.fromEntries(rows.map((row) => [row.image_model_id, { modelId: row.text_model_id, mode: row.mode }]));
+      return Object.fromEntries(
+        rows.map((row): [string, TextWriterAssignment] => [
+          row.image_model_id,
+          { modelId: row.text_model_id, mode: row.mode, ...(isReasoningEffort(row.effort) ? { effort: row.effort } : {}) },
+        ]),
+      );
     },
 
     setWriter(imageModelId, assignment) {
@@ -749,13 +816,18 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
         write(() => db.run('DELETE FROM image_model_writers WHERE image_model_id = ?', [imageModelId]));
         return;
       }
-      requireEnabledModel(assignment.modelId);
+      const model = requireEnabledModel(assignment.modelId);
+      checkEffort(model, assignment.effort);
       write(() => {
+        const stored = db
+          .query<{ effort: string | null }, [string]>('SELECT effort FROM image_model_writers WHERE image_model_id = ?')
+          .get(imageModelId)?.effort;
         db.run(
-          `INSERT INTO image_model_writers (image_model_id, text_model_id, mode, updated_at) VALUES (?, ?, ?, ?)
+          `INSERT INTO image_model_writers (image_model_id, text_model_id, mode, effort, updated_at) VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(image_model_id) DO UPDATE SET
-             text_model_id = excluded.text_model_id, mode = excluded.mode, updated_at = excluded.updated_at`,
-          [imageModelId, assignment.modelId, assignment.mode, Date.now()],
+             text_model_id = excluded.text_model_id, mode = excluded.mode, effort = excluded.effort,
+             updated_at = excluded.updated_at`,
+          [imageModelId, assignment.modelId, assignment.mode, nextEffort(model, assignment.effort, stored), Date.now()],
         );
       });
     },

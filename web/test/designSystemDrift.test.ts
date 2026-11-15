@@ -437,7 +437,8 @@ describe('design system drift guards', () => {
       'web/src/components/Lightbox/Content.tsx',
       'web/src/components/Sidebar/index.tsx',
       'web/src/components/PromptManager/index.tsx',
-      'web/src/components/PromptManager/SettingsPanel.tsx',
+      'web/src/components/TextModels/index.tsx',
+      'web/src/components/TextModels/YourPicks.tsx',
       'web/src/components/TextModels/ProviderForm.tsx',
       'web/src/components/TextModels/TestReport.tsx',
     ];

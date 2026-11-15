@@ -1,8 +1,7 @@
-/* Text models admin view (spec § 12.2): the Prompt Library fixed-zone
-   contract. The head holds ManagedViewHeader; the body is the single
-   scroller. The body is also the size container: provider inventory and the
-   routing rail sit side by side once it is wide enough, whatever the sidebar
-   is doing, and stack (inventory first) below that. */
+/* Text models view: the Prompt Library fixed-zone contract. The head holds
+   ManagedViewHeader (and, for admins, the tab strip); the body is the single
+   scroller and the size container the provider inventory reads. Panels form
+   one left-aligned column, capped so rows stay readable on wide windows. */
 
 .view {
   composes: inset from '../ManagedViewHeader/index.module.css';
@@ -33,25 +32,30 @@
   container: text-models / inline-size;
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  gap: 20px;
-}
-
-.providers {
+/* One tab's content (or the non-admin's picks): a capped column. */
+.column {
+  width: 100%;
+  max-width: 880px;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-@container text-models (width >= 980px) {
-  .layout {
-    grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
-    gap: 24px;
-  }
+.tabPanel {
+  min-width: 0;
+}
+
+.tabPanel:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-panel);
+}
+
+/* Add provider: the Providers tab's first row, end-aligned. */
+.addRow {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .guideLink {
@@ -77,13 +81,6 @@
   border-radius: var(--radius-panel);
   background: var(--bg-elev);
   box-shadow: var(--shadow-1);
-}
-
-.panelTitle {
-  margin: 0;
-  color: var(--ink);
-  font-size: var(--text-md);
-  font-weight: 500;
 }
 
 .note {
@@ -149,125 +146,174 @@
   outline-offset: 2px;
 }
 
-/* Routing rail */
+/* Feature panels (Shared setup, Your picks): a label head with one note,
+   then rows. Rows separate by spacing, not hairlines; a group name is a
+   small-caps label with space above. */
 
-.routing {
-  padding: 16px 18px 10px;
-}
-
-.routeDefault {
+.featurePanel {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+}
+
+.panelHead {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panelLabel {
+  composes: label from '../../styles/type.module.css';
+  margin: 0;
+}
+
+.panelNote {
+  max-width: 72ch;
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.panelBody {
+  padding: 4px 16px 12px;
+}
+
+.featureGroup {
+  margin-top: 16px;
+}
+
+.featureGroup:first-child {
+  margin-top: 10px;
+}
+
+.groupLabel {
+  composes: label from '../../styles/type.module.css';
+  margin: 0 0 2px;
+}
+
+/* Label and description left, a fixed two-slot control group right: the
+   model and effort chips line up down the column across every row. */
+.featureRow {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--bg-sunk);
+  gap: 16px;
+  padding: 9px 0;
 }
 
-.routeMain {
+.featureMain {
   min-width: 0;
+  padding-top: 4px;
 }
 
-.routeControl {
+.featureLabel {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.featureDescription,
+.featureNote {
+  max-width: 70ch;
+  margin: 1px 0 0;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.featureNote {
+  margin-top: 6px;
+}
+
+.featureControls {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 168px 132px;
+  gap: 8px;
+  align-items: center;
+}
+
+.slot {
   min-width: 0;
-  max-width: 60%;
+  display: flex;
 }
 
-/* ChipSelect renders its trigger button as the grid/flex item; a long model
-   name truncates inside it instead of pushing the picker out of the panel. */
-.routeItem > button,
-.routeControl > button {
+.effortHolder {
   min-width: 0;
-  max-width: 100%;
+  display: flex;
+  flex: 1;
 }
 
-.routeItem > button > span,
-.routeControl > button > span {
+/* ChipSelect renders its trigger button as the slot's item: it fills the
+   slot, and a long model name truncates inside it (the full name stays in
+   the accessible name and the value tip). */
+.slot button[aria-haspopup='listbox'] {
+  width: 100%;
+  min-width: 0;
+  justify-content: space-between;
+}
+
+.slot button[aria-haspopup='listbox'] > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.routeItem > button > svg,
-.routeControl > button > svg {
+.slot button[aria-haspopup='listbox'] > svg {
   flex-shrink: 0;
 }
 
-.routeLabel {
-  margin: 0;
-  color: var(--ink);
-  font-size: var(--text-sm);
-  font-weight: 500;
-}
-
-.routeGroup {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-}
-
-.routeGroupHead {
-  margin-bottom: 6px;
-}
-
-.routeList {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  column-gap: 32px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* Stacked under the inventory with room to spare: two columns of routes. */
-@container text-models (640px <= width < 980px) {
-  .routeList {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-/* Label left, picker right: right edges line up down the list, so the eye
-   runs straight from a task to the model it goes to. */
-.routeItem {
-  display: grid;
-  grid-template-columns: minmax(96px, 1fr) minmax(0, max-content);
-  align-items: center;
-  column-gap: 12px;
-  row-gap: 4px;
-  min-height: 36px;
-  padding: 2px 0;
-}
-
-.routeItemLabel {
-  color: var(--ink-2);
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
-}
-
-/* A route with no model of its own: the task's inherited model, or no writer. */
+/* An inherited or unset value: quiet, never coloured. */
 .unsetValue {
   color: var(--ink-3);
 }
 
+/* Sits where the effort chip would, on the chip's vertical rhythm. */
+.effortFixed {
+  margin: 0;
+  padding: 6px 0;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/* Inline text action ("Use the shared model"): underlined ink, no accent. */
+.textAction {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.textAction[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.textAction:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+/* A writer's mode choice, under its controls. */
 .modes {
   grid-column: 1 / -1;
-  display: grid;
-  gap: 0;
-  margin: 2px 0 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--bg-sunk);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
 }
 
 .mode {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-height: 28px;
   color: var(--ink-2);
   font-size: var(--text-xs);
@@ -286,6 +332,32 @@
 .mode input:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* Your picks: the writers note well above the panel. */
+.picks {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.writersNote {
+  padding: 12px 16px;
+  border-radius: var(--radius-panel);
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.writersNote p {
+  max-width: 72ch;
+  margin: 0;
+}
+
+.noteName {
+  color: var(--ink);
+  font-weight: 600;
 }
 
 /* Provider cards: header, notes, then a full-bleed model list. */
@@ -653,6 +725,13 @@
     min-height: 44px;
   }
 
+  /* The text stays inline; the hit area reaches 44 px. */
+  .textAction::before {
+    content: '';
+    position: absolute;
+    inset: -14px -4px;
+  }
+
   .providerActions .compactButton {
     height: 44px;
   }
@@ -695,10 +774,6 @@
     padding-block: 0;
   }
 
-  .routing {
-    padding: 14px 14px 8px;
-  }
-
   .providerHead {
     padding: 12px 14px 10px;
   }
@@ -712,13 +787,26 @@
     padding-inline: 14px;
   }
 
-  .routeDefault {
+  .panelHead {
+    padding: 12px 14px 10px;
+  }
+
+  .panelBody {
+    padding: 4px 14px 10px;
+  }
+
+  .featureRow {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 8px;
   }
 
-  .routeControl {
-    max-width: 100%;
+  .featureControls {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .addRow > button {
+    flex: 1;
   }
 }

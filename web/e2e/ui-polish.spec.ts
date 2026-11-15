@@ -453,6 +453,7 @@ test.describe('model recovery and provider guidance:', () => {
             await route.fulfill({ json: calls === 1 ? pass : unsupported });
           });
           await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+          await openTextModelsTab(page, 'Providers');
           const opener = page.getByRole('button', { name: 'Add provider', exact: true });
           await opener.press('Enter');
           const dialog = page.getByRole('dialog', { name: 'Add a provider', exact: true });
@@ -986,6 +987,14 @@ const noHorizontalOverflow = (page: Page) => page.evaluate(() =>
   document.documentElement.scrollWidth <= window.innerWidth + 1,
 );
 
+// A text admin with a provider lands on Shared setup; the inventory and the
+// personal picks sit behind their own tabs in the Text models header.
+async function openTextModelsTab(page: Page, name: 'Shared setup' | 'Your picks' | 'Providers'): Promise<void> {
+  const tab = page.getByRole('tablist', { name: 'Text models sections', exact: true }).getByRole('tab', { name, exact: true });
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+}
+
 // Extend the public offline fixture without changing its production owners.
 async function withSettingsOwnership(page: Page, holdTask?: string): Promise<void> {
   await page.addInitScript(({ tasks, holdTask }) => {
@@ -1091,11 +1100,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       try {
         const page = await context.newPage();
         await withSettingsOwnership(page);
-        await page.goto('/e2e/studio/index.html?view=prompts&textAdmin=1&textProvider=1');
-        await page.getByRole('tab', { name: 'Settings', exact: true }).click();
-        const panel = page.getByRole('region', { name: 'Your text model settings', exact: true });
-        await expect(panel.getByRole('heading', { level: 2, name: 'Your text models', exact: true })).toBeVisible();
-        await expect(panel.getByText('Choose which model writes for you in each feature. Default follows the shared setup.', { exact: true })).toBeVisible();
+        await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+        await openTextModelsTab(page, 'Your picks');
+        const view = page.getByRole('region', { name: 'Text models', exact: true });
+        const panel = page.getByRole('region', { name: 'Your picks', exact: true });
+        await expect(panel.getByRole('heading', { level: 3, name: 'Your picks', exact: true })).toBeVisible();
+        await expect(panel.getByText('Pick a model for a feature to use it instead of the shared one. A feature you leave alone follows the shared setup, shown with ↳.', { exact: true })).toBeVisible();
         const model = panel.getByRole('button', { name: /^Text model for AI fill,/ });
         const effort = panel.locator('button[aria-label^="Reasoning effort for AI fill,"]');
         const slot = effort.locator('..');
@@ -1112,7 +1122,11 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(effort).not.toHaveAttribute('data-tip');
         await expect(page.locator('[data-tip-label]').filter({ hasText: 'Pick a model to choose its reasoning effort' })).toHaveCount(0);
         await expect(panel.getByRole('button', { name: /^Reasoning effort for AI fill,/ })).toHaveCount(0);
-        await expectSettingsInk(model.locator('span').first().locator('span'), '--ink-3');
+        // An unset pick shows the inherited model after a decorative ↳.
+        await expect(model).toHaveAccessibleName('Text model for AI fill, currently Shared setup (Atlas)');
+        await expect(model.locator('span').first()).toHaveText('↳ Atlas');
+        await expect(model.locator('span[aria-hidden="true"]')).toHaveText('↳');
+        await expectSettingsInk(model.locator('span').first().locator('span').first(), '--ink-3');
         const touch = await page.evaluate(() => matchMedia('(hover: none), (any-pointer: coarse)').matches);
         const tab = browser.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab';
         if (touch) await expectFloor(model, 'personal model');
@@ -1146,8 +1160,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.keyboard.press(tab);
         await expect(effort).toBeFocused();
         const geometry = () => model.evaluate((element) => {
-          const row = element.parentElement?.parentElement;
-          const slot = element.nextElementSibling;
+          // Model chip → its slot → the controls grid → the feature row.
+          const modelSlot = element.parentElement;
+          const row = modelSlot?.parentElement?.parentElement;
+          const slot = modelSlot?.nextElementSibling;
           if (!row || !slot) throw new Error('missing settings row');
           return [element, slot, row].map((node) => {
             const rect = node.getBoundingClientRect();
@@ -1172,9 +1188,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(page.getByRole('listbox')).toHaveCount(0);
         await expect(effort).toBeFocused();
         await model.click();
-        await page.getByRole('option', { name: 'Use default (Atlas)', exact: true }).click();
+        await page.getByRole('option', { name: 'Shared setup (Atlas)', exact: true }).click();
         await expect(page.getByRole('listbox')).toHaveCount(0);
-        await expect(model).toHaveAccessibleName('Text model for AI fill, currently Default (Atlas)');
+        await expect(model).toHaveAccessibleName('Text model for AI fill, currently Shared setup (Atlas)');
         await expect(model).toBeEnabled();
         await expect(model).toBeFocused();
         await expect(slot).toHaveCSS('visibility', 'hidden');
@@ -1186,36 +1202,46 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(clearedBox.height).toBe(inactiveBox.height);
         await page.keyboard.press(tab);
         await expect(panel.getByRole('button', { name: /^Text model for Brainstorm,/ })).toBeFocused();
-        await expect(panel.getByText('Offline writer is offline right now; Story planner is using the default.', { exact: true })).toHaveCount(1);
+        await expect(panel.getByText('Offline writer is offline right now; Story planner is using the shared setup.', { exact: true })).toHaveCount(1);
         const offline = panel.getByRole('button', { name: /^Text model for Story planner,/ });
         await expect(offline).toHaveAccessibleName('Text model for Story planner, currently Offline writer');
         await expectSettingsInk(offline.locator('span').first().locator('span'), '--ink-3');
         await expect(panel.getByText('Effort fixed by the model', { exact: true })).toHaveCount(1);
         await expect(panel.locator('button[aria-label^="Reasoning effort for List drafts,"]')).toHaveCount(0);
         expect(await noHorizontalOverflow(page)).toBe(true);
-        expect(await panel.evaluate((element) => [...element.querySelectorAll('[data-zone="body"], [class*="rowControl"]')].every((node) => node.scrollWidth <= node.clientWidth + 1))).toBe(true);
+        expect(await view.evaluate((element) => [...element.querySelectorAll('[data-zone="body"], [class*="featureControls"]')].every((node) => node.scrollWidth <= node.clientWidth + 1))).toBe(true);
         expect(await page.evaluate(async () => (await fetch('/settings-ownership-writes')).json() as Promise<unknown>)).toEqual([
           { task: 'ai-fill', body: { modelId: 'override' } },
           { task: 'ai-fill', body: { modelId: 'override', effort: 'high' } },
           { task: 'ai-fill', body: { modelId: null } },
         ]);
-        await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
-        const routing = page.getByRole('region', { name: 'Routing for everyone', exact: true });
-        await expect(routing.getByRole('heading', { level: 3, name: 'Routing for everyone', exact: true })).toBeVisible();
-        await expect(routing.getByText('Features use these models for anyone who keeps the default.', { exact: true })).toBeVisible();
-        await expect(routing.getByText('Every task uses it unless assigned below.', { exact: true })).toBeVisible();
-        await expect(routing.getByRole('group', { name: 'Task assignments', exact: true })).toBeVisible();
-        await expect(routing.getByRole('group', { name: 'Prompt writers', exact: true })).toBeVisible();
+        await openTextModelsTab(page, 'Shared setup');
+        const routing = page.getByRole('region', { name: 'Features', exact: true });
+        await expect(routing.getByRole('heading', { level: 3, name: 'Features', exact: true })).toBeVisible();
+        await expect(routing.getByText('What each feature writes with for everyone. People can pick their own model under Your picks.', { exact: true })).toBeVisible();
+        await expect(routing.getByText('Every feature uses it unless one is assigned below.', { exact: true })).toBeVisible();
+        for (const group of ['Composer', 'Stories', 'Prompt Library']) {
+          await expect(routing.getByRole('group', { name: group, exact: true })).toBeVisible();
+        }
+        const writers = page.getByRole('region', { name: 'Image models', exact: true });
+        await expect(writers.getByRole('heading', { level: 3, name: 'Image models', exact: true })).toBeVisible();
+        await expect(writers.getByRole('button', { name: /^Prompt writer for / })).toHaveCount(2);
+        // The admin's own picks (the offline and the fixed writer) show beside the shared rows.
+        await expect(routing.getByText('Your own pick here is Offline writer.', { exact: false })).toHaveCount(1);
+        await expect(routing.getByText('Your own pick here is Fixed writer.', { exact: false })).toHaveCount(1);
+        await expect(routing.getByRole('button', { name: 'Use the shared model', exact: true })).toHaveCount(2);
         if (touch) await expectFloor(routing.getByRole('button', { name: 'Default model, currently Atlas', exact: true }), 'everyone default');
         expect(await noHorizontalOverflow(page)).toBe(true);
-        // A separate fresh document exercises the existing public zero-model fixture.
+        // A separate fresh document exercises the existing public zero-model
+        // fixture: a non-admin sees Your picks alone, as its empty state.
         const emptyPage = await context.newPage();
-        await emptyPage.goto('/e2e/studio/index.html?view=prompts&noTextModels=1');
-        await emptyPage.getByRole('tab', { name: 'Settings', exact: true }).click();
-        const empty = emptyPage.getByRole('region', { name: 'Your text model settings', exact: true });
-        await expect(empty.getByRole('heading', { name: 'Your text models', exact: true })).toBeVisible();
+        await emptyPage.goto('/e2e/studio/index.html?view=text-models&noTextModels=1');
+        const empty = emptyPage.getByRole('region', { name: 'Text models', exact: true });
+        await expect(empty.getByRole('heading', { level: 2, name: 'No text model yet', exact: true })).toBeVisible();
         await expect(empty.getByText('Ask your admin to connect a text model.', { exact: true })).toBeVisible();
-        await expect(empty.getByRole('button', { name: /^Text model for / })).toHaveCount(TEXT_TASKS.length);
+        await expect(empty.getByRole('tablist')).toHaveCount(0);
+        // No model, no rows: the empty state replaces the feature rows.
+        await expect(empty.getByRole('button', { name: /^Text model for / })).toHaveCount(0);
         await expect(empty.getByRole('button', { name: /^Reasoning effort for / })).toHaveCount(0);
         expect(await noHorizontalOverflow(emptyPage)).toBe(true);
         await test.info().attach('settings-ownership', { body: JSON.stringify({ viewport, colorScheme, touch, inactiveBox, clearedBox, liveGeometry }), contentType: 'application/json' });
@@ -1236,10 +1262,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         (await fetch(`/settings-ownership-focus-evidence?step=${step}`)).json() as Promise<unknown>, step);
       try {
         await withSettingsOwnership(page, 'ai-fill');
-        await page.goto('/e2e/studio/index.html?view=prompts&textAdmin=1&textProvider=1');
-        const settingsTab = page.getByRole('tab', { name: 'Settings', exact: true });
-        await settingsTab.click();
-        const panel = page.getByRole('region', { name: 'Your text model settings', exact: true });
+        await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+        const settingsTab = page.getByRole('tab', { name: 'Your picks', exact: true });
+        await openTextModelsTab(page, 'Your picks');
+        const panel = page.getByRole('region', { name: 'Your picks', exact: true });
         const model = panel.getByRole('button', { name: /^Text model for AI fill,/ });
         const menu = page.getByRole('listbox', { name: /^Text model for AI fill,/ });
         await model.click();
@@ -1617,6 +1643,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       });
     });
     await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+    await openTextModelsTab(page, 'Providers');
     const provider = page.getByRole('region', { name: 'Preview provider', exact: true });
     await expect(provider).toHaveAttribute('data-enabled', 'false');
     for (const status of ['available', 'offline', 'unknown']) {
@@ -1704,6 +1731,7 @@ for (const scenario of [
         Object.defineProperty(window, 'fetch', { configurable: true, get: () => fetchProviders, set: (value: typeof fetch) => { inner = value; } });
       });
       await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+      await openTextModelsTab(page, 'Providers');
       const provider = page.getByRole('region', { name: 'Preview provider', exact: true });
       await expect(page.getByRole('listitem', { name: 'Preview checking', exact: true }).locator('[data-status="unknown"]')).toHaveText('checking…');
       const rowNames = ['ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMN', 'Preview JSON', 'Preview complete', 'Preview image'] as const;
@@ -1834,6 +1862,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     try {
       const page = await context.newPage();
       await page.goto('/e2e/studio/index.html?view=text-models&textAdmin=1&textProvider=1');
+      await openTextModelsTab(page, 'Providers');
       for (const kind of ['provider', 'model'] as const) {
         if (kind === 'provider') await page.getByRole('button', { name: 'Add provider', exact: true }).click();
         else {
@@ -3071,13 +3100,17 @@ test.describe('prerequisite readiness:', () => {
           try {
             const page = await context.newPage();
             await withPrerequisiteReadiness(page);
-            await page.goto(`/e2e/studio/index.html?view=prompts&noTextModels=1${admin ? '&textAdmin=1&textProvider=1' : ''}`);
-            await page.getByRole('tab', { name: 'Settings', exact: true }).click();
-            const panel = page.getByRole('region', { name: 'Your text model settings' });
+            await page.goto(`/e2e/studio/index.html?view=text-models&noTextModels=1${admin ? '&textAdmin=1&textProvider=1' : ''}`);
+            // An admin with a provider lands on Shared setup, a non-admin on
+            // Your picks; with no model listed both show the empty state.
+            const panel = page.getByRole('region', { name: 'Text models', exact: true });
+            await expect(panel.getByRole('heading', { level: 2, name: 'No text model yet', exact: true })).toBeVisible();
             await expect(panel.getByText(admin
-              ? 'No text models are connected yet. Add one in Text models.'
+              ? 'Add a provider and its models under Providers.'
               : 'Ask your admin to connect a text model.', { exact: true })).toBeVisible();
-            await expect(panel.getByRole('button', { name: /^Text model for / })).toHaveCount(TEXT_TASKS.length);
+            if (admin) await expect(panel.getByRole('button', { name: 'Go to Providers', exact: true })).toBeVisible();
+            else await expect(panel.getByRole('button', { name: 'Go to Providers', exact: true })).toHaveCount(0);
+            await expect(panel.getByRole('button', { name: /^Text model for / })).toHaveCount(0);
             await expect(panel.getByRole('link')).toHaveCount(0);
             await page.getByRole('button', { name: 'Back to Unsorted', exact: true }).click();
             const composer = await approvedExpand(page);

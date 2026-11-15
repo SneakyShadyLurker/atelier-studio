@@ -1,9 +1,10 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useIsMutating, useMutation, useQuery, useQueryClient, type MutationKey, type QueryClient } from '@tanstack/react-query';
 import type {
   TextModelCreateEntry,
   TextModelPatchRequest,
   TextProviderCreateRequest,
   TextProviderPatchRequest,
+  TextDefaultPutRequest,
   TextRoutingResponse,
   TextTask,
   TextWriterPutRequest,
@@ -60,9 +61,14 @@ export function invalidateTextConfig(queryClient: QueryClient): Promise<void> {
 }
 
 /** The one way to write admin text config; Tasks 15-16 dialogs build on it. */
-export function useTextAdminMutation<TVars, TData>(mutationFn: (vars: TVars) => Promise<TData>, onSuccess?: (data: TData, queryClient: QueryClient) => void) {
+export function useTextAdminMutation<TVars, TData>(
+  mutationFn: (vars: TVars) => Promise<TData>,
+  onSuccess?: (data: TData, queryClient: QueryClient) => void,
+  mutationKey?: MutationKey,
+) {
   const queryClient = useQueryClient();
   return useMutation<TData, Error, TVars>({
+    ...(mutationKey === undefined ? {} : { mutationKey }),
     mutationFn,
     onSuccess: (data) => { onSuccess?.(data, queryClient); },
     onSettled: () => invalidateTextConfig(queryClient),
@@ -113,10 +119,22 @@ const keepRouting = (data: TextRoutingResponse, queryClient: QueryClient) => {
   queryClient.setQueryData(textAdminKeys.routing(), data);
 };
 
+// Routing writes share one key so "a save is pending" is read from the
+// mutation cache, not from one component's hook instance: Shared setup
+// unmounts on a tab change, and a remount must still see a save in flight
+// (an effort save sends the row's model id, which is stale until it lands).
+const ROUTING_WRITE_KEY: MutationKey = ['text-admin', 'routing-write'];
+
+/** True while any routing write (default, assignment, writer, mode, effort) is in flight. */
+export function useRoutingSaving(): boolean {
+  return useIsMutating({ mutationKey: ROUTING_WRITE_KEY }) > 0;
+}
+
 export function useSetRoutingDefault() {
   return useTextAdminMutation(
-    ({ scope, modelId }: { scope: 'default' | TextTask; modelId: string | null }) => putRoutingDefault(scope, modelId),
+    ({ scope, body }: { scope: 'default' | TextTask; body: TextDefaultPutRequest }) => putRoutingDefault(scope, body),
     keepRouting,
+    ROUTING_WRITE_KEY,
   );
 }
 
@@ -124,5 +142,6 @@ export function useSetRoutingWriter() {
   return useTextAdminMutation(
     ({ imageModelId, body }: { imageModelId: string; body: TextWriterPutRequest }) => putRoutingWriter(imageModelId, body),
     keepRouting,
+    ROUTING_WRITE_KEY,
   );
 }

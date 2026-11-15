@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
-import type { AdminProvider, Model, TextRoutingResponse } from '@atelier/shared';
+import type { AdminProvider, Model, PublicTextModel, TextModelsResponse, TextRoutingResponse } from '@atelier/shared';
 import { textAdminKeys } from '../../api/textProviders';
 import { textModelKeys } from '../../api/textModels';
 import {
@@ -11,7 +11,9 @@ import {
   useTextProviders,
   useUpdateModel,
 } from '../../hooks/useTextProviders';
-import { APP_VIEW_TEXT_MODELS, APP_VIEW_UNSORTED, useAtelierStore } from '../../store/atelier';
+import { useTextModelsEntry } from '../../hooks/useTextModelsAccess';
+import { goToTextModels } from '../../lib/textModelsNav';
+import { APP_VIEW_TEXT_MODELS, APP_VIEW_UNSORTED, useAtelierStore, type TextModelsTab } from '../../store/atelier';
 import Sidebar from '../Sidebar';
 import { GLM, KIMI, PROVIDERS, ROUTING } from './fixtures';
 import TextModels from './index';
@@ -36,10 +38,30 @@ function wrapper(client: QueryClient) {
   };
 }
 
+const LISTED: readonly PublicTextModel[] = [
+  { id: KIMI.id, displayName: 'Kimi K3', providerName: 'CLIProxyAPI', vision: true, reasoningLevels: ['low', 'high', 'max'], status: 'available' },
+];
+
+function textModels(models: readonly PublicTextModel[]): TextModelsResponse {
+  return { models, tasks: [], defaults: { byTask: {} }, writers: {}, lockedWriters: [] };
+}
+
+type Answer<T> = T | 'pending' | 'error' | 404;
+
+function answer<T>(value: Answer<T>, json: (body: T) => Response): Response | Promise<Response> {
+  if (value === 'pending') return new Promise<Response>(() => undefined);
+  if (value === 404) return Response.json({ error: 'not found' }, { status: 404 });
+  // 400 is not retryable, so a failed read settles without backoff.
+  if (value === 'error') return Response.json({ error: 'bad request' }, { status: 400 });
+  return json(value);
+}
+
 /** Routes fetch by path; records every call. */
 function installFetch(options: {
-  providers?: readonly AdminProvider[] | 404;
-  routing?: TextRoutingResponse;
+  providers?: Answer<readonly AdminProvider[]>;
+  routing?: Answer<TextRoutingResponse>;
+  /** The `models` of `GET /api/text-models`; zero listed by default. */
+  models?: Answer<readonly PublicTextModel[]>;
 } = {}): Call[] {
   const calls: Call[] = [];
   globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
@@ -48,11 +70,10 @@ function installFetch(options: {
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) as unknown : undefined;
     calls.push({ method, url, body });
     if (url.endsWith('/api/text-providers') && method === 'GET') {
-      if (options.providers === 404) return Response.json({ error: 'not found' }, { status: 404 });
-      return Response.json({ providers: options.providers ?? PROVIDERS });
+      return answer(options.providers ?? PROVIDERS, (providers) => Response.json({ providers }));
     }
-    if (url.includes('/api/text-routing')) return Response.json(options.routing ?? ROUTING);
-    if (url.includes('/api/text-models')) return Response.json({ models: [], tasks: [], defaults: { byTask: {} }, writers: {} });
+    if (url.includes('/api/text-routing')) return answer(options.routing ?? ROUTING, (routing) => Response.json(routing));
+    if (url.includes('/api/text-models')) return answer(options.models ?? [], (models) => Response.json(textModels(models)));
     if (method === 'POST' && url.endsWith('/test')) return Response.json({ checks: [], proposed: {}, advertised: {}, wireNotes: [] });
     if (method === 'DELETE') return Response.json({ ok: true });
     if (method === 'PATCH') return Response.json({});
@@ -61,8 +82,14 @@ function installFetch(options: {
   return calls;
 }
 
-function renderView(options: Parameters<typeof installFetch>[0] = {}) {
-  const calls = installFetch(options);
+/**
+ * `tab`: the tab chosen this session; the inventory tests open Providers.
+ * null leaves the choice to the view's default.
+ */
+function renderView(options: Parameters<typeof installFetch>[0] & { tab?: TextModelsTab | null } = {}) {
+  const { tab = 'providers', ...fetchOptions } = options;
+  useAtelierStore.setState({ textModelsTab: tab });
+  const calls = installFetch(fetchOptions);
   const client = newClient();
   const onBack = mock(() => undefined);
   const view = render(<TextModels onBack={onBack} />, { wrapper: wrapper(client) });
@@ -72,7 +99,7 @@ function renderView(options: Parameters<typeof installFetch>[0] = {}) {
 afterEach(() => {
   cleanup();
   mock.restore();
-  useAtelierStore.setState({ toasts: [], view: APP_VIEW_UNSORTED });
+  useAtelierStore.setState({ toasts: [], view: APP_VIEW_UNSORTED, textModelsTab: null });
 });
 
 describe('Text models gating', () => {
@@ -90,7 +117,7 @@ describe('Text models gating', () => {
     await waitFor(() => { expect(result.current.enabled).toBe(true); });
   });
 
-  test('the sidebar shows the labelled Text models row only to admins', () => {
+  test('the sidebar shows the labelled Text models row only when enabled', () => {
     const models: readonly Model[] = [];
     const onSelectView = mock();
     const props = {
@@ -147,7 +174,7 @@ describe('Text models gating', () => {
 
 describe('Text models view', () => {
   test('first run: serif empty state with one action and the guide link', async () => {
-    renderView({ providers: [] });
+    renderView({ providers: [], tab: null });
 
     expect(await screen.findByRole('heading', { name: 'No text model yet' })).toBeTruthy();
     expect(document.querySelector('[data-etching="empty-text-models"]')).not.toBeNull();
@@ -155,16 +182,26 @@ describe('Text models view', () => {
     const guide = screen.getByRole('link', { name: 'Read the guide' });
     expect(guide.getAttribute('href')).toContain('docs/connect-a-text-model.md');
     expect(guide.getAttribute('rel')).toContain('noopener');
-    // Header action plus the empty state's single action.
-    expect(screen.getAllByRole('button', { name: 'Add provider' })).toHaveLength(2);
-    expect(screen.queryByRole('region', { name: 'Routing for everyone' })).toBeNull();
+    // The empty state's own action is the only Add provider.
+    expect(screen.getAllByRole('button', { name: 'Add provider' })).toHaveLength(1);
+    expect(screen.queryByRole('region', { name: 'Features' })).toBeNull();
   });
 
   test('Add provider opens the dialog slot (Task 15 plugs the form in)', async () => {
     renderView({ providers: [] });
-    const [headerAction] = await screen.findAllByRole('button', { name: 'Add provider' });
-    if (!headerAction) throw new Error('missing Add provider');
-    fireEvent.click(headerAction);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }));
+    expect(await screen.findByRole('dialog', { name: 'Add a provider' })).toBeTruthy();
+  });
+
+  test('with providers, Add provider is the first row of the Providers tab, not a header action', async () => {
+    const { container } = renderView();
+    const panel = await screen.findByRole('tabpanel', { name: 'Providers' });
+    const add = within(panel).getByRole('button', { name: 'Add provider' });
+    expect(screen.getAllByRole('button', { name: 'Add provider' })).toHaveLength(1);
+    expect(container.querySelector('[data-zone="head"]')?.contains(add)).toBe(false);
+    const cli = within(panel).getByRole('region', { name: 'CLIProxyAPI' });
+    expect(add.compareDocumentPosition(cli) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(add);
     expect(await screen.findByRole('dialog', { name: 'Add a provider' })).toBeTruthy();
   });
 
@@ -252,13 +289,20 @@ describe('Text models view', () => {
     expect(within(screen.getByRole('listitem', { name: 'GLM 5.3' })).queryByText(/^(Default|In use)/)).toBeNull();
   });
 
-  test('provider inventory comes before routing', async () => {
-    const { container } = renderView();
-    const routing = await screen.findByRole('region', { name: 'Routing for everyone' });
-    expect(within(routing).getByText('Features use these models for anyone who keeps the default.')).toBeTruthy();
-    const cli = screen.getByRole('region', { name: 'CLIProxyAPI' });
-    expect(cli.compareDocumentPosition(routing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  test('routing sits in Shared setup, the inventory in Providers', async () => {
+    const { container } = renderView({ tab: 'shared', models: LISTED });
+    const shared = await screen.findByRole('tabpanel', { name: 'Shared setup' });
+    const routing = await within(shared).findByRole('region', { name: 'Features' });
+    expect(within(routing).getByText('What each feature writes with for everyone. People can pick their own model under Your picks.')).toBeTruthy();
+    expect(within(shared).getByRole('region', { name: 'Image models' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'CLIProxyAPI' })).toBeNull();
     expect(container.querySelector('[data-zone="body"]')?.contains(routing)).toBe(true);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Providers' }));
+    const providers = await screen.findByRole('tabpanel', { name: 'Providers' });
+    expect(await within(providers).findByRole('region', { name: 'CLIProxyAPI' })).toBeTruthy();
+    await waitFor(() => { expect(screen.queryByRole('region', { name: 'Features' })).toBeNull(); });
+    expect(container.querySelector('[data-zone="body"]')?.contains(providers)).toBe(true);
   });
 
   test('a provider with every model offline says so', async () => {
@@ -435,7 +479,197 @@ describe('admin writes refresh the admin view and the user picker', () => {
   test('reroute', async () => {
     const client = setup();
     const { result } = renderHook(() => useSetRoutingDefault(), { wrapper: wrapper(client) });
-    await act(() => result.current.mutateAsync({ scope: 'ai-fill', modelId: GLM.id }));
+    await act(() => result.current.mutateAsync({ scope: 'ai-fill', body: { modelId: GLM.id } }));
     await expectBothInvalidated(client);
+  });
+});
+
+describe('Text models tabs', () => {
+  test('an admin sees Shared setup, Your picks and Providers in order, each controlling a labelled panel', async () => {
+    renderView({ tab: null, models: LISTED });
+    const tablist = await screen.findByRole('tablist', { name: 'Text models sections' });
+    const tabs = within(tablist).getAllByRole('tab');
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Shared setup', 'Your picks', 'Providers']);
+    // The strip sits in the header's action slot, as in the Prompt Library.
+    expect(document.querySelector('[data-zone="head"]')?.contains(tablist)).toBe(true);
+    for (const tab of tabs) {
+      const panel = document.getElementById(tab.getAttribute('aria-controls') ?? '');
+      expect(panel?.getAttribute('role')).toBe('tabpanel');
+      expect(panel?.getAttribute('aria-labelledby')).toBe(tab.id);
+    }
+    expect(screen.getByRole('tabpanel', { name: 'Shared setup' })).toBeTruthy();
+  });
+
+  test('arrow keys rove the tabs; only the selected tab is in the tab order', async () => {
+    renderView({ tab: null, models: LISTED });
+    const tablist = await screen.findByRole('tablist');
+    const [shared, picks, providers] = within(tablist).getAllByRole('tab');
+    if (!shared || !picks || !providers) throw new Error('missing tabs');
+    expect(shared.getAttribute('aria-selected')).toBe('true');
+    expect([shared.tabIndex, picks.tabIndex, providers.tabIndex]).toEqual([0, -1, -1]);
+    shared.focus();
+    // Focus moves once the target is reachable (runWhenReachable).
+    fireEvent.keyDown(shared, { key: 'ArrowRight' });
+    await waitFor(() => { expect(document.activeElement === picks).toBe(true); });
+    expect([shared.tabIndex, picks.tabIndex, providers.tabIndex]).toEqual([-1, 0, -1]);
+    fireEvent.keyDown(picks, { key: 'ArrowRight' });
+    await waitFor(() => { expect(document.activeElement === providers).toBe(true); });
+    fireEvent.keyDown(providers, { key: 'ArrowLeft' });
+    await waitFor(() => { expect(document.activeElement === picks).toBe(true); });
+    // Roving moves focus only; selection follows a press.
+    expect(shared.getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(picks);
+    expect(picks.getAttribute('aria-selected')).toBe('true');
+    expect(await screen.findByRole('tabpanel', { name: 'Your picks' })).toBeTruthy();
+  });
+
+  test('with no choice this session an admin lands on Providers while there is no provider, else Shared setup', async () => {
+    renderView({ tab: null, providers: [] });
+    const tab = await screen.findByRole('tab', { name: 'Providers' });
+    expect(tab.getAttribute('aria-selected')).toBe('true');
+    cleanup();
+
+    renderView({ tab: null, models: LISTED });
+    expect((await screen.findByRole('tab', { name: 'Shared setup' })).getAttribute('aria-selected')).toBe('true');
+    expect(useAtelierStore.getState().textModelsTab).toBeNull();
+  });
+
+  test('the chosen tab survives leaving and re-entering the view', async () => {
+    const { unmount } = renderView({ tab: null, models: LISTED });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Your picks' }));
+    expect(useAtelierStore.getState().textModelsTab).toBe('picks');
+    unmount();
+
+    render(<TextModels onBack={() => undefined} />, { wrapper: wrapper(newClient()) });
+    expect((await screen.findByRole('tab', { name: 'Your picks' })).getAttribute('aria-selected')).toBe('true');
+  });
+
+  test('"Set up text models" opens the view on the Providers tab with focus on the heading', async () => {
+    useAtelierStore.setState({ textModelsTab: 'shared' });
+    goToTextModels();
+    expect(useAtelierStore.getState().view).toEqual(APP_VIEW_TEXT_MODELS);
+    expect(useAtelierStore.getState().textModelsTab).toBe('providers');
+    installFetch({ models: LISTED });
+    render(<TextModels onBack={() => undefined} />, { wrapper: wrapper(newClient()) });
+    expect((await screen.findByRole('tab', { name: 'Providers' })).getAttribute('aria-selected')).toBe('true');
+    const heading = screen.getByRole('heading', { level: 2, name: 'Text models' });
+    await waitFor(() => { expect(document.activeElement === heading).toBe(true); });
+  });
+
+  test('a non-admin sees Your picks alone, with no tablist and no admin reads', async () => {
+    const { calls } = renderView({ tab: null, providers: 404, models: LISTED });
+    expect(await screen.findByRole('region', { name: 'Your picks' })).toBeTruthy();
+    expect(screen.queryByRole('tablist')).toBeNull();
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add provider' })).toBeNull();
+    expect(screen.getByRole('heading', { level: 2, name: 'Text models' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back to Unsorted' })).toBeTruthy();
+    expect(calls.some((call) => call.url.includes('/api/text-routing'))).toBe(false);
+  });
+
+  test('a pending admin probe shows the loading state', async () => {
+    renderView({ tab: null, providers: 'pending', models: LISTED });
+    expect(await screen.findByText('Loading text models…')).toBeTruthy();
+    expect(screen.queryByRole('tablist')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Your picks' })).toBeNull();
+  });
+
+  test('a failed admin probe (not a 404) shows the error state with Retry', async () => {
+    renderView({ tab: null, providers: 'error', models: LISTED });
+    expect(await screen.findByText('Couldn’t load the text models.')).toBeTruthy();
+    expect(screen.queryByRole('tablist')).toBeNull();
+    installFetch({ models: LISTED });
+    fireEvent.click(screen.getByRole('button', { name: /Retry/ }));
+    expect(await screen.findByRole('tablist', { name: 'Text models sections' })).toBeTruthy();
+  });
+
+  test('zero listed models: a non-admin reads the ask-your-admin empty state', async () => {
+    renderView({ tab: null, providers: 404, models: [] });
+    expect(await screen.findByRole('heading', { name: 'No text model yet' })).toBeTruthy();
+    expect(screen.getByText('Ask your admin to connect a text model.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Go to Providers' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Text model for / })).toBeNull();
+  });
+
+  for (const tab of ['shared', 'picks'] as const) {
+    test(`zero listed models: an admin on ${tab === 'shared' ? 'Shared setup' : 'Your picks'} is pointed to Providers`, async () => {
+      renderView({ tab, models: [] });
+      const panel = await screen.findByRole('tabpanel', { name: tab === 'shared' ? 'Shared setup' : 'Your picks' });
+      expect(await within(panel).findByRole('heading', { name: 'No text model yet' })).toBeTruthy();
+      expect(within(panel).getByText('Add a provider and its models under Providers.')).toBeTruthy();
+      expect(screen.queryByRole('region', { name: 'Features' })).toBeNull();
+      expect(screen.queryByRole('region', { name: 'Your picks' })).toBeNull();
+      expect(screen.getByRole('tablist')).toBeTruthy();
+      fireEvent.click(within(panel).getByRole('button', { name: 'Go to Providers' }));
+      expect(screen.getByRole('tab', { name: 'Providers' }).getAttribute('aria-selected')).toBe('true');
+      const providers = await screen.findByRole('tabpanel', { name: 'Providers' });
+      expect(await within(providers).findByRole('region', { name: 'CLIProxyAPI' })).toBeTruthy();
+    });
+  }
+
+  test('a failed routing read stays inside Shared setup; Providers stays usable', async () => {
+    renderView({ tab: 'shared', routing: 'error', models: LISTED });
+    const shared = await screen.findByRole('tabpanel', { name: 'Shared setup' });
+    expect(await within(shared).findByText('Couldn’t load the routing settings.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Providers' }));
+    const providers = await screen.findByRole('tabpanel', { name: 'Providers' });
+    const kimi = await within(providers).findByRole('listitem', { name: 'Kimi K3' });
+    expect(within(kimi).getByRole('switch', { name: 'Use Kimi K3' }).hasAttribute('disabled')).toBe(false);
+    expect(within(providers).getByRole('button', { name: 'Add provider' })).toBeTruthy();
+  });
+
+  test('a failed providers refetch keeps the tabs and Your picks', async () => {
+    const { client } = renderView({ tab: 'picks', models: LISTED });
+    expect(await screen.findByRole('region', { name: 'Your picks' })).toBeTruthy();
+    installFetch({ providers: 'error', models: LISTED });
+    await client.refetchQueries({ queryKey: textAdminKeys.providers() });
+    await waitFor(() => { expect(client.getQueryState(textAdminKeys.providers())?.status).toBe('error'); });
+    expect(screen.getByRole('tablist')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Your picks' })).toBeTruthy();
+    expect(screen.queryByText('Couldn’t load the text models.')).toBeNull();
+  });
+});
+
+describe('Text models sidebar entry', () => {
+  function entry(options: Parameters<typeof installFetch>[0], client = newClient()) {
+    installFetch(options);
+    return { ...renderHook(() => useTextModelsEntry(), { wrapper: wrapper(client) }), client };
+  }
+
+  test('an admin always sees it, even with zero listed models', async () => {
+    const { result } = entry({ models: [] });
+    await waitFor(() => { expect(result.current).toBe(true); });
+  });
+
+  test('a non-admin sees it once a model is listed', async () => {
+    const { result } = entry({ providers: 404, models: LISTED });
+    await waitFor(() => { expect(result.current).toBe(true); });
+  });
+
+  test('a non-admin with zero listed models does not', async () => {
+    const { result, client } = entry({ providers: 404, models: [] });
+    await waitFor(() => { expect(client.getQueryState(textModelKeys.all())?.status).toBe('success'); });
+    await waitFor(() => { expect(client.getQueryState(textAdminKeys.providers())?.status).toBe('error'); });
+    expect(result.current).toBe(false);
+  });
+
+  test('a non-admin does not while the read is pending or has never succeeded', async () => {
+    const pending = entry({ providers: 404, models: 'pending' });
+    await waitFor(() => { expect(pending.client.getQueryState(textAdminKeys.providers())?.status).toBe('error'); });
+    expect(pending.result.current).toBe(false);
+    pending.unmount();
+
+    const failed = entry({ providers: 404, models: 'error' });
+    await waitFor(() => { expect(failed.client.getQueryState(textModelKeys.all())?.status).toBe('error'); });
+    expect(failed.result.current).toBe(false);
+  });
+
+  test('a failed refetch keeps the last successful answer', async () => {
+    const { result, client } = entry({ providers: 404, models: LISTED });
+    await waitFor(() => { expect(result.current).toBe(true); });
+    installFetch({ providers: 404, models: 'error' });
+    await client.refetchQueries({ queryKey: textModelKeys.all() });
+    await waitFor(() => { expect(client.getQueryState(textModelKeys.all())?.status).toBe('error'); });
+    expect(result.current).toBe(true);
   });
 });

@@ -22,7 +22,7 @@
  *                   and a native modal dialog. No Composer, so the toast stack
  *                   shows its nonanchored fallback.
  *   ?case=editor    the production TemplateEditor with its inline name field.
- *   ?case=settings  the production text-model settings near the window top.
+ *   ?case=settings  the production Your picks text-model rows near the window top.
  *   &theme=dark     dark tokens.
  *
  * window.atelierHarness.toast(text) raises an actionable toast with an Undo
@@ -49,7 +49,7 @@ import Composer from '../../src/components/Composer';
 import ChipSelect, { type ChipSelectOption } from '../../src/components/Composer/ChipSelect';
 import { DialogShell } from '../../src/components/DialogShell';
 import TemplateEditor from '../../src/components/PromptManager/TemplateEditor';
-import SettingsPanel from '../../src/components/PromptManager/SettingsPanel';
+import YourPicks from '../../src/components/TextModels/YourPicks';
 import ImageTile from '../../src/components/tile/ImageTile';
 import Toast from '../../src/components/Toast';
 import { useKeyboard } from '../../src/hooks/useKeyboard';
@@ -451,7 +451,7 @@ const TEXT_MODELS: TextModelsResponse = {
 function SettingsCase() {
   return (
     <main style={{ padding: '80px 24px', maxWidth: 1000, margin: 'auto' }}>
-      <SettingsPanel />
+      <YourPicks admin={false} />
       <AppChrome />
     </main>
   );

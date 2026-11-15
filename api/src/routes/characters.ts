@@ -86,8 +86,9 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
         // Resolves to whether a terminal event was sent.
         const run = async (current: TextModelRecord, fallback: TextModelRecord | null): Promise<boolean> => {
           const provider = textProviderForResolved(c.var.config, text, current);
-          // A user's effort stays with the selected model; the partner keeps its row default.
-          const reasoningEffort = current.id === resolved.model.id ? resolved.effort : undefined;
+          // Each model runs with the effort its own resolution returned: the
+          // partner's comes from `next`, never from the selected model's.
+          const reasoningEffort = current.id === resolved.model.id ? resolved.effort : next.ok ? next.effort : undefined;
           let emitted = 0;
           for await (const chunk of provider.brainstormCharacters(
             reasoningEffort === undefined ? input : { ...input, reasoningEffort },

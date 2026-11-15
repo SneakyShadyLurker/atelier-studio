@@ -1,0 +1,96 @@
+/* Header tab strip shared by the managed views that sit in tabs (Prompt
+   Library, Text models). The owner renders a `role="tablist"` composing
+   `.strip` in ManagedViewHeader's action slot, with `.tab` / `.tabActive`
+   buttons roved by `useRovingTabIndex` (horizontal). */
+
+.strip {
+  display: flex;
+  gap: 4px;
+}
+
+.tab,
+.tabActive {
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-out), border-bottom-color var(--dur-hover) var(--ease-out), transform var(--dur-transform) var(--ease-tactile);
+}
+
+.tab:active,
+.tabActive:active {
+  transform: scale(var(--m-press-row));
+}
+
+.tabActive {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
+@media (hover: hover) {
+  .tab:hover {
+    color: var(--ink);
+  }
+}
+
+.tab:focus-visible,
+.tabActive:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (width < 768px) {
+  /* 6px keeps four tabs inside a 390px strip; narrower phones scroll
+     behind the edge fade. */
+  .tab,
+  .tabActive {
+    padding: 0 6px;
+  }
+
+  /* The strip scrolls sideways; the edges fade so a tab past the edge reads
+     as more to come, and the owner scrolls the active tab into view. Inline
+     padding keeps the end tabs clear of the fade when scrolled fully. */
+  .strip {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+    padding-inline: 12px;
+    scroll-padding-inline: 24px;
+    mask-image: linear-gradient(to right, transparent 0, black 14px, black calc(100% - 14px), transparent 100%);
+  }
+
+  .strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab,
+  .tabActive {
+    flex: none;
+    white-space: nowrap;
+  }
+}
+
+/* Touch floors on capability, after the base and phone rules they raise. */
+@media (hover: none), (any-pointer: coarse) {
+  .tab,
+  .tabActive {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab:active,
+  .tabActive:active {
+    transform: none;
+  }
+}

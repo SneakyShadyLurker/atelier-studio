@@ -1,5 +1,6 @@
 import {
   currentTextConfigRevision,
+  type TextDefaultEfforts,
   type TextDefaults,
   type TextModelRecord,
   type TextProviderRecord,
@@ -20,7 +21,9 @@ export interface TextConfig {
   /** Enabled models of enabled providers by row id. */
   readonly models: ReadonlyMap<string, TextModelRecord>;
   readonly defaults: TextDefaults;
-  /** Image model id → writer. May name a model absent from `models` (disabled). */
+  /** Stored efforts of the default and task assignments, as stored (the resolver checks them against the model). */
+  readonly defaultEfforts: TextDefaultEfforts;
+  /** Image model id → writer, with its stored effort. May name a model absent from `models` (disabled). */
   readonly writers: Readonly<Record<string, TextWriterAssignment>>;
 }
 
@@ -29,7 +32,10 @@ export interface TextConfigSnapshot {
   current(): TextConfig;
 }
 
-type SnapshotSource = Pick<TextProviderStore, 'listProviders' | 'listModels' | 'readDefaults' | 'readWriters'>;
+type SnapshotSource = Pick<
+  TextProviderStore,
+  'listProviders' | 'listModels' | 'readDefaults' | 'readDefaultEfforts' | 'readWriters'
+>;
 
 function buildTextConfig(store: SnapshotSource, revision: number): TextConfig {
   const providers = new Map(
@@ -44,7 +50,14 @@ function buildTextConfig(store: SnapshotSource, revision: number): TextConfig {
       .filter((model) => model.enabled && providers.has(model.providerId))
       .map((model) => [model.id, model] as const),
   );
-  return { revision, providers, models, defaults: store.readDefaults(), writers: store.readWriters() };
+  return {
+    revision,
+    providers,
+    models,
+    defaults: store.readDefaults(),
+    defaultEfforts: store.readDefaultEfforts(),
+    writers: store.readWriters(),
+  };
 }
 
 export function createTextConfigSnapshot(store: SnapshotSource): TextConfigSnapshot {

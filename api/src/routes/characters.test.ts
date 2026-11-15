@@ -224,7 +224,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     expect(events.map((e) => e.event)).toEqual(['prompt', 'done']);
   });
 
-  test('a pinned effort stays with its pin: a failover partner that matches the pin keeps its default', async () => {
+  test("a failover partner runs with its own resolution's effort: a partner that is the user's pick brings that effort", async () => {
     setTextModelProviderForTests(null);
     const requests: Record<string, unknown>[] = [];
     const upstream = serveByModel(requests, { [TEXT_MODELS.mimo]: 503, [TEXT_MODELS.kimi]: 'record' });
@@ -240,7 +240,7 @@ describe('POST /api/prompts/characters/brainstorm', () => {
     await parseSse(await post(app, 'alice', { count: 1, modelId: 'krea-2-gonzalomo', textModelId: legacyTextModelId(db, 'mimo') }));
     expect(requests.map((request) => [request.model, request.reasoning_effort])).toEqual([
       [TEXT_MODELS.mimo, 'none'],
-      [TEXT_MODELS.kimi, 'low'],
+      [TEXT_MODELS.kimi, 'max'],
     ]);
 
     requests.length = 0;
@@ -504,6 +504,22 @@ describe('brainstorm text model pin and failover', () => {
     const res = await post(runtime.app, 'alice', { count: 1, modelId: 'gpt-image-2.6-sunburst' });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('TEXT_MODEL_UNAVAILABLE');
+  });
+
+  test('a failover partner served by a task assignment runs with that assignment\'s effort', async () => {
+    setTextModelProviderForTests(null);
+    const requests: Record<string, unknown>[] = [];
+    const runtime = upstreamRuntime(serveByModel(requests, { [TEXT_MODELS.mimo]: 503, [TEXT_MODELS.kimi]: 'record' }));
+    const kimi = legacyTextModelId(runtime.db, 'kimi');
+    runtime.text.store.setDefault('brainstorm', kimi, 'max');
+    const events = await parseSse(await post(runtime.app, 'alice', {
+      count: 1, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(runtime.db, 'mimo'),
+    }));
+    expect(requests.map((request) => [request.model, request.reasoning_effort])).toEqual([
+      [TEXT_MODELS.mimo, 'none'],
+      [TEXT_MODELS.kimi, 'max'],
+    ]);
+    expect(events.map((e) => e.event)).toEqual(['prompt', 'done']);
   });
 
   test('the partner must be eligible: with the default turned off there is no failover', async () => {

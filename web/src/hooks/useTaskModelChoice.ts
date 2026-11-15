@@ -28,9 +28,9 @@ export interface TaskModelChoice {
   readonly modelId: string;
   readonly effort: EffortValue;
   readonly groups: readonly ProviderGroup[];
-  /** Name of the model "Use default" resolves to, when known. */
+  /** Name of the model "Shared setup" resolves to, when known. */
   readonly defaultName: string | undefined;
-  /** Levels the selected model offers; null while "Use default" is selected. */
+  /** Levels the selected model offers; null while "Shared setup" is selected. */
   readonly effortLevels: readonly TextReasoningEffort[] | null;
   readonly setModelId: (modelId: string) => void;
   readonly setEffort: (effort: EffortValue) => void;
@@ -85,7 +85,7 @@ export function useTaskModelChoice(task: TextTask, imageModelId: string | undefi
 
   const defaultId = defaultModelId(data, row, byId, imageModelId);
   // An offline pick stays the selected (unselectable) option rather than
-  // showing as the default: "Use default" is then a real change that clears it.
+  // showing as the shared setup: "Shared setup" is then a real change that clears it.
   const { picked, effort: savedEffort } = rowPick(row, byId);
   const saved: Choice = picked !== undefined
     ? { modelId: picked.id, effort: savedEffort }
@@ -124,7 +124,7 @@ export function useTaskModelChoice(task: TextTask, imageModelId: string | undefi
       if (state.kind !== 'ready' || edits === null) return;
       // Compared with the stored row, not with what the dialog showed: a pick
       // the listing no longer names shows as the default, and choosing
-      // "Use default" after trying another model still has to clear it.
+      // "Shared setup" after trying another model still has to clear it.
       const storedModelId = row.pick ?? DEFAULT_PICK;
       const storedEffort: EffortValue = row.effort ?? 'default';
       if (choice.modelId === storedModelId && choice.effort === storedEffort) return;

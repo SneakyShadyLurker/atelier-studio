@@ -26,6 +26,7 @@
     "test": "bun test --isolate"
   },
   "devDependencies": {
-    "@types/range-parser": "1.2.7"
+    "@types/range-parser": "1.2.7",
+    "fast-check": "4.10.2"
   }
 }

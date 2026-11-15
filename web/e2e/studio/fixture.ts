@@ -1,4 +1,5 @@
-import type { AdminProvider, AiFillBatchRequest, AiFillRequest, Batch, Collection, CollectionsResponse, GenerateRequest, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse, TextModelsResponse, TextRoutingResponse } from '@atelier/shared';
+import type { AdminProvider, AiFillBatchRequest, AiFillRequest, Batch, Collection, CollectionsResponse, GenerateRequest, LibraryCoverageResponse, LibraryDiagnosisResponse, Model, PromptLibraryResponse, TextDefaultPutRequest, TextModelTaskPutRequest, TextModelsResponse, TextReasoningEffort, TextRoutingResponse } from '@atelier/shared';
+import { TEXT_TASKS } from '@atelier/shared';
 
 // Local SVG stills keep the preview deterministic and completely offline.
 function still(primary: string, secondary: string, accent: string, motif: number): string {
@@ -119,6 +120,23 @@ const textProvider: AdminProvider = {
   updatedAt: 1,
 };
 
+// `textModels=1`: two enabled models (Atlas with reasoning levels, Quill with
+// a fixed effort), a default with an effort, an assignment, a locked writer
+// with an effort and one personal pick, so every Text models tab has rows.
+const previewModel = textProvider.models[0];
+if (!previewModel) throw new Error('missing preview text model');
+const textRoutingProvider: AdminProvider = {
+  ...textProvider,
+  models: [
+    { ...previewModel, id: 'text-model-atlas', modelId: 'atlas', displayName: 'Atlas', enabled: true, reasoningLevels: ['low', 'medium', 'high'] },
+    { ...previewModel, id: 'text-model-quill', modelId: 'quill', displayName: 'Quill', enabled: true, sortOrder: 1 },
+  ],
+};
+const textRoutingModels: TextModelsResponse['models'] = textRoutingProvider.models.map((model) => ({
+  id: model.id, displayName: model.displayName, providerName: textRoutingProvider.name, vision: model.vision, reasoningLevels: model.reasoningLevels, status: model.status,
+}));
+const textRoutingWriterImage = 'krea-2-test-alpha';
+
 const libraryDiagnosis: LibraryDiagnosisResponse = {
   templates: promptLibrary.templates.map((template) => ({ templateName: template.name, satisfiable: true })),
   librarySnapshotHash: 'offline-library',
@@ -157,6 +175,28 @@ export function installOfflineResponses(): void {
   // Without it `/text-models` 404s, which the gate reads as unknown.
   const noTextModels = motionParams.get('noTextModels') === '1';
   const withTextProvider = motionParams.get('textProvider') === '1';
+  // `textModels=1` answers a populated text-model setup (see textRoutingProvider)
+  // and keeps its routing and personal-pick saves in memory; every PUT body is
+  // recorded in window.__studioTextWrites. With `textAdmin=1` the admin probe
+  // lists its provider.
+  const withTextModels = motionParams.get('textModels') === '1';
+  let textListing: TextModelsResponse = {
+    models: textRoutingModels,
+    tasks: TEXT_TASKS.map((task) => (task === 'storytelling'
+      ? { task, pick: 'text-model-quill', pickState: 'active', effectiveModelId: 'text-model-quill' }
+      : { task, effectiveModelId: task === 'enhance' ? 'text-model-quill' : 'text-model-atlas' })),
+    defaults: { default: 'text-model-atlas', byTask: { enhance: 'text-model-quill' } },
+    writers: { [textRoutingWriterImage]: 'text-model-atlas' },
+    lockedWriters: [textRoutingWriterImage],
+  };
+  let textRouting: TextRoutingResponse = {
+    defaults: textListing.defaults,
+    efforts: { default: 'high', byTask: {} },
+    writers: { [textRoutingWriterImage]: { modelId: 'text-model-atlas', mode: 'lock', effort: 'low' } },
+    imageModels: models.map(({ id, name }) => ({ id, label: name })),
+  };
+  // `libraryGated=1` answers the Prompt Library with 404: a person without access.
+  const libraryGated = motionParams.get('libraryGated') === '1';
   // `emptyLibrary=1` answers an empty Prompt Library (every tab's empty state).
   const emptyLibrary = motionParams.get('emptyLibrary') === '1';
   // `video=1` adds an image-to-video model (the Composer's mode swap).
@@ -233,8 +273,10 @@ export function installOfflineResponses(): void {
   // backend immediately, then resolve the slots after the requested delay.
   const aiFillDelay = Number(motionParams.get('aiFillDelay') ?? 0);
   const generatedRows = new Map<string, Batch>();
-  const studioWindow = window as Window & { __studioGenerated?: number };
+  const studioWindow = window as Window & { __studioGenerated?: number; __studioTextWrites?: { path: string; body: unknown }[] };
   studioWindow.__studioGenerated = 0;
+  const textWrites: { path: string; body: unknown }[] = [];
+  studioWindow.__studioTextWrites = textWrites;
   const offlineFetch = Object.assign((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
@@ -346,10 +388,63 @@ export function installOfflineResponses(): void {
         return written();
       }
     }
+    if (withTextModels && method === 'PUT') {
+      const defaultRoute = /^\/api\/text-routing\/defaults\/([^/]+)$/.exec(url.pathname);
+      const taskRoute = /^\/api\/text-models\/tasks\/([^/]+)$/.exec(url.pathname);
+      const scope = defaultRoute?.[1];
+      const task = TEXT_TASKS.find((candidate) => candidate === taskRoute?.[1]);
+      if (textAdmin && scope !== undefined) {
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '') as TextDefaultPutRequest;
+        textWrites.push({ path: url.pathname, body });
+        const effort = (stored: TextReasoningEffort | undefined) => (body.modelId === null || body.effort === null ? undefined : body.effort ?? stored);
+        const { default: storedDefault, ...defaultRest } = textRouting.defaults;
+        const { default: storedEffort, ...effortRest } = textRouting.efforts;
+        if (scope === 'default') {
+          const nextEffort = effort(storedEffort);
+          textRouting = {
+            ...textRouting,
+            defaults: body.modelId === null ? defaultRest : { ...defaultRest, default: body.modelId },
+            efforts: nextEffort === undefined ? effortRest : { ...effortRest, default: nextEffort },
+          };
+        } else {
+          const key = TEXT_TASKS.find((candidate) => candidate === scope);
+          if (key === undefined) return Promise.resolve(json({ error: 'unknown task' }, 404));
+          const nextEffort = effort(textRouting.efforts.byTask[key]);
+          // Rebuilt without the task's entries, then set again when kept.
+          const byTask = Object.fromEntries(Object.entries(textRouting.defaults.byTask).filter(([id]) => id !== key));
+          const efforts = Object.fromEntries(Object.entries(textRouting.efforts.byTask).filter(([id]) => id !== key));
+          textRouting = {
+            ...textRouting,
+            defaults: { ...(storedDefault === undefined ? {} : { default: storedDefault }), byTask: body.modelId === null ? byTask : { ...byTask, [key]: body.modelId } },
+            efforts: { ...textRouting.efforts, byTask: nextEffort === undefined ? efforts : { ...efforts, [key]: nextEffort } },
+          };
+        }
+        textListing = { ...textListing, defaults: textRouting.defaults };
+        return Promise.resolve(json(textRouting));
+      }
+      if (task !== undefined) {
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '') as TextModelTaskPutRequest;
+        textWrites.push({ path: url.pathname, body });
+        const fallback = textListing.defaults.byTask[task] ?? textListing.defaults.default;
+        textListing = {
+          ...textListing,
+          tasks: textListing.tasks.map((row) => {
+            if (row.task !== task) return row;
+            if (body.modelId === null) return fallback === undefined ? { task } : { task, effectiveModelId: fallback };
+            const effort = body.effort === null ? undefined : body.effort ?? row.effort;
+            return { task, pick: body.modelId, pickState: 'active', effectiveModelId: body.modelId, ...(effort === undefined ? {} : { effort }) };
+          }),
+        };
+        return Promise.resolve(json(textListing));
+      }
+    }
     if (method !== 'GET') return Promise.resolve(json({ error: 'Preview is read only' }, 405));
-    if (textAdmin && url.pathname === '/api/text-providers') return Promise.resolve(json({ providers: withTextProvider ? [textProvider] : [] }));
+    if (textAdmin && url.pathname === '/api/text-providers') return Promise.resolve(json({ providers: withTextModels ? [textRoutingProvider] : withTextProvider ? [textProvider] : [] }));
+    if (textAdmin && withTextModels && url.pathname === '/api/text-routing') return Promise.resolve(json(textRouting));
+    if (withTextModels && url.pathname === '/api/text-models') return Promise.resolve(json(textListing));
+    if (libraryGated && url.pathname === '/api/prompts') return Promise.resolve(json({ error: 'Not found' }, 404));
     if (textAdmin && url.pathname === '/api/text-routing') return Promise.resolve(json({
-      defaults: { byTask: {} }, writers: {}, imageModels: models.map(({ id, name }) => ({ id, label: name })),
+      defaults: { byTask: {} }, efforts: { byTask: {} }, writers: {}, imageModels: models.map(({ id, name }) => ({ id, label: name })),
     } satisfies TextRoutingResponse));
     if (noTextModels && url.pathname === '/api/text-models') return Promise.resolve(json({
       models: [], tasks: [], defaults: { byTask: {} }, writers: {}, lockedWriters: [],

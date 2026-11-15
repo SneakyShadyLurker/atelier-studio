@@ -751,6 +751,46 @@ export const TEXT_TASK_LABELS = {
   'template-draft': 'Template drafts',
 } as const satisfies Record<TextTask, string>;
 
+/** One sentence per feature, shown under its label in Text models. */
+export const TEXT_TASK_DESCRIPTIONS = {
+  enhance: 'Rewrites a prompt before it renders.',
+  motion: 'Rewrites the motion prompt when you animate an image.',
+  condense: 'Shortens long prompts for Krea.',
+  storytelling: 'Plans the segments of a story.',
+  'story-segments': 'Writes the motion prompt for each story segment.',
+  'ai-fill': 'Fills the ai-fill parts of a template when you generate.',
+  brainstorm: 'Produces prompt ideas for the queue.',
+  'template-draft': 'Drafts and reworks template bodies.',
+  'list-draft': 'Drafts the options of a variable list.',
+  infer: 'Proposes dimensions and tags for list options.',
+  rescue: 'Proposes a list option when new tags leave a template with no valid roll.',
+} as const satisfies Record<TextTask, string>;
+
+export interface TextTaskGroup {
+  readonly id: string;
+  readonly label: string;
+  readonly tasks: readonly TextTask[];
+  /** The group's features live in the Prompt Library, so only people with access see them. */
+  readonly needsPromptLibrary: boolean;
+}
+
+/** Features grouped by where they appear, in display order. Every task sits in exactly one group. */
+export const TEXT_TASK_GROUPS = [
+  { id: 'composer', label: 'Composer', tasks: ['enhance', 'motion', 'condense'], needsPromptLibrary: false },
+  { id: 'stories', label: 'Stories', tasks: ['storytelling', 'story-segments'], needsPromptLibrary: false },
+  {
+    id: 'prompt-library',
+    label: 'Prompt Library',
+    tasks: ['ai-fill', 'brainstorm', 'template-draft', 'list-draft', 'infer', 'rescue'],
+    needsPromptLibrary: true,
+  },
+] as const satisfies readonly TextTaskGroup[];
+
+// A task added to TEXT_TASKS without a group fails here.
+type _EveryTextTaskGrouped = _Assert<
+  [Exclude<TextTask, (typeof TEXT_TASK_GROUPS)[number]['tasks'][number]>] extends [never] ? true : false
+>;
+
 /** How Atelier talks to a provider. */
 export const TEXT_PROTOCOLS = ['openai-compatible', 'anthropic'] as const;
 export type TextProtocol = (typeof TEXT_PROTOCOLS)[number];
@@ -849,8 +889,19 @@ export type TextWriterMode = 'lock' | 'prefer';
 /** Admin `GET /api/text-routing` and the answer to every routing PUT. */
 export interface TextRoutingResponse {
   readonly defaults: TextModelsResponse['defaults'];
-  /** Image model id → prompt writer. */
-  readonly writers: Readonly<Record<string, { readonly modelId: string; readonly mode: TextWriterMode }>>;
+  /**
+   * Stored reasoning effort of the default and each task assignment, as
+   * stored: absent means none. Whether the model still offers it is decided
+   * at resolution, where an unoffered effort is ignored.
+   */
+  readonly efforts: {
+    readonly default?: TextReasoningEffort;
+    readonly byTask: Partial<Record<TextTask, TextReasoningEffort>>;
+  };
+  /** Image model id → prompt writer, with its stored effort (absent means none). */
+  readonly writers: Readonly<
+    Record<string, { readonly modelId: string; readonly mode: TextWriterMode; readonly effort?: TextReasoningEffort }>
+  >;
   /** Registered image models a writer can be set for. */
   readonly imageModels: readonly { readonly id: string; readonly label: string }[];
 }
@@ -990,12 +1041,22 @@ export interface TextModelPatchRequest extends Partial<TextModelCapabilities> {
   readonly sortOrder?: number;
 }
 
+/** `PUT /api/text-routing/defaults/:scope`. */
+export interface TextDefaultPutRequest {
+  /** null clears the assignment and its effort. */
+  readonly modelId: string | null;
+  /** Omitted keeps a stored effort the new model offers, otherwise none; null clears it. */
+  readonly effort?: TextReasoningEffort | null;
+}
+
 /** `PUT /api/text-routing/writers/:imageModelId`. */
 export interface TextWriterPutRequest {
-  /** null clears the writer. */
+  /** null clears the writer and its effort. */
   readonly modelId: string | null;
   /** Omitted = the server default, 'prefer'. */
   readonly mode?: TextWriterMode;
+  /** Omitted keeps a stored effort the new model offers, otherwise none; null clears it. */
+  readonly effort?: TextReasoningEffort | null;
 }
 
 /** `PUT /api/text-models/tasks/:task`. */

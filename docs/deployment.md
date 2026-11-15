@@ -469,6 +469,8 @@ Schema v61 adds the nullable `downscale` column to `user_model_resolution` for t
 
 Schema v62 adds `screen_policy` (`full` or `minors`, default `full`) to `text_models`; existing rows get `full`, so screening is unchanged until an admin picks **Block minors only**. Once v62 is recorded, a v61 image refuses the database.
 
+Schema v63 adds the nullable `effort` column to `text_defaults` and `image_model_writers`, the shared reasoning effort of the default model, feature assignments and prompt writers. Existing rows get no effort, so every call keeps its model's default effort until an admin sets one under **Text models → Shared setup**. Once v63 is recorded, a v62 image refuses the database.
+
 Follow these steps for a release:
 
 1. **Lock.** Hold one deploy lock per compose directory so a deploy and host maintenance never overlap. `infra/docker/deploy-lock.sh` is a bash 3.2 lock library (BSD and Linux) for this: an owner record in `infra/docker/.deploy.lock`, stale-lock recovery under a kernel flock on `infra/docker/.deploy-reclaim.flock`, and a refusal while a live owner or child holds it. Never delete `.deploy-reclaim.flock`; keep both paths gitignored.

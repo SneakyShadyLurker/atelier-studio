@@ -13,6 +13,12 @@ import { brainstormRouteTimeoutMs, textStreamDrainMs } from '../providers/text/t
 
 const SAFE_ERROR_MESSAGE = "Couldn't brainstorm characters. Please try again.";
 
+/** 0 = unscreened, 1 = minors-only screen, 2 = full screen. */
+function screenStrictness(model: TextModelRecord): number {
+  if (!model.screenRequests) return 0;
+  return model.screenPolicy === 'full' ? 2 : 1;
+}
+
 export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/brainstorm', async (c) => {
   const parsed = await parseBody(c, BrainstormCharactersRequestSchema);
   if (!parsed.ok) return parsed.response;
@@ -36,12 +42,12 @@ export const charactersRoutes = new Hono<AppEnv>().post('/prompts/characters/bra
   if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
   // One-shot transient failover partner (spec § 2.3): the resolver's next
   // choice with the selected model excluded. A locked writer has none (the
-  // resolver fails rather than cross it), and a screened model never hands
-  // its request to an unscreened one.
+  // resolver fails rather than cross it), and the partner must screen at
+  // least as strictly as the selected model (each runs its own screen).
   const next = text.resolve({ ...route, excludeModelIds: [resolved.model.id] });
   const partner: TextModelRecord | null = next.ok
     && next.model.id !== resolved.model.id
-    && (!resolved.model.screenRequests || next.model.screenRequests)
+    && screenStrictness(next.model) >= screenStrictness(resolved.model)
     ? next.model
     : null;
   const count = Math.min(parsed.value.count, c.var.config.BRAINSTORM_MAX_COUNT);

@@ -467,6 +467,8 @@ Schema v60 adds `user_model_resolution`, the per-user render-size setting for lo
 
 Schema v61 adds the nullable `downscale` column to `user_model_resolution` for the per-user "Downsize to 2K" switch; existing rows keep their values and read as on. Once v61 is recorded, a v60 image refuses the database.
 
+Schema v62 adds `screen_policy` (`full` or `minors`, default `full`) to `text_models`; existing rows get `full`, so screening is unchanged until an admin picks **Block minors only**. Once v62 is recorded, a v61 image refuses the database.
+
 Follow these steps for a release:
 
 1. **Lock.** Hold one deploy lock per compose directory so a deploy and host maintenance never overlap. `infra/docker/deploy-lock.sh` is a bash 3.2 lock library (BSD and Linux) for this: an owner record in `infra/docker/.deploy.lock`, stale-lock recovery under a kernel flock on `infra/docker/.deploy-reclaim.flock`, and a refusal while a live owner or child holds it. Never delete `.deploy-reclaim.flock`; keep both paths gitignored.

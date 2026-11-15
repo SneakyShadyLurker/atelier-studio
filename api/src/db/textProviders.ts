@@ -11,6 +11,7 @@ import type {
   TextProtocol,
   TextProviderAuthMode,
   TextReasoningEffort,
+  TextScreenPolicy,
   TextStructuredOutputMode,
   TextTask,
   TextTokenField,
@@ -95,6 +96,7 @@ interface TextModelSettings {
   readonly displayName?: string;
   readonly enabled?: boolean;
   readonly screenRequests?: boolean;
+  readonly screenPolicy?: TextScreenPolicy;
   readonly sortOrder?: number;
 }
 
@@ -210,6 +212,7 @@ interface ModelRow {
   latency_profile: TextLatencyProfile;
   prompt_variant: TextPromptVariant;
   screen_requests: number;
+  screen_policy: TextScreenPolicy;
   verified_at: number | null;
   probe_json: string | null;
   sort_order: number;
@@ -220,7 +223,7 @@ const PROVIDER_COLUMNS = `id, name, protocol, base_url, preset, auth_mode, crede
 
 const MODEL_COLUMNS = `id, provider_id, model_id, display_name, legacy_key, enabled, vision, max_images,
   structured_output, reasoning_levels, reasoning_default, temperature, top_p, fixed_output_tokens,
-  latency_profile, prompt_variant, screen_requests, verified_at, probe_json, sort_order`;
+  latency_profile, prompt_variant, screen_requests, screen_policy, verified_at, probe_json, sort_order`;
 
 const MODEL_ORDER = 'ORDER BY sort_order, created_at, id';
 
@@ -269,6 +272,7 @@ function modelFromRow(row: ModelRow): TextModelRecord {
     legacyKey: row.legacy_key,
     enabled: row.enabled === 1,
     screenRequests: row.screen_requests === 1,
+    screenPolicy: row.screen_policy,
     sortOrder: row.sort_order,
     verifiedAt: row.verified_at,
     lastTest: parseReport(row.probe_json),
@@ -616,8 +620,8 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
                  (id, provider_id, model_id, display_name, enabled, vision, max_images,
                   structured_output, reasoning_levels, reasoning_default, temperature, top_p,
                   fixed_output_tokens, latency_profile, prompt_variant, screen_requests,
-                  sort_order, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  screen_policy, sort_order, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 model.id,
                 providerId,
@@ -635,6 +639,7 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
                 model.latencyProfile,
                 model.promptVariant,
                 model.screenRequests ? 1 : 0,
+                model.screenPolicy ?? 'full',
                 sortOrder,
                 now,
                 now,
@@ -660,7 +665,7 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
               SET display_name = ?, enabled = ?, vision = ?, max_images = ?, structured_output = ?,
                   reasoning_levels = ?, reasoning_default = ?, temperature = ?, top_p = ?,
                   fixed_output_tokens = ?, latency_profile = ?, prompt_variant = ?,
-                  screen_requests = ?, sort_order = ?, updated_at = ?
+                  screen_requests = ?, screen_policy = ?, sort_order = ?, updated_at = ?
             WHERE id = ?`,
           [
             merged.displayName,
@@ -676,6 +681,7 @@ export function createTextProviderStore(deps: TextProviderStoreDeps): TextProvid
             merged.latencyProfile,
             merged.promptVariant,
             merged.screenRequests ? 1 : 0,
+            merged.screenPolicy,
             merged.sortOrder,
             Date.now(),
             id,

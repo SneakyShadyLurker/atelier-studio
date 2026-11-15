@@ -128,6 +128,7 @@ function model(structuredOutput: TextStructuredOutputMode = 'json_object', model
     latencyProfile: 'standard',
     promptVariant: 'generic',
     screenRequests: false,
+    screenPolicy: 'full',
     sortOrder: 0,
     verifiedAt: null,
     lastTest: null,

@@ -77,6 +77,7 @@ function bareModel(providerId: string, modelId: string): TextModelRecord {
     latencyProfile: 'standard',
     promptVariant: 'generic',
     screenRequests: false,
+    screenPolicy: 'full',
     sortOrder: 0,
     verifiedAt: null,
     lastTest: null,

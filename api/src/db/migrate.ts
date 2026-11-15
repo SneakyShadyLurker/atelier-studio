@@ -10,7 +10,7 @@ import { namedArtifactDir, namedArtifactRoot } from '../storage/files';
 import type { AppLogger } from '../observability/logger';
 import { LEGACY_SEED, type TextSeed } from './textSeed';
 
-export const BINARY_SCHEMA_VERSION = 61;
+export const BINARY_SCHEMA_VERSION = 62;
 
 export class MigrationError extends Error {
   constructor(message: string) {
@@ -609,6 +609,9 @@ const migration60Sql = loadMigration('0060_user_model_resolution.sql');
 // Per-user "Downsize to 2K" switch on the same rows (2026-11-11). NULL means
 // on, the default.
 const migration61Sql = loadMigration('0061_user_model_resolution_downscale.sql');
+// Per-text-model screen policy (2026-11-15): 'minors' screens only for sexual
+// content involving minors or unestablished ages. Existing rows keep 'full'.
+const migration62Sql = loadMigration('0062_text_models_screen_policy.sql');
 
 // Wraps migration 19 with a conditional `tile_ref_images` rebuild and the
 // SQLite-recommended foreign-key dance for ALTER-table-style rebuilds.
@@ -1750,6 +1753,7 @@ const migrations: readonly Migration[] = [
   { version: 59, sql: migration59Sql },
   { version: 60, sql: migration60Sql },
   { version: 61, fn: (db) => { addColumnIfMissing(db, 'user_model_resolution', 'downscale', migration61Sql); } },
+  { version: 62, fn: (db) => { addColumnIfMissing(db, 'text_models', 'screen_policy', migration62Sql); } },
 ];
 
 export function migrate(

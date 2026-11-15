@@ -1,4 +1,4 @@
--- Atelier database schema — cumulative state after migrations 1-61.
+-- Atelier database schema — cumulative state after migrations 1-62.
 -- Reference only (migrate.ts is the runtime source of truth); the version
 -- in this header must track BINARY_SCHEMA_VERSION when migrations are added.
 --
@@ -273,7 +273,8 @@ CREATE TABLE text_models (
   probe_json          TEXT,
   sort_order          INTEGER NOT NULL DEFAULT 0,
   created_at          INTEGER NOT NULL,
-  updated_at          INTEGER NOT NULL
+  updated_at          INTEGER NOT NULL,
+  screen_policy       TEXT NOT NULL DEFAULT 'full' CHECK (screen_policy IN ('full', 'minors'))
 );
 
 -- Not unique: each row is a settings profile, so two rows on one provider may

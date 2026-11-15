@@ -60,6 +60,31 @@ describe('request screening (screenRequests)', () => {
     expect(sent).toHaveLength(0);
   });
 
+  test('a minors-only row asks only the age question: adult nudity passes, an unestablished age blocks', async () => {
+    fakeUpstream();
+    const asked: string[][] = [];
+    let sexual = 0.01;
+    setJevSystemOneProviderForTests((_url, init) => {
+      asked.push(Object.keys((JSON.parse(typeof init.body === 'string' ? init.body : '{}') as { questions: object }).questions));
+      return Promise.resolve(Response.json({ answers: {
+        explicit_nudity: { type: 'noul', noul: 0.99 },
+        sexual_minor_or_unknown_age: { type: 'noul', noul: sexual },
+        graphic_violence: { type: 'noul', noul: 0.99 },
+      } }));
+    });
+    const model = genericTextModel('sonnet', { displayName: 'Sonnet', screenRequests: true, screenPolicy: 'minors' });
+    const provider = testTextModelProvider({ origin: 'http://x', model, moderation: { openrouterApiKey: 'or-key' } });
+    expect((await collect(provider.enhance('x', [], new AbortController().signal))).at(-1)).toEqual({ type: 'done' });
+    expect(asked).toEqual([['sexual_minor_or_unknown_age']]);
+    expect(sent).toHaveLength(1);
+
+    sexual = 0.95;
+    const blocked = await collect(provider.enhance('y', [], new AbortController().signal));
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]).toMatchObject({ type: 'failed', kind: 'moderation-blocked', moderation: { categories: ['sexual-age'] } });
+    expect(sent).toHaveLength(1);
+  });
+
   test('an allowed request is screened as text only, then sent', async () => {
     fakeUpstream();
     const states: unknown[] = [];

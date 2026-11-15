@@ -98,6 +98,7 @@ const textProvider: AdminProvider = {
     displayName: 'Preview writer',
     enabled: false,
     screenRequests: false,
+    screenPolicy: 'full',
     sortOrder: 0,
     status: 'available',
     verifiedAt: null,

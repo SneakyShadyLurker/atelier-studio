@@ -315,20 +315,27 @@ they remove it.
 
 ## Screen requests first
 
-**Screen requests first** is a switch under **Advanced** in **Edit model**.
-When it is on, Atelier checks the text of every request with a content
-screen before the request reaches that model, and blocks requests that ask for
-explicit nudity, sexual content involving minors or graphic violence. The
-check uses a classifier on OpenRouter, so it needs `OPENROUTER_API_KEY` on the
+**Screen requests first** is a choice under **Advanced** in **Edit model**:
+
+- **Off**: no check.
+- **Block nudity, minors and graphic violence**: blocks requests that ask for
+  explicit nudity (even of adults), sexual content involving minors or people
+  whose age is not clearly adult, and graphic violence.
+- **Block minors only**: asks only the age question. Explicit adult nudity and
+  graphic violence pass; sexual content whose people are not clearly
+  established as 18 or older is blocked.
+
+When it is on, Atelier checks the text of every request with this content
+screen before the request reaches that model. GPT Image always uses the full
+check. The check uses a classifier on OpenRouter, so it needs `OPENROUTER_API_KEY` on the
 server, and only the text is checked, never image pixels. Without the key,
 requests to a screened model are refused, and the provider shows a warning
 until the key is set. Details are in
 [Providers](providers.md#gpt-only-input-moderation).
 
 Turn it on for a provider whose terms forbid that content, so a refusal
-happens in Atelier rather than on your account. Brainstorm never hands a
-screened model's request to an unscreened one when it retries on another
-model. Leave the switch off for local models you control.
+happens in Atelier rather than on your account. When Brainstorm retries on
+another model, it only picks one that screens at least as strictly. Leave the switch off for local models you control.
 
 ## Troubleshooting
 
@@ -347,5 +354,5 @@ model. Leave the switch off for local models you control.
 | "No text model is set up. An admin can add one under Text models." (HTTP 409) | Set a **Default model** in the Routing panel, and check that the model and its provider are switched on. |
 | "None of the available text models accepts images. Remove the reference images or ask an admin to enable image input on a model." (HTTP 409) | Remove the reference images, or connect a model that can read images, test it and make sure **Image input** is on. |
 | "The text model set for this image model is turned off or unavailable." (HTTP 409) | A locked prompt writer cannot serve. Turn the model back on, or change the writer to another model or to **No writer**. |
-| A screened model refuses every request | Set `OPENROUTER_API_KEY`, or turn off **Screen requests first** for that model. |
+| A screened model refuses every request | Set `OPENROUTER_API_KEY`, or set **Screen requests first** to **Off** for that model. |
 | A model shows **offline** | The provider answered without listing it. Check the id, or that the local server has the model loaded, then click **Check again**. |

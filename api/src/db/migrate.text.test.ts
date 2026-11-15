@@ -416,7 +416,7 @@ describe('migration 59 - GPT Image 2.6 writer', () => {
       const retired = before.find((row) => row.image_model_id === 'gpt-image-2.5-sunburst');
       expect(retired?.mode).toBe('lock');
       migrate(db, dataDir);
-      expect(schemaVersion(db)).toBe(61);
+      expect(schemaVersion(db)).toBe(BINARY_SCHEMA_VERSION);
       expect(writers(db)).toEqual(
         before
           .map((row) => (row === retired ? { ...row, image_model_id: 'gpt-image-2.6-sunburst' } : row))
@@ -436,6 +436,29 @@ describe('migration 59 - GPT Image 2.6 writer', () => {
       migrate(db, dataDir);
       const rows = writers(db).filter((row) => row.image_model_id.startsWith('gpt-image-2.'));
       expect(rows).toEqual([{ image_model_id: 'gpt-image-2.6-sunburst', text_model_id: other?.id ?? '', mode: 'prefer', updated_at: 99 }]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe('migration 62 - text model screen policy', () => {
+  test('existing text model rows upgrade to the full screen policy', () => {
+    const { db, dataDir } = openV57WithPins();
+    try {
+      migrate(db, dataDir, { textSeed: SEED, targetVersion: 61 });
+      expect(schemaVersion(db)).toBe(61);
+      const before = db.query<{ id: string }, []>('SELECT id FROM text_models').all();
+      expect(before.length).toBeGreaterThan(0);
+      migrate(db, dataDir);
+      expect(schemaVersion(db)).toBe(62);
+      const rows = db.query<{ id: string; screen_policy: string }, []>('SELECT id, screen_policy FROM text_models').all();
+      expect(rows.map((row) => row.id).sort()).toEqual(before.map((row) => row.id).sort());
+      expect(new Set(rows.map((row) => row.screen_policy))).toEqual(new Set(['full']));
+      const id = rows[0]?.id ?? '';
+      db.run("UPDATE text_models SET screen_policy = 'minors' WHERE id = ?", [id]);
+      expect(() => db.run("UPDATE text_models SET screen_policy = 'adult' WHERE id = ?", [id]))
+        .toThrow(/CHECK constraint failed/i);
     } finally {
       db.close();
     }

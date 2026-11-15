@@ -294,6 +294,54 @@ describe('per-model screening (screenRequests)', () => {
   });
 });
 
+describe('minors-only screen policy', () => {
+  const textEvidence = { task: 'text-generation' as const, input: 'A landscape' };
+
+  /** A fake JEV that records the question ids it was asked and answers every one of them. */
+  function recordingJev(sexual: number, violence: number, nudity: number): string[][] {
+    const asked: string[][] = [];
+    setJevSystemOneProviderForTests((_url, init) => {
+      if (typeof init.body !== 'string') throw new Error('Expected a JSON request');
+      asked.push(Object.keys((JSON.parse(init.body) as { questions: object }).questions));
+      return Promise.resolve(decision(sexual, violence, nudity));
+    });
+    return asked;
+  }
+
+  test('asks JEV only the age question; nudity and violence scores cannot block', async () => {
+    const asked = recordingJev(0.01, 1, 1);
+    await moderateGptInput(undefined, textEvidence, signal(), { policy: 'minors' });
+    expect(asked).toEqual([['sexual_minor_or_unknown_age']]);
+  });
+
+  test('a confident age score blocks with only the sexual-age category', async () => {
+    recordingJev(0.95, 1, 1);
+    expect(await rejectionOf(moderateGptInput(undefined, textEvidence, signal(), { policy: 'minors', modelLabel: 'Sonnet' }))).toMatchObject({
+      kind: 'moderation-blocked',
+      moderation: { reason: 'sexual-age', categories: ['sexual-age'], target: 'text', modelLabel: 'Sonnet' },
+    });
+  });
+
+  test('the full policy (and the default) still asks all three questions', async () => {
+    const asked = recordingJev(0.01, 0.01, 0.01);
+    await moderateGptInput(undefined, textEvidence, signal(), { policy: 'full' });
+    await moderateGptInput(undefined, textEvidence, signal());
+    const all = ['explicit_nudity', 'sexual_minor_or_unknown_age', 'graphic_violence'];
+    expect(asked).toEqual([all, all]);
+  });
+
+  test('the memo never reuses a verdict across policies', async () => {
+    const memo = createGptModerationMemo();
+    const asked = recordingJev(0.01, 1, 1);
+    await memo.moderate(undefined, textEvidence, signal(), { policy: 'minors' });
+    expect(await rejectionOf(memo.moderate(undefined, textEvidence, signal(), { policy: 'full' }))).toMatchObject({
+      kind: 'moderation-blocked', moderation: { categories: ['nudity', 'graphic-violence'] },
+    });
+    await memo.moderate(undefined, textEvidence, signal(), { policy: 'minors' });
+    expect(asked).toHaveLength(2);
+  });
+});
+
 describe('one screen per request', () => {
   const image = () => createCliproxyProvider({ baseUrl: 'https://gpt.test', token: 'test', maxResponseBytes: 10_000 });
   const tile = (provider: ReturnType<typeof image>, tileIndex: number, abort?: AbortSignal) =>

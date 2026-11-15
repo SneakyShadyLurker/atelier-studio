@@ -527,6 +527,31 @@ describe('brainstorm text model pin and failover', () => {
     expect(requests.map((request) => request.model)).toEqual([TEXT_MODELS.gpt]);
     expect(events.map((e) => e.event)).toEqual(['error']);
   });
+
+  test('a fully screened model never hands its request to a minors-only partner', async () => {
+    setTextModelProviderForTests(null);
+    const requests: Record<string, unknown>[] = [];
+    const runtime = upstreamRuntime(serveByModel(requests, { [TEXT_MODELS.gpt]: 503, [TEXT_MODELS.kimi]: 'record' }));
+    runtime.text.store.updateModel(legacyTextModelId(runtime.db, 'kimi'), { screenRequests: true, screenPolicy: 'minors' });
+    const events = await parseSse(await post(runtime.app, 'alice', {
+      count: 1, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(runtime.db, 'gpt'),
+    }));
+    expect(requests.map((request) => request.model)).toEqual([TEXT_MODELS.gpt]);
+    expect(events.map((e) => e.event)).toEqual(['error']);
+  });
+
+  test('a minors-only model fails over to a fully screened partner', async () => {
+    setTextModelProviderForTests(null);
+    const requests: Record<string, unknown>[] = [];
+    const runtime = upstreamRuntime(serveByModel(requests, { [TEXT_MODELS.gpt]: 503, [TEXT_MODELS.kimi]: 'record' }));
+    runtime.text.store.updateModel(legacyTextModelId(runtime.db, 'gpt'), { screenPolicy: 'minors' });
+    runtime.text.store.updateModel(legacyTextModelId(runtime.db, 'kimi'), { screenRequests: true });
+    const events = await parseSse(await post(runtime.app, 'alice', {
+      count: 1, modelId: 'gemini-3-pro-image-preview', textModelId: legacyTextModelId(runtime.db, 'gpt'),
+    }));
+    expect(requests.map((request) => request.model)).toEqual([TEXT_MODELS.gpt, TEXT_MODELS.kimi]);
+    expect(events.map((e) => e.event)).toEqual(['prompt', 'done']);
+  });
 });
 
 describe('brainstorm terminal errors', () => {

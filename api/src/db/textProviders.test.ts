@@ -288,6 +288,7 @@ describe('text provider store: models', () => {
       legacyKey: null,
       enabled: true,
       screenRequests: false,
+      screenPolicy: 'full',
       sortOrder: 0,
       verifiedAt: null,
       lastTest: null,
@@ -361,6 +362,22 @@ describe('text provider store: models', () => {
 
     const updated = store.updateModel(gpt.id, { displayName: 'GPT', screenRequests: true });
     expect(updated).toMatchObject({ displayName: 'GPT', reasoningLevels: [], reasoningDefault: 'medium', screenRequests: true });
+  });
+
+  test('screen policy defaults to full and updates independently of screenRequests', async () => {
+    const { store } = setup();
+    const p = await provider(store);
+    const [model] = store.createModels(p.id, [{ modelId: 'a' }]);
+    const id = present(model).id;
+    expect(model?.screenPolicy).toBe('full');
+
+    expect(store.updateModel(id, { screenPolicy: 'minors' })).toMatchObject({ screenRequests: false, screenPolicy: 'minors' });
+    expect(store.updateModel(id, { screenRequests: true })).toMatchObject({ screenRequests: true, screenPolicy: 'minors' });
+    expect(store.getModel(id)).toMatchObject({ screenRequests: true, screenPolicy: 'minors' });
+    expect(store.updateModel(id, { screenPolicy: 'full' })?.screenPolicy).toBe('full');
+
+    const [created] = store.createModels(p.id, [{ modelId: 'b', screenRequests: true, screenPolicy: 'minors' }]);
+    expect(created).toMatchObject({ screenRequests: true, screenPolicy: 'minors' });
   });
 
   test('maxImages requires vision', async () => {

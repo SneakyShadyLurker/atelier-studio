@@ -194,7 +194,7 @@ describe('Edit model: advanced', () => {
     fireEvent.change(field('Fixed output tokens'), { target: { value: '4000' } });
     fireEvent.click(field('Slow model'));
     fireEvent.click(field('Kimi-tuned'));
-    fireEvent.click(field('Screen requests first'));
+    fireEvent.click(field('Block nudity, minors and graphic violence'));
     fireEvent.click(button('Save'));
     await waitFor(() => { expect(patches(calls)).toHaveLength(1); });
     expect(patches(calls)[0]?.body).toEqual({
@@ -205,6 +205,36 @@ describe('Edit model: advanced', () => {
       promptVariant: 'kimi',
       screenRequests: true,
     });
+  });
+
+  test('choosing "Block minors only" turns screening on with the minors policy', async () => {
+    const { calls } = setup();
+    fireEvent.click(screen.getByText('Advanced'));
+    expect(field('Off').checked).toBe(true);
+    fireEvent.click(field('Block minors only'));
+    fireEvent.click(button('Save'));
+    await waitFor(() => { expect(patches(calls)).toHaveLength(1); });
+    expect(patches(calls)[0]?.body).toEqual({ screenRequests: true, screenPolicy: 'minors' });
+  });
+
+  test('on a fully screened model, "Block minors only" sends only the policy', async () => {
+    const { calls } = setup({ model: { ...SCOUT, screenRequests: true } });
+    fireEvent.click(screen.getByText('Advanced'));
+    expect(field('Block nudity, minors and graphic violence').checked).toBe(true);
+    fireEvent.click(field('Block minors only'));
+    fireEvent.click(button('Save'));
+    await waitFor(() => { expect(patches(calls)).toHaveLength(1); });
+    expect(patches(calls)[0]?.body).toEqual({ screenPolicy: 'minors' });
+  });
+
+  test('choosing Off on a minors-only model turns screening off and keeps the policy', async () => {
+    const { calls } = setup({ model: { ...SCOUT, screenRequests: true, screenPolicy: 'minors' } });
+    fireEvent.click(screen.getByText('Advanced'));
+    expect(field('Block minors only').checked).toBe(true);
+    fireEvent.click(field('Off'));
+    fireEvent.click(button('Save'));
+    await waitFor(() => { expect(patches(calls)).toHaveLength(1); });
+    expect(patches(calls)[0]?.body).toEqual({ screenRequests: false });
   });
 
   test('out-of-range sampling is refused in plain words', () => {

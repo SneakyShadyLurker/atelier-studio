@@ -6,6 +6,7 @@ import type {
   TextModelCapabilities,
   TextModelPatchRequest,
   TextReasoningEffort,
+  TextScreenPolicy,
 } from '@atelier/shared';
 import {
   TEXT_DISPLAY_NAME_MAX_CHARS,
@@ -49,8 +50,17 @@ interface ModelDraft {
   readonly fixedOutputTokens: string;
   readonly latencyProfile: TextModelCapabilities['latencyProfile'];
   readonly promptVariant: TextModelCapabilities['promptVariant'];
-  readonly screenRequests: boolean;
+  /** 'off' = no screen; otherwise the screen policy. */
+  readonly screening: ScreenChoice;
 }
+
+type ScreenChoice = 'off' | TextScreenPolicy;
+
+const SCREEN_CHOICES: readonly { readonly value: ScreenChoice; readonly label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'full', label: 'Block nudity, minors and graphic violence' },
+  { value: 'minors', label: 'Block minors only' },
+];
 
 type DraftErrors = Partial<Record<'displayName' | 'maxImages' | 'reasoningDefault' | 'temperature' | 'topP' | 'fixedOutputTokens', string>>;
 
@@ -78,7 +88,7 @@ function draftOf(model: AdminModel): ModelDraft {
     fixedOutputTokens: numberText(model.fixedOutputTokens),
     latencyProfile: model.latencyProfile,
     promptVariant: model.promptVariant,
-    screenRequests: model.screenRequests,
+    screening: model.screenRequests ? model.screenPolicy : 'off',
   };
 }
 
@@ -119,6 +129,15 @@ function errorsOf(draft: ModelDraft): DraftErrors {
 const sameLevels = (a: readonly TextReasoningEffort[], b: readonly TextReasoningEffort[]) =>
   a.length === b.length && a.every((level, index) => level === b[index]);
 
+/** Off leaves the stored policy alone; a policy choice also turns screening on. */
+function screeningPatch(model: AdminModel, screening: ScreenChoice): TextModelPatchRequest {
+  const screenRequests = screening !== 'off';
+  return {
+    ...(screenRequests === model.screenRequests ? {} : { screenRequests }),
+    ...(screening === 'off' || screening === model.screenPolicy ? {} : { screenPolicy: screening }),
+  };
+}
+
 /** Only the fields that changed; call with a draft that has no errors. */
 function patchOf(model: AdminModel, draft: ModelDraft): TextModelPatchRequest {
   const name = draft.displayName.trim();
@@ -139,7 +158,7 @@ function patchOf(model: AdminModel, draft: ModelDraft): TextModelPatchRequest {
     ...(fixedOutputTokens === model.fixedOutputTokens ? {} : { fixedOutputTokens }),
     ...(draft.latencyProfile === model.latencyProfile ? {} : { latencyProfile: draft.latencyProfile }),
     ...(draft.promptVariant === model.promptVariant ? {} : { promptVariant: draft.promptVariant }),
-    ...(draft.screenRequests === model.screenRequests ? {} : { screenRequests: draft.screenRequests }),
+    ...screeningPatch(model, draft.screening),
   };
 }
 
@@ -587,26 +606,30 @@ export default function EditModelDialog({ provider, model, imageLabel, startTest
                 </div>
               </fieldset>
 
-              <div className={form.field}>
-                <label className={form.choice}>
-                  <input
-                    type="checkbox"
-                    checked={draft.screenRequests}
-                    disabled={busy}
-                    aria-describedby={screenHintId}
-                    onChange={(event) => { change({ screenRequests: event.currentTarget.checked }); }}
-                  />
-                  <span>Screen requests first</span>
-                </label>
+              <fieldset className={form.choiceGroup} disabled={busy} aria-describedby={screenHintId}>
+                <legend className={form.fieldLabel}>Screen requests first</legend>
+                <div className={form.choices}>
+                  {SCREEN_CHOICES.map((choice) => (
+                    <label key={choice.value} className={form.choice}>
+                      <input
+                        type="radio"
+                        name={`${fieldId}-screen`}
+                        checked={draft.screening === choice.value}
+                        onChange={() => { change({ screening: choice.value }); }}
+                      />
+                      <span>{choice.label}</span>
+                    </label>
+                  ))}
+                </div>
                 <p id={screenHintId} className={form.fieldHint}>
-                  Checks each request with the content screen before it reaches this model. Needs OPENROUTER_API_KEY on the server.
+                  Checks each request with the content screen before it reaches this model. Minors only lets adult nudity and violence through. Needs OPENROUTER_API_KEY on the server.
                 </p>
                 {screenWarning && (
                   <p className={form.fieldWarning}>
                     OPENROUTER_API_KEY is not set on this server, so models that screen requests refuse them until it is.
                   </p>
                 )}
-              </div>
+              </fieldset>
             </div>
           </details>
 

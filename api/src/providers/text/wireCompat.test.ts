@@ -99,6 +99,7 @@ function modelRecord(seed: LegacySeedModel, sortOrder: number): TextModelRecord 
     displayName: seed.displayName,
     enabled: true,
     screenRequests: seed.screenRequests,
+    screenPolicy: 'full',
     sortOrder,
     verifiedAt: null,
     lastTest: null,

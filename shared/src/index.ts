@@ -780,6 +780,12 @@ export type TextLatencyProfile = (typeof TEXT_LATENCY_PROFILES)[number];
 export const TEXT_PROMPT_VARIANTS = ['generic', 'kimi'] as const;
 export type TextPromptVariant = (typeof TEXT_PROMPT_VARIANTS)[number];
 
+/** What the content pre-check blocks when a model screens requests:
+ *  'full' = nudity, minors and graphic violence; 'minors' = sexual content
+ *  involving minors or unestablished ages only. */
+export const TEXT_SCREEN_POLICIES = ['full', 'minors'] as const;
+export type TextScreenPolicy = (typeof TEXT_SCREEN_POLICIES)[number];
+
 /** Whether the provider currently lists the model. 'unknown' passes routing. */
 export type TextModelStatus = 'available' | 'offline' | 'unknown';
 
@@ -868,6 +874,8 @@ export interface AdminModel extends TextModelCapabilities {
   readonly enabled: boolean;
   /** Run the content pre-check before every request to this model. */
   readonly screenRequests: boolean;
+  /** What the pre-check blocks; only meaningful with `screenRequests`. */
+  readonly screenPolicy: TextScreenPolicy;
   readonly sortOrder: number;
   readonly status: TextModelStatus;
   /** Epoch ms of the last passing "Test model"; null = untested. */
@@ -978,6 +986,7 @@ export interface TextModelPatchRequest extends Partial<TextModelCapabilities> {
   readonly displayName?: string;
   readonly enabled?: boolean;
   readonly screenRequests?: boolean;
+  readonly screenPolicy?: TextScreenPolicy;
   readonly sortOrder?: number;
 }
 

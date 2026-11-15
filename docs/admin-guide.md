@@ -127,7 +127,7 @@ Everything here is optional. One default model is a complete setup.
 | **Prompt writers** | Choose which model writes prompts for one image model. **Always use this model** overrides everyone's own pick and never falls back: if that model is off, requests for that image model fail. **Use unless the person picked their own** lets personal picks win and falls back normally |
 | **Model switch** | Turns a model off without deleting it. Atelier skips it and uses the next model in line, except where it is a locked prompt writer |
 | **Slow model** | Allows longer waits and larger replies, for models that think for minutes |
-| **Screen requests first** | Checks request text before it reaches that model. It blocks explicit nudity (even of adults), sexual content involving minors or people whose age is not clearly adult, and graphic violence. Needs `OPENROUTER_API_KEY` on the server |
+| **Screen requests first** | Checks request text before it reaches that model. **Block nudity, minors and graphic violence** blocks explicit nudity (even of adults), sexual content involving minors or people whose age is not clearly adult, and graphic violence. **Block minors only** asks only the age question: adult nudity and graphic violence pass, sexual content whose people are not clearly 18 or older is blocked. Needs `OPENROUTER_API_KEY` on the server |
 
 People can also pick their own model per task under **Prompt Library**,
 **Settings**. Before you remove a model or provider, Atelier tells you what

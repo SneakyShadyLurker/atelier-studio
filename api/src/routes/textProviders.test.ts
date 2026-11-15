@@ -321,6 +321,21 @@ describe('model writes', () => {
     expect(edited).toMatchObject({ vision: true, maxImages: 4, screenRequests: true, displayName: 'M', enabled: false, sortOrder: 3, temperature: 0.7 });
   });
 
+  test('screenPolicy defaults to full, PATCH sets minors, and an unknown value is 400', async () => {
+    const rt = admin();
+    const provider = await createProvider(rt);
+    const [model] = await createModels(rt, provider.id, [{ modelId: 'm-1' }]);
+    expect(model?.screenPolicy).toBe('full');
+    const path = `/text-providers/${provider.id}/models/${model?.id}`;
+
+    const minors = await json<AdminModel>(await call(rt, 'PATCH', path, { screenRequests: true, screenPolicy: 'minors' }), 200);
+    expect(minors).toMatchObject({ screenRequests: true, screenPolicy: 'minors' });
+    expect((await providers(rt))[0]?.models[0]).toMatchObject({ screenRequests: true, screenPolicy: 'minors' });
+
+    expect((await call(rt, 'PATCH', path, { screenPolicy: 'adult' })).status).toBe(400);
+    expect((await providers(rt))[0]?.models[0]?.screenPolicy).toBe('minors');
+  });
+
   test('a model is addressed only under its own provider', async () => {
     const rt = admin();
     const a = await createProvider(rt, { name: 'A' });

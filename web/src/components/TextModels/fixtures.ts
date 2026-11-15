@@ -19,6 +19,7 @@ export function adminModel(overrides: Partial<AdminModel> & Pick<AdminModel, 'id
     promptVariant: 'generic',
     enabled: true,
     screenRequests: false,
+    screenPolicy: 'full',
     sortOrder: 0,
     status: 'available',
     verifiedAt: null,

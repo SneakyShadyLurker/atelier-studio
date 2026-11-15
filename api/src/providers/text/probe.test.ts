@@ -113,6 +113,7 @@ function model(modelId = 'm-1'): TextModelRecord {
     latencyProfile: 'standard',
     promptVariant: 'generic',
     screenRequests: false,
+    screenPolicy: 'full',
     sortOrder: 0,
     verifiedAt: null,
     lastTest: null,

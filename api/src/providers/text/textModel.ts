@@ -769,7 +769,7 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       instructions: request.systemPrompt,
       // JEV is text-only. Never send reference-image bytes or data URLs to it.
       input: (request.images?.length ?? 0) === 0 ? request.user : [request.user],
-    }, signal, { modelLabel: model.displayName, logger });
+    }, signal, { modelLabel: model.displayName, logger, policy: model.screenPolicy });
   };
 
   /**

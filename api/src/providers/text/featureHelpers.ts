@@ -201,7 +201,9 @@ export interface AiFillProviderInput {
 
 export type AiFillResult =
   | { type: 'ok'; text: string }
-  | TextCallFailure;
+  | TextCallFailure
+  // A provider safety filter that ended the call: a refusal, never retried.
+  | (Omit<TextCallFailure, 'kind'> & { kind: 'content-filter' });
 
 export type DraftTemplateProviderInput = DraftTemplateRequest & {
   readonly library: LibraryOverview;

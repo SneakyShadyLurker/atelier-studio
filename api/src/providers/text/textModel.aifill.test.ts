@@ -293,6 +293,39 @@ describe('aiFill retry policy', () => {
     }
   });
 
+  test('classifies an in-stream provider safety-filter frame as a non-retried content filter', async () => {
+    const original = globalThis.fetch;
+    let calls = 0;
+    // The frame a provider safety filter sends after reasoning has started:
+    // the HTTP status is 200, the 400 only lives inside the stream.
+    const reasoning = JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'Thinking' }, finish_reason: null }] });
+    const blocked = JSON.stringify({
+      choices: [{ index: 0, delta: {}, finish_reason: 'error' }],
+      error: {
+        status: 400,
+        message: 'Your prompt was blocked by safety filters. Please revise and try again.',
+        code: 'content_policy_violation',
+      },
+    });
+    globalThis.fetch = (() => {
+      calls += 1;
+      return Promise.resolve(new Response(`data: ${reasoning}\n\ndata: ${blocked}\n\n`, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }));
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await makeProvider().aiFill(defaultInput, new AbortController().signal);
+
+      expect(calls).toBe(1);
+      expect(result).toMatchObject({ type: 'failed', kind: 'content-filter', status: 400 });
+      if (result.type === 'failed') expect(result.detail).toContain('blocked by safety filters');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   test('generic OpenAI-compatible fallback sends reasoning_effort and omits thinking', async () => {
     const original = globalThis.fetch;
     let sent: Record<string, unknown> = {};

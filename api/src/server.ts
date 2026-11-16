@@ -179,9 +179,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     await next();
   });
   // Framework-native security headers (nosniff, X-Frame-Options, Referrer-
-  // Policy, COOP, …). HSTS is disabled — TLS terminates at the SWAG edge,
-  // which owns Strict-Transport-Security; re-emitting it here would duplicate
-  // the header. Cross-Origin-Resource-Policy is disabled too: the artifact
+  // Policy, COOP, …). HSTS is disabled: the outermost TLS edge owns
+  // Strict-Transport-Security (the CDN when one fronts SWAG, otherwise SWAG),
+  // and re-emitting it here would duplicate the header. Cross-Origin-Resource-Policy is disabled too: the artifact
   // routes serve browser-embedded image bytes to the SPA and local/dev proxy
   // topologies may still vary by origin. The CSP is the tightest possible one:
   // atelier-api only ever

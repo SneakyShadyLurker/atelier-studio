@@ -239,6 +239,19 @@ describe('testModel', () => {
     expect(message).not.toContain(KEY);
   });
 
+  test('the probe image clears minimum-size limits (Qwen 400s images under 10 px a side)', async () => {
+    chat = scripted((body, kind) => {
+      if (kind !== 'image') return undefined;
+      const url = /data:image\/png;base64,([A-Za-z0-9+/=]+)/.exec(JSON.stringify(body))?.[1] ?? '';
+      const ihdr = Buffer.from(url, 'base64');
+      const tooSmall = ihdr.length < 24 || ihdr.readUInt32BE(16) < 10 || ihdr.readUInt32BE(20) < 10;
+      return tooSmall ? { status: 400, body: 'Invalid request parameters. Please check your input and try again.' } : undefined;
+    });
+    const report = await run();
+    expect(statusOf(report, 'image')).toBe('pass');
+    expect(report.proposed.vision).toBe(true);
+  });
+
   test('other image failures leave vision unknown', async () => {
     chat = scripted((_body, kind) => (kind === 'image' ? { status: 500, body: 'boom' } : undefined));
     const report = await run();

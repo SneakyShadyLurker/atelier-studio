@@ -69,5 +69,5 @@ export function isLikelyModelRefusal(text: string): boolean {
 
 /** Detects explicit provider-side moderation/error markers. */
 export function isLikelyContentFilterFailure(detail: string): boolean {
-  return /\bcontent[_ -]?filter(?:ed|ing)?\b|\bconsidered high risk\b|\b(?:safety|policy|moderation)\s+(?:block(?:ed)?|refusal|violation)\b/i.test(detail);
+  return /\bcontent[_ -]?filter(?:ed|ing)?\b|\bconsidered high risk\b|\b(?:safety|policy|moderation)\s+(?:block(?:ed)?|refusal|violation)\b|\bcontent[_ -]policy[_ -]violation\b|\bblocked by (?:the )?(?:safety|content|moderation) filters?\b/i.test(detail);
 }

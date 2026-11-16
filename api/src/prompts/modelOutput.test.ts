@@ -95,6 +95,8 @@ describe('isLikelyContentFilterFailure', () => {
     'The request was considered high risk',
     'blocked by policy violation',
     'moderation block',
+    'Your prompt was blocked by safety filters. Please revise and try again.',
+    '{"code":"content_policy_violation"}',
   ])('detects provider moderation marker: %s', (detail) => {
     expect(isLikelyContentFilterFailure(detail)).toBe(true);
   });

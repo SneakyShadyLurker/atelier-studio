@@ -254,6 +254,29 @@ describe('POST /api/prompts/ai-fill', () => {
     expect(frameData(frames, 'error').code).toBe('provider-error');
   });
 
+  test('a provider safety filter → content-filter error, logged as content-filter without its text', async () => {
+    const detail = '{"status":400,"message":"Your prompt was blocked by safety filters.","code":"content_policy_violation"}';
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({ type: 'failed', kind: 'content-filter', status: 400, detail })));
+    const runtime = testRuntime({ seedLegacyText: true, PROMPT_LIBRARY_USERS: 'alice', LOG_LEVEL: 'info' });
+    const response = await runtime.app.fetch(new Request('http://local/api/prompts/ai-fill', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        'Remote-User': 'alice',
+      },
+      body: JSON.stringify(BODY),
+    }));
+    const frames = parseSseText(await response.text());
+    expect(frames.some((f) => f.event === 'result')).toBe(false);
+    expect(frameData(frames, 'error').code).toBe('content-filter');
+    const record = runtime.logs
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((entry) => entry.event === 'ai_fill_upstream');
+    expect(record).toMatchObject({ failureKind: 'content-filter', status: 400 });
+    expect(runtime.logs.join('')).not.toContain('blocked by safety filters');
+  });
+
   test('quota failure → error event with quota-exhausted code and retryAfterSeconds', async () => {
     setTextModelProviderForTests(fakeProvider(() => Promise.resolve({ type: 'failed', kind: 'quota', status: 429, detail: 'x', retryAfterSeconds: 900 })));
     const frames = parseSseText(await (await postAiFill(BODY)).text());
@@ -961,5 +984,13 @@ describe('ai-fill batch terminal errors', () => {
     })));
     const frames = parseSseText(await (await postAiFillBatch({ items: [item], modelId: 'gpt-image-2.6-sunburst' })).text());
     expect(frameData(frames, 'error')).toEqual({ message: 'Codex quota exhausted', code: 'quota-exhausted', retryAfterSeconds: 300 });
+  });
+
+  test('a provider safety filter reaches the client as content-filter', async () => {
+    setTextModelProviderForTests(fakeProvider(() => Promise.resolve({
+      type: 'failed', kind: 'content-filter', status: 400, detail: 'blocked by safety filters',
+    })));
+    const frames = parseSseText(await (await postAiFillBatch({ items: [item], modelId: 'gpt-image-2.6-sunburst' })).text());
+    expect(frameData(frames, 'error').code).toBe('content-filter');
   });
 });

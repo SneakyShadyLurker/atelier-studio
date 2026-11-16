@@ -1155,7 +1155,12 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
       } catch (err) {
         if (signal.aborted) throw err;
         if (isAbortError(err)) throw err;
-        return textFailureFromError(err);
+        // A provider safety filter can end a 200 stream with an in-stream 400
+        // frame; it is a refusal, not a provider error.
+        const failure = textFailureFromError(err);
+        return failure.kind === 'permanent' && isLikelyContentFilterFailure(failure.detail)
+          ? { ...failure, kind: 'content-filter' }
+          : failure;
       }
     }),
 

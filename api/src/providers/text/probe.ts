@@ -29,9 +29,13 @@ export const CHECK_TIMEOUT_MS = 20_000;
 export const CHECK_MAX_BYTES = 64 * 1024;
 const CHECK_OUTPUT_TOKENS = 1024;
 
-/** A 1×1 transparent PNG. */
+/**
+ * A 32×32 white PNG. Some servers refuse tiny images with a generic 400
+ * (some Qwen hosts reject anything under 10 px a side), which would
+ * read as "image support unknown" for a model that sees images fine.
+ */
 const PIXEL_PNG = Uint8Array.from(Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAJklEQVR42u3NMQ0AAAwDoPo33arYsQQMkB6LQCAQCAQCgUAg+BIMi1X0ptsIcT0AAAAASUVORK5CYII=',
   'base64',
 ));
 

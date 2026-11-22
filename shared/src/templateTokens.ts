@@ -62,13 +62,26 @@ export function findTokens(body: string): readonly TokenSpan[] {
 }
 
 export function referencedVarNames(body: string): readonly string[] {
+  // Mirrors the web resolver's var scan (collectVarOccurrences): every
+  // `{{var::` opener at any depth, closed by findClose, whole interior to
+  // parseVarToken. Comments are stripped until none remain, as the resolver's
+  // repeated macro passes do when stripping exposes a new `{{//`.
+  let text = body;
+  for (let pass = 0; pass < 8; pass++) {
+    const stripped = stripTemplateComments(text);
+    text = stripped.text;
+    if (!stripped.changed) break;
+  }
   const names = new Set<string>();
-  for (const span of findTokens(stripTemplateComments(body).text)) {
-    const m = span.text.match(VAR_TOKEN_ANCHORED);
-    const inner = m?.[1];
-    if (!inner) continue;
-    const { listName } = parseVarToken(inner);
+  let i = 0;
+  while (i < text.length) {
+    const start = text.indexOf('{{var::', i);
+    if (start === -1) break;
+    const close = findClose(text, start + 2);
+    if (close === -1) break;
+    const { listName } = parseVarToken(text.slice(start + '{{var::'.length, close));
     if (listName) names.add(listName);
+    i = close + 2;
   }
   return [...names].sort((a, b) => a.localeCompare(b));
 }

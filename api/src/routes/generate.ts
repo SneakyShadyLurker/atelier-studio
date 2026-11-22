@@ -26,7 +26,8 @@ import {
   releaseForPool,
   waitsOnGlobalCapAlone,
 } from '../orchestrator/concurrency';
-import { needsQueuedPromptPreparation, prepareQueuedPrompts } from '../orchestrator/queuedPromptPreparation';
+import { needsQueuedPromptPreparation, prepareQueuedPrompts, promptNeedsCondensation } from '../orchestrator/queuedPromptPreparation';
+import { readCondensePrompts } from '../routing/promptCondensePreference';
 import {
   capsForPool,
   findModel,
@@ -324,6 +325,12 @@ export const generateRoutes = new Hono<AppEnv>().post('/generate', async (c) => 
       return c.json({ error: 'upload not found' }, 404);
     }
 
+    // Read before the create transaction, so a failed read cannot leave a
+    // committed batch without a queue entry. Only a condensation candidate
+    // reads it; the preparer reads it again before the call.
+    const condensePrompts = !promptNeedsCondensation(request.modelId, request.prompt)
+      || readCondensePrompts(c.var.db, userId);
+
     type CreateOutcome =
       | { kind: 'queue-full' }
       | { kind: 'video-busy' }
@@ -407,6 +414,7 @@ export const generateRoutes = new Hono<AppEnv>().post('/generate', async (c) => 
     // to read stored refs/sources, and dequeue resumes it on unseal.
     const needsPreparation = pool === 'local' && needsQueuedPromptPreparation(
       c.var.config, request.modelId, request.prompt, request.refImageIds?.length ?? 0,
+      () => condensePrompts,
     );
     // Every pool keeps this user's accepted queue order even if a newer,
     // smaller request could acquire capacity before its queued predecessor.

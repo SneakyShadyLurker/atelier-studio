@@ -1,4 +1,4 @@
--- Atelier database schema — cumulative state after migrations 1-63.
+-- Atelier database schema — cumulative state after migrations 1-64.
 -- Reference only (migrate.ts is the runtime source of truth); the version
 -- in this header must track BINARY_SCHEMA_VERSION when migrations are added.
 --
@@ -344,6 +344,16 @@ CREATE TABLE user_model_steps (
   steps      INTEGER NOT NULL CHECK (steps BETWEEN 1 AND 100),
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, model_id)
+);
+
+-- Per-user preferences that are not per model (v64). `condense_prompts` is
+-- the "Condense long prompts" switch for Krea rows: NULL means on, only 0
+-- (off) is stored, and a row whose setting columns are all NULL is deleted.
+-- updated_at is epoch ms.
+CREATE TABLE user_preferences (
+  user_id          TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  condense_prompts INTEGER CHECK (condense_prompts IN (0, 1)),
+  updated_at       INTEGER NOT NULL
 );
 
 CREATE TABLE users (

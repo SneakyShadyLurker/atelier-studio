@@ -12,6 +12,7 @@ import { KREA_PROMPT_CONDENSE_TRIGGER_WORDS } from '../prompts/promptBudget';
 import { localTilesInFlight } from '../orchestrator/concurrency';
 import { stopQueuedPromptPreparation } from '../orchestrator/queuedPromptPreparation';
 import { snapshotBatchDonePromises } from '../orchestrator/registry';
+import { writeCondensePrompts } from '../routing/promptCondensePreference';
 
 // The condense pass runs in the batch worker, not in POST /api/generate. Its fail-open matrix is unit-tested in
 // orchestrator/condenseBatchPrompt.test.ts; what THIS file pins is the
@@ -211,4 +212,75 @@ test('a prompt under the trigger is never rewritten by the worker', async () => 
   ).get(payload.batchId);
   expect(row?.prompt).toBe(original);
   expect(calls).toBe(0);
+});
+
+test('a user who turned condensing off renders an over-budget prompt as submitted', async () => {
+  const original = wordPrompt(400);
+  let calls = 0;
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
+    await Promise.resolve();
+    calls += 1;
+    yield { type: 'delta', text: wordPrompt(120, 'short') } satisfies EnhanceChunk;
+    yield { type: 'done' } satisfies EnhanceChunk;
+  }));
+  const runtime = kreaRuntime();
+  writeCondensePrompts(runtime.db, 'alice', false);
+
+  const res = await jsonRequest(runtime.app, '/api/generate', {
+    prompt: original, modelId: 'krea-2-gonzalomo', ratio: '1:1', count: 1,
+  }, 'alice');
+  expect(res.status).toBe(201);
+  // /generate itself skips preparation: with capacity free the batch starts
+  // instead of queuing for a preparer.
+  const { batchId, status } = await res.json() as { batchId: string; status: string };
+  expect(status).toBe('running');
+  const events = await runtime.fetch(`/api/batches/${batchId}/events`, { headers: { 'Remote-User': 'alice' } });
+  expect(await events.text()).toContain('event: done');
+  expect(calls).toBe(0);
+  expect(runtime.db.query('SELECT prompt FROM batches WHERE id = ?').get(batchId)).toEqual({ prompt: original });
+});
+
+test('turning condensing off while a batch waits for its preparer skips the pass', async () => {
+  // Two batches park in both preparer slots, so the third waits as pending.
+  let entered = 0;
+  let bothEntered: () => void = () => undefined;
+  const slotsFull = new Promise<void>((resolve) => { bothEntered = resolve; });
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  setTextModelProviderForTests(fakeCondenseProvider(async function* () {
+    entered += 1;
+    if (entered === 2) bothEntered();
+    await gate;
+    yield { type: 'delta', text: wordPrompt(120, 'short') } satisfies EnhanceChunk;
+    yield { type: 'done' } satisfies EnhanceChunk;
+  }));
+  const runtime = kreaRuntime();
+  const submit = async (prefix: string) => {
+    const res = await jsonRequest(runtime.app, '/api/generate', {
+      prompt: wordPrompt(400, prefix), modelId: 'krea-2-gonzalomo', ratio: '1:1', count: 1,
+    }, 'alice');
+    expect(res.status).toBe(201);
+    return (await res.json() as { batchId: string }).batchId;
+  };
+  let waiting: string;
+  let first: string;
+  let second: string;
+  try {
+    first = await submit('first');
+    second = await submit('second');
+    await slotsFull;
+    waiting = await submit('waiting');
+    writeCondensePrompts(runtime.db, 'alice', false);
+  } finally {
+    // Teardown drains the parked calls, so they must always be released.
+    release();
+  }
+
+  for (const batchId of [first, second, waiting]) {
+    const events = await runtime.fetch(`/api/batches/${batchId}/events`, { headers: { 'Remote-User': 'alice' } });
+    expect(await events.text()).toContain('event: done');
+  }
+  expect(entered).toBe(2);
+  expect(runtime.db.query('SELECT prompt FROM batches WHERE id = ?').get(waiting))
+    .toEqual({ prompt: wordPrompt(400, 'waiting') });
 });

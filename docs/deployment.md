@@ -471,6 +471,8 @@ Schema v62 adds `screen_policy` (`full` or `minors`, default `full`) to `text_mo
 
 Schema v63 adds the nullable `effort` column to `text_defaults` and `image_model_writers`, the shared reasoning effort of the default model, feature assignments and prompt writers. Existing rows get no effort, so every call keeps its model's default effort until an admin sets one under **Text models → Shared setup**. Once v63 is recorded, a v62 image refuses the database.
 
+Schema v64 adds `user_preferences`, which holds the per-user "Condense long prompts" switch (`condense_prompts`, only 0 = off is stored). It creates an empty table, so every user keeps condensing on. Once v64 is recorded, a v63 image refuses the database.
+
 Follow these steps for a release:
 
 1. **Lock.** Hold one deploy lock per compose directory so a deploy and host maintenance never overlap. `infra/docker/deploy-lock.sh` is a bash 3.2 lock library (BSD and Linux) for this: an owner record in `infra/docker/.deploy.lock`, stale-lock recovery under a kernel flock on `infra/docker/.deploy-reclaim.flock`, and a refusal while a live owner or child holds it. Never delete `.deploy-reclaim.flock`; keep both paths gitignored.

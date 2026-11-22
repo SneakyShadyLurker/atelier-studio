@@ -1147,6 +1147,19 @@ export interface ModelResolutionPutRequest {
   readonly downscale?: boolean;
 }
 
+/** The user's "Condense long prompts" switch for Krea rows. */
+export interface PromptCondenseSettingsResponse {
+  /** False when the user sees no model whose prompts are condensed; the switch is then hidden. */
+  readonly available: boolean;
+  /** True (the default) lets queued preparation shorten an over-budget prompt. */
+  readonly enabled: boolean;
+}
+
+export interface PromptCondensePutRequest {
+  /** false renders over-budget prompts as submitted. */
+  readonly enabled: boolean;
+}
+
 /** Advisory leading ai-fill frame naming the text model serving the fill. */
 export type AiFillBackendFrame = AiFillBackendFrameWire;
 
@@ -1370,6 +1383,8 @@ type _NoUserIdOnModelStepsSetting = _Assert<_NoUserIdOn<ModelStepsSetting>>;
 type _NoUserIdOnModelResolutionSettings = _Assert<_NoUserIdOn<ModelResolutionSettingsResponse>>;
 type _NoUserIdOnModelResolutionSetting = _Assert<_NoUserIdOn<ModelResolutionSetting>>;
 type _NoUserIdOnModelResolutionPut = _Assert<_NoUserIdOn<ModelResolutionPutRequest>>;
+type _NoUserIdOnPromptCondenseSettings = _Assert<_NoUserIdOn<PromptCondenseSettingsResponse>>;
+type _NoUserIdOnPromptCondensePut = _Assert<_NoUserIdOn<PromptCondensePutRequest>>;
 type _NoUserIdOnBrainstormCharactersRequest = _Assert<_NoUserIdOn<BrainstormCharactersRequest>>;
 type _NoUserIdOnDraftListRequest = _Assert<_NoUserIdOn<DraftVariableListRequest>>;
 type _NoUserIdOnDraftVariableListResponse = _Assert<_NoUserIdOn<DraftVariableListResponse>>;

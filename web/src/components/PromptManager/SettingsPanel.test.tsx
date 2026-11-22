@@ -440,3 +440,64 @@ describe('SettingsPanel render resolution', () => {
     expect(screen.queryByText('Render resolution')).toBeNull();
   });
 });
+
+function renderCondense(initial: { available: boolean; enabled: boolean }, putStatus = 200) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  let current = initial;
+  globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = urlOf(input);
+    if (url.includes('/settings/prompt-condense')) {
+      if (init?.method === 'PUT') {
+        if (putStatus !== 200) return Response.json({ error: 'boom' }, { status: putStatus });
+        current = { ...current, ...(JSON.parse(init.body as string) as { enabled: boolean }) };
+      }
+      return Response.json(current);
+    }
+    if (url.includes('/settings/')) return Response.json({ models: [], options: [], min: 1, max: 100 });
+    return Response.json({});
+  }) as unknown as typeof fetch;
+  renderedClient = client;
+  render(<SettingsPanel />, { wrapper: wrapper(client) });
+  return globalThis.fetch as unknown as ReturnType<typeof mock>;
+}
+
+describe('SettingsPanel prompt condensing', () => {
+  test('the switch is on by default and turning it off saves enabled false', async () => {
+    const fetchMock = renderCondense({ available: true, enabled: true });
+    const heading = await screen.findByRole('heading', { name: 'Prompt condensing' });
+    expect(heading.nextElementSibling).toBeNull();
+    const toggle = screen.getByRole('switch', { name: 'Condense long prompts' });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/settings/prompt-condense',
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ enabled: false }) }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Condense long prompts' }).getAttribute('aria-checked')).toBe('false');
+    });
+  });
+
+  test('a failed save rolls back and shows an error toast', async () => {
+    renderCondense({ available: true, enabled: true }, 500);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Condense long prompts' }));
+    await waitFor(() => {
+      expect(useAtelierStore.getState().toasts.some((toast) => toast.tone === 'error')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Condense long prompts' }).getAttribute('aria-checked')).toBe('true');
+    });
+  });
+
+  test('is hidden for a user without a Krea row', async () => {
+    renderCondense({ available: false, enabled: true });
+    await waitFor(() => {
+      expect((globalThis.fetch as unknown as ReturnType<typeof mock>).mock.calls.some(([url]) => String(url).includes('/settings/prompt-condense'))).toBe(true);
+    });
+    await settled();
+    expect(screen.queryByText('Prompt condensing')).toBeNull();
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+});

@@ -319,7 +319,8 @@ describe('validate-models', () => {
 
   describe('h3image reference slots', () => {
     type H3Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
-    const SLOTS = 'h3image reference slots feed MiniMaxH3ImageConditioning images.image_N from LoadImage in order, and the base graph takes none';
+    const SLOTS = 'h3image reference slots feed MiniMaxH3ImageConditioning images.image_N from LoadImage in order';
+    const EDIT_MODE = 'h3image base graphs feed one black 512x512 EmptyImage as images.image_1 to run in edit mode';
     function violation(file: string, mutate: (graph: H3Graph) => void): { result: ReturnType<typeof run>; graphPath: string } {
       const dir = copyFixture(BUILTIN_MODELS_DIR);
       const graphPath = join(dir, 'minimax-h3-image', file);
@@ -360,12 +361,55 @@ describe('validate-models', () => {
       expect(result.stderr).toContain(`${graphPath}: h3image reference graphs connect the VAE so pictures anchor as reference latents`);
     });
 
-    test('a loader no slot reads exits 1', () => {
+    test('a loader in the base graph exits 1', () => {
       const { result, graphPath } = violation('workflow.json', (graph) => {
-        graph['30'] = { class_type: 'LoadImage', inputs: { image: 'fixed.png' } };
+        graph['31'] = { class_type: 'LoadImage', inputs: { image: 'fixed.png' } };
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image base graphs load no image`);
+    });
+
+    test('a reference graph with a loader no slot reads exits 1', () => {
+      const { result, graphPath } = violation('reference.json', (graph) => {
+        graph['31'] = { class_type: 'LoadImage', inputs: { image: 'fixed.png' } };
       });
       expect(result.code).toBe(1);
       expect(result.stderr).toContain(`${graphPath}: h3image graphs load one image per reference slot`);
+    });
+
+    test('a base graph without the edit-mode placeholder exits 1', () => {
+      const { result, graphPath } = violation('workflow.json', (graph) => {
+        Reflect.deleteProperty(node(graph, '4').inputs, 'images.image_1');
+        Reflect.deleteProperty(graph, '30');
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: ${EDIT_MODE}`);
+    });
+
+    test('a non-black or resized placeholder exits 1', () => {
+      for (const change of [{ color: 0xffffff }, { width: 64, height: 64 }, { batch_size: 2 }]) {
+        const { result, graphPath } = violation('workflow.json', (graph) => {
+          Object.assign(node(graph, '30').inputs, change);
+        });
+        expect(result.code).toBe(1);
+        expect(result.stderr).toContain(`${graphPath}: ${EDIT_MODE}`);
+      }
+    });
+
+    test('a base graph that anchors the placeholder through the VAE exits 1', () => {
+      const { result, graphPath } = violation('workflow.json', (graph) => {
+        node(graph, '4').inputs.vae = ['3', 0];
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image base graphs leave the VAE off the conditioning node so the placeholder anchors no latent`);
+    });
+
+    test('a reference graph carrying the edit-mode placeholder exits 1', () => {
+      const { result, graphPath } = violation('reference.json', (graph) => {
+        graph['30'] = { class_type: 'EmptyImage', inputs: { width: 512, height: 512, batch_size: 1, color: 0 } };
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`${graphPath}: h3image reference graphs take no edit-mode placeholder image`);
     });
   });
 

@@ -27,13 +27,13 @@
         "2",
         0
       ],
-      "vae": [
-        "3",
-        0
-      ],
       "prompt": "{{prompt}}",
       "width": "{{width}}",
-      "height": "{{height}}"
+      "height": "{{height}}",
+      "images.image_1": [
+        "30",
+        0
+      ]
     }
   },
   "7": {
@@ -141,6 +141,15 @@
       "s_noise": 1.1,
       "s_noise_end": 0.9,
       "noise_clip_std": 0.0
+    }
+  },
+  "30": {
+    "class_type": "EmptyImage",
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "batch_size": 1,
+      "color": 0
     }
   }
 }

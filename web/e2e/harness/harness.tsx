@@ -6,7 +6,7 @@
  * inerting without booting the API. Dev-server only — Vite builds `index.html`
  * alone (see build.rollupOptions.input), so nothing here reaches dist.
  */
-import type { Batch, DraftTemplateRequest, DraftTemplateResponse, GptModerationNotice, Model, TemplateChange, TextModelsResponse } from '@atelier/shared';
+import type { Batch, DraftTemplateRequest, DraftTemplateResponse, DraftVariableListRequest, DraftVariableListResponse, GptModerationNotice, Model, TemplateChange, TextModelsResponse } from '@atelier/shared';
 import { TEXT_TASKS } from '@atelier/shared';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { StrictMode, useEffect, useRef, useState } from 'react';
@@ -847,6 +847,83 @@ function installReworkServer(): void {
   window.fetch = Object.assign(serve, { preconnect: original.preconnect });
 }
 
+/* The Prompt Library with a populated variable list to draft on (list draft
+   review, e2e/list-draft-review.spec.ts). The draft server answers from the
+   request's own options, so its indexes always address the rows sent: a
+   rework edits a value, reweights a row, removes the last row and adds two;
+   Add options adds two; `answer=none` places nothing. One rework suggestion
+   cannot be placed. */
+const SCARF_VALUES = [
+  'a red wool scarf',
+  'a blue scarf',
+  ...['a grey scarf', 'a cream scarf', 'a striped scarf', 'a checked scarf', 'a knitted scarf', 'a silk scarf', 'a long scarf',
+    'a short scarf', 'a fringed scarf', 'a tartan scarf', 'a mustard scarf', 'a navy scarf'],
+  'a pink scarf',
+];
+
+const LIST_DRAFT_LIBRARY = {
+  ...PROMPT_LIBRARY,
+  templates: [],
+  variableLists: [{
+    id: 'list-scarf',
+    name: 'scarf',
+    sortOrder: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    options: SCARF_VALUES.map((value, i) => ({ id: `scarf-${String(i)}`, listId: 'list-scarf', value, tagIds: [], sortOrder: i, weight: 1 })),
+  }],
+};
+
+function listDraftAnswer(request: DraftVariableListRequest, none: boolean): DraftVariableListResponse {
+  const baseCount = request.options.length;
+  if (none) return { kind: 'changes', baseCount, changes: [], unplaced: [], summary: null };
+  if (request.mode === 'extend') {
+    return {
+      kind: 'changes',
+      baseCount,
+      changes: [
+        { id: 0, op: 'add', value: 'a green scarf', weight: 1, why: '' },
+        { id: 1, op: 'add', value: 'a scarf with a tassel', weight: 3, why: '' },
+      ],
+      unplaced: [],
+      summary: null,
+    };
+  }
+  return {
+    kind: 'changes',
+    baseCount,
+    changes: [
+      { id: 0, op: 'edit', index: 0, value: 'a red silk scarf', weight: 1, why: 'Names a finer fabric, as you asked.' },
+      { id: 1, op: 'edit', index: 1, value: request.options[1]?.value ?? '', weight: 5, why: 'Draws the plain colour more often.' },
+      { id: 2, op: 'remove', index: baseCount - 1, why: 'Too close to the red one.' },
+      { id: 3, op: 'add', value: 'a green scarf', weight: 1, why: 'Adds a colour the list lacks.' },
+      { id: 4, op: 'add', value: 'a scarf with a tassel', weight: 3, why: 'A detail the list lacks, drawn a little more often.' },
+    ],
+    unplaced: [{ op: 'remove', find: 'a black scarf', value: null, weight: null, why: 'Too dark for the list.', reason: 'missing' }],
+    summary: 'Named the fabrics, reweighted a colour and swapped a near-duplicate.',
+  };
+}
+
+function installListDraftServer(): void {
+  const none = new URLSearchParams(window.location.search).get('answer') === 'none';
+  const original = window.fetch.bind(window);
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const serve = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.href);
+    const method = (init?.method ?? 'GET').toUpperCase();
+    if (url.pathname === '/api/text-models' && method === 'GET') return json(REWORK_TEXT_MODELS);
+    if (url.pathname === '/api/text-providers') return json({ error: 'Not found' }, 404);
+    if (url.pathname === '/api/prompts' && method === 'GET') return json(LIST_DRAFT_LIBRARY);
+    if (url.pathname === '/api/prompts/lists/draft' && method === 'POST') {
+      const request = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as DraftVariableListRequest;
+      const frame = `event: done\ndata: ${JSON.stringify(listDraftAnswer(request, none))}\n\n`;
+      return new Response(frame, { headers: { 'Content-Type': 'text/event-stream' } });
+    }
+    return original(input, init);
+  };
+  window.fetch = Object.assign(serve, { preconnect: original.preconnect });
+}
+
 /* The character-card dialog with its card-kind picker; `#card-submitted`
    echoes the last submit as `kind:direction`. */
 function CharacterCardCase() {
@@ -979,6 +1056,7 @@ const CASES: Record<string, () => React.JSX.Element> = {
   picker: PromptPickerCase,
   library: LibraryCase,
   'library-rework': LibraryCase,
+  'library-list-draft': LibraryCase,
   edit: EditActionsCase,
   'character-card': CharacterCardCase,
   'frontend-i2v': FrontendI2VCase,
@@ -987,7 +1065,7 @@ const CASES: Record<string, () => React.JSX.Element> = {
   'infinite-status': InfiniteStatusCase,
 };
 const Case = (kase === null ? undefined : CASES[kase]) ?? DialogCase;
-const NEEDS_QUERY_CLIENT = new Set(['feed', 'feed-lightbox', 'feed-history', 'tile-actions', 'plate', 'phone-feed', 'picker', 'library', 'library-rework', 'edit', 'frontend-i2v', 'frontend-save-template', 'frontend-history-refresh']);
+const NEEDS_QUERY_CLIENT = new Set(['feed', 'feed-lightbox', 'feed-history', 'tile-actions', 'plate', 'phone-feed', 'picker', 'library', 'library-rework', 'library-list-draft', 'edit', 'frontend-i2v', 'frontend-save-template', 'frontend-history-refresh']);
 if (root) {
   const queryClient = new QueryClient();
   if (kase === 'frontend-i2v' || kase === 'frontend-save-template' || kase === 'frontend-history-refresh') useAtelierStore.setState(initialAtelierState, true);
@@ -1009,6 +1087,11 @@ if (root) {
   if (kase === 'library-rework') {
     installReworkServer();
     queryClient.setQueryData(promptKeys.library(), REWORK_LIBRARY);
+  }
+  if (kase === 'library-list-draft') {
+    installListDraftServer();
+    queryClient.setQueryData(promptKeys.library(), LIST_DRAFT_LIBRARY);
+    useAtelierStore.getState().setPromptManagerTab('lists');
   }
   const tree = kase !== null && NEEDS_QUERY_CLIENT.has(kase)
     ? <QueryClientProvider client={queryClient}><Case /></QueryClientProvider>

@@ -21,7 +21,11 @@ import type { TextModelRecord, TextProviderRecord } from '../../db/textProviders
 import { isAbortError } from '../../lifecycle/abort';
 import { policyBreakerState, QuotaExhaustedError, TransientUpstreamError } from '../../lifecycle/resilient-call';
 import { buildBrainstormBrief, buildBrainstormSystemPrompt } from '../../prompts/brainstormCharactersSystemPrompt';
-import { DRAFT_LIST_SYSTEM_PROMPT } from '../../prompts/draftListSystemPrompt';
+import {
+  EXTEND_LIST_SYSTEM_PROMPT,
+  REWORK_LIST_SYSTEM_PROMPT,
+  WRITE_LIST_SYSTEM_PROMPT,
+} from '../../prompts/draftListSystemPrompt';
 import { DRAFT_TEMPLATE_SYSTEM_PROMPT } from '../../prompts/draftTemplateSystemPrompt';
 import { ENHANCE_SYSTEM_PROMPT } from '../../prompts/enhanceSystemPrompt';
 import { imageAuthoringSystemPrompt } from '../../prompts/gptSystemPrompt';
@@ -37,16 +41,21 @@ import { errorToRawString as detailOf, tryParseJson } from '../_http';
 import { frameDataText } from '../_sse';
 import {
   createBrainstormRecordAssembler,
-  draftBrief,
+  draftListBrief,
   DRAFT_TEMPLATE_RESPONSE_FORMAT,
   draftTemplateBrief,
   draftTemplateResultFromContent,
-  parseDraftPayload,
+  extendListResultFromContent,
+  LIST_DRAFT_RESPONSE_FORMAT,
+  LIST_EXTEND_RESPONSE_FORMAT,
+  LIST_REWORK_RESPONSE_FORMAT,
   REWORK_TEMPLATE_RESPONSE_FORMAT,
+  reworkListResultFromContent,
   reworkTemplateResultFromContent,
   safeTextDetail,
   textFailureFromError,
   unparseableFailure,
+  writeListResultFromContent,
   type AiFillProviderInput,
   type AiFillResult,
   type BrainstormCharactersInput,
@@ -71,7 +80,8 @@ import {
   AI_FILL_BATCH_MAX_OUTPUT_TOKENS,
   AI_FILL_MAX_OUTPUT_TOKENS,
   brainstormMaxOutputTokens,
-  DRAFT_LIST_MAX_OUTPUT_TOKENS,
+  draftListMaxOutputTokens,
+  draftListMaxResponseBytes,
   draftTemplateMaxOutputTokens,
   draftTemplateMaxResponseBytes,
   ENHANCE_MAX_OUTPUT_TOKENS,
@@ -1093,17 +1103,21 @@ export function createTextModelProvider(init: TextModelProviderInit): TextModelP
     }),
 
     draftList: tracked('draft-list', async (call: CallRecord, input: DraftListProviderInput, signal: AbortSignal): Promise<DraftResult> => {
+      // One system prompt, strict answer shape and result builder per mode.
+      const byMode = input.mode === 'rework'
+        ? { prompt: REWORK_LIST_SYSTEM_PROMPT, format: LIST_REWORK_RESPONSE_FORMAT, build: reworkListResultFromContent }
+        : input.mode === 'extend'
+          ? { prompt: EXTEND_LIST_SYSTEM_PROMPT, format: LIST_EXTEND_RESPONSE_FORMAT, build: extendListResultFromContent }
+          : { prompt: WRITE_LIST_SYSTEM_PROMPT, format: LIST_DRAFT_RESPONSE_FORMAT, build: writeListResultFromContent };
       try {
         const text = await callWithPolicy(call, draftListPolicy, signal, {
-          maxOutputTokens: DRAFT_LIST_MAX_OUTPUT_TOKENS,
-          systemPrompt: imageAuthoringSystemPrompt(DRAFT_LIST_SYSTEM_PROMPT, input.modelId),
-          user: draftBrief(input),
-          responseFormat: 'json_object',
+          maxOutputTokens: draftListMaxOutputTokens(input.mode, input.options, effectiveEffort(model, input.reasoningEffort)),
+          systemPrompt: imageAuthoringSystemPrompt(byMode.prompt, input.modelId),
+          user: draftListBrief(input),
+          responseFormat: byMode.format,
           ...withUserEffort(input.reasoningEffort),
-        }, responseCap(init.maxResponseBytes, input.reasoningEffort));
-        const payload = parseDraftPayload(text);
-        if (!payload) return unparseableFailure('unparseable draft response');
-        return { type: 'ok', payload };
+        }, draftListMaxResponseBytes(responseCap(init.maxResponseBytes, input.reasoningEffort), input.mode, input.options));
+        return byMode.build(text, input);
       } catch (err) {
         if (signal.aborted) throw err;
         if (isAbortError(err)) throw err;

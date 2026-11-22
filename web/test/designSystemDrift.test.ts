@@ -618,7 +618,7 @@ describe('design system drift guards', () => {
     // field (fieldInput, fieldTextarea and the Text models aliases).
     const sites = [
       ['web/src/styles/dialog.module.css', '.fieldWell', 'frame'],
-      ['web/src/components/DescribeTemplateDialog/ModelFields.module.css', '.select', 'control'],
+      ['web/src/components/DescribeDialog/ModelFields.module.css', '.select', 'control'],
       ['web/src/components/TextModels/ModelDialogs.module.css', '.select', 'control'],
       ['web/src/components/Composer/index.module.css', '.motionTextarea', 'control'],
       ['web/src/components/PromptPicker/index.module.css', '.searchInput', 'control'],

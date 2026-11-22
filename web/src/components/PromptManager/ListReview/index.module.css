@@ -1,0 +1,80 @@
+/* Variable-list draft review: the template review's sheet, marks, notes and
+   folds (TemplateReview/index.module.css owns them) laid out as rows of
+   options. Only the row layout lives here. Option values are prose fragments,
+   so they are set in sans; weights are tabular readouts. A decision repaints
+   colour, background and decoration only: no row changes height. */
+
+/* The sheet's box stays the shared one; its rows read as list lines, not
+   preformatted text. */
+.sheet {
+  padding-block: 6px;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  font-variant-numeric: normal;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.row {
+  display: block;
+  padding-block: 3px;
+}
+
+.line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.value {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* "weight 3", "weight 1 to 5": a quiet tabular readout at the row's end. */
+.weight {
+  composes: numeral from '../../../styles/type.module.css';
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* A change row: the shared focus frame, with room for its note. */
+.row[data-change-id] {
+  margin-block: 2px;
+}
+
+.revealed {
+  display: flex;
+  flex-direction: column;
+}
+
+/* An unplaced suggestion: what it named and proposed, in the sheet's marks. */
+.proposed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.proposed .weight {
+  margin-left: 0;
+}
+
+@media (width < 768px) {
+  .rows {
+    font-size: var(--text-base);
+  }
+}

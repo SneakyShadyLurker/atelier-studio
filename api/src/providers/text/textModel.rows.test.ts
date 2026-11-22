@@ -184,7 +184,7 @@ describe('SDK stream differences', () => {
       model: seededTextModel('kimi'),
       credential: () => Promise.reject(new Error('BYOK_ENCRYPTION_KEY is not set')),
     });
-    expect(await broken.draftList({ name: 'L', existing: [], target: 3 }, new AbortController().signal))
+    expect(await broken.draftList({ mode: 'extend', name: 'L', options: [{ value: 'red', weight: 1 }], addLimit: 3 }, new AbortController().signal))
       .toMatchObject({ type: 'failed', detail: 'BYOK_ENCRYPTION_KEY is not set' });
     expect(sent).toHaveLength(0);
   });

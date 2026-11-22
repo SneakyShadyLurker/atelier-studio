@@ -3,7 +3,7 @@ import { buildAiFillSystemPrompt, buildAiFillBatchSystemPrompt, buildKimiAiFillS
 import { buildBrainstormSystemPrompt, assembleBrainstormCharacterPrompt, BRAINSTORM_FIELD_SEPARATOR } from './brainstormCharactersSystemPrompt';
 import { ENHANCE_SYSTEM_PROMPT } from './enhanceSystemPrompt';
 import { DRAFT_TEMPLATE_SYSTEM_PROMPT } from './draftTemplateSystemPrompt';
-import { DRAFT_LIST_SYSTEM_PROMPT } from './draftListSystemPrompt';
+import { EXTEND_LIST_SYSTEM_PROMPT, REWORK_LIST_SYSTEM_PROMPT, WRITE_LIST_SYSTEM_PROMPT } from './draftListSystemPrompt';
 import { REWORK_TEMPLATE_SYSTEM_PROMPT } from './reworkTemplateSystemPrompt';
 import { SKIN_MARKING_BAN, WET_LOOK_BAN } from './skinRenderRules';
 import { imageAuthoringSystemPrompt, isSunburstModel, SUNBURST_ENHANCE_SYSTEM_PROMPT, SUNBURST_PROMPT_RULES } from './gptSystemPrompt';
@@ -22,7 +22,9 @@ describe('Sunburst prompt contract', () => {
       buildBrainstormSystemPrompt({ modelId, count: 2 }),
       imageAuthoringSystemPrompt(DRAFT_TEMPLATE_SYSTEM_PROMPT, modelId),
       imageAuthoringSystemPrompt(REWORK_TEMPLATE_SYSTEM_PROMPT, modelId),
-      imageAuthoringSystemPrompt(DRAFT_LIST_SYSTEM_PROMPT, modelId),
+      imageAuthoringSystemPrompt(WRITE_LIST_SYSTEM_PROMPT, modelId),
+      imageAuthoringSystemPrompt(EXTEND_LIST_SYSTEM_PROMPT, modelId),
+      imageAuthoringSystemPrompt(REWORK_LIST_SYSTEM_PROMPT, modelId),
     ];
     for (const prompt of prompts) {
       expect(prompt).toContain(SUNBURST_PROMPT_RULES);

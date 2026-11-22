@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { VariableOption } from '@atelier/shared';
+import type { DraftVariableListResponse, VariableOption } from '@atelier/shared';
+import { LIST_DRAFT_MAX_ADDS, type UnplacedListReason } from '@atelier/shared/list-draft';
 import type { AppEnv } from '../../server-env';
 import { ensureUser } from '../../db/users';
 import { reorderOwned } from '../../db/reorder';
-import type { DraftResult } from '../../providers/text/featureHelpers';
+import type { DraftListProviderMode, DraftResult } from '../../providers/text/featureHelpers';
 import { imageModelRouting, textModelFailureBody, textProviderForResolved } from '../../providers/textRouting';
 import { draftRouteTimeoutMs } from '../../providers/text/textBudgets';
 import { textFailureToSseError } from '../../lifecycle/llm-error';
@@ -338,34 +339,31 @@ export const listsRoutes = new Hono<AppEnv>()
     if (updated === 'overlap') return c.json({ error: 'the same tag cannot be both require and exclude' }, 400);
     return c.body(null, 204);
   })
-  .post('/prompts/lists/:id/draft', async (c) => {
-    const params = parseParams(c, IdParam);
-    if (!params.ok) return params.response;
+  .post('/prompts/lists/draft', async (c) => {
     const parsed = await parseBody(c, DraftListBody);
     if (!parsed.ok) return parsed.response;
-    if (!existsList(c.var.db, c.var.userId, params.value.id)) return c.body(null, 404);
-
-    const SAFE = 'Couldn’t draft the list. Try a more specific name.';
-    const MAX_DRAFT_VALUE_LEN = 2_000;
-    const { name, existing, description } = parsed.value;
-    // Each click drafts up to a target count of NEW values, bounded by the SAME
-    // effective per-list option cap the save endpoint enforces. Two target tiers:
-    //
-    //   * SEED_TARGET (10) — empty list + user-supplied description (the "describe
-    //     and seed" flow from the editor; client mediates).
-    //   * EXPAND_TARGET (20) — every other call (name+existing only, OR clarify
-    //     follow-up with description on a non-empty list).
-    //
-    // Sharing the save cap guarantees AI-drafted entries are always persistable:
-    // draft can never push a list past what PUT /options will accept. A full list
-    // cleanly yields zero new entries.
-    const SEED_TARGET = 10;
-    const EXPAND_TARGET = 20;
-    const requested = existing.length === 0 && description !== undefined ? SEED_TARGET : EXPAND_TARGET;
-    const target = Math.max(0, Math.min(requested, c.var.config.MAX_OPTIONS_PER_LIST - existing.length));
-
+    const { mode, name, options, description } = parsed.value;
     const logger = c.var.logger;
     const userId = c.var.userId;
+
+    // One user-scoped read: the brief's list names, the create collision set
+    // and the list count. No option rows: the request carries the base.
+    const listNames = c.var.db
+      .query<{ name: string }, [string]>('SELECT name FROM variable_lists WHERE user_id = ?')
+      .all(userId)
+      .map((row) => row.name);
+    if (mode === 'create' && listNames.length >= c.var.config.MAX_VARIABLE_LISTS) {
+      return c.json({ error: 'list limit reached' }, 409);
+    }
+
+    const SAFE = 'Couldn’t draft the list. Please try again.';
+    const MAX_CLARIFY_LEN = 2_000;
+    // The same effective per-list cap the save endpoint enforces, so every
+    // accepted subset of the answer stays saveable. Removals earn no credit.
+    const capacity = Math.max(0, c.var.config.MAX_OPTIONS_PER_LIST - options.length);
+    const addLimit = Math.min(capacity, LIST_DRAFT_MAX_ADDS);
+    const providerMode: DraftListProviderMode = mode === 'extend' && options.length === 0 ? 'seed' : mode;
+
     const resolved = c.var.text.resolve({ userId, task: 'list-draft', ...imageModelRouting(c.var.config, parsed.value.modelId, userId) });
     if (!resolved.ok) return c.json(textModelFailureBody(resolved.reason), 409);
     const textModel = resolved.model;
@@ -375,25 +373,32 @@ export const listsRoutes = new Hono<AppEnv>()
     // Cloudflare edge's ~100s idle cutoff, which would sever a plain-JSON
     // response with a silent 502. The shared helper emits a 15s :keepalive
     // and exactly one terminal `done`/`error` frame. Mirrors enhance.ts /
-    // infer.ts. Success and clarify both ride a terminal `done` frame; the
-    // sanitized failure paths ride `error`.
+    // infer.ts. Every answer rides a terminal `done` frame; the sanitized
+    // failure paths ride `error`.
     // Covers every attempt of the draft policy, which is longer on a slow row.
     const timeoutMs = draftRouteTimeoutMs(textModel.latencyProfile, c.var.config);
     return {
       timeoutMs,
       disconnect: c.req.raw.signal,
       run: async ({ send, signal, timedOut, clientDisconnected }) => {
-        if (target === 0) {
-          send('done', { kind: 'entries', entries: [] });
+        if (providerMode === 'extend' && addLimit === 0) {
+          send('done', { kind: 'changes', baseCount: options.length, changes: [], unplaced: [], summary: null } satisfies DraftVariableListResponse);
           return;
         }
 
         let result: DraftResult;
         try {
           result = await provider.draftList(
-            description === undefined
-              ? { name, existing, target, ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}), ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }) }
-              : { name, existing, description, target, ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}), ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }) },
+            {
+              mode: providerMode,
+              ...(name !== undefined ? { name } : {}),
+              options,
+              ...(description !== undefined ? { description } : {}),
+              addLimit,
+              ...(providerMode === 'create' ? { listNames } : {}),
+              ...(parsed.value.modelId ? { modelId: parsed.value.modelId } : {}),
+              ...(resolved.effort === undefined ? {} : { reasoningEffort: resolved.effort }),
+            },
             signal,
           );
         } catch (error) {
@@ -417,8 +422,10 @@ export const listsRoutes = new Hono<AppEnv>()
           return;
         }
 
-        if (result.payload.kind === 'clarify') {
-          if (description !== undefined) {
+        const { payload } = result;
+        if (payload.kind === 'clarify') {
+          // A question is an answer only to an extend without instructions.
+          if (providerMode !== 'extend' || description !== undefined) {
             logger.warn(
               { event: 'draft_list_clarify_after_description', userId },
               'model re-asked for clarification despite a description',
@@ -426,22 +433,27 @@ export const listsRoutes = new Hono<AppEnv>()
             send('error', { message: SAFE });
             return;
           }
-          send('done', { kind: 'clarify', question: result.payload.question.slice(0, MAX_DRAFT_VALUE_LEN) });
+          send('done', { kind: 'clarify', question: payload.question.slice(0, MAX_CLARIFY_LEN) });
           return;
         }
 
-        const seen = new Set(existing.map((v) => v.trim().toLowerCase()));
-        const entries: string[] = [];
-        for (const raw of result.payload.entries) {
-          const value = raw.trim();
-          if (value.length === 0 || value.length > MAX_DRAFT_VALUE_LEN) continue;
-          const key = value.toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          entries.push(value);
-          if (entries.length >= target) break;
+        if (payload.kind === 'changes' && providerMode === 'rework') {
+          const unplacedReasons: Partial<Record<UnplacedListReason, number>> = {};
+          for (const { reason } of payload.unplaced) unplacedReasons[reason] = (unplacedReasons[reason] ?? 0) + 1;
+          logger.info(
+            {
+              event: 'draft_list_rework',
+              textModelId: textModel.id,
+              userId,
+              placed: payload.changes.length,
+              unplaced: payload.unplaced.length,
+              unplacedReasons,
+            },
+            'draft list rework placed',
+          );
         }
-        send('done', { kind: 'entries', entries });
+
+        send('done', payload);
       },
     };
     });

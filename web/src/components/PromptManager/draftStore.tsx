@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import type { ListOptionDraft } from '@atelier/shared';
 import { registerUnsavedWork } from '../../lib/preloadRecovery';
 import type { TemplateReview } from './templateReview';
+import { remapReviewKeys, type ListReview } from './listReview';
 
 export interface TemplateDraft {
   readonly name: string;
@@ -15,6 +17,24 @@ export interface OptionDraft {
   readonly weight: number;
   readonly weightInput: string;
   readonly expanded: boolean;
+}
+
+/** A key for a row the server has not seen yet; never sent as an id. */
+export function newOptionKey(): string {
+  return `draft:${String(Date.now())}:${Math.random().toString(36).slice(2)}`;
+}
+
+/** An AI-drafted option as a new, untagged, unsaved row. */
+export function draftedOption(option: ListOptionDraft): OptionDraft {
+  return {
+    key: newOptionKey(),
+    value: option.value,
+    tagIds: [],
+    excludeTagIds: [],
+    weight: option.weight,
+    weightInput: String(option.weight),
+    expanded: false,
+  };
 }
 
 export interface ListDraft {
@@ -110,6 +130,26 @@ export function remapOptionKeys(
   });
 }
 
+/** A weight edit whose save failed: the row goes back to the weight it had before. */
+export interface WeightRestore {
+  readonly key: string;
+  readonly attempted: number;
+  readonly previous: number;
+}
+
+// Only a row that still holds the attempted weight goes back: a later edit of
+// the same row stays. The same array comes back when nothing matches.
+export function restoreOptionWeight(
+  options: readonly OptionDraft[],
+  restore: WeightRestore,
+): readonly OptionDraft[] {
+  if (!options.some((option) => option.key === restore.key && option.weight === restore.attempted)) return options;
+  return options.map((option) => (
+    option.key === restore.key && option.weight === restore.attempted
+      ? { ...option, weight: restore.previous, weightInput: String(restore.previous) }
+      : option));
+}
+
 export interface PromptSelection {
   readonly templateId: string | null;
   readonly listId: string | null;
@@ -129,13 +169,18 @@ export class PromptDraftStore {
   // which a review leaves it (spec R8.3).
   private readonly templateReviews = new Map<string, TemplateReview>();
   private readonly lists = new Map<string, ListDraft>();
+  // Open list draft reviews, under the list id; like the template reviews
+  // they outlive the list draft, which a review leaves clean.
+  private readonly listReviews = new Map<string, ListReview>();
   private readonly dimensions = new Map<string, DimensionDraft>();
   private readonly dimensionEditors = new Map<string, (settlement: DimensionSettlement) => void>();
   private readonly listEditors = new Map<string, (keys: ReadonlyMap<string, string>) => void>();
+  private readonly listWeightEditors = new Map<string, (restore: WeightRestore) => void>();
   private selection: PromptSelection = { templateId: null, listId: null, dimensionId: null, newTemplateName: null };
   private readonly listeners = new Set<() => void>();
   private templateCreatePending = false;
   private listPruneRevision = 0;
+  private listSeedRevision = 0;
 
   private notify(): void { for (const listener of this.listeners) listener(); }
 
@@ -169,11 +214,13 @@ export class PromptDraftStore {
     this.notify();
   }
   getListPruneRevision = (): number => this.listPruneRevision;
+  getListSeedRevision = (): number => this.listSeedRevision;
   // Editors keep their entries in step with their dirty state, and an entry
   // outlives its editor, so this covers drafts retained off-view as well.
   hasDrafts = (): boolean => this.templates.size > 0
     || this.templateReviews.size > 0
     || this.lists.size > 0
+    || this.listReviews.size > 0
     || this.dimensions.size > 0
     || this.selection.newTemplateName !== null;
 
@@ -198,11 +245,25 @@ export class PromptDraftStore {
   clearListIfUnchanged(id: string, submitted: ListDraft): void {
     if (sameDraft(this.lists.get(id), submitted)) this.deleteList(id);
   }
+  // A list draft written from outside its editor (a newly created list's
+  // drafted options). The revision remounts an editor that mounted first.
+  seedList(id: string, draft: ListDraft): void {
+    this.lists.set(id, draft);
+    this.listSeedRevision += 1;
+    this.notify();
+  }
+  getListReview(id: string): ListReview | undefined { return this.listReviews.get(id); }
+  setListReview(id: string, review: ListReview): void { this.listReviews.set(id, review); }
+  deleteListReview(id: string): void { this.listReviews.delete(id); }
   // After a save, a still-pending draft must address saved rows by their
-  // server ids, or its next save would re-create them under new ids.
+  // server ids, or its next save would re-create them under new ids. A
+  // retained review follows, so it stays fresh against the settled rows.
   remapListOptionKeys(id: string, keys: ReadonlyMap<string, string>): void {
+    if (keys.size === 0) return;
+    const review = this.listReviews.get(id);
+    if (review) this.listReviews.set(id, remapReviewKeys(review, keys));
     const draft = this.lists.get(id);
-    if (!draft || keys.size === 0) return;
+    if (!draft) return;
     this.lists.set(id, { ...draft, options: remapOptionKeys(draft.options, keys) });
   }
   // Like settleDimension: an options save can settle after its editor closed
@@ -212,6 +273,30 @@ export class PromptDraftStore {
     if (keys.size === 0) return;
     this.remapListOptionKeys(id, keys);
     this.listEditors.get(id)?.(keys);
+  }
+  // A weight save can fail after its editor closed, or after it was reopened
+  // as a new instance: the retained draft and the editor mounted now both put
+  // the row back, so the failed weight is not saved with the list later.
+  // `cleanAfter` is the draft as the restore leaves it when the weight was
+  // the list's only unsaved edit. With no editor mounted to notice that the
+  // rows are clean again, the entry goes here: a kept one would count as
+  // unsaved work and reopen the list on a snapshot of rows the server may
+  // have moved on from.
+  restoreListOptionWeight(id: string, restore: WeightRestore, cleanAfter?: ListDraft): void {
+    const draft = this.lists.get(id);
+    if (draft) {
+      const options = restoreOptionWeight(draft.options, restore);
+      const restored = options === draft.options ? draft : { ...draft, options };
+      if (cleanAfter !== undefined && !this.listWeightEditors.has(id) && sameDraft(restored, cleanAfter)) this.lists.delete(id);
+      else if (restored !== draft) this.lists.set(id, restored);
+    }
+    this.listWeightEditors.get(id)?.(restore);
+  }
+  attachListWeightEditor(id: string, apply: (restore: WeightRestore) => void): () => void {
+    this.listWeightEditors.set(id, apply);
+    return () => {
+      if (this.listWeightEditors.get(id) === apply) this.listWeightEditors.delete(id);
+    };
   }
   attachListEditor(id: string, apply: (keys: ReadonlyMap<string, string>) => void): () => void {
     this.listEditors.set(id, apply);

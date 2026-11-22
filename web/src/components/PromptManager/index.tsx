@@ -13,6 +13,9 @@ import {
   useReorderTemplates,
 } from '../../hooks/usePromptMutations';
 import { useInferDimensions } from '../../hooks/useInferDimensions';
+import { useDraftNewList } from '../../hooks/useDraftNewList';
+import { usePromptImageContext } from '../../hooks/usePromptImageContext';
+import { useTaskModelChoice } from '../../hooks/useTaskModelChoice';
 import { useTextModelGate } from '../../hooks/useTextModelGate';
 import { goToTextModels } from '../../lib/textModelsNav';
 import { usePromptLibrary } from '../../hooks/usePromptLibrary';
@@ -28,6 +31,7 @@ import { coverageBadgeState } from './coverageBadge';
 import { CoverageCard } from './CoverageCard';
 import { useAtelierStore, type PromptManagerTab } from '../../store/atelier';
 import ConfirmDialog from '../ConfirmDialog';
+import DescribeListDialog from '../DescribeListDialog';
 import { I } from '../icons/I';
 import { ManagedViewHeader } from '../ManagedViewHeader';
 import DimensionEditor from './DimensionEditor';
@@ -111,6 +115,9 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
     selectionStore.getSelection,
   );
   const listPruneRevision = useSyncExternalStore(selectionStore.subscribe, selectionStore.getListPruneRevision);
+  // Bumped when a created list's drafted options are seeded: an editor that
+  // mounted on the list before them remounts on the drafted rows.
+  const listSeedRevision = useSyncExternalStore(selectionStore.subscribe, selectionStore.getListSeedRevision);
   const setSelection = (patch: Partial<PromptSelection>) => {
     selectionStore.setSelection({ ...selectionStore.getSelection(), ...patch });
   };
@@ -126,6 +133,15 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
   const listLiRefs = useRef(new Map<string, HTMLLIElement | null>());
 
   const createList = useCreateList();
+  // Draft New List: one owner for its dialog, here rather than in either
+  // button, so it survives the Lists tab switching from empty to populated.
+  const { modelId: imageModelId } = usePromptImageContext();
+  const listModelChoice = useTaskModelChoice('list-draft', imageModelId);
+  const newListDraft = useDraftNewList({
+    store: selectionStore,
+    commitChoice: listModelChoice.commit,
+    onCreated: (list) => { selectionStore.setSelection({ ...selectionStore.getSelection(), listId: list.id }); },
+  });
   const createDimension = useCreateDimension();
   const patchDimension = usePatchDimension();
   const deleteTemplate = useDeleteTemplate();
@@ -150,6 +166,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
   // model; with none configured at all they open the note under the button.
   const textModelGate = useTextModelGate();
   const proposeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const draftNewListButtonRef = useRef<HTMLButtonElement | null>(null);
   const fixButtonRef = useRef<HTMLButtonElement | null>(null);
   const [textNote, setTextNote] = useState<{ action: string; anchorRef: RefObject<HTMLButtonElement | null> } | null>(null);
   const onAiClick = async () => {
@@ -333,6 +350,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
       deleteList.mutateAsync(target.item.id)
         .then(() => {
           draftStore?.deleteList(target.item.id);
+          draftStore?.deleteListReview(target.item.id);
           addToast('Variable list deleted');
         })
         .catch((error: unknown) => { addToast(describeError(error, "Couldn't delete the variable list."), 'error'); });
@@ -366,6 +384,26 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
     >
       <I.sparkle aria-hidden="true" />
       {aiButtonLabel(infer.status, infer.progress)}
+    </button>
+  );
+
+  const draftNewListButton = (
+    <button
+      type="button"
+      className={btn.ai}
+      ref={draftNewListButtonRef}
+      onClick={() => {
+        if (textModelGate.availability === 'none') {
+          setTextNote({ action: 'Draft New List', anchorRef: draftNewListButtonRef });
+          return;
+        }
+        // Each dialog opens on the saved model pick; a cancelled choice is not kept.
+        listModelChoice.reset();
+        newListDraft.draft();
+      }}
+    >
+      <I.sparkle aria-hidden="true" />
+      Draft New List
     </button>
   );
 
@@ -554,18 +592,24 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
         )}
         </div>
 
-        <div className={styles.body} role="tabpanel" id="tabpanel-lists" aria-labelledby="tab-lists" tabIndex={0} hidden={tab !== 'lists'}>
+        <div className={`${styles.body} ${listsEmpty ? styles.bodyWithHeader : ''}`} role="tabpanel" id="tabpanel-lists" aria-labelledby="tab-lists" tabIndex={0} hidden={tab !== 'lists'}>
         {tab === 'lists' && (
           <>
+            {/* The empty tab keeps Draft New List in a header row above its
+                empty state, as the Dimensions tab keeps Propose Dimensions. */}
+            {listsEmpty && <div className={styles.paneHeader}>{draftNewListButton}</div>}
             {!listsEmpty && (
             <aside className={styles.resourcePane} aria-label="Lists" onKeyDown={listRoving.onKeyDown}>
               <div className={styles.paneNew}>
                 {inlineContext?.kind === 'creating' && inlineContext.tab === 'lists'
                   ? renderInlineInput('Variable list name')
                   : lists.length > 0 && (
-                    <button type="button" className={btn.secondary} onClick={() => { startCreate('lists'); }}>
-                      <I.plus aria-hidden="true" />New
-                    </button>
+                    <>
+                      <button type="button" className={btn.secondary} onClick={() => { startCreate('lists'); }}>
+                        <I.plus aria-hidden="true" />New
+                      </button>
+                      {draftNewListButton}
+                    </>
                     )}
               </div>
               <div className={styles.resourceScroll}>
@@ -627,7 +671,7 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
               </div>
             </aside>
             )}
-            {selectedList && <ListEditor key={`${selectedList.id}:${listPruneRevision}`} list={selectedList} dimensions={dimensions} onDelete={() => { setDeleteTarget({ kind: 'list', item: selectedList }); }} />}
+            {selectedList && <ListEditor key={`${selectedList.id}:${String(listPruneRevision)}:${String(listSeedRevision)}`} list={selectedList} dimensions={dimensions} onDelete={() => { setDeleteTarget({ kind: 'list', item: selectedList }); }} />}
             {listsEmpty && (
               <div className={styles.emptySpan} data-empty-span="">
                 <StateView
@@ -844,6 +888,18 @@ export default function PromptManager({ onBack }: PromptManagerProps) {
         exitRef={helpExitRef}
         onClose={() => { setHelpOpen(false); }}
       />
+      {newListDraft.dialogMode !== null && (
+        <DescribeListDialog
+          mode={newListDraft.dialogMode === 'clarify' ? 'clarify' : 'create'}
+          question={newListDraft.clarifyQuestion}
+          busy={newListDraft.status === 'drafting'}
+          error={newListDraft.error}
+          notice={newListDraft.notice}
+          modelChoice={listModelChoice}
+          onSubmit={newListDraft.submitDescription}
+          onCancel={newListDraft.cancelDialog}
+        />
+      )}
       {textNote !== null && (
         <TextModelNote
           open

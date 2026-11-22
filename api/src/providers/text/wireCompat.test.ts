@@ -20,6 +20,7 @@ import {
   type ChatResponseFormat,
   type ChatUserContentPart,
 } from '../../test/legacyChatBody';
+import { LIST_EXTEND_RESPONSE_FORMAT } from './featureHelpers';
 import { boundedFetch } from './fetch';
 import { classifyFinish } from './finish';
 import { openaiCompatibleAdapter } from './openaiCompatible';
@@ -177,7 +178,14 @@ const SHAPES: readonly CallShape[] = [
     responseFormat: RESCUE_RESPONSE_FORMAT,
     stream: true,
   },
-  { name: 'list draft', defaults: DRAFT_LIST_DEFAULTS, systemPrompt: 'draft list system', user: 'name: colours', responseFormat: 'json_object', stream: true },
+  {
+    name: 'list draft strict schema',
+    defaults: DRAFT_LIST_DEFAULTS,
+    systemPrompt: 'extend list system',
+    user: '<name>"colours"</name>',
+    responseFormat: LIST_EXTEND_RESPONSE_FORMAT,
+    stream: true,
+  },
   { name: 'template draft non-streaming', defaults: DRAFT_TEMPLATE_DEFAULTS, systemPrompt: 'draft template system', user: 'a portrait template', stream: false },
 ];
 

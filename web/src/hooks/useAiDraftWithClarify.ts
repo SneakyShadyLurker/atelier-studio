@@ -41,6 +41,9 @@ interface UseAiDraftWithClarifyArgs<TBase, TResolved extends { kind: string }> {
   onResolve: (result: TResolved, request: { base: TBase; description: string | undefined }) => { notice: string } | undefined;
   /** Error copy when the request fails for a non-abort reason. */
   errorFallback: string;
+  /** Read at submit: true lets a blank description fire the request with
+   *  `description: undefined` instead of being ignored. */
+  allowBlankDescription?: () => boolean;
 }
 
 export interface UseAiDraftWithClarifyResult {
@@ -72,7 +75,7 @@ const PROMPT_STATUS: Record<Exclude<AiDraftDialogMode, null>, AiDraftStatus> = {
 export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>(
   args: UseAiDraftWithClarifyArgs<TBase, TResolved>,
 ): UseAiDraftWithClarifyResult {
-  const { captureBase, isEmptyBase, nonEmptyBase = 'draft', run, onResolve, errorFallback } = args;
+  const { captureBase, isEmptyBase, nonEmptyBase = 'draft', run, onResolve, errorFallback, allowBlankDescription } = args;
   const addToast = useAtelierStore((s) => s.addToast);
   const abortable = useAbortableMutation();
   const [status, setStatus] = useState<AiDraftStatus>('idle');
@@ -165,9 +168,10 @@ export function useAiDraftWithClarify<TBase, TResolved extends { kind: string }>
 
   const submitDescription = (text: string) => {
     const trimmed = text.trim();
-    if (trimmed.length === 0 || isPending) return;
+    const blank = trimmed.length === 0;
+    if (isPending || (blank && allowBlankDescription?.() !== true)) return;
     if (dialogMode === null || base === null) return;
-    fire(base.value, trimmed);
+    fire(base.value, blank ? undefined : trimmed);
   };
 
   const cancelDialog = () => {

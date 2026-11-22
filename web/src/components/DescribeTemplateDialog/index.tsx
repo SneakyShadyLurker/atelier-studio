@@ -1,7 +1,7 @@
 import { TEMPLATE_DESCRIPTION_MAX_CHARS } from '@atelier/shared/prompt-limits';
 import type { TaskModelChoice } from '../../hooks/useTaskModelChoice';
 import { DescribeDialog } from '../DescribeDialog';
-import { ModelFields } from './ModelFields';
+import { ModelFields } from '../DescribeDialog/ModelFields';
 
 interface DescribeTemplateDialogProps {
   mode: 'seed' | 'rework' | 'clarify';

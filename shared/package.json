@@ -17,7 +17,8 @@
     "./prompt-limits": "./src/promptLimits.ts",
     "./wire-schemas": "./src/wireSchemas.ts",
     "./prompt-tool-schemas": "./src/promptToolSchemas.ts",
-    "./template-rework": "./src/templateRework.ts"
+    "./template-rework": "./src/templateRework.ts",
+    "./list-draft": "./src/listDraft.ts"
   },
   "scripts": {
     "typecheck": "bun check",

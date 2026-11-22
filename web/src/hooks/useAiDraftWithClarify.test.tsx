@@ -248,3 +248,56 @@ describe('useAiDraftWithClarify rework mode', () => {
     });
   });
 });
+
+describe('useAiDraftWithClarify blank descriptions', () => {
+  function blankHarness(allowBlankDescription?: () => boolean) {
+    const run = mock((_base: string[], _description: string | undefined, _signal: AbortSignal): Promise<Resolved> => (
+      Promise.resolve({ kind: 'entries', entries: ['x'] })
+    ));
+    const onResolve = mock((_result: Resolved) => undefined);
+    const view = renderHook(
+      () => useAiDraftWithClarify<string[], Resolved>({
+        captureBase: () => [],
+        isEmptyBase: (value) => value.length === 0,
+        run,
+        onResolve,
+        errorFallback: 'Could not draft.',
+        ...(allowBlankDescription === undefined ? {} : { allowBlankDescription }),
+      }),
+      { wrapper: wrapper() },
+    );
+    act(() => { view.result.current.draft(); });
+    expect(view.result.current.dialogMode).toBe('seed');
+    return { view, run, onResolve };
+  }
+
+  test('a blank submit fires once without a description when allowed', async () => {
+    const { view, run, onResolve } = blankHarness(() => true);
+    act(() => { view.result.current.submitDescription('   '); });
+    await waitFor(() => { expect(view.result.current.status).toBe('done'); });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]?.[1]).toBeUndefined();
+    expect(onResolve).toHaveBeenCalledTimes(1);
+  });
+
+  test('a real description still sends the trimmed text when blanks are allowed', async () => {
+    const { view, run } = blankHarness(() => true);
+    act(() => { view.result.current.submitDescription('  harbours  '); });
+    await waitFor(() => { expect(view.result.current.status).toBe('done'); });
+    expect(run.mock.calls[0]?.[1]).toBe('harbours');
+  });
+
+  test('a blank submit sends nothing when not allowed', () => {
+    const { view, run } = blankHarness(() => false);
+    act(() => { view.result.current.submitDescription(''); });
+    expect(run).not.toHaveBeenCalled();
+    expect(view.result.current.status).toBe('seed-prompt');
+  });
+
+  test('a blank submit sends nothing when the option is absent', () => {
+    const { view, run } = blankHarness();
+    act(() => { view.result.current.submitDescription('  '); });
+    expect(run).not.toHaveBeenCalled();
+    expect(view.result.current.status).toBe('seed-prompt');
+  });
+});

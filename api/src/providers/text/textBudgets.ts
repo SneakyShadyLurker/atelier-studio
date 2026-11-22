@@ -128,10 +128,6 @@ export const MOTION_ENHANCE_MAX_OUTPUT_TOKENS = 36_000;
 // AI Storytelling planning, with room for the full JSON beat sheet.
 export const STORY_PLANNER_MAX_OUTPUT_TOKENS = 36_000;
 
-// Draft-list generation: the 1200-token JSON answer allowance plus the shared
-// low-reasoning overhead.
-export const DRAFT_LIST_MAX_OUTPUT_TOKENS = 1200 + KIMI_LOW_REASONING_OVERHEAD_TOKENS;
-
 // Dimension inference and rescue: the 32000-token answer allowance handles
 // large libraries, plus the shared low-reasoning overhead.
 export const INFER_DIMENSIONS_MAX_OUTPUT_TOKENS = 32000 + KIMI_LOW_REASONING_OVERHEAD_TOKENS;
@@ -165,6 +161,43 @@ const STREAM_BYTES_PER_TOKEN_CEILING = PINNED_EFFORT_MAX_RESPONSE_BYTES / 32_768
 /** Raw-stream cap of one template draft: `capBytes` plus room for the body a rework streams back. */
 export function draftTemplateMaxResponseBytes(capBytes: number, existingBody: string): number {
   return capBytes + reworkBodyTokens(existingBody) * STREAM_BYTES_PER_TOKEN_CEILING;
+}
+
+// List drafts: the 4000-token answer allowance (up to 100 options) plus the
+// shared low-reasoning overhead.
+const DRAFT_LIST_BASE_OUTPUT_TOKENS = 4000 + KIMI_LOW_REASONING_OVERHEAD_TOKENS;
+
+/** The provider's list-draft modes; an empty list's `extend` is a `seed`. */
+export type DraftListBudgetMode = 'create' | 'seed' | 'extend' | 'rework';
+
+/** Tokens a list rework may spend quoting and rewriting the options: one per three characters plus 40 per option. */
+function reworkOptionTokens(mode: DraftListBudgetMode, options: readonly { value: string }[]): number {
+  if (mode !== 'rework') return 0;
+  const chars = options.reduce((sum, option) => sum + Array.from(option.value).length, 0);
+  return Math.ceil(chars / 3) + 40 * options.length;
+}
+
+/**
+ * Output budget of one list draft. A rework quotes the options it changes, so
+ * the options add their tokens; an effort above low (the effort actually sent)
+ * reasons through at least the enhance budget.
+ */
+export function draftListMaxOutputTokens(
+  mode: DraftListBudgetMode,
+  options: readonly { value: string }[],
+  effort: TextReasoningEffort | null | undefined,
+): number {
+  const answer = DRAFT_LIST_BASE_OUTPUT_TOKENS + reworkOptionTokens(mode, options);
+  return effortAboveLow(effort) ? Math.max(answer, ENHANCE_MAX_OUTPUT_TOKENS) : answer;
+}
+
+/** Raw-stream cap of one list draft: `capBytes` plus room for the options a rework streams back. */
+export function draftListMaxResponseBytes(
+  capBytes: number,
+  mode: DraftListBudgetMode,
+  options: readonly { value: string }[],
+): number {
+  return capBytes + reworkOptionTokens(mode, options) * STREAM_BYTES_PER_TOKEN_CEILING;
 }
 
 // ai-fill writes at most AI_FILL_MAX_SLOTS short blanks, so it must not inherit

@@ -59,21 +59,11 @@ function pendingProvider(
   };
 }
 
-function seedList(db: ReturnType<typeof testRuntime>['db'], userId = 'alice'): string {
-  const id = crypto.randomUUID();
-  const now = Date.now();
-  db.query('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)').run(userId, now);
-  db.query(
-    'INSERT INTO variable_lists (id, user_id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)',
-  ).run(id, userId, 'mood', now, now);
-  return id;
-}
-
-function postListDraft(app: ReturnType<typeof testRuntime>['app'], listId: string) {
-  return app.fetch(new Request(`http://local/api/prompts/lists/${listId}/draft`, {
+function postListDraft(app: ReturnType<typeof testRuntime>['app']) {
+  return app.fetch(new Request('http://local/api/prompts/lists/draft', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Remote-User': 'alice' },
-    body: JSON.stringify({ name: 'mood', existing: [] }),
+    body: JSON.stringify({ mode: 'extend', name: 'mood', options: [{ value: 'calm', weight: 1 }] }),
   }));
 }
 
@@ -89,19 +79,24 @@ describe('prompt draft LLM admission', () => {
   test('list draft returns pre-stream 429 while the draft admission pool is full', async () => {
     const pending = pendingProvider('draftList', {
       type: 'ok',
-      payload: { kind: 'entries', entries: ['wistful'] } satisfies DraftVariableListResponse,
+      payload: {
+        kind: 'changes',
+        baseCount: 1,
+        changes: [{ id: 0, op: 'add', value: 'wistful', weight: 1, why: '' }],
+        unplaced: [],
+        summary: null,
+      } satisfies DraftVariableListResponse,
     });
     setTextModelProviderForTests(pending.provider);
-    const { app, db } = testRuntime({
+    const { app } = testRuntime({
       seedLegacyText: true,
       PROMPT_LIBRARY_USERS: 'alice',
       MAX_CONCURRENT_LLM_DRAFT_PER_USER: '1',
     });
-    const listId = seedList(db);
 
-    const first = await postListDraft(app, listId);
+    const first = await postListDraft(app);
     expect(first.status).toBe(200);
-    const blocked = await postListDraft(app, listId);
+    const blocked = await postListDraft(app);
 
     expect(blocked.status).toBe(429);
     expect(await blocked.json()).toMatchObject({

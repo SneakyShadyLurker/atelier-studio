@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import type { PromptLibraryResponse, VariableList } from '@atelier/shared';
-import { MAX_OPTIONS_PER_LIST } from '@atelier/shared';
+import type { PromptLibraryResponse, TextModelsResponse, VariableList } from '@atelier/shared';
+import { MAX_OPTIONS_PER_LIST, TEXT_TASKS } from '@atelier/shared';
 import { promptKeys } from '../../api/prompts';
+import { useAtelierStore } from '../../store/atelier';
+import Toast from '../Toast';
 import ListEditor from './ListEditor';
+import { PromptDraftProvider, usePromptDraftStore, type PromptDraftStore } from './draftStore';
 import { seedTextModelGate } from '../../../test/fixtures/textModelGate';
 
 const originalFetch = globalThis.fetch;
@@ -28,13 +31,6 @@ function list(options: { id: string; value: string; weight?: number }[] = []): V
       weight: o.weight ?? 1,
     })),
   };
-}
-// The draft route streams its result as SSE: success/clarify ride a terminal
-// `done` frame. (Failures stay plain JSON — see responseFetch.)
-function jsonFetch(body: unknown) {
-  return mock(() => Promise.resolve(new Response(`event: done\ndata: ${JSON.stringify(body)}\n\n`, {
-    status: 200, headers: { 'Content-Type': 'text/event-stream' },
-  })));
 }
 function responseFetch(status: number, body: unknown) {
   return mock(() => Promise.resolve(new Response(JSON.stringify(body), {
@@ -207,7 +203,7 @@ describe('ListEditor — option identity', () => {
   });
 });
 
-describe('ListEditor — AI Draft List', () => {
+describe('ListEditor — weights', () => {
   test('weight input renders for each option with the persisted value', () => {
     wrap(<ListEditor list={list([{ id: 'o1', value: 'red', weight: 7 }])} dimensions={[]} />);
 
@@ -284,143 +280,6 @@ describe('ListEditor — AI Draft List', () => {
     expect(requestBody(call)).toEqual({ weight: 0 });
   });
 
-  test('button disabled when the name is empty', () => {
-    wrap(<ListEditor list={{ ...list(), name: '' }} dimensions={[]} />);
-    const btn = screen.getByRole('button', { name: /draft list/i });
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
-    expect(btn.getAttribute('data-tip')).toBe('Name the list first');
-  });
-
-  test('button stays enabled when the list has 20 options', () => {
-    const twenty = Array.from({ length: 20 }, (_, i) => ({ id: `o${i}`, value: `v${i}` }));
-    wrap(<ListEditor list={list(twenty)} dimensions={[]} />);
-    const btn = screen.getByRole('button', { name: /draft list/i });
-    expect((btn as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  test('button stays enabled one option below the cap', () => {
-    const nearFull = Array.from({ length: MAX_OPTIONS_PER_LIST - 1 }, (_, i) => ({ id: `o${i}`, value: `v${i}` }));
-    wrap(<ListEditor list={list(nearFull)} dimensions={[]} />);
-    const btn = screen.getByRole('button', { name: /draft list/i });
-    expect((btn as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  test('button disabled when the list is at the option cap', () => {
-    const full = Array.from({ length: MAX_OPTIONS_PER_LIST }, (_, i) => ({ id: `o${i}`, value: `v${i}` }));
-    wrap(<ListEditor list={list(full)} dimensions={[]} />);
-    const btn = screen.getByRole('button', { name: /draft list/i });
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
-    expect(btn.getAttribute('data-tip')).toBe(`List is at the ${MAX_OPTIONS_PER_LIST}-option limit`);
-  });
-
-  test('drafted entries are appended (deduped) and mark the form dirty', async () => {
-    globalThis.fetch = jsonFetch({ kind: 'entries', entries: ['blue', 'green'] }) as unknown as typeof fetch;
-    wrap(<ListEditor list={list([{ id: 'o1', value: 'red' }])} dimensions={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
-    await waitFor(() => {
-      expect(screen.getByDisplayValue('blue')).toBeDefined();
-      expect(screen.getByDisplayValue('green')).toBeDefined();
-    });
-    expect(screen.getByDisplayValue('red')).toBeDefined();
-    const saveBtn = screen.getByRole('button', { name: /save list/i });
-    expect((saveBtn as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  test('a clarify response opens the describe dialog for a non-empty list', async () => {
-    globalThis.fetch = jsonFetch({ kind: 'clarify', question: 'Which colours?' }) as unknown as typeof fetch;
-    wrap(<ListEditor list={{ ...list([{ id: 'o1', value: 'red' }]), name: 'X' }} dimensions={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
-    await waitFor(() => {
-      expect(screen.getByRole('dialog')).toBeDefined();
-      expect(screen.getByText('Which colours?')).toBeDefined();
-    });
-  });
-
-  test('empty list opens the seed dialog without firing the draft mutation', () => {
-    const f = jsonFetch({ kind: 'entries', entries: ['blue'] });
-    globalThis.fetch = f as unknown as typeof fetch;
-    wrap(<ListEditor list={list()} dimensions={[]} />);
-    const btn = screen.getByRole('button', { name: /draft list/i });
-    expect(btn.getAttribute('data-tip')).toBe('Describe the list and generate up to 10 starter entries');
-    fireEvent.click(btn);
-    expect(f).not.toHaveBeenCalled();
-    expect(screen.getByText('Drafting…')).toBeDefined();
-    expect(screen.getByRole('dialog')).toBeDefined();
-    expect(screen.getByText(
-      'Describe what this list should contain. The AI will generate up to 10 starter entries you can edit, reorder, or delete.',
-    )).toBeDefined();
-  });
-
-  test('seed description submit appends entries and closes the dialog', async () => {
-    globalThis.fetch = jsonFetch({ kind: 'entries', entries: ['blue', 'green'] }) as unknown as typeof fetch;
-    wrap(<ListEditor list={list()} dimensions={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
-    fireEvent.change(screen.getByRole('textbox', { name: /list description/i }), { target: { value: 'paint colours' } });
-    fireEvent.click(screen.getByRole('button', { name: /generate list/i }));
-    await waitFor(() => {
-      expect(screen.getByDisplayValue('blue')).toBeDefined();
-      expect(screen.getByDisplayValue('green')).toBeDefined();
-    });
-    // Dismissal rides the shared exit transition (useExitTransition).
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  test('seed description failure keeps the dialog mounted with an inline error', async () => {
-    globalThis.fetch = responseFetch(502, { error: 'upstream unavailable' }) as unknown as typeof fetch;
-    wrap(<ListEditor list={list()} dimensions={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
-    fireEvent.change(screen.getByRole('textbox', { name: /list description/i }), { target: { value: 'paint colours' } });
-    fireEvent.click(screen.getByRole('button', { name: /generate list/i }));
-    await waitFor(() => {
-      expect(screen.getByRole('status').textContent).toBe('Something went wrong on our end. Please try again.');
-    });
-    expect(screen.getByRole('dialog')).toBeDefined();
-  });
-
-  test('cancel from seed dialog leaves the editor empty without appending entries', async () => {
-    const f = jsonFetch({ kind: 'entries', entries: ['blue'] });
-    globalThis.fetch = f as unknown as typeof fetch;
-    wrap(<ListEditor list={list()} dimensions={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
-    expect(f).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByText('Add options to make this list usable in templates.')).toBeDefined();
-  });
-
-  test('cancel then reopen seed dialog starts with a blank textarea', async () => {
-    wrap(<ListEditor list={list()} dimensions={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
-    fireEvent.change(screen.getByRole('textbox', { name: /list description/i }), { target: { value: 'paint colours' } });
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
-    fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
-    expect(screen.getByRole('textbox', { name: /list description/i })).toHaveProperty('value', '');
-  });
-
-  test('tooltip switches from seed copy to expand copy once the list has content', () => {
-    wrap(<ListEditor list={list()} dimensions={[]} />);
-    expect(screen.getByRole('button', { name: /draft list/i }).getAttribute('data-tip'))
-      .toBe('Describe the list and generate up to 10 starter entries');
-    fireEvent.click(screen.getByRole('button', { name: /\+ add option/i }));
-    fireEvent.change(screen.getByRole('textbox', { name: /option 1/i }), { target: { value: 'red' } });
-    expect(screen.getByRole('button', { name: /draft list/i }).getAttribute('data-tip'))
-      .toBe('Generate ~20 more entries with the text model assigned to this task');
-  });
-
-  test('blank option rows still trigger the seed dialog', () => {
-    const f = jsonFetch({ kind: 'entries', entries: ['blue'] });
-    globalThis.fetch = f as unknown as typeof fetch;
-    wrap(<ListEditor list={list()} dimensions={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: /\+ add option/i }));
-    fireEvent.click(screen.getByRole('button', { name: /\+ add option/i }));
-    fireEvent.click(screen.getByRole('button', { name: /draft list/i }));
-    expect(f).not.toHaveBeenCalled();
-    expect(screen.getByRole('dialog')).toBeDefined();
-    expect(screen.getByText(/up to 10 starter entries/)).toBeDefined();
-  });
 });
 
 describe('ListEditor — tags disclosure', () => {
@@ -446,5 +305,600 @@ describe('ListEditor — tags disclosure', () => {
     expect(panel.hasAttribute('inert')).toBe(true);
     expect(panel.contains(chip)).toBe(true);
     expect(screen.queryByRole('button', { name: /^wild-outdoor: / })).toBeNull();
+  });
+});
+
+// --- Draft List: dialog, review, Apply, Discard and Undo (spec list-draft-review R4 to R6) ---
+
+const SCARF_DIMS = [{
+  id: 'dim-1',
+  name: 'Season',
+  tags: [{ id: 'tag-winter', dimensionId: 'dim-1', label: 'winter', sortOrder: 0 }],
+}];
+
+const LISTING: TextModelsResponse = {
+  models: [
+    { id: 'writer-a', displayName: 'Writer A', providerName: 'Provider', vision: false, reasoningLevels: ['low', 'high'], status: 'available' },
+    { id: 'writer-b', displayName: 'Writer B', providerName: 'Provider', vision: false, reasoningLevels: ['low', 'high'], status: 'available' },
+  ],
+  tasks: TEXT_TASKS.map((task) => (task === 'list-draft'
+    ? { task, pick: 'writer-a', effectiveModelId: 'writer-a', pickState: 'active' }
+    : { task, effectiveModelId: 'writer-a' })),
+  defaults: { default: 'writer-a', byTask: {} },
+  writers: {},
+  lockedWriters: [],
+};
+
+function scarves(): VariableList {
+  const values: [string, string, number, string[]][] = [
+    ['o1', 'a red scarf', 1, ['tag-winter']],
+    ['o2', 'a blue scarf', 1, []],
+    ['o3', 'a white scarf', 2, []],
+  ];
+  return {
+    id: 'list-1', name: 'scarf', sortOrder: 0, createdAt: 0, updatedAt: 0,
+    options: values.map(([id, value, weight, tagIds], index) => ({ id, listId: 'list-1', value, tagIds, sortOrder: index, weight })),
+  };
+}
+
+const REWORK_ANSWER = {
+  kind: 'changes',
+  baseCount: 3,
+  changes: [
+    { id: 0, op: 'edit', index: 0, value: 'a red silk scarf', weight: 5, why: 'Names the fabric.' },
+    { id: 1, op: 'remove', index: 1, why: 'Too plain.' },
+    { id: 2, op: 'add', value: 'a green scarf', weight: 1, why: 'Adds a colour.' },
+  ],
+  unplaced: [],
+  summary: 'Named the fabric and swapped a colour.',
+};
+
+interface ServerCalls {
+  order: string[];
+  drafts: Record<string, unknown>[];
+  picks: unknown[];
+  puts: unknown[];
+  patches: string[];
+}
+
+/** Routes the editor's requests and records them. `answers` are the draft answers in turn. */
+function listServer(options: { answers?: readonly unknown[]; pickStatus?: number; patchStatus?: number; hold?: Promise<void>; saved?: VariableList } = {}): ServerCalls {
+  const calls: ServerCalls = { order: [], drafts: [], picks: [], puts: [], patches: [] };
+  globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const method = init?.method ?? 'GET';
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) as unknown : undefined;
+    if (url.endsWith('/text-models/tasks/list-draft') && method === 'PUT') {
+      calls.order.push('PUT pick');
+      calls.picks.push(body);
+      return Promise.resolve(options.pickStatus === undefined ? Response.json(LISTING) : Response.json({ error: 'nope' }, { status: options.pickStatus }));
+    }
+    if (url.endsWith('/text-models')) return Promise.resolve(Response.json(LISTING));
+    if (url.endsWith('/prompts/lists/draft')) {
+      calls.order.push('POST draft');
+      calls.drafts.push(body as Record<string, unknown>);
+      const answer = options.answers?.[calls.drafts.length - 1] ?? REWORK_ANSWER;
+      return Promise.resolve(new Response(`event: done\ndata: ${JSON.stringify(answer)}\n\n`, {
+        status: 200, headers: { 'Content-Type': 'text/event-stream' },
+      }));
+    }
+    // `hold` keeps a save or a weight PATCH in flight until the test lets it go.
+    const held = options.hold ?? Promise.resolve();
+    if (method === 'PUT' && url.endsWith('/options')) {
+      calls.puts.push(body);
+      return held.then(() => Response.json(options.saved ?? scarves()));
+    }
+    if (method === 'PATCH') {
+      calls.patches.push(url);
+      const { patchStatus } = options;
+      if (patchStatus !== undefined) return held.then(() => Response.json({ error: 'nope' }, { status: patchStatus }));
+      return held.then(() => new Response(null, { status: 204 }));
+    }
+    return Promise.resolve(Response.json({ templates: [], variableLists: [options.saved ?? scarves()], dimensions: [] }));
+  }) as unknown as typeof fetch;
+  return calls;
+}
+
+interface Mounted {
+  readonly store: PromptDraftStore;
+  /** Mounts a new editor instance (on `target`) under the same draft store; null unmounts it. */
+  readonly remount: (target: VariableList | null) => void;
+}
+
+/** The editor beside the real toast, inside a draft store, on the seeded text-model listing. */
+function mountEditor(target: VariableList = scarves(), prepare?: (store: PromptDraftStore) => void): Mounted {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  seedTextModelGate(client, { models: LISTING });
+  const holder: { store: PromptDraftStore | null } = { store: null };
+  function Capture() {
+    const store = usePromptDraftStore();
+    if (holder.store === null && store !== null) {
+      holder.store = store;
+      prepare?.(store);
+    }
+    return null;
+  }
+  const ui = (key: number, shown: VariableList | null) => (
+    <QueryClientProvider client={client}>
+      <PromptDraftProvider>
+        <Capture />
+        {shown !== null && <ListEditor key={key} list={shown} dimensions={SCARF_DIMS} />}
+        <Toast />
+      </PromptDraftProvider>
+    </QueryClientProvider>
+  );
+  let mounts = 0;
+  const view = render(ui(mounts, target));
+  if (holder.store === null) throw new Error('missing draft store');
+  const store = holder.store;
+  return {
+    store,
+    remount: (next) => {
+      mounts += 1;
+      view.rerender(ui(mounts, next));
+    },
+  };
+}
+
+const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
+const head = () => document.querySelector('[data-zone="head"]');
+const sheet = () => screen.queryByRole('group', { name: 'Options, under review' });
+const optionValues = () => screen.queryAllByRole<HTMLInputElement>('textbox', { name: /^Option \d+/ }).map((input) => input.value);
+const weights = () => screen.queryAllByRole<HTMLInputElement>('spinbutton').map((input) => input.value);
+const undo = () => screen.getByRole('button', { name: 'Undo' });
+
+async function openReview(instructions = 'name the fabric'): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole('button', { name: /^(Draft List|Rework again)$/ }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Rework' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Change instructions' }), { target: { value: instructions } });
+  fireEvent.click(screen.getByRole('button', { name: 'Rework list' }));
+  return screen.findByRole('group', { name: 'Options, under review' });
+}
+
+afterEach(() => { useAtelierStore.setState({ toasts: [] }); });
+
+describe('ListEditor — Draft List button', () => {
+  test('disabled without a name, with its tip', () => {
+    wrap(<ListEditor list={{ ...list(), name: '' }} dimensions={[]} />);
+    const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Draft List' });
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('data-tip')).toBe('Name the list first');
+  });
+
+  test('stays enabled at the option limit and opens on Rework with Add options off (R4.1)', () => {
+    listServer();
+    const full = Array.from({ length: MAX_OPTIONS_PER_LIST }, (_, i) => ({ id: `o${String(i)}`, value: `scarf ${String(i)}` }));
+    wrap(<ListEditor list={list(full)} dimensions={[]} />);
+    const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Draft List' });
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('data-tip')).toBe('Describe what to add or change, and pick the text model that writes it');
+    fireEvent.click(button);
+    expect(screen.getByRole<HTMLInputElement>('radio', { name: 'Add options' }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>('radio', { name: 'Rework' }).checked).toBe(true);
+    expect(screen.getByText('This list is at its option limit, so there is no room to add.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Drafting…' })).toBeTruthy();
+  });
+});
+
+describe('ListEditor — seed (R6.1)', () => {
+  test('an empty list seeds: the answer replaces the blank rows as unsaved rows with their weights', async () => {
+    const calls = listServer({ answers: [{ kind: 'list', name: null, options: [{ value: 'a red scarf', weight: 1 }, { value: 'a none scarf', weight: 9 }] }] });
+    wrap(<ListEditor list={list()} dimensions={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: /\+ add option/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Draft List' }));
+    expect(screen.getByRole('heading', { name: 'Describe the list' })).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: 'List description' }), { target: { value: 'scarves' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Draft list' }));
+    await waitFor(() => { expect(optionValues()).toEqual(['a red scarf', 'a none scarf']); });
+    expect(weights()).toEqual(['1', '9']);
+    expect(calls.drafts).toEqual([{ mode: 'extend', name: 'Colours', options: [], description: 'scarves' }]);
+    expect(sheet()).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Save list' }).disabled).toBe(false);
+  });
+});
+
+describe('ListEditor — review (R5)', () => {
+  test('a changes answer opens the review in the body zone; Save, the table and Add option give way', async () => {
+    const calls = listServer();
+    mountEditor();
+    const review = await openReview();
+    expect(calls.drafts).toEqual([{
+      mode: 'rework',
+      name: 'scarf',
+      options: [{ value: 'a red scarf', weight: 1 }, { value: 'a blue scarf', weight: 1 }, { value: 'a white scarf', weight: 2 }],
+      description: 'name the fabric',
+    }]);
+    expect(document.querySelector('[data-zone="body"]')?.contains(review)).toBe(true);
+    expect(optionValues()).toEqual([]);
+    expect(head()?.contains(screen.getByRole('button', { name: 'Rework again' }))).toBe(true);
+    expect(head()?.contains(screen.getByRole('button', { name: 'Discard' }))).toBe(true);
+    expect(head()?.contains(screen.getByRole('button', { name: 'Apply 3 changes' }))).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Save list' })).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: /\+ add option/i }).disabled).toBe(true);
+    expect(screen.getByText('Named the fabric and swapped a colour.')).toBeTruthy();
+  });
+
+  test('Apply writes the accepted changes: an edit keeps its key and tags, a removal goes, adds follow', async () => {
+    listServer();
+    const { store } = mountEditor();
+    await openReview();
+    fireEvent.click(within(screen.getByRole('group', { name: 'Change 2 of 3' })).getByRole('button', { name: 'Reject' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 2 changes' }));
+    await flush();
+    expect(sheet()).toBeNull();
+    expect(optionValues()).toEqual(['a red silk scarf', 'a blue scarf', 'a white scarf', 'a green scarf']);
+    expect(weights()).toEqual(['5', '1', '2', '1']);
+    expect(store.getListReview('list-1')).toBeUndefined();
+    expect(useAtelierStore.getState().toasts.find((toast) => toast.text === 'Applied 2 changes')?.tone).toBe('success');
+    fireEvent.click(screen.getByRole('button', { name: 'Show tags for a red silk scarf' }));
+    expect(screen.getByRole('button', { name: 'winter: required' })).toBeTruthy();
+    // Apply never saves: the list is unsaved work, and the edited row kept its id.
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Save list' }).disabled).toBe(false);
+    expect(store.getList('list-1')?.options.map((row) => row.key).slice(0, 3)).toEqual(['o1', 'o2', 'o3']);
+  });
+
+  test('Apply then Undo restores the exact rows and the review with its decisions', async () => {
+    listServer();
+    const { store } = mountEditor();
+    await openReview();
+    fireEvent.click(within(screen.getByRole('group', { name: 'Change 3 of 3' })).getByRole('button', { name: 'Reject' }));
+    const decided = store.getListReview('list-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 2 changes' }));
+    await flush();
+    expect(optionValues()).toEqual(['a red silk scarf', 'a white scarf']);
+    fireEvent.click(undo());
+    await flush();
+    expect(sheet()).not.toBeNull();
+    expect(screen.getByRole('group', { name: 'Change 3 of 3' }).getAttribute('data-decision')).toBe('rejected');
+    expect(screen.getByRole('button', { name: 'Apply 2 changes' })).toBeTruthy();
+    expect(store.getListReview('list-1')).toEqual(decided);
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await flush();
+    expect(optionValues()).toEqual(['a red scarf', 'a blue scarf', 'a white scarf']);
+    expect(weights()).toEqual(['1', '1', '2']);
+  });
+
+  test('Discard then Undo restores the review; the rows never changed', async () => {
+    listServer();
+    const { store } = mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Reject all' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Change 1 of 3' })).getByRole('button', { name: 'Accept' }));
+    const decided = store.getListReview('list-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await flush();
+    expect(sheet()).toBeNull();
+    expect(optionValues()).toEqual(['a red scarf', 'a blue scarf', 'a white scarf']);
+    expect(useAtelierStore.getState().toasts.find((toast) => toast.text === 'Changes discarded')?.tone).toBe('soft');
+    fireEvent.click(undo());
+    await flush();
+    expect(store.getListReview('list-1')).toEqual(decided);
+    expect(screen.getByRole('button', { name: 'Apply 1 change' })).toBeTruthy();
+  });
+
+  test('a tag change after Apply retires its Undo', async () => {
+    listServer();
+    mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Show tags for a white scarf' }));
+    fireEvent.click(screen.getByRole('button', { name: 'winter: not set' }));
+    fireEvent.click(undo());
+    await flush();
+    expect(sheet()).toBeNull();
+    expect(optionValues()).toEqual(['a red silk scarf', 'a white scarf', 'a green scarf']);
+  });
+
+  test("a save's key settlement after Apply retires its Undo", async () => {
+    const saved: VariableList = {
+      ...scarves(),
+      options: [
+        { id: 'o1', listId: 'list-1', value: 'a red silk scarf', tagIds: ['tag-winter'], sortOrder: 0, weight: 5 },
+        { id: 'o3', listId: 'list-1', value: 'a white scarf', tagIds: [], sortOrder: 1, weight: 2 },
+        { id: 'o-green', listId: 'list-1', value: 'a green scarf', tagIds: [], sortOrder: 2, weight: 1 },
+      ],
+    };
+    const calls = listServer({ saved });
+    mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Save list' }));
+    await waitFor(() => { expect(calls.puts).toHaveLength(1); });
+    await waitFor(() => { expect(useAtelierStore.getState().toasts.some((toast) => toast.text === 'Variable list saved')).toBe(true); });
+    fireEvent.click(undo());
+    await flush();
+    expect(sheet()).toBeNull();
+    expect(optionValues()).toEqual(['a red silk scarf', 'a white scarf', 'a green scarf']);
+  });
+
+  test('at zero accepted changes with unsaved edits pending, no entry point applies or saves', async () => {
+    const calls = listServer();
+    mountEditor();
+    // An unsaved edit before the draft: the review's base carries it.
+    fireEvent.change(screen.getByRole('textbox', { name: 'Option 3: a white scarf' }), { target: { value: 'a cream scarf' } });
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Reject all' }));
+    const apply = screen.getByRole('button', { name: 'Apply' });
+    expect(apply.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(apply);
+    fireEvent.submit(screen.getByRole('form'));
+    fireEvent.keyDown(screen.getByRole('group', { name: 'Change 1 of 3' }), { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(screen.getByRole('group', { name: 'Change 1 of 3' }), { key: 'Enter', ctrlKey: true });
+    await flush();
+    expect(sheet()).not.toBeNull();
+    expect(calls.puts).toEqual([]);
+    expect(calls.patches).toEqual([]);
+    expect(useAtelierStore.getState().toasts.some((toast) => toast.text.startsWith('Applied'))).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await flush();
+    expect(optionValues()).toEqual(['a red scarf', 'a blue scarf', 'a cream scarf']);
+  });
+
+  test('Cmd/Ctrl+Enter applies from the form while changes are accepted', async () => {
+    listServer();
+    mountEditor();
+    await openReview();
+    fireEvent.keyDown(screen.getByRole('group', { name: 'Change 1 of 3' }), { key: 'Enter', ctrlKey: true });
+    await flush();
+    expect(sheet()).toBeNull();
+    expect(optionValues()).toEqual(['a red silk scarf', 'a white scarf', 'a green scarf']);
+  });
+
+  test('Cmd/Ctrl+Enter inside the Rework again dialog leaves the review unapplied', async () => {
+    const calls = listServer({ answers: [REWORK_ANSWER, { ...REWORK_ANSWER, changes: [], summary: 'Nothing else to change.' }] });
+    mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Rework again' }));
+    const area = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Change instructions' });
+    // The dialog reopens on the review's mode with its instructions.
+    expect(area.value).toBe('name the fabric');
+    fireEvent.keyDown(area, { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(area, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => { expect(screen.getByText('Nothing else to change.')).toBeTruthy(); });
+    expect(calls.drafts).toHaveLength(2);
+    expect(calls.drafts[1]).toMatchObject({ mode: 'rework', description: 'name the fabric' });
+    expect(sheet()).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Apply 3 changes' })).toBeTruthy();
+    expect(useAtelierStore.getState().toasts.some((toast) => toast.text.startsWith('Applied'))).toBe(false);
+  });
+
+  test('a failed Rework again leaves the review and its decisions as they were', async () => {
+    listServer({ answers: [REWORK_ANSWER, { kind: 'changes', baseCount: 9, changes: [], unplaced: [], summary: null }] });
+    mountEditor();
+    await openReview();
+    fireEvent.click(within(screen.getByRole('group', { name: 'Change 1 of 3' })).getByRole('button', { name: 'Reject' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rework again' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rework list' }));
+    await waitFor(() => { expect(screen.getByText("Couldn't draft the list.")).toBeTruthy(); });
+    expect(screen.getByRole('group', { name: 'Change 1 of 3' }).getAttribute('data-decision')).toBe('rejected');
+  });
+});
+
+describe('ListEditor — weights after a review (R5.11)', () => {
+  test('a blur after an applied reweight sends no PATCH; a manual change does', async () => {
+    const calls = listServer();
+    mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }));
+    await flush();
+    const first = () => screen.getAllByRole<HTMLInputElement>('spinbutton')[0];
+    const input = first();
+    if (!input) throw new Error('missing weight input');
+    expect(input.value).toBe('5');
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    await flush();
+    expect(calls.patches).toEqual([]);
+    fireEvent.change(input, { target: { value: '7' } });
+    fireEvent.blur(input);
+    await waitFor(() => { expect(calls.patches).toEqual(['/api/prompts/lists/list-1/options/o1']); });
+  });
+
+  test('a failed weight save returns to the applied weight, not the saved one', async () => {
+    const calls = listServer({ patchStatus: 500 });
+    mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }));
+    await flush();
+    const first = () => screen.getAllByRole<HTMLInputElement>('spinbutton')[0];
+    const input = first();
+    if (!input) throw new Error('missing weight input');
+    fireEvent.change(input, { target: { value: '7' } });
+    fireEvent.blur(input);
+    await waitFor(() => { expect(calls.patches).toHaveLength(1); });
+    // The server still holds 1; the reweight the user accepted was 5.
+    await waitFor(() => { expect(first()?.value).toBe('5'); });
+  });
+
+  test('a weight save that fails after the editor closed restores the retained draft', async () => {
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const calls = listServer({ patchStatus: 500, hold });
+    const { store, remount } = mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }));
+    await flush();
+    const input = screen.getAllByRole<HTMLInputElement>('spinbutton')[0];
+    if (!input) throw new Error('missing weight input');
+    fireEvent.change(input, { target: { value: '7' } });
+    fireEvent.blur(input);
+    await waitFor(() => { expect(calls.patches).toHaveLength(1); });
+    expect(store.getList('list-1')?.options[0]?.weight).toBe(7);
+    // The editor closes while the PATCH is in flight, then the PATCH fails.
+    remount(null);
+    release();
+    await waitFor(() => { expect(store.getList('list-1')?.options[0]?.weight).toBe(5); });
+    expect(useAtelierStore.getState().toasts.some((toast) => toast.tone === 'error')).toBe(true);
+    remount(scarves());
+    expect(screen.getAllByRole<HTMLInputElement>('spinbutton')[0]?.value).toBe('5');
+    expect(optionValues()[0]).toBe('a red silk scarf');
+  });
+
+  test('a weight save that fails after the editor closed leaves no draft when it was the only edit', async () => {
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const calls = listServer({ patchStatus: 500, hold });
+    const { store, remount } = mountEditor();
+    const input = screen.getAllByRole<HTMLInputElement>('spinbutton')[0];
+    if (!input) throw new Error('missing weight input');
+    fireEvent.change(input, { target: { value: '7' } });
+    fireEvent.blur(input);
+    await waitFor(() => { expect(calls.patches).toHaveLength(1); });
+    remount(null);
+    release();
+    await waitFor(() => { expect(useAtelierStore.getState().toasts.some((toast) => toast.tone === 'error')).toBe(true); });
+    expect(store.getList('list-1')).toBeUndefined();
+    expect(store.hasDrafts()).toBe(false);
+  });
+
+  test('a blur that changes nothing leaves the Undo of Apply working', async () => {
+    listServer();
+    mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }));
+    await flush();
+    for (const input of screen.getAllByRole<HTMLInputElement>('spinbutton')) {
+      fireEvent.focus(input);
+      fireEvent.blur(input);
+    }
+    await flush();
+    fireEvent.click(undo());
+    await flush();
+    expect(sheet()).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Apply 3 changes' })).toBeTruthy();
+  });
+});
+
+describe('ListEditor — focus after a review', () => {
+  const firstOption = () => screen.getAllByRole<HTMLInputElement>('textbox', { name: /^Option \d+/ })[0];
+
+  test('Apply hands focus to the first option', async () => {
+    listServer();
+    mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }));
+    await flush();
+    expect(document.activeElement === firstOption()).toBe(true);
+  });
+
+  test('Discard hands focus to the first option', async () => {
+    listServer();
+    mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await flush();
+    expect(document.activeElement === firstOption()).toBe(true);
+  });
+
+  test('with a save in flight the option fields are disabled, so Add option takes focus', async () => {
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    listServer({ hold });
+    mountEditor();
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Save list' }));
+    await flush();
+    // The save has not settled: Undo still reopens the review, and Apply ends it again.
+    fireEvent.click(undo());
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }));
+    await flush();
+    expect(firstOption()?.disabled).toBe(true);
+    expect(document.activeElement === screen.getByRole('button', { name: '+ Add option' })).toBe(true);
+    release();
+    await flush();
+  });
+
+  test('a review that removed every option hands focus to Add option', async () => {
+    const one: VariableList = { ...scarves(), options: scarves().options.slice(0, 1) };
+    listServer({ answers: [{ kind: 'changes', baseCount: 1, changes: [{ id: 0, op: 'remove', index: 0, why: 'Gone.' }], unplaced: [], summary: null }] });
+    mountEditor(one);
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 1 change' }));
+    await flush();
+    expect(document.activeElement === screen.getByRole('button', { name: '+ Add option' })).toBe(true);
+  });
+});
+
+describe('ListEditor — model choice (R4.3)', () => {
+  test('the list-draft pick is saved before the draft; the request carries the image model', async () => {
+    const previous = useAtelierStore.getState().draft;
+    useAtelierStore.setState({ draft: { ...previous, modelId: 'image-model-a' } });
+    try {
+      const calls = listServer();
+      mountEditor();
+      fireEvent.click(screen.getByRole('button', { name: 'Draft List' }));
+      const model = await screen.findByLabelText<HTMLSelectElement>('Model');
+      expect(model.value).toBe('writer-a');
+      fireEvent.change(model, { target: { value: 'writer-b' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'What to add' }), { target: { value: 'more' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add options' }));
+      await waitFor(() => { expect(calls.drafts).toHaveLength(1); });
+      expect(calls.order).toEqual(['PUT pick', 'POST draft']);
+      expect(calls.picks).toEqual([{ modelId: 'writer-b', effort: null }]);
+      expect(calls.drafts[0]?.modelId).toBe('image-model-a');
+    } finally {
+      useAtelierStore.setState({ draft: previous });
+    }
+  });
+
+  test('a rejected pick save shows inline and sends no draft', async () => {
+    const calls = listServer({ pickStatus: 500 });
+    mountEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Draft List' }));
+    fireEvent.change(await screen.findByLabelText('Model'), { target: { value: 'writer-b' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add options' }));
+    await waitFor(() => { expect(calls.picks).toHaveLength(1); });
+    await waitFor(() => { expect(screen.getByRole('dialog').querySelector('[role="status"]')?.textContent).not.toBe(''); });
+    expect(calls.drafts).toEqual([]);
+    expect(screen.getByRole('heading', { name: 'Add to the list' })).toBeTruthy();
+  });
+});
+
+describe('ListEditor — review in the draft store (R5.9)', () => {
+  test('a remount reopens a fresh review; a stale one is dropped', async () => {
+    listServer();
+    const { store, remount } = mountEditor();
+    await openReview();
+    remount(null);
+    expect(store.getListReview('list-1')).toBeDefined();
+    remount(scarves());
+    expect(sheet()).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Apply 3 changes' })).toBeTruthy();
+
+    // The server's rows moved on: the stored review no longer fits and goes.
+    remount(null);
+    const moved = { ...scarves(), options: scarves().options.map((option) => (option.id === 'o2' ? { ...option, weight: 4 } : option)) };
+    remount(moved);
+    expect(sheet()).toBeNull();
+    expect(optionValues()).toEqual(['a red scarf', 'a blue scarf', 'a white scarf']);
+    await flush();
+    expect(store.getListReview('list-1')).toBeUndefined();
+  });
+
+  test('a key settlement with only the review retained keeps it fresh for the next mount', () => {
+    listServer();
+    const settled: VariableList = { ...scarves(), options: [{ id: 'o-red', listId: 'list-1', value: 'a red scarf', tagIds: [], sortOrder: 0, weight: 1 }] };
+    const { store, remount } = mountEditor(settled, (prepared) => {
+      prepared.setListReview('list-1', {
+        mode: 'extend',
+        base: [{ key: 'draft:new', value: 'a red scarf', weight: 1 }],
+        changes: [{ id: 0, op: 'add', value: 'a blue scarf', weight: 1, why: '' }],
+        unplaced: [],
+        summary: null,
+        instructions: '',
+        rejected: [],
+      });
+      // A save that settles while no editor is mounted and no list draft is retained.
+      prepared.settleListOptionKeys('list-1', new Map([['draft:new', 'o-red']]));
+    });
+    expect(store.getList('list-1')).toBeUndefined();
+    remount(settled);
+    expect(sheet()).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Apply 1 change' })).toBeTruthy();
   });
 });

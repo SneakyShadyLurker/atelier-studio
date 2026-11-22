@@ -143,6 +143,30 @@ describe('TemplateReview', () => {
     for (const n of [1, 2, 3]) expect(group(n).getAttribute('data-decision')).toBe('accepted');
   });
 
+  test('a bulk action that does not apply keeps its slot: hidden, inert and unclickable', async () => {
+    render(<Harness initial={review()} />);
+    const slot = (label: string) => {
+      const found = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === label);
+      if (found === undefined) throw new Error(`missing ${label} slot`);
+      return found;
+    };
+    expect(slot('Accept all').getAttribute('data-shown')).toBe('false');
+    expect(slot('Accept all').getAttribute('aria-hidden')).toBe('true');
+    expect(slot('Accept all').inert).toBe(true);
+    expect(slot('Reject all').getAttribute('data-shown')).toBe('true');
+    fireEvent.click(slot('Reject all'));
+    await flush();
+    expect(slot('Reject all').getAttribute('data-shown')).toBe('false');
+    expect(slot('Accept all').getAttribute('data-shown')).toBe('true');
+    expect(slot('Accept all').inert).toBe(false);
+    // The hidden slot does nothing if something still reaches it: a bulk
+    // action that ran would move focus to its opposite.
+    group(2).focus();
+    fireEvent.click(slot('Reject all'));
+    await flush();
+    expect(document.activeElement === group(2)).toBe(true);
+  });
+
   test('Previous and Next step without wrapping, focus the change and announce it', async () => {
     render(<Harness initial={review()} />);
     await flush();

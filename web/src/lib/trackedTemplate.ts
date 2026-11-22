@@ -51,7 +51,7 @@ const BLOCK_WORDS = 80;
 /** ...and the replacement, or the diff's kept words, fall below this share of the passage. */
 const BLOCK_KEPT = 0.4;
 /** The word diff's budget; past it a large change reads as a block. */
-const DIFF_MAX_EDIT_LENGTH = 1000;
+export const DIFF_MAX_EDIT_LENGTH = 1000;
 /** A note never stands inside a token that nests no other token and is at most this long. */
 const LEAF_TOKEN_MAX_CHARS = 120;
 

@@ -93,6 +93,11 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+/* The empty Lists tab: the same header row above its empty state. */
+.bodyWithHeader {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 /* Settings tab has no resource rail — the panel spans the full width. */
 .bodySettings {
   grid-template-columns: minmax(0, 1fr);
@@ -1179,6 +1184,11 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 0 0 6px;
+}
+
+/* The empty Lists tab's header row (Draft New List), as the Dimensions one. */
+.paneHeader {
+  composes: dimPaneHeader;
 }
 
 .coverageBadgeHealthy {

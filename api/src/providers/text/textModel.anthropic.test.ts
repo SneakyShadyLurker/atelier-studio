@@ -194,14 +194,14 @@ describe('Anthropic structured output through textModel', () => {
   });
 
   test('an overloaded_error after the first content chunk is retried by an accumulating call', async () => {
-    const DRAFT = JSON.stringify({ kind: 'entries', entries: ['teal'] });
+    const DRAFT = JSON.stringify({ kind: 'options', options: [{ value: 'teal', weight: 1 }], question: null });
     replyQueue = [overloadedAfterContent(), textStream(DRAFT)];
     const requestsBefore = captured.length;
     const result = await claude('json_schema').draftList(
-      { name: 'colours', existing: [], target: 1 },
+      { mode: 'extend', name: 'colours', options: [{ value: 'red', weight: 1 }], addLimit: 1 },
       new AbortController().signal,
     );
-    expect(result).toEqual({ type: 'ok', payload: { kind: 'entries', entries: ['teal'] } });
+    expect(result).toEqual({ type: 'ok', payload: { kind: 'changes', baseCount: 1, changes: [{ id: 0, op: 'add', value: 'teal', weight: 1, why: '' }], unplaced: [], summary: null } });
     expect(captured.length - requestsBefore).toBe(2);
   });
 

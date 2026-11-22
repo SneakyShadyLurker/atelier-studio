@@ -9,6 +9,7 @@ import {
 } from '@atelier/shared/prompt-limits';
 import { PROMPT_ARRAY_TRANSPORT_MAX, TEMPLATE_BODY_HARD_MAX } from '../prompts/limits';
 import { NameSchema, uuidParam } from './_schema';
+import { LIST_OPTION_VALUE_MAX_CHARS } from '@atelier/shared/list-draft';
 
 export const IdParam = uuidParam('id');
 
@@ -30,12 +31,26 @@ export const TemplatePatch = z.object({
 export const ListCreate = z.object({ name: NameSchema }).strict();
 export const ListPatch = z.object({ name: NameSchema }).strict();
 
+// The list draft's body (spec R2.2): `options` are the editor's rows as they
+// stand, the base its changes address by position.
 export const DraftListBody = z.object({
   modelId: z.string().min(1).max(200).optional(),
-  name: NameSchema,
-  existing: z.array(z.string().trim().min(1).check(maxUtf16Length(2_000))).max(PROMPT_ARRAY_TRANSPORT_MAX),
+  mode: z.enum(['create', 'extend', 'rework']),
+  name: NameSchema.optional(),
+  options: z.array(z.object({
+    value: z.string().trim().min(1).check(maxUtf16Length(LIST_OPTION_VALUE_MAX_CHARS)),
+    weight: z.number().int().min(0).max(100),
+  }).strict()).max(PROMPT_ARRAY_TRANSPORT_MAX),
   description: z.string().trim().min(1).check(maxUtf16Length(LIST_DESCRIPTION_MAX_CHARS)).optional(),
-}).strict();
+}).strict()
+  .refine((b) => b.mode !== 'create' || b.name === undefined, { error: 'A new list gets its name from the draft', path: ['name'] })
+  .refine((b) => b.mode === 'create' || b.name !== undefined, { error: 'Name the list to draft', path: ['name'] })
+  .refine((b) => b.mode !== 'create' || b.options.length === 0, { error: 'A new list starts without options', path: ['options'] })
+  .refine((b) => b.mode !== 'rework' || b.options.length > 0, { error: 'Only a list with options can be reworked', path: ['options'] })
+  .refine(
+    (b) => b.description !== undefined || (b.mode === 'extend' && b.options.length > 0),
+    { error: 'Describe the list or the changes to make', path: ['description'] },
+  );
 
 export const OptionsReplace = z.object({
   options: z.array(z.object({

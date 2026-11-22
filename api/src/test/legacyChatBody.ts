@@ -39,7 +39,7 @@ export const STORY_PLANNER_DEFAULTS = {
 export const DRAFT_LIST_DEFAULTS = {
   reasoning_effort: 'low',
   verbosity: 'low',
-  max_completion_tokens: 1200 + KIMI_LOW_REASONING_OVERHEAD_TOKENS,
+  max_completion_tokens: 4000 + KIMI_LOW_REASONING_OVERHEAD_TOKENS,
 } as const;
 
 export const INFER_DIMENSIONS_DEFAULTS = {

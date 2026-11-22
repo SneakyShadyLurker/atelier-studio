@@ -4,17 +4,20 @@ import { useEffect } from 'react';
 import { hasUnsavedWork } from '../../lib/preloadRecovery';
 import { initialAtelierState, useAtelierStore } from '../../store/atelier';
 import type { TemplateReview } from './templateReview';
+import type { ListReview } from './listReview';
 import {
   PromptDraftProvider,
   PromptDraftStore,
   usePromptDraftStore,
   reconcileTagIds,
   remapOptionKeys,
+  restoreOptionWeight,
   settleDimensionBases,
   type DimensionDraft,
   type DimensionSettlement,
   type OptionDraft,
   type TagDraft,
+  type WeightRestore,
 } from './draftStore';
 
 const submittedTags: readonly TagDraft[] = [
@@ -218,5 +221,107 @@ describe('PromptDraftStore list option key settlement', () => {
     detachSecond();
     store.settleListOptionKeys('list', keys);
     expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  test('remaps a retained list review whether or not a list draft is retained', () => {
+    const store = new PromptDraftStore();
+    const review: ListReview = {
+      mode: 'rework',
+      base: [{ key: 'draft:new', value: 'a red scarf', weight: 1 }, { key: 'o1', value: 'a blue scarf', weight: 1 }],
+      changes: [{ id: 0, op: 'remove', index: 1, why: '' }],
+      unplaced: [],
+      summary: null,
+      instructions: 'fewer',
+      rejected: [0],
+    };
+    store.setListReview('list', review);
+    store.settleListOptionKeys('list', keys);
+    expect(store.getList('list')).toBeUndefined();
+    expect(store.getListReview('list')).toEqual({ ...review, base: [{ ...review.base[0], key: 'saved-new' }, review.base[1]] } as ListReview);
+  });
+});
+
+describe('PromptDraftStore list reviews and seeds', () => {
+  const review: ListReview = {
+    mode: 'extend',
+    base: [{ key: 'o1', value: 'a red scarf', weight: 1 }],
+    changes: [{ id: 0, op: 'add', value: 'a blue scarf', weight: 1, why: '' }],
+    unplaced: [],
+    summary: null,
+    instructions: '',
+    rejected: [],
+  };
+
+  test('a stored list review counts as unsaved work and outlives the list draft', () => {
+    const store = new PromptDraftStore();
+    store.setListReview('list', review);
+    expect(store.getListReview('list') === review).toBe(true);
+    expect(store.hasDrafts()).toBe(true);
+    store.setList('list', { name: 'scarf', options: [] });
+    store.deleteList('list');
+    expect(store.getListReview('list') === review).toBe(true);
+    store.deleteListReview('list');
+    expect(store.getListReview('list')).toBeUndefined();
+    expect(store.hasDrafts()).toBe(false);
+  });
+
+  test('seedList stores the draft, bumps the seed revision and notifies', () => {
+    const store = new PromptDraftStore();
+    const listener = mock(() => undefined);
+    store.subscribe(listener);
+    const before = store.getListSeedRevision();
+    store.seedList('list', { name: 'scarf', options: [] });
+    expect(store.getList('list')).toEqual({ name: 'scarf', options: [] });
+    expect(store.getListSeedRevision()).toBe(before + 1);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PromptDraftStore: a failed weight save', () => {
+  const row = (key: string, weight: number): OptionDraft => ({
+    key, value: key, tagIds: [], excludeTagIds: [], weight, weightInput: String(weight), expanded: false,
+  });
+
+  test('the retained draft and the mounted editor both put the row back', () => {
+    const store = new PromptDraftStore();
+    store.setList('list', { name: 'scarf', options: [row('a', 7), row('b', 2)] });
+    const seen: WeightRestore[] = [];
+    const detach = store.attachListWeightEditor('list', (restore) => { seen.push(restore); });
+    const restore: WeightRestore = { key: 'a', attempted: 7, previous: 5 };
+    store.restoreListOptionWeight('list', restore);
+    expect(store.getList('list')?.options.map((option) => [option.weight, option.weightInput])).toEqual([[5, '5'], [2, '2']]);
+    expect(seen).toEqual([restore]);
+    detach();
+    store.restoreListOptionWeight('list', { key: 'b', attempted: 2, previous: 1 });
+    expect(seen).toHaveLength(1);
+  });
+
+  test('with no editor mounted, a restore that leaves the list clean drops the retained draft', () => {
+    const clean = { name: 'scarf', options: [row('a', 1), row('b', 2)] };
+    const restore: WeightRestore = { key: 'a', attempted: 7, previous: 1 };
+    const store = new PromptDraftStore();
+    store.setList('list', { name: 'scarf', options: [row('a', 7), row('b', 2)] });
+    store.restoreListOptionWeight('list', restore, clean);
+    expect(store.getList('list')).toBeUndefined();
+    expect(store.hasDrafts()).toBe(false);
+    // Another unsaved edit keeps the entry, restored.
+    store.setList('list', { name: 'scarf', options: [row('a', 7), row('b', 9)] });
+    store.restoreListOptionWeight('list', restore, clean);
+    expect(store.getList('list')?.options.map((option) => option.weight)).toEqual([1, 9]);
+    // A mounted editor owns the cleanup: its own effect drops a clean draft.
+    store.setList('list', { name: 'scarf', options: [row('a', 7), row('b', 2)] });
+    const detach = store.attachListWeightEditor('list', () => undefined);
+    store.restoreListOptionWeight('list', restore, clean);
+    expect(store.getList('list')?.options.map((option) => option.weight)).toEqual([1, 2]);
+    detach();
+  });
+
+  test('a row edited again since keeps its weight, and the options array is untouched', () => {
+    const options = [row('a', 9)];
+    expect(restoreOptionWeight(options, { key: 'a', attempted: 7, previous: 5 }) === options).toBe(true);
+    const store = new PromptDraftStore();
+    store.setList('list', { name: 'scarf', options });
+    store.restoreListOptionWeight('list', { key: 'a', attempted: 7, previous: 5 });
+    expect(store.getList('list')?.options === options).toBe(true);
   });
 });

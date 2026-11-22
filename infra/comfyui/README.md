@@ -15,6 +15,32 @@ MiniMax H3 Image row needs ComfyUI 0.45.0 or later for its core
 nodes and stays within the worker's three inputs per job. For the application
 server, start with [Deployment](../../docs/deployment.md).
 
+The launcher starts ComfyUI with `--disable-all-custom-nodes` and whitelists
+only these custom-node directories in `custom_nodes/`, at the versions
+reviewed for the worker's write guard and offline mode. Any other installed
+pack stays unloaded. Pin them: an update that changes their code needs the
+same review before the worker restarts on it.
+
+| Directory | Reviewed version | Submittable classes |
+|---|---|---|
+| `atelier_private` | this repository | the worker's own load and save nodes |
+| `ComfyUI-Krea2-Ostris-Edit` | commit `7756566` | `Krea2OstrisEditModelPatch`, `TextEncodeKrea2OstrisEdit` |
+| `RES4LYF` | 1.2.2, commit `cb2c312` | none: it registers its schedulers (`bong_tangent`, `beta57`, …) and samplers (`res_2s`, `res_3s`, …) into core `KSampler` and `BasicScheduler` |
+| `ComfyUI-KJNodes` | 1.5.5, commit `aa2b5ea` | `MiniMaxH3PromptWeight`, `ImageSharpenKJ` |
+| `seedvarianceenhancer` | 2.2.0 (registry) | `SeedVarianceEnhancer` |
+
+Every other class those packs define stays outside `atelier_private/allowed_nodes.json`, so a
+graph that names one is refused at submission; the worker's route filter also
+hides the HTTP routes RES4LYF and KJNodes register. Review notes (2026-11-22):
+RES4LYF writes its own `res4lyf.config.json` and reloads core k-diffusion
+sampling at import, before the write guard starts; keep its optional
+timestep-shift patch off. `SeedVarianceEnhancer` reseeds the global torch RNG
+without restoring it; the noise-adding samplers reseed it per job, while a
+sampler with noise turned off (`prepare_empty_noise`) does not, and the worker
+has no general per-job RNG reset. `comfyui-propost`'s film grain is not
+approved: on a cache miss it saves a PNG to the temp directory, which the
+write guard refuses.
+
 This worker processes content in memory and returns it to Atelier for encrypted
 storage. It runs as an exclusive mode of one Windows ComfyUI portable install;
 the protocol itself has no fixed host or hardware identity. The adapter requires its authenticated TLS

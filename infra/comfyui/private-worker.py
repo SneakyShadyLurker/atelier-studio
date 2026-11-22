@@ -106,6 +106,7 @@ command = [sys.executable, '-s', str(ROOT / 'ComfyUI' / 'main.py'),
            '--tls-keyfile', str(SECRETS / 'key.pem'), '--tls-certfile', str(SECRETS / 'cert.pem'),
            '--disable-metadata', '--offline', '--disable-assets', '--disable-all-custom-nodes',
            '--whitelist-custom-nodes', 'atelier_private', 'ComfyUI-Krea2-Ostris-Edit',
+           'RES4LYF', 'ComfyUI-KJNodes', 'seedvarianceenhancer',
            '--cache-ram', '--database-url', 'sqlite:///:memory:',
            '--fast', 'fp16_accumulation', '--force-channels-last', '--fast-disk',
            '--preview-method', 'none']

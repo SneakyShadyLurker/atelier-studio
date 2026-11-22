@@ -269,7 +269,7 @@ describe('text_call event', () => {
       { type: 'stream-start', warnings: [] },
       { type: 'finish', usage: none, finishReason: { unified: 'content-filter', raw: 'content_filter' } },
     ], logger);
-    const result = await provider.draftList({ name: 'Colours', existing: [], target: 10 }, signal());
+    const result = await provider.draftList({ mode: 'extend', name: 'Colours', options: [{ value: 'red', weight: 1 }], addLimit: 10 }, signal());
     expect(result.type).toBe('failed');
     const call = records.find((r) => r.event === 'text_call');
     expect(call).toMatchObject({ task: 'draft-list', finish: 'content-filter', outcome: 'permanent', attempts: 1 });

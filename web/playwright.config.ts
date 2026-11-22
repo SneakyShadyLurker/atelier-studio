@@ -50,9 +50,9 @@ export default defineConfig({
     // The plate's etching paints through CSS `mask` / `-webkit-mask`, which
     // each engine resolves itself.
     { name: 'webkit-plate', use: { ...devices['Desktop Safari'] }, testMatch: '**/plate.spec.ts' },
-    // The rework review's marks (box-decoration-break), scrollIntoView and
-    // focus hand-off are resolved per engine.
-    { name: 'webkit-rework', use: { ...devices['Desktop Safari'] }, testMatch: '**/template-rework-review.spec.ts' },
+    // The template and list reviews' marks (box-decoration-break),
+    // scrollIntoView and focus hand-off are resolved per engine.
+    { name: 'webkit-rework', use: { ...devices['Desktop Safari'] }, testMatch: ['**/template-rework-review.spec.ts', '**/list-draft-review.spec.ts'] },
     // Native CSS anchor positioning and popovers are resolved by each engine
     // independently, so their behaviour lane runs on every installed one.
     // Unrelated specs and pixel baselines stay Chromium-only.

@@ -13,10 +13,17 @@ afterEach(() => {
   mock.restore();
 });
 
-function renderDialog(props: { error?: string | null; notice?: string | null } = {}) {
+interface DialogProps {
+  error?: string | null;
+  notice?: string | null;
+  body?: string;
+  resetKey?: string;
+}
+
+function renderDialog(props: DialogProps = {}) {
   const onSubmit = mock((_description: string) => undefined);
   const onCancel = mock(() => undefined);
-  render(
+  const element = (next: DialogProps) => (
     <DescribeDialog
       title="Describe the list"
       body="What should the list contain?"
@@ -25,12 +32,13 @@ function renderDialog(props: { error?: string | null; notice?: string | null } =
       maxLength={500}
       submitLabel="Draft list"
       busy={false}
-      {...props}
+      {...next}
       onSubmit={onSubmit}
       onCancel={onCancel}
-    />,
+    />
   );
-  return { onSubmit, onCancel };
+  const { rerender } = render(element(props));
+  return { onSubmit, onCancel, rerender: (next: DialogProps) => { rerender(element(next)); } };
 }
 
 describe('DescribeDialog', () => {
@@ -40,6 +48,40 @@ describe('DescribeDialog', () => {
     fireEvent.change(field, { target: { value: '  moody harbours  ' } });
     fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true });
     expect(onSubmit).toHaveBeenCalledWith('moody harbours');
+  });
+
+  test('Cmd/Ctrl+Enter during IME composition does not submit', () => {
+    const { onSubmit } = renderDialog();
+    const field = screen.getByLabelText('Description');
+    fireEvent.change(field, { target: { value: 'moody harbours' } });
+    fireEvent.keyDown(field, { key: 'Enter', metaKey: true, isComposing: true });
+    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true, keyCode: 229 });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test('a new body clears the typed text', () => {
+    const { rerender } = renderDialog();
+    const field = screen.getByLabelText<HTMLTextAreaElement>('Description');
+    fireEvent.change(field, { target: { value: 'moody harbours' } });
+    rerender({ body: 'Which harbours?' });
+    expect(field.value).toBe('');
+  });
+
+  test('a body change under a stable reset key keeps the typed text', () => {
+    const { rerender } = renderDialog({ resetKey: 'seed' });
+    const field = screen.getByLabelText<HTMLTextAreaElement>('Description');
+    fireEvent.change(field, { target: { value: 'moody harbours' } });
+    rerender({ resetKey: 'seed', body: 'Describe the list, or leave it blank.' });
+    expect(field.value).toBe('moody harbours');
+    expect(screen.getByText('Describe the list, or leave it blank.')).not.toBeNull();
+  });
+
+  test('a new reset key clears the typed text', () => {
+    const { rerender } = renderDialog({ resetKey: 'seed' });
+    const field = screen.getByLabelText<HTMLTextAreaElement>('Description');
+    fireEvent.change(field, { target: { value: 'moody harbours' } });
+    rerender({ resetKey: 'clarify' });
+    expect(field.value).toBe('');
   });
 
   test('a dismissed dialog does not submit during its exit fade', async () => {

@@ -1246,6 +1246,94 @@ describe('PromptManager', () => {
     expect(within(panel).getByRole('button', { name: /Propose Dimensions/ })).toBeTruthy();
   });
 
+  describe('Draft New List (spec list-draft-review R6.2, R6.3)', () => {
+    const created = {
+      id: '019e42fd-1111-7000-8000-000000000030',
+      name: 'scarf',
+      options: [],
+      sortOrder: 0,
+      createdAt: 3,
+      updatedAt: 3,
+    };
+
+    /** The library server: a create POST adds the list; the draft answers a named list. */
+    function createServer(seed: PromptLibraryResponse, createStatus = 201) {
+      const calls = { drafts: [] as unknown[], creates: [] as unknown[] };
+      let current = seed;
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+      client.setQueryData(promptKeys.library(), seed);
+      globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) as unknown : undefined;
+        if (url.endsWith('/prompts/lists/draft')) {
+          calls.drafts.push(body);
+          return Promise.resolve(sseDoneResponse({ kind: 'list', name: 'scarf', options: [{ value: 'a red scarf', weight: 1 }, { value: 'a blue scarf', weight: 3 }] }));
+        }
+        if (url.endsWith('/prompts/lists') && init?.method === 'POST') {
+          calls.creates.push(body);
+          if (createStatus !== 201) return Promise.resolve(Response.json({ error: 'list limit reached' }, { status: createStatus }));
+          current = { ...current, variableLists: [...current.variableLists, created] };
+          return Promise.resolve(Response.json(created, { status: 201 }));
+        }
+        if (url.endsWith('/prompts')) return Promise.resolve(Response.json(current));
+        return Promise.resolve(Response.json({ error: 'not found' }, { status: 404 }));
+      }) as unknown as typeof fetch;
+      render(<PromptManager onBack={() => undefined} />, { wrapper: wrapper(client) });
+      return calls;
+    }
+
+    test('the empty Lists tab offers Draft New List in a header row above the empty state; a populated pane beside New', async () => {
+      renderManager(emptyLibrary);
+      fireEvent.click(await screen.findByRole('tab', { name: 'Variable lists' }));
+      const panel = await screen.findByRole('tabpanel', { name: 'Variable lists' });
+      const button = within(panel).getByRole('button', { name: 'Draft New List' });
+      const empty = within(panel).getByRole('heading', { name: 'No variable lists yet' }).closest('[data-empty-span]');
+      expect(button.closest('[data-empty-span]')).toBeNull();
+      expect(empty && (button.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+      cleanup();
+
+      renderManager();
+      fireEvent.click(await screen.findByRole('tab', { name: 'Variable lists' }));
+      const pane = within(await screen.findByRole('tabpanel', { name: 'Variable lists' })).getByRole('complementary', { name: 'Lists' });
+      expect(within(pane).getByRole('button', { name: 'New' })).toBeTruthy();
+      expect(within(pane).getByRole('button', { name: 'Draft New List' })).toBeTruthy();
+    });
+
+    test('creating the first list opens its drafted rows as unsaved', async () => {
+      const calls = createServer(emptyLibrary);
+      fireEvent.click(await screen.findByRole('tab', { name: 'Variable lists' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Draft New List' }));
+      expect(screen.getByRole('heading', { name: 'Describe the new list' })).toBeTruthy();
+      fireEvent.change(screen.getByRole('textbox', { name: 'List description' }), { target: { value: 'scarves' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Draft list' }));
+      const editor = await screen.findByRole('form', { name: 'Edit variable list scarf' });
+      await waitFor(() => {
+        expect(within(editor).queryAllByRole<HTMLInputElement>('textbox', { name: /^Option \d+/ }).map((input) => input.value))
+          .toEqual(['a red scarf', 'a blue scarf']);
+      });
+      expect(within(editor).getAllByRole<HTMLInputElement>('spinbutton').map((input) => input.value)).toEqual(['1', '3']);
+      expect(within(editor).getByRole<HTMLButtonElement>('button', { name: 'Save list' }).disabled).toBe(false);
+      expect(calls.drafts).toEqual([{ mode: 'create', options: [], description: 'scarves' }]);
+      expect(calls.creates).toEqual([{ name: 'scarf' }]);
+      expect(useAtelierStore.getState().toasts.some((toast) => toast.text === 'Variable list created')).toBe(true);
+    });
+
+    test('a rejected create keeps the dialog open with the error and the description', async () => {
+      const calls = createServer(library, 409);
+      fireEvent.click(await screen.findByRole('tab', { name: 'Variable lists' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Draft New List' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'List description' }), { target: { value: 'scarves' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Draft list' }));
+      await waitFor(() => { expect(screen.getByRole('dialog').querySelector('[role="status"]')?.textContent).toBe('list limit reached'); });
+      expect(screen.getByRole('heading', { name: 'Describe the new list' })).toBeTruthy();
+      expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'List description' }).value).toBe('scarves');
+      expect(useAtelierStore.getState().toasts.some((toast) => toast.text === 'Variable list created')).toBe(false);
+      // Submitting again drafts afresh.
+      fireEvent.click(screen.getByRole('button', { name: 'Draft list' }));
+      await waitFor(() => { expect(calls.drafts).toHaveLength(2); });
+    });
+  });
+
   test('a populated pane shows the New button with a plus glyph', async () => {
     renderManager();
     const rail = within(await screen.findByRole('tabpanel', { name: 'Templates' })).getByRole('complementary', { name: 'Templates' });

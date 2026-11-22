@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { runWhenReachable } from '../../lib/focus';
+import { isImeComposing } from '../../lib/ime';
 import { useExitTransition } from '../../hooks/useExitTransition';
 import { DialogShell } from '../DialogShell';
 import { I } from '../icons/I';
@@ -23,6 +24,9 @@ export interface DescribeDialogProps {
   optional?: boolean;
   /** Text the field starts with (on mount only). */
   initialText?: string;
+  /** The field clears and refocuses when this changes; defaults to `body`.
+   *  A stable key lets the body copy change without clearing typed text. */
+  resetKey?: string;
   /** Extra controls rendered between the body copy and the field. */
   children?: ReactNode;
   onSubmit: (description: string) => void;
@@ -46,6 +50,7 @@ export function DescribeDialog({
   notice = null,
   optional = false,
   initialText = '',
+  resetKey,
   children,
   onSubmit,
   onCancel,
@@ -60,15 +65,16 @@ export function DescribeDialog({
   const hintId = useId();
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const [text, setText] = useState(initialText);
-  // Reset the field when `body` (the seed copy or the clarify question) changes
-  // to a NEW value: the dialog stays mounted across submits (so its inline error
-  // shows), so without this the previous answer would linger under the next
-  // clarify question. A submit FAILURE leaves `body` unchanged, so the user's
-  // answer is preserved for retry. Render-time reset (React's "adjust state on
-  // prop change" pattern) rather than an effect.
-  const [prevBody, setPrevBody] = useState(body);
-  if (body !== prevBody) {
-    setPrevBody(body);
+  // Reset the field when the reset key (by default `body`: the seed copy or the
+  // clarify question) changes to a NEW value: the dialog stays mounted across
+  // submits (so its inline error shows), so without this the previous answer
+  // would linger under the next clarify question. A submit FAILURE leaves the
+  // key unchanged, so the user's answer is preserved for retry. Render-time
+  // reset (React's "adjust state on prop change" pattern) rather than an effect.
+  const fieldKey = resetKey ?? body;
+  const [prevKey, setPrevKey] = useState(fieldKey);
+  if (fieldKey !== prevKey) {
+    setPrevKey(fieldKey);
     setText('');
   }
   // One inline message at a time: a failure outranks the neutral note.
@@ -80,7 +86,7 @@ export function DescribeDialog({
     const target = areaRef.current;
     runWhenReachable(() => { target?.focus(); }, target);
     return undefined;
-  }, [body]);
+  }, [fieldKey]);
 
   const submit = () => {
     // Escape then Cmd/Ctrl+Enter during the exit fade must not start a draft.
@@ -115,7 +121,7 @@ export function DescribeDialog({
             disabled={busy}
             onChange={(event) => { setText(event.target.value); }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !isImeComposing(event)) {
                 event.preventDefault();
                 submit();
               }

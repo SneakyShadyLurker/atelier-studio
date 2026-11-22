@@ -38,7 +38,7 @@ beforeAll(() => {
           },
         }), { headers: { 'content-type': 'text/event-stream' } });
       }
-      const frame = JSON.stringify({ choices: [{ index: 0, delta: { content: '{"kind":"entries","entries":["navy"]}' }, finish_reason: 'stop' }] });
+      const frame = JSON.stringify({ choices: [{ index: 0, delta: { content: '{"kind":"options","options":[{"value":"navy","weight":1}],"question":null}' }, finish_reason: 'stop' }] });
       return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
     },
   });
@@ -86,8 +86,8 @@ describe('textModelProviderFor', () => {
     expect(after).not.toBe(before);
     expect(textModelProviderFor(config, store, modelRowId)).toBe(after);
 
-    const result = await after.draftList({ name: 'Colours', existing: [], target: 5 }, new AbortController().signal);
-    expect(result).toEqual({ type: 'ok', payload: { kind: 'entries', entries: ['navy'] } });
+    const result = await after.draftList({ mode: 'extend', name: 'Colours', options: [{ value: 'red', weight: 1 }], addLimit: 5 }, new AbortController().signal);
+    expect(result).toEqual({ type: 'ok', payload: { kind: 'changes', baseCount: 1, changes: [{ id: 0, op: 'add', value: 'navy', weight: 1, why: '' }], unplaced: [], summary: null } });
     const request = seen.at(-1);
     // The stored key is decrypted at use time and the edited row is live.
     expect(request?.authorization).toBe('Bearer sk-stored-key');
@@ -107,10 +107,10 @@ describe('textModelProviderFor', () => {
   test('TEXT_STREAM_INCLUDE_USAGE asks streams for usage, on by default', async () => {
     const { store, modelRowId } = await setup();
     const signal = new AbortController().signal;
-    await textModelProviderFor(testConfig(), store, modelRowId).draftList({ name: 'Colours', existing: [], target: 5 }, signal);
+    await textModelProviderFor(testConfig(), store, modelRowId).draftList({ mode: 'extend', name: 'Colours', options: [{ value: 'red', weight: 1 }], addLimit: 5 }, signal);
     expect(seen.at(-1)?.body.stream_options).toEqual({ include_usage: true });
     const off = testConfig({ TEXT_STREAM_INCLUDE_USAGE: 'false' });
-    await textModelProviderFor(off, store, modelRowId).draftList({ name: 'Colours', existing: [], target: 5 }, signal);
+    await textModelProviderFor(off, store, modelRowId).draftList({ mode: 'extend', name: 'Colours', options: [{ value: 'red', weight: 1 }], addLimit: 5 }, signal);
     expect(seen.at(-1)?.body.stream_options).toBeUndefined();
   });
 
@@ -130,7 +130,7 @@ describe('textModelProviderFor', () => {
     };
     setTextModelProviderForTests(fake);
     const provider = textModelProviderFor(config, store, modelRowId);
-    expect(await provider.draftList({ name: 'x', existing: [], target: 1 }, new AbortController().signal))
+    expect(await provider.draftList({ mode: 'extend', name: 'x', options: [{ value: 'red', weight: 1 }], addLimit: 1 }, new AbortController().signal))
       .toMatchObject({ type: 'failed', detail: 'fake' });
     // Omitted methods are back-filled as the legacy setter did.
     expect(await provider.inferTaxonomy('{}', new AbortController().signal)).toEqual({ type: 'ok', ops: [] });

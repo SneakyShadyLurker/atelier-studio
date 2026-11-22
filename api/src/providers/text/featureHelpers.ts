@@ -7,6 +7,14 @@ import {
   type DraftTemplateResponse,
   type DraftVariableListResponse,
 } from '@atelier/shared';
+import {
+  cleanListCandidates,
+  placeListOperations,
+  uniqueListName,
+  type ListCandidate,
+  type ListOptionDraft,
+} from '@atelier/shared/list-draft';
+import { PROMPT_LIBRARY_NAME_MAX_CHARS } from '@atelier/shared/prompt-limits';
 import { placeTemplateOperations, type PlaceOptions, type TemplateOperation } from '@atelier/shared/template-rework';
 import { findTokens, VAR_TOKEN_ANCHORED } from '@atelier/shared/template-tokens';
 import { BrokenCircuitError, TaskCancelledError, type IPolicy } from 'cockatiel';
@@ -34,6 +42,7 @@ import { errorToRawString as detailOf } from '../_http';
 import type { ProviderLogger } from '../types';
 import {
   AI_FILL_MAX_ATTEMPTS,
+  type DraftListBudgetMode,
   aiFillBatchPerAttemptTimeoutMs,
   aiFillPerAttemptTimeoutMs,
   MAX_DRAFT_RAW_BODY_CHARS,
@@ -166,12 +175,21 @@ export interface EnhanceImageInput {
   mime: string;
 }
 
+/** The provider's list-draft modes: the route sends an empty list's `extend` as `seed`. */
+export type DraftListProviderMode = DraftListBudgetMode;
+
 export interface DraftListProviderInput {
   readonly modelId?: string;
-  name: string;
-  existing: readonly string[];
-  description?: string;
-  target: number;
+  readonly mode: DraftListProviderMode;
+  /** The list's name; absent for `create`. */
+  readonly name?: string;
+  /** The base: the editor's non-blank rows, in order. */
+  readonly options: readonly ListOptionDraft[];
+  readonly description?: string;
+  /** The most options the answer may add or write. */
+  readonly addLimit: number;
+  /** Every list name of the user (`create`): shown to the model and kept free of collisions. */
+  readonly listNames?: readonly string[];
   /** User-pinned effort; replaces the model's default effort. */
   readonly reasoningEffort?: TextReasoningEffort;
 }
@@ -354,30 +372,6 @@ export function unparseableFailure(detail: string): TextCallFailure {
   return { type: 'failed', kind: 'transient', status: null, detail };
 }
 
-export function parseDraftPayload(raw: string): DraftVariableListResponse | null {
-  const parsed = parseModelJsonObject(raw);
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const obj = parsed as { kind?: unknown; entries?: unknown; question?: unknown };
-  if (obj.kind === 'entries' && Array.isArray(obj.entries)) {
-    const entries = obj.entries.filter((e): e is string => typeof e === 'string');
-    return { kind: 'entries', entries };
-  }
-  if (obj.kind === 'clarify' && typeof obj.question === 'string' && obj.question.trim().length > 0) {
-    return { kind: 'clarify', question: obj.question };
-  }
-  return null;
-}
-
-export function draftBrief(input: DraftListProviderInput): string {
-  const lines = [
-    `List name: ${JSON.stringify(input.name)}`,
-    `Existing values (do not repeat these): ${input.existing.length > 0 ? JSON.stringify(input.existing) : 'none'}`,
-    `Produce up to ${input.target} new values.`,
-  ];
-  if (input.description) lines.push(`User description of the list: ${JSON.stringify(input.description)}`);
-  return lines.join('\n');
-}
-
 export function draftTemplateBrief(input: DraftTemplateProviderInput): string {
   const parts: string[] = [];
   parts.push(`<name>${JSON.stringify(input.name)}</name>`);
@@ -505,6 +499,142 @@ export const REWORK_TEMPLATE_RESPONSE_FORMAT = {
 } as const;
 
 const UNPARSEABLE_DRAFT = 'unparseable draft response';
+
+// ---- list drafts ----------------------------------------------------------
+
+/** One row of a list brief: its 1-based number, JSON-encoded value and weight. */
+function listBriefRows(options: readonly ListOptionDraft[]): string[] {
+  return ['<options>', ...options.map((option, i) => `  ${i + 1}. ${JSON.stringify(option.value)} (weight ${option.weight})`), '</options>'];
+}
+
+/**
+ * The user message of a list draft (spec R2.10): XML-flavoured tags around
+ * JSON-encoded user strings, as the mode's system prompt describes its input.
+ */
+export function draftListBrief(input: DraftListProviderInput): string {
+  const parts: string[] = [];
+  const write = input.mode === 'create' || input.mode === 'seed';
+  if (write) parts.push(`<mode>${JSON.stringify(input.mode)}</mode>`);
+  if (input.mode !== 'create') parts.push(`<name>${JSON.stringify(input.name ?? '')}</name>`);
+  if (!write) parts.push(...listBriefRows(input.options));
+  if (input.description !== undefined) parts.push(`<description>${JSON.stringify(input.description)}</description>`);
+  parts.push(`<limit>${input.addLimit}</limit>`);
+  if (input.mode === 'create') parts.push(`<library>${JSON.stringify(input.listNames ?? [])}</library>`);
+  return parts.join('\n');
+}
+
+const ListOptionAnswerSchema = z.object({ value: z.string(), weight: z.number() }).strict();
+
+/** A strict response format for `schema`, as OpenAI strict schemas and Anthropic's forced json tool need it. */
+function strictListFormat(name: string, schema: z.ZodType) {
+  const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(schema, { target: 'draft-7', io: 'output' });
+  return { type: 'json_schema', json_schema: { name, strict: true, schema: jsonSchema } } as const;
+}
+
+/** Create and seed: the whole list, with a name for `create` and null for a seed. */
+export const LIST_DRAFT_RESPONSE_FORMAT = strictListFormat('list_draft', z.object({
+  name: z.string().nullable(),
+  options: z.array(ListOptionAnswerSchema),
+}).strict());
+
+/** Extend: new options, or one question when nothing shows what the list varies. */
+export const LIST_EXTEND_RESPONSE_FORMAT = strictListFormat('list_extend', z.object({
+  kind: z.enum(['options', 'clarify']),
+  options: z.array(ListOptionAnswerSchema),
+  question: z.string().nullable(),
+}).strict());
+
+/** Rework: changes addressed by row number and current value, each with its reason. */
+export const LIST_REWORK_RESPONSE_FORMAT = strictListFormat('list_rework', z.object({
+  changes: z.array(z.object({
+    why: z.string(),
+    op: z.enum(['edit', 'remove', 'add']),
+    n: z.number().nullable(),
+    find: z.string().nullable(),
+    value: z.string().nullable(),
+    weight: z.number().nullable(),
+  }).strict()),
+  summary: z.string(),
+}).strict());
+
+/** The answer's array under `key` as candidates, objects only; null when the answer has no such array. */
+function listCandidates(parsed: object, key: string): ListCandidate[] | null {
+  const members = (parsed as Record<string, unknown>)[key];
+  if (!Array.isArray(members)) return null;
+  return (members as unknown[]).flatMap((member): ListCandidate[] => {
+    if (typeof member !== 'object' || member === null) return [];
+    const { value, weight } = member as { value?: unknown; weight?: unknown };
+    return [{ value, weight }];
+  });
+}
+
+/**
+ * Turns a create or seed answer into the whole list (spec R2.5): cleaned
+ * options cut to the add limit, and for `create` a name that is free among the
+ * user's lists. No usable option, or a create without a name, is transient.
+ */
+export function writeListResultFromContent(content: string, input: DraftListProviderInput): DraftResult {
+  const parsed = parseModelJsonObject(content);
+  if (!parsed || typeof parsed !== 'object') return unparseableFailure(UNPARSEABLE_DRAFT);
+  const candidates = listCandidates(parsed, 'options');
+  if (candidates === null) return unparseableFailure(UNPARSEABLE_DRAFT);
+  const options = cleanListCandidates(candidates, [], input.addLimit);
+  if (options.length === 0) return unparseableFailure('list draft has no usable option');
+  if (input.mode !== 'create') return { type: 'ok', payload: { kind: 'list', name: null, options } };
+  const proposed = (parsed as { name?: unknown }).name;
+  const name = typeof proposed === 'string'
+    ? uniqueListName(proposed, input.listNames ?? [], PROMPT_LIBRARY_NAME_MAX_CHARS)
+    : null;
+  if (name === null) return unparseableFailure('list draft has no name');
+  return { type: 'ok', payload: { kind: 'list', name, options } };
+}
+
+/**
+ * Turns an extend answer into add changes (spec R2.6): cleaned options that
+ * differ from every base value, cut to the add limit; or the model's question.
+ */
+export function extendListResultFromContent(content: string, input: DraftListProviderInput): DraftResult {
+  const parsed = parseModelJsonObject(content);
+  if (!parsed || typeof parsed !== 'object') return unparseableFailure(UNPARSEABLE_DRAFT);
+  const { kind, question } = parsed as { kind?: unknown; question?: unknown };
+  if (kind === 'clarify') {
+    if (typeof question !== 'string' || question.trim() === '') return unparseableFailure(UNPARSEABLE_DRAFT);
+    return { type: 'ok', payload: { kind: 'clarify', question: question.trim() } };
+  }
+  const candidates = listCandidates(parsed, 'options');
+  if (candidates === null) return unparseableFailure(UNPARSEABLE_DRAFT);
+  const options = cleanListCandidates(candidates, input.options.map((option) => option.value), input.addLimit);
+  return {
+    type: 'ok',
+    payload: {
+      kind: 'changes',
+      baseCount: input.options.length,
+      changes: options.map((option, id) => ({ id, op: 'add', value: option.value, weight: option.weight, why: '' })),
+      unplaced: [],
+      summary: null,
+    },
+  };
+}
+
+/** Turns a rework answer into placed changes against the base (spec R2.7). */
+export function reworkListResultFromContent(content: string, input: DraftListProviderInput): DraftResult {
+  const parsed = parseModelJsonObject(content);
+  if (!parsed || typeof parsed !== 'object') return unparseableFailure(UNPARSEABLE_DRAFT);
+  const { changes: operations, summary } = parsed as { changes?: unknown; summary?: unknown };
+  if (!Array.isArray(operations)) return unparseableFailure(UNPARSEABLE_DRAFT);
+  const { changes, unplaced } = placeListOperations(input.options, operations as unknown[], input.addLimit);
+  const trimmedSummary = typeof summary === 'string' ? summary.trim() : '';
+  return {
+    type: 'ok',
+    payload: {
+      kind: 'changes',
+      baseCount: input.options.length,
+      changes,
+      unplaced,
+      summary: trimmedSummary === '' ? null : trimmedSummary,
+    },
+  };
+}
 
 /**
  * Turns a draft-template answer into the result: parses the JSON (fences,

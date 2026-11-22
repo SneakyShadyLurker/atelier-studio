@@ -7,7 +7,7 @@ import {
 } from './aiFillSystemPrompt';
 import { buildBrainstormSystemPrompt } from './brainstormCharactersSystemPrompt';
 import { buildCondensePromptSystemPrompt } from './condensePromptSystemPrompt';
-import { DRAFT_LIST_SYSTEM_PROMPT } from './draftListSystemPrompt';
+import { EXTEND_LIST_SYSTEM_PROMPT, REWORK_LIST_SYSTEM_PROMPT, WRITE_LIST_SYSTEM_PROMPT } from './draftListSystemPrompt';
 import { DRAFT_TEMPLATE_SYSTEM_PROMPT } from './draftTemplateSystemPrompt';
 import {
   ENHANCE_SYSTEM_PROMPT,
@@ -35,7 +35,9 @@ const prompts: Record<string, string> = {
   'ai-fill-batch-kimi': buildKimiAiFillBatchSystemPrompt({ modelId: aiFillArgs.modelId, items: [aiFillArgs] }),
   brainstorm: buildBrainstormSystemPrompt({ count: 2, modelId: 'gpt-image-test' }),
   condense: buildCondensePromptSystemPrompt(200),
-  'draft-list': DRAFT_LIST_SYSTEM_PROMPT,
+  'extend-list': EXTEND_LIST_SYSTEM_PROMPT,
+  'rework-list': REWORK_LIST_SYSTEM_PROMPT,
+  'write-list': WRITE_LIST_SYSTEM_PROMPT,
   'draft-template': DRAFT_TEMPLATE_SYSTEM_PROMPT,
   enhance: ENHANCE_SYSTEM_PROMPT,
   'enhance-h3': H3_IMAGE_ENHANCE_SYSTEM_PROMPT,

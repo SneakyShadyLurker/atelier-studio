@@ -134,15 +134,15 @@ describe('stream stall watchdog', () => {
     const fetchState = useFetch((call) => call === 1
       ? stalledAfterContent()
       : scriptedResponse((send) => {
-        send(contentFrame(JSON.stringify({ kind: 'entries', entries: ['teal'] })));
+        send(contentFrame(JSON.stringify({ kind: 'options', options: [{ value: 'teal', weight: 1 }], question: null })));
         send(stopFrame);
         return Promise.resolve();
       }));
     const result = await watchedProvider(50).draftList(
-      { name: 'colours', existing: [], target: 1 },
+      { mode: 'extend', name: 'colours', options: [{ value: 'red', weight: 1 }], addLimit: 1 },
       new AbortController().signal,
     );
-    expect(result).toEqual({ type: 'ok', payload: { kind: 'entries', entries: ['teal'] } });
+    expect(result).toEqual({ type: 'ok', payload: { kind: 'changes', baseCount: 1, changes: [{ id: 0, op: 'add', value: 'teal', weight: 1, why: '' }], unplaced: [], summary: null } });
     expect(fetchState.calls()).toBe(2);
   });
 

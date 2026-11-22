@@ -58,11 +58,14 @@ describe('model-output JSON repair', () => {
   });
 
   test('list draft: stray bracket and raw newline', async () => {
-    const input = { name: 'Colours', existing: [], target: 5 };
-    expect(await provider('{"kind":"clarify","question":"Which?"]}').draftList(input, signal()))
+    const input = { mode: 'extend', name: 'Colours', options: [{ value: 'red', weight: 1 }], addLimit: 5 } as const;
+    expect(await provider('{"kind":"clarify","options":[],"question":"Which?"]}').draftList(input, signal()))
       .toEqual({ type: 'ok', payload: { kind: 'clarify', question: 'Which?' } });
-    expect(await provider('{"kind":"entries","entries":["navy\nblue"]}').draftList(input, signal()))
-      .toEqual({ type: 'ok', payload: { kind: 'entries', entries: ['navy\nblue'] } });
+    expect(await provider('{"kind":"options","options":[{"value":"navy\nblue","weight":1}],"question":null}').draftList(input, signal()))
+      .toEqual({
+        type: 'ok',
+        payload: { kind: 'changes', baseCount: 1, changes: [{ id: 0, op: 'add', value: 'navy\nblue', weight: 1, why: '' }], unplaced: [], summary: null },
+      });
   });
 
   test('template draft: stray bracket and raw newline', async () => {

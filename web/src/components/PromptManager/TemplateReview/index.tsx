@@ -2,11 +2,10 @@ import { Fragment, useEffect, useEffectEvent, useId, useMemo, useRef, useState, 
 import type { TemplateChange, UnplacedReason, WordRun } from '@atelier/shared/template-rework';
 import { isReducedMotionPreferred } from '../../../hooks/useReducedMotion';
 import { runWhenReachable } from '../../../lib/focus';
-import { isImeComposing } from '../../../lib/ime';
 import { segmentTemplate, type Segment } from '../../../lib/trackedTemplate';
-import btn from '../../../styles/buttons.module.css';
 import { Disclosure } from '../../Disclosure';
 import { I } from '../../icons/I';
+import { countAnnouncement as announceCounts, Mark, NoteRow, ReviewHead, ReviewHint, UnplacedList, useReviewShortcuts } from '../reviewParts';
 import { acceptedIds, setAllDecisions, setDecision, type TemplateReview as Review } from '../templateReview';
 import styles from './index.module.css';
 
@@ -31,64 +30,8 @@ const CAUSES: Record<UnplacedReason, string> = {
   too_long: 'It would make the template too long',
 };
 
-const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? '⌘' : 'Ctrl';
-
-const plural = (count: number, one: string, many: string) => `${String(count)} ${count === 1 ? one : many}`;
-
 function countAnnouncement(review: Review): string {
-  return `${plural(acceptedIds(review).length, 'change', 'changes')} to apply, ${String(review.rejected.length)} rejected`;
-}
-
-function isTextField(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable;
-}
-
-/** One painted run. The painted span stays put across decisions, so its tint
- *  eases; only while accepted does it hold the semantic del/ins. */
-function Mark({ kind, accepted, text }: { kind: 'del' | 'ins'; accepted: boolean; text: string }) {
-  if (kind === 'del') {
-    return (
-      <span className={styles.del}>
-        {accepted ? <del><span className="srOnly">deleted: </span>{text}</del> : text}
-      </span>
-    );
-  }
-  return (
-    <span className={styles.ins}>
-      {accepted ? <ins><span className="srOnly">inserted: </span>{text}</ins> : text}
-    </span>
-  );
-}
-
-interface NoteRowProps {
-  change: TemplateChange;
-  accepted: boolean;
-  current: boolean;
-  reasonId: string;
-  onToggle: () => void;
-}
-
-function NoteRow({ change, accepted, current, reasonId, onToggle }: NoteRowProps) {
-  return (
-    <div className={styles.note} data-current={current ? 'true' : undefined} data-note-id={change.id}>
-      <span className={styles.num} aria-hidden="true">{change.id + 1}</span>
-      <span className={styles.why}>
-        <span id={reasonId}>
-          {change.why}
-          {!accepted && <span className="srOnly"> Rejected.</span>}
-        </span>
-        {change.why === '' ? null : ' '}
-        {/* Always laid out, shown only while rejected: the word must not add a
-            line to the note when a decision flips (nothing moves, R4.5). */}
-        <span className={styles.state} data-shown={accepted ? 'false' : 'true'} aria-hidden="true">Rejected</span>
-      </span>
-      <button type="button" className={styles.act} aria-describedby={reasonId} onClick={onToggle}>
-        <span aria-hidden={!accepted} data-shown={accepted ? 'true' : 'false'}>Reject</span>
-        <span aria-hidden={accepted} data-shown={accepted ? 'false' : 'true'}>Accept</span>
-      </button>
-    </div>
-  );
+  return announceCounts(acceptedIds(review).length, review.rejected.length);
 }
 
 interface TemplateReviewProps {
@@ -113,7 +56,6 @@ export default function TemplateReview({ review, onChange, onApply, scopeRef }: 
   const [current, setCurrent] = useState(0);
   const [openFolds, setOpenFolds] = useState<ReadonlySet<number>>(() => new Set());
   const [openRemoved, setOpenRemoved] = useState<ReadonlySet<number>>(() => new Set());
-  const [unplacedOpen, setUnplacedOpen] = useState(false);
   const [announcement, setAnnouncement] = useState('');
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const acceptAllRef = useRef<HTMLButtonElement | null>(null);
@@ -121,7 +63,6 @@ export default function TemplateReview({ review, onChange, onApply, scopeRef }: 
   const idBase = useId();
   const reasonId = (id: number) => `${idBase}-why-${String(id)}`;
   const removedId = (id: number) => `${idBase}-removed-${String(id)}`;
-  const unplacedId = `${idBase}-unplaced`;
   const currentId = review.changes[current]?.id;
 
   const groupOf = (id: number) => sheetRef.current?.querySelector<HTMLElement>(`[data-change-id="${String(id)}"]`) ?? null;
@@ -163,36 +104,18 @@ export default function TemplateReview({ review, onChange, onApply, scopeRef }: 
     runWhenReachable(() => { (decision === 'rejected' ? acceptAllRef : rejectAllRef).current?.focus(); });
   };
 
-  const onScopeKey = useEffectEvent((event: KeyboardEvent) => {
-    if (isImeComposing(event)) return;
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-      if (acceptedCount === 0) return;
-      event.preventDefault();
-      onApply();
-      return;
-    }
-    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || isTextField(event.target)) return;
-    const key = event.key.toLowerCase();
-    if (key === 'j') {
-      event.preventDefault();
-      navigate(current + 1);
-    } else if (key === 'k') {
-      event.preventDefault();
-      navigate(current - 1);
-    } else if ((key === 'a' || key === 'r') && currentId !== undefined) {
-      event.preventDefault();
-      const next = decide(currentId, key === 'a' ? 'accepted' : 'rejected');
+  useReviewShortcuts({
+    scopeRef,
+    onNext: () => { navigate(current + 1); },
+    onPrevious: () => { navigate(current - 1); },
+    onDecideCurrent: (decision) => {
+      if (currentId === undefined) return;
+      const next = decide(currentId, decision);
       if (current + 1 < total) navigate(current + 1, `${countAnnouncement(next)}. `);
-    }
+    },
+    onApply,
+    canApply: acceptedCount > 0,
   });
-
-  useEffect(() => {
-    const scope = scopeRef.current;
-    if (scope === null) return undefined;
-    const listener = (event: KeyboardEvent) => { onScopeKey(event); };
-    scope.addEventListener('keydown', listener);
-    return () => { scope.removeEventListener('keydown', listener); };
-  }, [scopeRef]);
 
   const revealFold = (start: number) => {
     setOpenFolds((open) => new Set(open).add(start));
@@ -259,43 +182,18 @@ export default function TemplateReview({ review, onChange, onApply, scopeRef }: 
 
   return (
     <div className={styles.review}>
-      <div className={styles.head}>
-        <span className={styles.label}>Review</span>
-        {review.summary !== null && review.summary !== '' && <p className={styles.summary}>{review.summary}</p>}
-        <div className={styles.tools}>
-          {acceptedCount < total && (
-            <button type="button" ref={acceptAllRef} className={styles.textAction} onClick={() => { decideAll('accepted'); }}>
-              Accept all
-            </button>
-          )}
-          {acceptedCount > 0 && (
-            <button type="button" ref={rejectAllRef} className={styles.textAction} onClick={() => { decideAll('rejected'); }}>
-              Reject all
-            </button>
-          )}
-          <button
-            type="button"
-            className={`${btn.iconAction} ${styles.nav}`}
-            aria-label="Previous change"
-            aria-disabled={current === 0}
-            data-tip="Previous change"
-            onClick={() => { navigate(current - 1); }}
-          >
-            <I.caret className={styles.up} />
-          </button>
-          <span className={styles.count}>{`${String(current + 1)} / ${String(total)}`}</span>
-          <button
-            type="button"
-            className={`${btn.iconAction} ${styles.nav}`}
-            aria-label="Next change"
-            aria-disabled={current >= total - 1}
-            data-tip="Next change"
-            onClick={() => { navigate(current + 1); }}
-          >
-            <I.caret />
-          </button>
-        </div>
-      </div>
+      <ReviewHead
+        summary={review.summary}
+        total={total}
+        acceptedCount={acceptedCount}
+        current={current}
+        onAcceptAll={() => { decideAll('accepted'); }}
+        onRejectAll={() => { decideAll('rejected'); }}
+        onPrevious={() => { navigate(current - 1); }}
+        onNext={() => { navigate(current + 1); }}
+        acceptAllRef={acceptAllRef}
+        rejectAllRef={rejectAllRef}
+      />
 
       <div ref={sheetRef} role="group" aria-label="Body, under review" className={styles.sheet}>
         {segments.map((segment, index) => {
@@ -364,38 +262,17 @@ export default function TemplateReview({ review, onChange, onApply, scopeRef }: 
         })}
       </div>
 
-      {review.unplaced.length > 0 && (
-        <div className={styles.unplaced}>
-          <button
-            type="button"
-            className={styles.unplacedToggle}
-            aria-expanded={unplacedOpen}
-            aria-controls={unplacedId}
-            onClick={() => { setUnplacedOpen((open) => !open); }}
-          >
-            <span className={styles.caret} data-open={unplacedOpen ? 'true' : 'false'}><I.caret /></span>
-            {`${plural(review.unplaced.length, 'suggestion', 'suggestions')} could not be placed`}
-          </button>
-          <Disclosure id={unplacedId} open={unplacedOpen}>
-            <ul className={styles.unplacedList}>
-              {review.unplaced.map((item, index) => (
-                <li key={index} className={styles.unplacedItem}>
-                  {item.why !== '' && <p className={styles.unplacedWhy}>{item.why}</p>}
-                  {item.replace !== '' && <p className={styles.proposed}>{item.replace}</p>}
-                  <p className={styles.cause}>{CAUSES[item.reason]}</p>
-                </li>
-              ))}
-            </ul>
-          </Disclosure>
-        </div>
-      )}
+      <UnplacedList count={review.unplaced.length}>
+        {review.unplaced.map((item, index) => (
+          <li key={index} className={styles.unplacedItem}>
+            {item.why !== '' && <p className={styles.unplacedWhy}>{item.why}</p>}
+            {item.replace !== '' && <p className={styles.proposed}>{item.replace}</p>}
+            <p className={styles.cause}>{CAUSES[item.reason]}</p>
+          </li>
+        ))}
+      </UnplacedList>
 
-      <p className={styles.hint}>
-        <span><kbd className={styles.kbd}>J</kbd> <kbd className={styles.kbd}>K</kbd> move</span>
-        <span><kbd className={styles.kbd}>A</kbd> accept</span>
-        <span><kbd className={styles.kbd}>R</kbd> reject</span>
-        <span><kbd className={styles.kbd}>{MOD_KEY}</kbd> <kbd className={styles.kbd}>Enter</kbd> apply</span>
-      </p>
+      <ReviewHint />
 
       <div role="status" aria-live="polite" aria-atomic="true" className="srOnly">{announcement}</div>
     </div>

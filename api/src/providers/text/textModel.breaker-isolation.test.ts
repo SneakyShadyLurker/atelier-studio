@@ -41,7 +41,7 @@ describe('per-capability breaker isolation', () => {
       expect(eFirst.done).toBe(false);
 
       const dr = await provider.draftList(
-        { name: 'x', existing: [], target: 5 },
+        { mode: 'extend', name: 'x', options: [{ value: 'red', weight: 1 }], addLimit: 5 },
         new AbortController().signal,
       );
       expect(dr.type).toBe('failed');

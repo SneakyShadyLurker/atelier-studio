@@ -27,7 +27,7 @@ describe('textModel stream retry', () => {
     globalThis.fetch = (() => {
       calls += 1;
       if (calls === 1) return Promise.resolve(erroredBodyResponse(new TypeError('connection reset')));
-      return Promise.resolve(sseJsonResponse({ kind: 'entries', entries: ['navy'] }));
+      return Promise.resolve(sseJsonResponse({ kind: 'options', options: [{ value: 'navy', weight: 1 }], question: null }));
     }) as unknown as typeof fetch;
     try {
       const provider = testTextModelProvider({ origin: 'http://x', token: 't', model: genericTextModel('m'), maxResponseBytes: 1_000_000, draftListPolicy: buildResilientPolicy({
@@ -40,12 +40,12 @@ describe('textModel stream retry', () => {
         }) });
 
       const result = await provider.draftList(
-        { name: 'Colours', existing: [], target: 5 },
+        { mode: 'extend', name: 'Colours', options: [{ value: 'red', weight: 1 }], addLimit: 5 },
         new AbortController().signal,
       );
 
       expect(calls).toBe(2);
-      expect(result).toEqual({ type: 'ok', payload: { kind: 'entries', entries: ['navy'] } });
+      expect(result).toEqual({ type: 'ok', payload: { kind: 'changes', baseCount: 1, changes: [{ id: 0, op: 'add', value: 'navy', weight: 1, why: '' }], unplaced: [], summary: null } });
     } finally {
       globalThis.fetch = original;
     }
@@ -80,14 +80,14 @@ test('EOF without a successful terminal remains transient and retries before ret
   const original = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = Object.assign(() => {
-    if (++calls > 1) return Promise.resolve(sseJsonResponse({ kind: 'entries', entries: ['navy'] }));
+    if (++calls > 1) return Promise.resolve(sseJsonResponse({ kind: 'options', options: [{ value: 'navy', weight: 1 }], question: null }));
     return Promise.resolve(new Response('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
   }, { preconnect: original.preconnect });
   try {
     const provider = testTextModelProvider({ origin: 'http://x', token: 't', model: genericTextModel('m'), maxResponseBytes: 1_000_000, draftListPolicy: buildResilientPolicy({ timeoutPerAttemptMs: 5_000, maxAttempts: 2, initialBackoffMs: 1,
         maxBackoffMs: 1, breakerThreshold: 8, halfOpenAfterMs: 30_000 }) });
-    expect(await provider.draftList({ name: 'Colours', existing: [], target: 5 }, new AbortController().signal))
-      .toEqual({ type: 'ok', payload: { kind: 'entries', entries: ['navy'] } });
+    expect(await provider.draftList({ mode: 'extend', name: 'Colours', options: [{ value: 'red', weight: 1 }], addLimit: 5 }, new AbortController().signal))
+      .toEqual({ type: 'ok', payload: { kind: 'changes', baseCount: 1, changes: [{ id: 0, op: 'add', value: 'navy', weight: 1, why: '' }], unplaced: [], summary: null } });
     expect(calls).toBe(2);
   } finally { globalThis.fetch = original; }
 });

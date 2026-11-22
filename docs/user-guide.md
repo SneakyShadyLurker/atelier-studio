@@ -200,6 +200,41 @@ stays for later drafts and shows there too.
 If an admin locked the prompt writer for the image model selected in the
 Composer, the dialog names that model instead and there is nothing to pick.
 
+**Draft List** in the variable list editor does the same for a list's
+options. On an empty list it asks what the list should hold and fills the
+rows. On a list that already has options the dialog offers two choices:
+
+- **Add options** adds new options in the vein of the ones you have. Say what
+  to add, such as "15 more, leaning toward winter", or leave the field blank
+  for more of the same. It never changes or removes an existing option.
+- **Rework** changes the list the way you describe: rewrite options, remove
+  some, change how often one is drawn, or add new ones. Options you do not
+  mention stay as they are.
+
+Either way the answer opens as a review in place of the option list. An
+edited option shows its removed words struck through and its new words
+underlined on a tinted background; a removed option is struck through; added
+options sit at the end, marked the same way as new words. A changed weight
+reads "weight 1 to 5". Each change has a number, the model's reason where it
+gave one, and a **Reject** button; long runs of untouched options fold behind
+**Show N unchanged options**. Deciding, stepping through the changes, the
+keyboard shortcuts, **Apply N changes**, **Discard**, **Undo** and **Rework
+again** work as in the template review. When the model proposed a change it
+could not match to an option, the review lists it under "1 suggestion could
+not be placed". Applying does not save the list: the options are saved when
+you press **Save list**. A reworked option keeps its tags; added options
+start without tags. A weight the review changed is saved with the list too:
+only a weight you type yourself is saved straight away, and if that save
+fails the field goes back to what it showed before, with a message.
+
+**Draft New List** in the Lists pane makes a whole list from a description,
+such as "twenty weather conditions, from clear to stormy". The text model
+names the list and writes its options. The list is created right away and
+its options stay unsaved until you press **Save list**.
+
+These dialogs show the **Model** and **Reasoning** fields too; they are your
+**List drafts** pick.
+
 **Enhance** asks a text model to rewrite the prompt and generates from the
 rewrite. Every press rolls the prompt's tokens afresh, rewrites that result and
 starts one batch, so you can press it repeatedly without waiting; the prompt

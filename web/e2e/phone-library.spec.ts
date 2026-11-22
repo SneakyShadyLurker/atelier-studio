@@ -112,7 +112,9 @@ test.describe('phone prompt library editors', () => {
     await expect(editor).toBeVisible();
     const head = editor.locator('[data-zone="head"]');
     await expect(head.getByRole('button', { name: 'More list actions' })).toBeVisible();
-    await expect(head.getByRole('button', { name: /Draft List/ })).toHaveCount(0);
+    // Draft List lives behind More; the Lists pane keeps Draft New List beside New.
+    await expect(head.getByRole('button', { name: 'Draft List', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('complementary', { name: 'Lists' }).getByRole('button', { name: 'Draft New List' })).toBeVisible();
 
     const body = editor.locator('[data-zone="body"]');
     const name = body.getByRole('textbox', { name: 'Option 1: serene' });

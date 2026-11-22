@@ -155,9 +155,53 @@ export const DiagnoseSelectionResponseSchema = z.readonly(z.object({
 }));
 export type DiagnoseSelectionResponseWire = JsonFields<z.infer<typeof DiagnoseSelectionResponseSchema>>;
 
+const listWeight = z.int().check(z.gte(0), z.lte(100));
+const listIndex = z.int().check(z.nonnegative());
+
+// One option of a variable list as the list draft sends and answers it.
+export const ListOptionSchema = z.object({ value: z.string(), weight: listWeight });
+export type ListOptionWire = JsonFields<z.infer<typeof ListOptionSchema>>;
+
+// One placed list change: `index` is 0-based into the options the request
+// carried (the base); `id` is the change's position in `changes`. An edit
+// carries the row's value and weight after the edit.
+export const ListChangeSchema = z.union([
+  z.object({ id: listIndex, op: z.literal('add'), value: z.string(), weight: listWeight, why: z.string() }),
+  z.object({ id: listIndex, op: z.literal('edit'), index: listIndex, value: z.string(), weight: listWeight, why: z.string() }),
+  z.object({ id: listIndex, op: z.literal('remove'), index: listIndex, why: z.string() }),
+]);
+export type ListChangeWire = JsonFields<z.infer<typeof ListChangeSchema>>;
+
+export const UnplacedListReasonSchema = z.enum(['missing', 'ambiguous', 'overlap', 'duplicate']);
+export type UnplacedListReasonWire = z.infer<typeof UnplacedListReasonSchema>;
+
+// A list rework operation the server could not place; kept for display only.
+// `value` and `weight` are what an edit proposed, null where it proposed nothing.
+export const UnplacedListChangeSchema = z.object({
+  op: z.enum(['edit', 'remove']),
+  find: z.string(),
+  value: z.nullable(z.string()),
+  weight: z.nullable(listWeight),
+  why: z.string(),
+  reason: UnplacedListReasonSchema,
+});
+export type UnplacedListChangeWire = JsonFields<z.infer<typeof UnplacedListChangeSchema>>;
+
 export const DraftVariableListResponseSchema = z.union([
-  z.object({ kind: z.literal('entries'), entries: z.array(z.string()) }),
   z.object({ kind: z.literal('clarify'), question: z.string() }),
+  // The whole content of a new list (`name` set) or an empty one (`name` null).
+  z.object({
+    kind: z.literal('list'),
+    name: z.nullable(z.string()),
+    options: z.readonly(z.array(ListOptionSchema)),
+  }),
+  z.object({
+    kind: z.literal('changes'),
+    baseCount: listIndex,
+    changes: z.readonly(z.array(ListChangeSchema)),
+    unplaced: z.readonly(z.array(UnplacedListChangeSchema)),
+    summary: z.nullable(z.string()),
+  }),
 ]);
 export type DraftVariableListResponseWire = JsonFields<z.infer<typeof DraftVariableListResponseSchema>>;
 

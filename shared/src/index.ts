@@ -24,8 +24,9 @@ import type {
 import type {
   BundleCommonWire, CoherenceWarningWire, CoverageWarningWire, DiagnoseSelectionResponseWire, DimensionBundleWire,
   DimensionProposalWire, DraftTemplateResponseWire, DraftVariableListResponseWire, InferDimensionsResponseWire,
-  InferPhaseEventWire, InferProgressEventWire, RejectedOpWire, RescueBundleWire, RescueDonePayloadWire,
-  RescueFailedPayloadWire, TemplateChangeWire, TemplateConflictWire, UnplacedTemplateChangeWire,
+  InferPhaseEventWire, InferProgressEventWire, ListChangeWire, ListOptionWire, RejectedOpWire, RescueBundleWire,
+  RescueDonePayloadWire, RescueFailedPayloadWire, TemplateChangeWire, TemplateConflictWire, UnplacedListChangeWire,
+  UnplacedTemplateChangeWire,
 } from './promptToolSchemas';
 export { GPT_MODERATION_REASONS, GptModerationNoticeSchema, GptModerationCategoriesSchema } from './moderation';
 export type { GptModerationNotice, GptModerationReason, GptModerationCategory } from './moderation';
@@ -761,7 +762,7 @@ export const TEXT_TASK_DESCRIPTIONS = {
   'ai-fill': 'Fills the ai-fill parts of a template when you generate.',
   brainstorm: 'Produces prompt ideas for the queue.',
   'template-draft': 'Drafts and reworks template bodies.',
-  'list-draft': 'Drafts the options of a variable list.',
+  'list-draft': 'Drafts, extends and reworks variable lists.',
   infer: 'Proposes dimensions and tags for list options.',
   rescue: 'Proposes a list option when new tags leave a template with no valid roll.',
 } as const satisfies Record<TextTask, string>;
@@ -1200,14 +1201,37 @@ export type BrainstormSseEvent =
   | { event: 'done'; data: BrainstormDoneWire }
   | { event: 'error'; data: { message: string } };
 
+/** What a list draft does: write a new list, add options to one, or change its options by instruction. */
+export type DraftListMode = 'create' | 'extend' | 'rework';
+
+/** One option of a variable list as a list draft sends and answers it. */
+export type ListOptionDraft = ListOptionWire;
+
 export interface DraftVariableListRequest {
   readonly modelId?: string;
-  name: string;
-  existing: string[];
+  mode: DraftListMode;
+  /** The list's name; required unless `mode` is `create`, which forbids it. */
+  name?: string;
+  /**
+   * The editor's non-blank rows in order, values trimmed (the base). Changes
+   * address rows by their 0-based position here. Empty for `create`.
+   */
+  options: ListOptionDraft[];
+  /**
+   * The user's instructions, trimmed and non-empty; absent when left blank.
+   * Required for `create`, `rework` and an `extend` of an empty list (a seed).
+   */
   description?: string;
 }
 
 export type DraftVariableListResponse = DraftVariableListResponseWire;
+
+/** A populated list's answer: placed changes against the base, reviewed before anything is written. */
+export type DraftListChanges = Extract<DraftVariableListResponse, { kind: 'changes' }>;
+
+export type ListChange = ListChangeWire;
+
+export type UnplacedListChange = UnplacedListChangeWire;
 
 export interface DraftTemplateRequest {
   readonly modelId?: string;
@@ -1349,6 +1373,11 @@ type _NoUserIdOnModelResolutionPut = _Assert<_NoUserIdOn<ModelResolutionPutReque
 type _NoUserIdOnBrainstormCharactersRequest = _Assert<_NoUserIdOn<BrainstormCharactersRequest>>;
 type _NoUserIdOnDraftListRequest = _Assert<_NoUserIdOn<DraftVariableListRequest>>;
 type _NoUserIdOnDraftVariableListResponse = _Assert<_NoUserIdOn<DraftVariableListResponse>>;
+type _NoUserIdOnDraftListMode = _Assert<_NoUserIdOn<DraftListMode>>;
+type _NoUserIdOnListOptionDraft = _Assert<_NoUserIdOn<ListOptionDraft>>;
+type _NoUserIdOnListChange = _Assert<_NoUserIdOn<ListChange>>;
+type _NoUserIdOnUnplacedListChange = _Assert<_NoUserIdOn<UnplacedListChange>>;
+type _NoUserIdOnDraftListChanges = _Assert<_NoUserIdOn<DraftListChanges>>;
 type _NoUserIdOnDraftTemplateRequest = _Assert<_NoUserIdOn<DraftTemplateRequest>>;
 type _NoUserIdOnDraftTemplateResponse = _Assert<_NoUserIdOn<DraftTemplateResponse>>;
 type _NoUserIdOnTemplateChange = _Assert<_NoUserIdOn<TemplateChange>>;
@@ -1503,6 +1532,14 @@ export type _NoUserIdInWire = [
   readonly __templateReworkTraps: [
     _NoUserIdOnTemplateChange,
     _NoUserIdOnUnplacedTemplateChange,
+  ];
+  // Nested items of the list draft's `list` and `changes` payloads.
+  readonly __listDraftTraps: [
+    _NoUserIdOnDraftListMode,
+    _NoUserIdOnListOptionDraft,
+    _NoUserIdOnListChange,
+    _NoUserIdOnUnplacedListChange,
+    _NoUserIdOnDraftListChanges,
   ];
 };
 

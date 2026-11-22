@@ -2,8 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   AI_FILL_MAX_OUTPUT_TOKENS,
   ENHANCE_MAX_OUTPUT_TOKENS,
-  DRAFT_LIST_MAX_OUTPUT_TOKENS,
   DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS,
+  draftListMaxOutputTokens,
+  draftListMaxResponseBytes,
   draftTemplateMaxOutputTokens,
   draftTemplateMaxResponseBytes,
   MOTION_ENHANCE_MAX_OUTPUT_TOKENS,
@@ -64,8 +65,40 @@ describe('Kimi generic text budgets', () => {
     expect(MOTION_ENHANCE_MAX_OUTPUT_TOKENS).toBe(36_000);
     expect(STORY_PLANNER_MAX_OUTPUT_TOKENS).toBe(36_000);
     expect(INFER_DIMENSIONS_MAX_OUTPUT_TOKENS).toBe(36000);
-    expect(DRAFT_LIST_MAX_OUTPUT_TOKENS).toBe(5200);
     expect(DRAFT_TEMPLATE_MAX_OUTPUT_TOKENS).toBe(5500);
+  });
+});
+
+describe('draftListMaxOutputTokens', () => {
+  const options = [{ value: 'a'.repeat(299) }, { value: '🌅' }];
+
+  test('every mode at low or default effort gets 4000 plus the low-reasoning overhead', () => {
+    for (const mode of ['create', 'seed', 'extend'] as const) {
+      expect(draftListMaxOutputTokens(mode, options, undefined)).toBe(8000);
+      expect(draftListMaxOutputTokens(mode, options, 'low')).toBe(8000);
+    }
+    expect(draftListMaxOutputTokens('rework', [], null)).toBe(8000);
+  });
+
+  test('a rework adds a token per three code points of the options and 40 per option', () => {
+    // 300 code points -> 100 tokens; two options -> 80 tokens.
+    expect(draftListMaxOutputTokens('rework', options, 'low')).toBe(8000 + 100 + 80);
+    expect(draftListMaxOutputTokens('rework', [{ value: 'ab' }], undefined)).toBe(8000 + 1 + 40);
+  });
+
+  test('an effort above low gets at least the enhance budget', () => {
+    expect(draftListMaxOutputTokens('extend', options, 'high')).toBe(ENHANCE_MAX_OUTPUT_TOKENS);
+    const many = Array.from({ length: 2_000 }, () => ({ value: 'x'.repeat(30) }));
+    expect(draftListMaxOutputTokens('rework', many, 'medium')).toBe(8000 + 20_000 + 80_000);
+  });
+});
+
+describe('draftListMaxResponseBytes', () => {
+  test('only a rework grows the cap, by its added tokens at the per-token stream rate', () => {
+    const options = [{ value: 'a'.repeat(30) }];
+    expect(draftListMaxResponseBytes(1024 * 1024, 'extend', options)).toBe(1024 * 1024);
+    expect(draftListMaxResponseBytes(1024 * 1024, 'create', [])).toBe(1024 * 1024);
+    expect(draftListMaxResponseBytes(1024 * 1024, 'rework', options)).toBe(1024 * 1024 + 50 * 512);
   });
 });
 

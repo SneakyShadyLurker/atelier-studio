@@ -70,6 +70,11 @@
     text-decoration-color var(--dur-hover) var(--ease-out);
 }
 
+/* A bulk action that does not apply keeps its slot (reviewParts BulkAction). */
+.textAction[data-shown='false'] {
+  visibility: hidden;
+}
+
 .textAction:focus-visible,
 .act:focus-visible,
 .fold:focus-visible,

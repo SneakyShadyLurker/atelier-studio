@@ -492,7 +492,7 @@ describe('migration 63 - shared text routing effort', () => {
       expect(beforeWriters.length).toBeGreaterThan(0);
       expect(beforePicks.some((row) => row.effort !== null)).toBe(true);
 
-      migrate(db, dataDir);
+      migrate(db, dataDir, { targetVersion: 63 });
       expect(schemaVersion(db)).toBe(63);
       expect(defaults(db)).toEqual(beforeDefaults);
       expect(writers(db)).toEqual(beforeWriters);
@@ -505,7 +505,7 @@ describe('migration 63 - shared text routing effort', () => {
 
       // Replay is a no-op: both columns are guarded independently.
       db.run('DELETE FROM schema_versions WHERE version = 63');
-      migrate(db, dataDir);
+      migrate(db, dataDir, { targetVersion: 63 });
       expect(schemaVersion(db)).toBe(63);
       expect(count(db, "SELECT COUNT(*) AS count FROM text_defaults WHERE effort = 'high'")).toBe(1);
     } finally {

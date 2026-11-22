@@ -1,5 +1,6 @@
 import ModelResolutionSection from './ModelResolutionSection';
 import ModelStepsSection from './ModelStepsSection';
+import PromptCondenseSection from './PromptCondenseSection';
 import styles from './SettingsPanel.module.css';
 
 // Each section owns its own loading and error state. Text-model picks live in
@@ -9,6 +10,7 @@ export default function SettingsPanel() {
     <div className={styles.stack}>
       <ModelStepsSection />
       <ModelResolutionSection />
+      <PromptCondenseSection />
     </div>
   );
 }

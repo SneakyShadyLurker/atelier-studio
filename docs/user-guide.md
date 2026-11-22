@@ -152,8 +152,9 @@ New installations do not include the operator's personal Prompt Library.
 - **Templates** hold reusable prompt text.
 - **Variable lists** provide alternatives for parts of a template.
 - **Dimensions** group tags that keep related choices coherent.
-- **Settings** holds the Model steps and Render resolution options. Which text
-  model writes for you is under **Text models** in the sidebar (see below).
+- **Settings** holds the Model steps, Render resolution and Prompt condensing
+  options. Which text model writes for you is under **Text models** in the
+  sidebar (see below).
 
 Start with a simple reusable template, then add variables as you need them.
 The **Library** chip in the composer opens the picker. A roll queue lets
@@ -273,6 +274,12 @@ poorly. The batch then shows the expanded prompt. A prompt of 60 words or more
 is sent as written, so write a fuller prompt, or press **Enhance**, copy the
 batch's prompt and edit it, to keep full control. An operator can switch the
 expansion off for either model.
+
+On **Krea** models, a prompt over 270 words is shortened automatically before
+it renders, toward about 200 words (more when it describes several people), because long prompts that list
+many objects flatten Krea's lighting. The batch then shows the shortened
+prompt. To always send your prompt as written, turn off **Condense long
+prompts** in Prompt Library → Settings → Prompt condensing.
 
 Read [Prompt Library authoring](prompt-library-authoring.md) for syntax,
 weights, dimensions and worked examples.

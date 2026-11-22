@@ -1541,6 +1541,32 @@ describe('migration 61 - user_model_resolution.downscale', () => {
   });
 });
 
+describe('migration 64 - user_preferences', () => {
+  test('applies on top of v63, stores only 0 or 1 and cascades with the user', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'atelier-migration64-'));
+    const db = new Database(':memory:');
+    try {
+      migrate(db, dataDir, { targetVersion: 63 });
+      expect(db.query('SELECT MAX(version) AS version FROM schema_versions').get()).toEqual({ version: 63 });
+
+      migrate(db, dataDir);
+      expect(db.query('SELECT COUNT(*) AS count FROM schema_versions WHERE version = 64').get()).toEqual({ count: 1 });
+      db.run("INSERT INTO users (id, created_at) VALUES ('u1', 1)");
+      db.run("INSERT INTO user_preferences (user_id, condense_prompts, updated_at) VALUES ('u1', 0, 1)");
+      for (const bad of [2, -1]) {
+        expect(() => db.query("UPDATE user_preferences SET condense_prompts = ? WHERE user_id = 'u1'").run(bad))
+          .toThrow(/CHECK constraint failed/i);
+      }
+      expect(() => db.run("INSERT INTO user_preferences (user_id, condense_prompts, updated_at) VALUES ('u1', NULL, 2)"))
+        .toThrow(/UNIQUE constraint failed/i);
+      db.run("DELETE FROM users WHERE id = 'u1'");
+      expect(db.query('SELECT COUNT(*) AS count FROM user_preferences').get()).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe('migration 44 - retire Pro text backend', () => {
   test('maps v43 Pro overrides to Flash, which migration 55 then retires, and rejects the retired key', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'atelier-migration44-'));

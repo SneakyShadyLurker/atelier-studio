@@ -112,7 +112,7 @@
   line-height: 1.5;
 }
 
-/* The "Downsize to 2K" switch reuses the text-model switch. */
+/* The "Downsize to 2K" and "Condense long prompts" switches reuse the text-model switch. */
 .switch {
   composes: switch from '../TextModels/index.module.css';
 }

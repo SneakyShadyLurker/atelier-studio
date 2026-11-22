@@ -4,6 +4,7 @@ import { reportIfCorruption } from '../db/integrity';
 import type { AppLogger } from '../observability/logger';
 import type { TextServices } from '../routing/textServices';
 import { findModel } from '../providers/registry';
+import { readCondensePrompts } from '../routing/promptCondensePreference';
 import {
   countPromptWords,
   KREA_PROMPT_CONDENSE_TRIGGER_WORDS,
@@ -39,17 +40,27 @@ let runtime: PreparationRuntime | null = null;
 let unsubscribe: (() => void) | undefined;
 const jobs = new Set<PreparationJob>();
 
-function needsCondensation(modelId: string, prompt: string): boolean {
+/** Whether this prompt is over a Krea row's condense trigger. */
+export function promptNeedsCondensation(modelId: string, prompt: string): boolean {
   return promptWordBudgetForModel(modelId) !== null
     && countPromptWords(prompt) > KREA_PROMPT_CONDENSE_TRIGGER_WORDS;
 }
 
 // Krea condensation and H3 Image or MOSS expansion are exclusive by target.
 // With a family's switch off (H3_IMAGE_AUTO_EXPAND, MOSS_AUTO_EXPAND) its
-// short prompts are not prepared at all, so they gain no queue delay.
-export function needsQueuedPromptPreparation(config: Config, modelId: string, prompt: string, referenceCount: number): boolean {
-  return needsCondensation(modelId, prompt)
-    || (promptExpansionEnabled(config, modelId) && promptNeedsExpansionForModel(modelId, prompt, referenceCount));
+// short prompts are not prepared at all, so they gain no queue delay. The
+// same holds for over-budget Krea prompts of a user who turned "Condense
+// long prompts" off (`condensePrompts` returns false): they render as
+// submitted. The switch is read only for a condensation candidate.
+export function needsQueuedPromptPreparation(
+  config: Config,
+  modelId: string,
+  prompt: string,
+  referenceCount: number,
+  condensePrompts: () => boolean,
+): boolean {
+  if (promptNeedsCondensation(modelId, prompt)) return condensePrompts();
+  return promptExpansionEnabled(config, modelId) && promptNeedsExpansionForModel(modelId, prompt, referenceCount);
 }
 
 // The batch's reference pictures in order. Missing or unreadable pictures
@@ -125,6 +136,7 @@ export function prepareQueuedPrompts(db: Database): boolean {
         && configured.config.LOCAL_MODELS_USERS.has(entry.userId);
       const needsPreparation = eligible && needsQueuedPromptPreparation(
         configured.config, entry.modelId, prompt, refImageIdsForBatch(configured.db, entry.batchId).length,
+        () => readCondensePrompts(configured.db, entry.userId),
       );
       queue.setPromptPreparation(entry.batchId, entry.epoch, needsPreparation ? 'pending' : 'ready');
     }
@@ -160,8 +172,12 @@ async function runPreparation(job: PreparationJob): Promise<void> {
   let retry = false;
   try {
     const deps = { ...configured, userId: entry.userId, signal: registered.batchController.signal };
-    const prompt = needsCondensation(entry.modelId, job.original)
-      ? await condenseBatchPrompt(job.original, entry.modelId, deps)
+    // The switch is read again here: a user may turn condensing off while
+    // the batch waits for a preparer.
+    const prompt = promptNeedsCondensation(entry.modelId, job.original)
+      ? (readCondensePrompts(configured.db, entry.userId)
+        ? await condenseBatchPrompt(job.original, entry.modelId, deps)
+        : job.original)
       : await expandBatchPrompt(job.original, entry.modelId, deps, await referenceBytes(configured, entry));
     if (!current(job) || registered.batchController.signal.aborted) return;
     if (prompt === job.original) ready = livePrompt(configured, entry) === job.original;

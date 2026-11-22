@@ -150,11 +150,11 @@ test('with reference pictures a prompt that already names a picture is kept with
   const written = 'The cup in <Picture 1> is <Subject 1>. The target image shows <Subject 1> with a blue finish.';
 
   expect(await expand(runtime, written, H3, undefined, [await picture(16)])).toBe(written);
-  expect(needsQueuedPromptPreparation(runtime.config, H3, written, 1)).toBe(false);
+  expect(needsQueuedPromptPreparation(runtime.config, H3, written, 1, () => true)).toBe(false);
   expect(reply.calls()).toBe(0);
   // Without pictures the same short text is an ordinary short prompt.
-  expect(needsQueuedPromptPreparation(runtime.config, H3, written, 0)).toBe(true);
-  expect(needsQueuedPromptPreparation(runtime.config, H3, 'make her jacket red', 1)).toBe(true);
+  expect(needsQueuedPromptPreparation(runtime.config, H3, written, 0, () => true)).toBe(true);
+  expect(needsQueuedPromptPreparation(runtime.config, H3, 'make her jacket red', 1, () => true)).toBe(true);
 });
 
 test('an unreadable reference picture fails open without a call', async () => {
@@ -257,16 +257,16 @@ test('MOSS_AUTO_EXPAND=false turns the MOSS predicate and pass off and leaves H3
   const on = testRuntime({ seedLegacyText: true });
   const off = testRuntime({ seedLegacyText: true, MOSS_AUTO_EXPAND: 'false' });
 
-  expect(needsQueuedPromptPreparation(on.config, MOSS, SHORT, 0)).toBe(true);
-  expect(needsQueuedPromptPreparation(on.config, MOSS, wordPrompt(60), 0)).toBe(false);
-  expect(needsQueuedPromptPreparation(off.config, MOSS, SHORT, 0)).toBe(false);
-  expect(needsQueuedPromptPreparation(off.config, H3, SHORT, 0)).toBe(true);
+  expect(needsQueuedPromptPreparation(on.config, MOSS, SHORT, 0, () => true)).toBe(true);
+  expect(needsQueuedPromptPreparation(on.config, MOSS, wordPrompt(60), 0, () => true)).toBe(false);
+  expect(needsQueuedPromptPreparation(off.config, MOSS, SHORT, 0, () => true)).toBe(false);
+  expect(needsQueuedPromptPreparation(off.config, H3, SHORT, 0, () => true)).toBe(true);
   expect(await expand(off, SHORT, MOSS)).toBe(SHORT);
   expect(reply.calls()).toBe(0);
   // The H3 switch does not reach MOSS either.
   const h3Off = testRuntime({ seedLegacyText: true, H3_IMAGE_AUTO_EXPAND: 'false' });
-  expect(needsQueuedPromptPreparation(h3Off.config, MOSS, SHORT, 0)).toBe(true);
-  expect(needsQueuedPromptPreparation(h3Off.config, H3, SHORT, 0)).toBe(false);
+  expect(needsQueuedPromptPreparation(h3Off.config, MOSS, SHORT, 0, () => true)).toBe(true);
+  expect(needsQueuedPromptPreparation(h3Off.config, H3, SHORT, 0, () => true)).toBe(false);
 });
 
 test('MOSS expansion gives up on its own timeout knob', async () => {
@@ -286,12 +286,18 @@ test('H3_IMAGE_AUTO_EXPAND=false turns the preparation predicate and the pass of
   const on = testRuntime({ seedLegacyText: true });
   const off = testRuntime({ seedLegacyText: true, H3_IMAGE_AUTO_EXPAND: 'false' });
 
-  expect(needsQueuedPromptPreparation(on.config, H3, SHORT, 0)).toBe(true);
-  expect(needsQueuedPromptPreparation(on.config, H3, wordPrompt(60), 0)).toBe(false);
-  expect(needsQueuedPromptPreparation(off.config, H3, SHORT, 0)).toBe(false);
+  expect(needsQueuedPromptPreparation(on.config, H3, SHORT, 0, () => true)).toBe(true);
+  expect(needsQueuedPromptPreparation(on.config, H3, wordPrompt(60), 0, () => true)).toBe(false);
+  expect(needsQueuedPromptPreparation(off.config, H3, SHORT, 0, () => true)).toBe(false);
   // The switch is H3-only: Krea condensation keeps its own trigger.
-  expect(needsQueuedPromptPreparation(off.config, 'krea-2-gonzalomo', wordPrompt(400), 0)).toBe(true);
-  expect(needsQueuedPromptPreparation(on.config, 'krea-2-gonzalomo', SHORT, 0)).toBe(false);
+  expect(needsQueuedPromptPreparation(off.config, 'krea-2-gonzalomo', wordPrompt(400), 0, () => true)).toBe(true);
+  // A user who turned "Condense long prompts" off gets no preparation at all.
+  expect(needsQueuedPromptPreparation(on.config, 'krea-2-gonzalomo', wordPrompt(400), 0, () => false)).toBe(false);
+  // The switch is read only for a condensation candidate.
+  const unread = () => { throw new Error('condense switch read for a non-candidate'); };
+  expect(needsQueuedPromptPreparation(on.config, H3, SHORT, 0, unread)).toBe(true);
+  expect(needsQueuedPromptPreparation(on.config, 'krea-2-gonzalomo', SHORT, 0, unread)).toBe(false);
+  expect(needsQueuedPromptPreparation(on.config, 'krea-2-gonzalomo', SHORT, 0, () => true)).toBe(false);
   expect(await expand(off, SHORT)).toBe(SHORT);
   expect(reply.calls()).toBe(0);
 });

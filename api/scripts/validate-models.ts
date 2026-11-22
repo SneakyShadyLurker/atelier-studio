@@ -133,6 +133,11 @@ function checkMoss(graph: Graph, model: LocalModelDef, fail: (reason: string) =>
 // The checkpoint is step-distilled, so it samples with LCM, which re-noises
 // between steps: an ODE solver such as Euler on the same sigmas over-sharpens
 // skin and ages faces. Guidance is fixed at 1, so the guider takes no negative.
+// Text-to-image runs in edit mode: plain text conditioning renders crusty skin,
+// spurious moles and blocky hair, and the sampler is tuned for the edit path.
+// The base graph therefore feeds one black 512x512 EmptyImage as image_1
+// without the VAE, so it only adds vision tokens to the text encoder and
+// anchors no reference latent (matched-seed A/B, 2026-11-22).
 function checkH3Image(graph: Graph, text: string, kind: string, model: LocalModelDef, fail: (reason: string) => void): void {
   if (model.requiredClipType !== 'minimax') fail('h3image rows require requiredClipType minimax');
   if (text.includes('{{count}}') || nodesOf(graph, 'RepeatLatentBatch').length > 0) {
@@ -171,15 +176,26 @@ function checkH3Image(graph: Graph, text: string, kind: string, model: LocalMode
     fail('one MiniMaxH3ImageConditioning feeds the sampler latent from output 1');
   }
   const pictures = Object.entries(conditioning[0]?.inputs ?? {}).filter(([name]) => name.startsWith('images.'));
-  const slots = kind === 'reference' ? REFERENCE_IMAGE_PLACEHOLDERS.slice(0, model.maxReferenceImages ?? 1) : [];
-  const ordered = pictures.length === slots.length && slots.every((token, slot) => {
-    const loader = linkedNode(graph, conditioning[0]?.inputs[`images.image_${slot + 1}`]);
-    return loader?.class_type === 'LoadImage' && loader.inputs.image === token;
-  });
-  if (!ordered) fail('h3image reference slots feed MiniMaxH3ImageConditioning images.image_N from LoadImage in order, and the base graph takes none');
-  if (nodesOf(graph, 'LoadImage').length !== slots.length) fail('h3image graphs load one image per reference slot');
-  if (kind === 'reference' && linkedNode(graph, conditioning[0]?.inputs.vae)?.class_type !== 'VAELoader') {
-    fail('h3image reference graphs connect the VAE so pictures anchor as reference latents');
+  if (kind === 'reference') {
+    const slots = REFERENCE_IMAGE_PLACEHOLDERS.slice(0, model.maxReferenceImages ?? 1);
+    const ordered = pictures.length === slots.length && slots.every((token, slot) => {
+      const loader = linkedNode(graph, conditioning[0]?.inputs[`images.image_${slot + 1}`]);
+      return loader?.class_type === 'LoadImage' && loader.inputs.image === token;
+    });
+    if (!ordered) fail('h3image reference slots feed MiniMaxH3ImageConditioning images.image_N from LoadImage in order');
+    if (nodesOf(graph, 'LoadImage').length !== slots.length) fail('h3image graphs load one image per reference slot');
+    if (nodesOf(graph, 'EmptyImage').length > 0) fail('h3image reference graphs take no edit-mode placeholder image');
+    if (linkedNode(graph, conditioning[0]?.inputs.vae)?.class_type !== 'VAELoader') {
+      fail('h3image reference graphs connect the VAE so pictures anchor as reference latents');
+    }
+  } else {
+    const trigger = linkedNode(graph, conditioning[0]?.inputs['images.image_1']);
+    if (pictures.length !== 1 || nodesOf(graph, 'EmptyImage').length !== 1 || trigger?.class_type !== 'EmptyImage'
+      || trigger.inputs.width !== 512 || trigger.inputs.height !== 512 || trigger.inputs.batch_size !== 1 || trigger.inputs.color !== 0) {
+      fail('h3image base graphs feed one black 512x512 EmptyImage as images.image_1 to run in edit mode');
+    }
+    if (conditioning[0]?.inputs.vae !== undefined) fail('h3image base graphs leave the VAE off the conditioning node so the placeholder anchors no latent');
+    if (nodesOf(graph, 'LoadImage').length > 0) fail('h3image base graphs load no image');
   }
 }
 

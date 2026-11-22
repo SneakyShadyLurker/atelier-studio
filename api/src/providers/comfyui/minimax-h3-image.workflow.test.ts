@@ -212,7 +212,14 @@ describe('MiniMax H3 Image workflow', () => {
     const conditioning = single(graph, 'MiniMaxH3ImageConditioning');
     expect(conditioning.inputs).toMatchObject({ prompt: params.prompt, width: params.width, height: params.height });
     expect(linked(graph, conditioning, 'clip').class_type).toBe('CLIPLoader');
-    expect(linked(graph, conditioning, 'vae').class_type).toBe('VAELoader');
+    // Edit mode for text-to-image: one black 512x512 picture adds vision tokens to
+    // the text encoder; without the VAE it anchors no reference latent.
+    expect(conditioning.inputs.vae).toBeUndefined();
+    expect(Object.keys(conditioning.inputs).filter((name) => name.startsWith('images.'))).toEqual(['images.image_1']);
+    expect(linked(graph, conditioning, 'images.image_1')).toEqual({
+      class_type: 'EmptyImage', inputs: { width: 512, height: 512, batch_size: 1, color: 0 },
+    });
+    expect(Object.values(graph).some((n) => n.class_type === 'LoadImage')).toBe(false);
     expect(linked(graph, single(graph, 'BasicGuider'), 'conditioning')).toBe(conditioning);
     expect(linked(graph, sampler, 'latent_image', 1)).toBe(conditioning);
     // Guidance is fixed at 1, so the graph carries no negative branch at all.
@@ -266,8 +273,16 @@ describe('MiniMax H3 Image workflow', () => {
     expect(Object.keys(graph).toSorted()).toEqual(Object.keys(template).toSorted());
   });
 
-  test('the reference graph is the base graph plus one loader per <Picture N> slot', () => {
+  test('the reference graph is the base graph with one loader per <Picture N> slot in place of the edit-mode placeholder', () => {
+    // Real pictures already put H3 in edit mode, so the reference graph drops the
+    // black placeholder and connects the VAE for reference latents.
     const base = build();
+    const placeholder = Object.entries(base).find(([, node]) => node.class_type === 'EmptyImage')?.[0];
+    if (placeholder === undefined) throw new Error('base graph has no edit-mode placeholder');
+    Reflect.deleteProperty(base, placeholder);
+    const baseConditioning = single(base, 'MiniMaxH3ImageConditioning');
+    Reflect.deleteProperty(baseConditioning.inputs, 'images.image_1');
+    baseConditioning.inputs.vae = ['3', 0];
     for (const count of [1, 2, 3]) {
       const referenceImages = ['job:a', 'job:b', 'job:c'].slice(0, count);
       const graph = buildWorkflow(referenceText, { ...params, referenceImages }, referencePlaceholders) as Record<string, Node>;

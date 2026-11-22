@@ -25,7 +25,7 @@ same review before the worker restarts on it.
 |---|---|---|
 | `atelier_private` | this repository | the worker's own load and save nodes |
 | `ComfyUI-Krea2-Ostris-Edit` | commit `7756566` | `Krea2OstrisEditModelPatch`, `TextEncodeKrea2OstrisEdit` |
-| `RES4LYF` | 1.2.2, commit `cb2c312` | none: it registers its schedulers (`bong_tangent`, `beta57`, …) and samplers (`res_2s`, `res_3s`, …) into core `KSampler` and `BasicScheduler` |
+| `RES4LYF` | 1.2.2, commit `cb2c312` | none: it registers its schedulers (`bong_tangent`, `beta57`, …) and samplers (`res_2s`, `res_3s`, …) into core `KSampler`'s lists; `BasicScheduler` does not list them (checked on the worker 2026-11-22) |
 | `ComfyUI-KJNodes` | 1.5.5, commit `aa2b5ea` | `MiniMaxH3PromptWeight`, `ImageSharpenKJ` |
 | `seedvarianceenhancer` | 2.2.0 (registry) | `SeedVarianceEnhancer` |
 
